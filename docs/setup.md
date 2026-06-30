@@ -80,6 +80,14 @@ shell vars win).
 action (e.g. a file write) and watch the stream — approve/deny and switch modes from the
 phone. Everything on the relay is AES-256-GCM ciphertext.
 
+On first pair the app asks for **notification permission**. Grant it so that, when you've
+walked away and the app is backgrounded, the phone buzzes and raises a heads-up banner the
+moment Copilot pauses for an approval (or the session goes quiet). Alerts carry only the
+tool *name* — never arguments or stream content — and nothing is logged off-device. While
+the app is in the foreground the on-screen approval card is used instead of a banner. (This
+covers the phone-in-hand / app-recent case; full wake-from-killed delivery via FCM is a
+planned follow-up.)
+
 ## Wire Supabase (Phase 2 — user-provided project)
 
 1. Create a fresh Supabase project. Configure its MCP like `kirana360` does

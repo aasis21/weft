@@ -22,6 +22,11 @@ import { LiveStreamView } from './components/LiveStreamView';
 import { startDemoSession } from './lib/demoSimulator';
 import { clearStoredPairing } from './lib/storage';
 import { pairFromQr, restorePairing } from './lib/helmClient';
+import {
+  ensureNotificationPermission,
+  notifyApprovalRequest,
+  notifySessionEnded,
+} from './lib/notifications';
 import type { HelmClient } from './lib/helmClient';
 
 const DEFAULT_MODE = MODES[0] as SessionMode;
@@ -97,7 +102,15 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     if (!client) return undefined;
-    const unsubscribe = client.subscribe((message) => dispatch({ type: 'message', message }));
+    void ensureNotificationPermission();
+    const unsubscribe = client.subscribe((message) => {
+      if (message.kind === KIND.APPROVAL_REQUEST) {
+        void notifyApprovalRequest(message);
+      } else if (message.kind === KIND.SESSION_END) {
+        void notifySessionEnded(message.reason);
+      }
+      dispatch({ type: 'message', message });
+    });
     dispatch({ type: 'connected' });
     return unsubscribe;
   }, [client]);
@@ -106,6 +119,7 @@ export default function App(): JSX.Element {
     if (!client || state.sessionEnded) return undefined;
     const id = window.setInterval(() => {
       if (state.lastHeartbeat && Date.now() - state.lastHeartbeat > 8_000) {
+        void notifySessionEnded('Your Copilot session went quiet.');
         dispatch({ type: 'ended' });
       }
     }, 1_000);
