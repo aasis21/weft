@@ -78,12 +78,14 @@ const session = await joinSession({
       },
     },
   ],
-  hooks: {
-    onSessionEnd: async (input) => {
-      await relayHandle?.stop?.(input?.reason ?? "session_end");
-      return { cleanupActions: ["Stopped Helm relay"] };
-    },
-  },
+});
+
+// Session-end cleanup. The native runtime (Copilot CLI >= 1.0.66) no longer accepts
+// SDK callback hooks (the old `hooks: { onSessionEnd }` throws at session.resume), so we
+// subscribe to the `session.shutdown` event instead to stop the relay and tell the phone.
+session.on?.("session.shutdown", (event) => {
+  const reason = event?.data?.shutdownType ?? event?.data?.errorReason ?? "session_end";
+  void relayHandle?.stop?.(reason);
 });
 
 await logPairingQr(session, JSON.stringify(pairingPayload));

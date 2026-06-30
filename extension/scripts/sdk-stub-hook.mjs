@@ -19,8 +19,17 @@ export async function load(url, context, nextLoad) {
     return {
       format: "module",
       shortCircuit: true,
+      // Replicate the Copilot CLI native runtime's two load-time rules so the build
+      // self-verifies against the bugs we actually hit:
+      //  1. callback `hooks` are rejected at session.resume (CLI >= 1.0.66);
+      //  2. reaching joinSession at all proves every bundled CJS require() initialized
+      //     (catches "Dynamic require of X is not supported").
       source:
-        'export function joinSession(){ throw new Error("HELM_SDK_STUB_REACHED"); }',
+        "export function joinSession(config){" +
+        "  if (config && config.hooks && Object.values(config.hooks).some(Boolean))" +
+        "    throw new Error('HELM_RUNTIME_REJECTS_HOOKS: SDK hook callbacks are no longer supported by the native runtime');" +
+        "  throw new Error('HELM_SDK_STUB_REACHED');" +
+        "}",
     };
   }
   return nextLoad(url, context);

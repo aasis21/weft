@@ -31,10 +31,17 @@ try {
   await import(pathToFileURL(outfile).href);
   console.log("[verify] bundle loaded (did not reach SDK stub, but no require error)");
 } catch (err) {
-  if (err?.message === "HELM_SDK_STUB_REACHED") {
-    console.log("[verify] bundle loads OK — reached SDK entrypoint past all CJS requires");
+  const msg = err?.message ?? String(err);
+  if (msg === "HELM_SDK_STUB_REACHED") {
+    console.log("[verify] bundle loads OK — reached SDK entrypoint past all CJS requires, no callback hooks");
+  } else if (msg.startsWith("HELM_RUNTIME_REJECTS_HOOKS")) {
+    console.error(
+      "[verify] FAIL: joinSession() is passing callback `hooks` — the Copilot CLI native runtime " +
+        "rejects these at session.resume. Use session.on(...) events instead.",
+    );
+    process.exit(1);
   } else {
-    console.error(`[verify] bundle FAILED to load: ${err?.message ?? err}`);
+    console.error(`[verify] bundle FAILED to load: ${msg}`);
     process.exit(1);
   }
 }
