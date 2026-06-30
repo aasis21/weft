@@ -47,18 +47,38 @@ In the app choose **Demo / Simulator**. It stands up a fake laptop side in-proce
 handshake, then streams scripted assistant/tool events, an approval card, heartbeats,
 and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 
-## Run the real extension under Copilot CLI (manual, local)
+## Run the real extension under Copilot CLI (the "real" test)
 
-> The HQ rule is to never write to `~/.copilot` from automation. Do this step yourself.
+> The HQ rule is to never write to `~/.copilot` from automation, so **you** run the
+> installer; the agent only ships it.
 
-1. Build: `npm run build -w @aasis21/helm-extension`.
-2. Copy `extension/dist/` into `~/.copilot/extensions/helm/` (the CLI auto-discovers
-   extensions there).
-3. Start `gh copilot`; the extension renders a pairing QR via `session.log()` (never
-   stdout). Scan it from the mobile app.
+**1. Install the extension** (builds + copies the single bundled `extension.mjs` into
+`~/.copilot/extensions/helm/`, where the CLI auto-discovers it, and copies a colocated
+`.env` if present):
 
-Until the Supabase transport is wired (below), set `HELM_TRANSPORT=local` only makes
-sense for same-machine tests; cross-device pairing needs the relay.
+```sh
+./setup.ps1     # Windows
+./setup.sh      # macOS/Linux
+# remove later with ./uninstall.ps1 / ./uninstall.sh
+```
+
+The extension auto-loads `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `HELM_TRANSPORT=supabase`
+from a `.env` next to it (or inherit them from the shell that launches `gh copilot`; exported
+shell vars win).
+
+**2. Get the app on your phone** — pick one:
+
+- **Native APK (camera QR scan):** `cd mobile && npx cap sync android` then build/install
+  via Android Studio (or `cd android && ./gradlew assembleDebug` and install the APK). The
+  build bakes in `VITE_HELM_TRANSPORT=supabase` + the relay creds from `mobile/.env.local`.
+- **Browser (fastest, paste-to-pair):** `cd mobile && npm run dev -- --host`, open the
+  printed LAN URL on your phone. Plain browsers can't use the camera scanner, so use the
+  **"Manual QR JSON fallback"** box — the extension also prints the raw payload under the QR.
+
+**3. Pair and drive it.** Start `gh copilot` in any repo; Helm prints a pairing QR via
+`session.log()` (run `/helm-pair` to re-show it). Scan/paste it, then trigger a Copilot
+action (e.g. a file write) and watch the stream — approve/deny and switch modes from the
+phone. Everything on the relay is AES-256-GCM ciphertext.
 
 ## Wire Supabase (Phase 2 — user-provided project)
 
