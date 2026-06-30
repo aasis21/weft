@@ -10,15 +10,37 @@ the clients join (`private:helm:<channelId>`).
   - `*_helm_realtime_broadcast_rls.sql` — RLS on `realtime.messages` authorizing
     `private:helm:*` broadcast for the `anon` / `authenticated` roles. **Apply this before
     using `HELM_TRANSPORT=supabase`** — private channels are denied by default.
-- `project.json` — `{ "project_id": "<ref>" }`. Fill in your Supabase project ref.
+- `project.json` — `{ "project_id": "<ref>" }`. The ref of the live Supabase project.
+
+## Live project (operator instance)
+
+The reference public instance is provisioned and the migration applied + verified:
+
+| | |
+|---|---|
+| Project | `helm` (org **Anvia**) |
+| Ref | `jqzohxjouzxzawqqlifv` (in `project.json`) |
+| URL | `https://jqzohxjouzxzawqqlifv.supabase.co` |
+| Region | `us-west-1` |
+| Postgres | 17 |
+| Auth | publishable/anon key (public by design); set via env, never committed |
+
+Credentials live in a gitignored `.env` (extension: `SUPABASE_URL` / `SUPABASE_ANON_KEY`)
+and `mobile/.env.local` (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`). The publishable
+key is safe to embed in clients; confidentiality rests on E2E encryption + channelId entropy
+(see the security note below). Self-hosters point these at their own project instead.
+
+**Verified live (2026-06):** a private `private:helm:*` channel subscribes and round-trips a
+broadcast; a true two-client send→receive works with production `self:false`; a
+`private:nothelm:*` topic is denied by RLS; the security advisor reports no lints.
 
 ## Apply it
 
 Pick one:
 
 **A. Supabase MCP (HQ wiring).** With the Supabase MCP loaded (see
-`cortex/mcp/mcp-config.json`; this requires a CLI restart + browser OAuth), ask the agent
-to apply `supabase/migrations` to your project.
+`cortex/mcp/mcp-config.json`), ask the agent to apply `supabase/migrations` to your project.
+This is how the live instance above was provisioned (`create_project` → `apply_migration`).
 
 **B. Supabase CLI.**
 ```sh
