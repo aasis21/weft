@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { Capacitor } from '@capacitor/core';
+import { WebQrScanner } from './WebQrScanner';
 
 interface PairingScreenProps {
   demoQr: string | null;
@@ -24,6 +26,7 @@ export function PairingScreen({
 }: PairingScreenProps): JSX.Element {
   const [manual, setManual] = useState('');
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   const run = async (task: () => Promise<void>): Promise<void> => {
     setBusy(true);
@@ -38,6 +41,12 @@ export function PairingScreen({
   };
 
   const scanQr = async (): Promise<void> => {
+    // Browsers can't use the native ML Kit scanner — open the in-page camera scanner instead.
+    if (!Capacitor.isNativePlatform()) {
+      onError(null);
+      setScanning(true);
+      return;
+    }
     await run(async () => {
       const module = await import('@capacitor-mlkit/barcode-scanning');
       const scanner = module.BarcodeScanner as unknown as ScannerApi;
@@ -51,6 +60,11 @@ export function PairingScreen({
     });
   };
 
+  const handleScanResult = async (raw: string): Promise<void> => {
+    setScanning(false);
+    await run(async () => onPair(raw));
+  };
+
   const pairManual = async (): Promise<void> => {
     await run(async () => onPair(manual));
   };
@@ -61,6 +75,9 @@ export function PairingScreen({
 
   return (
     <main className="pairing-shell">
+      {scanning ? (
+        <WebQrScanner onResult={handleScanResult} onCancel={() => setScanning(false)} />
+      ) : null}
       <section className="brand-panel">
         <div className="brand-mark" aria-hidden="true">
           H

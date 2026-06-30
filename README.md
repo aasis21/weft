@@ -4,6 +4,9 @@
 `gh copilot` sessions: watch the token stream, answer permission prompts, send prompts, and
 switch modes — all from your phone.
 
+> **Try it now (no install):** **<https://helm-copilot.netlify.app>** — open on your phone,
+> scan the pairing QR your terminal prints (or paste it), and you're bound to the session.
+
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
 > [`aasis21/anya`](https://github.com/aasis21/anya), and
 > [`aasis21/engram`](https://github.com/aasis21/engram).
@@ -32,7 +35,7 @@ Three layers, one monorepo:
 |---|---|
 | `extension/` | The Copilot CLI extension (`joinSession`) + a local test **harness** that mimics the phone with no Supabase needed. |
 | `shared/` | Contracts imported by **both** ends: message schema, E2E crypto (ECDH→AES-GCM), and a pluggable transport (LocalTransport now → SupabaseTransport later). |
-| `mobile/` | React + Vite + Capacitor app (Android first). |
+| `mobile/` | React + Vite + Capacitor app (Android first); also ships as a hosted **web app** ([helm-copilot.netlify.app](https://helm-copilot.netlify.app)) with in-browser camera QR scanning. |
 
 ### Design principles
 - **Approval = pure relay of native Copilot behavior.** The extension forwards the *native*

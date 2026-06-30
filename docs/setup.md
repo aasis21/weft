@@ -68,12 +68,22 @@ shell vars win).
 
 **2. Get the app on your phone** — pick one:
 
+- **Hosted web app (easiest, zero install):** open **<https://helm-copilot.netlify.app>**
+  on your phone. On Android Chrome it scans the QR with your camera directly in the browser
+  (via the `BarcodeDetector` API); on iOS Safari / Firefox it uses an on-page jsQR fallback,
+  and if the camera is unavailable you can paste the JSON payload. Served over HTTPS with a
+  `camera=(self)` permissions policy so scanning works.
 - **Native APK (camera QR scan):** `cd mobile && npx cap sync android` then build/install
   via Android Studio (or `cd android && ./gradlew assembleDebug` and install the APK). The
   build bakes in `VITE_HELM_TRANSPORT=supabase` + the relay creds from `mobile/.env.local`.
-- **Browser (fastest, paste-to-pair):** `cd mobile && npm run dev -- --host`, open the
-  printed LAN URL on your phone. Plain browsers can't use the camera scanner, so use the
-  **"Manual QR JSON fallback"** box — the extension also prints the raw payload under the QR.
+- **Local dev server:** `cd mobile && npm run dev -- --host`, open the printed LAN URL on
+  your phone (same in-browser camera scan + paste fallback as the hosted app).
+
+> The hosted site is a static deploy of `mobile/dist` on Netlify (site `helm-copilot`,
+> team `aasis21`). It points at the same public relay as everything else; the embedded
+> publishable key is client-safe and the channel is guarded by RLS + end-to-end AES-256-GCM.
+> Redeploy after a change with `npm run build -w @aasis21/helm-mobile` then a Netlify deploy
+> of `mobile/dist` (or connect the repo — `netlify.toml` already has the build config).
 
 **3. Pair and drive it.** Start `gh copilot` in any repo; Helm prints a pairing QR via
 `session.log()` (run `/helm-pair` to re-show it). Scan/paste it, then trigger a Copilot

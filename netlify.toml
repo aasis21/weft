@@ -1,0 +1,33 @@
+# Netlify build config for the Helm web app (the hosted, install-free viewport).
+#
+# This drives a git-connected build. The runtime relay creds are NOT committed here:
+# set them as Netlify environment variables on the site (Site settings > Environment):
+#   VITE_HELM_TRANSPORT = supabase
+#   VITE_SUPABASE_URL    = https://<ref>.supabase.co
+#   VITE_SUPABASE_ANON_KEY = sb_publishable_...   (client-safe publishable key by design)
+#
+# The publishable/anon key is meant to be embedded in clients; the relay is protected by
+# RLS on realtime.messages plus end-to-end AES-256-GCM, so a public web build is fine.
+
+[build]
+  # Repo root so npm workspaces resolve @aasis21/helm-shared before the mobile build.
+  base = "."
+  command = "npm run build -w @aasis21/helm-mobile"
+  publish = "mobile/dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback (mirrors mobile/public/_redirects for git-connected deploys).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Camera QR scanning needs HTTPS (Netlify default) + an explicit camera permission policy.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Permissions-Policy = "camera=(self)"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Content-Type-Options = "nosniff"

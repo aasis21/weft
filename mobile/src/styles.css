@@ -498,7 +498,6 @@ pre {
   .session-ended {
     grid-template-columns: 1fr;
   }
-
   .pairing-shell,
   .stream-grid {
     display: grid;
@@ -531,5 +530,104 @@ pre {
 
   .mode-selector {
     overflow-x: auto;
+  }
+}
+
+/* ---- In-browser QR scanner overlay ---------------------------------------- */
+.scanner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: max(28px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+  background: rgba(2, 7, 5, 0.94);
+  backdrop-filter: blur(8px);
+}
+
+.scanner-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+}
+
+.scanner-reticle {
+  position: relative;
+  z-index: 1;
+  width: min(72vw, 320px);
+  aspect-ratio: 1;
+  border-radius: 28px;
+  background:
+    linear-gradient(var(--accent), var(--accent)) top left,
+    linear-gradient(var(--accent), var(--accent)) top left,
+    linear-gradient(var(--accent), var(--accent)) top right,
+    linear-gradient(var(--accent), var(--accent)) top right,
+    linear-gradient(var(--accent), var(--accent)) bottom left,
+    linear-gradient(var(--accent), var(--accent)) bottom left,
+    linear-gradient(var(--accent), var(--accent)) bottom right,
+    linear-gradient(var(--accent), var(--accent)) bottom right;
+  background-repeat: no-repeat;
+  background-size: 34px 4px, 4px 34px;
+  box-shadow: 0 0 0 100vmax rgba(2, 7, 5, 0.55);
+  overflow: hidden;
+}
+
+.scanner-line {
+  position: absolute;
+  left: 8%;
+  width: 84%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  box-shadow: 0 0 16px var(--cyan);
+  animation: scanner-sweep 2.1s ease-in-out infinite;
+}
+
+@keyframes scanner-sweep {
+  0%,
+  100% {
+    top: 12%;
+    opacity: 0.4;
+  }
+  50% {
+    top: 86%;
+    opacity: 1;
+  }
+}
+
+.scanner-status {
+  z-index: 1;
+  margin: 0;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.5);
+  font-weight: 800;
+  text-align: center;
+}
+
+.scanner-status.is-error {
+  border-color: rgba(255, 107, 107, 0.4);
+  color: #ffe1e1;
+  background: rgba(255, 107, 107, 0.16);
+}
+
+.scanner-cancel {
+  z-index: 1;
+  width: auto;
+  min-width: 160px;
+  margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanner-line {
+    animation: none;
+    top: 49%;
   }
 }
