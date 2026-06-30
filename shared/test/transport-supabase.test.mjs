@@ -39,7 +39,9 @@ function createFakeSupabaseClient(bus = new Map()) {
           for (const target of bus.get(name) ?? []) {
             if (target === this && !self) continue;
             for (const handler of target.handlers) {
-              if (handler.type !== message.type || handler.event !== message.event) continue;
+              if (handler.type !== message.type) continue;
+              // realtime-js delivers to bindings whose event is the message event or `*`.
+              if (handler.event !== "*" && handler.event !== message.event) continue;
               queueMicrotask(() => handler.cb(message));
             }
           }

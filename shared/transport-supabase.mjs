@@ -1,8 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
 // Supabase Realtime Broadcast transport.
 //
 // Required Supabase setup: enable Realtime Authorization for private channels and add RLS
 // policies on `realtime.messages` that only allow authorized Helm clients to join
 // `private:helm:*` channels. The relay remains untrusted and only carries ciphertext.
+//
+// Subscribe-order independence: a SINGLE catch-all broadcast listener is registered at
+// channel-creation time (before channel.subscribe()), and transport.subscribe() only
+// mutates an in-memory dispatch map. This means callers may subscribe() before OR after
+// connect() and still receive events — Supabase Realtime otherwise delivers only to
+// listeners registered before subscribe(). Relies on realtime-js matching the `*`
+// wildcard event for broadcast bindings.
 
 const STATUS_SUBSCRIBED = "SUBSCRIBED";
 const STATUS_CHANNEL_ERROR = "CHANNEL_ERROR";
@@ -30,7 +38,29 @@ export function createSupabaseTransport({ client, channelId } = {}) {
   let closed = false;
   let subscribed = false;
   let connectPromise;
-  const subscriptions = new Set();
+
+  // event -> Set<handler>. The catch-all listener below dispatches into this map, so
+  // delivery is independent of when connect()/subscribe() are called.
+  const eventHandlers = new Map();
+
+  function dispatch(event, payload) {
+    const handlers = eventHandlers.get(event);
+    if (!handlers) return;
+    for (const handler of handlers) {
+      try {
+        handler(payload);
+      } catch {
+        // One faulty subscriber must not break delivery to the others.
+      }
+    }
+  }
+
+  // Registered before channel.subscribe() (which runs in ready()), so no events are
+  // missed regardless of subscribe()/connect() ordering.
+  channel.on("broadcast", { event: "*" }, (msg) => {
+    if (closed) return;
+    dispatch(msg.event, msg.payload);
+  });
 
   function assertOpen(action) {
     if (closed) throw fail(`${action}: transport is closed`);
@@ -107,23 +137,24 @@ export function createSupabaseTransport({ client, channelId } = {}) {
 
     subscribe(event, handler) {
       assertOpen("subscribe");
-      const entry = { active: true };
-      subscriptions.add(entry);
-      channel.on("broadcast", { event }, (msg) => {
-        if (!entry.active) return;
-        handler(msg.payload);
-      });
+      let handlers = eventHandlers.get(event);
+      if (!handlers) {
+        handlers = new Set();
+        eventHandlers.set(event, handlers);
+      }
+      handlers.add(handler);
       return () => {
-        entry.active = false;
-        subscriptions.delete(entry);
+        const current = eventHandlers.get(event);
+        if (!current) return;
+        current.delete(handler);
+        if (current.size === 0) eventHandlers.delete(event);
       };
     },
 
     async close() {
       if (closed) return;
       closed = true;
-      for (const entry of subscriptions) entry.active = false;
-      subscriptions.clear();
+      eventHandlers.clear();
       await removeChannel();
     },
   };

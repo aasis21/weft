@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import QRCode from "qrcode";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
@@ -73,9 +74,9 @@ try {
     channel,
     logger: (message, options) => session.log?.(message, options),
   });
-  // TODO(p4): Supabase subscribe ordering. waitForPeer connects before SecureChannel
-  // handlers are registered; LocalTransport supports this, but Supabase Broadcast may
-  // require order-independent subscribe semantics in the transport implementation.
+  // SupabaseTransport is subscribe-order independent (single catch-all broadcast listener
+  // + internal dispatch), so attachRelay may register SecureChannel handlers after
+  // waitForPeer has connected without losing events on either transport.
   relayHandle = await attachRelay({
     session,
     channel,

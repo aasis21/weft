@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Helm Copilot CLI extension (joinSession) + local test harness. Source in src/, bundled to dist/extension.mjs (esbuild) with @github/copilot-sdk external.",
+  "license": "Apache-2.0",
   "scripts": {
     "build": "node esbuild.config.mjs",
     "harness": "node harness/harness.mjs",

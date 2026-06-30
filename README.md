@@ -78,6 +78,7 @@ See [`docs/setup.md`](docs/setup.md) for the full developer guide.
 | [`docs/pairing.md`](docs/pairing.md) | the ECDH pairing handshake |
 | [`docs/security.md`](docs/security.md) | threat model & cryptography |
 | [`docs/mode-switching.md`](docs/mode-switching.md) | runtime interactive/plan/autopilot switching |
+| [`docs/hosting.md`](docs/hosting.md) | public instance vs self-hosting; operating a relay |
 
 ---
 
@@ -91,9 +92,12 @@ React/Capacitor mobile app (pairing, live stream, approval cards, prompt compose
 selector, session-ended) all build and pass their checks against `LocalTransport`.
 
 **Remaining (user-gated):** stand up a fresh Supabase project + RLS and flip
-`HELM_TRANSPORT=supabase` for real cross-device pairing, then choose a `LICENSE`. See
-the phased plan in the session artifacts.
+`HELM_TRANSPORT=supabase` for real cross-device pairing, then a real-device pass against a
+live `gh copilot` session. See the phased plan in the session artifacts.
 
 ## License
 
-To be decided (open-core/BSL vs MIT). Until a `LICENSE` file lands, all rights reserved.
+[Apache-2.0](LICENSE) — permissive, with an explicit patent grant and trademark
+reservation; see [`NOTICE`](NOTICE) for attribution. Operating a hosted relay is a
+separate concern from the code license — see [`docs/hosting.md`](docs/hosting.md) and
+[`TERMS.md`](TERMS.md).

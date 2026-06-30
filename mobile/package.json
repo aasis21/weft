@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Helm mobile app (React + Vite + Capacitor, Android first).",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

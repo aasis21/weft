@@ -75,11 +75,9 @@ sense for same-machine tests; cross-device pairing needs the relay.
    `createSupabaseTransport({ client, channelId })` (the `shared/` package stays
    dependency-free by injecting the client).
 
-> **Known follow-up:** on the real Broadcast transport, subscriptions registered after
-> `connect()` may not receive events. `attachRelay` registers `SecureChannel` handlers
-> post-connect, so `SupabaseTransport` needs to be made subscribe-order-independent
-> (single broadcast listener + internal dispatch) before cross-device use. Tracked in
-> `plan.md` and `pairing.md`.
+> **Resolved (p4):** `SupabaseTransport` registers a single catch-all broadcast listener
+> before `subscribe()` and dispatches internally, so subscriptions added after `connect()`
+> still receive events. No subscribe-ordering constraint remains for cross-device use.
 
 ## Configuration reference
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Helm shared — single entry point.
 export * from "./messages.mjs";
 export * from "./crypto.mjs";

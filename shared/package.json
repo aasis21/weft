@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Helm shared contracts: message schema, E2E crypto, and pluggable transport. Zero runtime dependencies so both the Node extension and the browser app can import it directly.",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./index.mjs",
   "types": "./index.d.ts",

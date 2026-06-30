@@ -64,11 +64,10 @@ A worked, runnable example lives in `shared/test/pairing.test.mjs`.
 `channel.on(...)` listeners must be registered before `channel.subscribe(...)`. The
 in-process `LocalTransport` (harness, tests, mobile demo) has no such constraint.
 
-> **Known follow-up (Phase 2 / p4):** `attachRelay` registers the `SecureChannel`
-> event handlers *after* `waitForPeer` has already connected. On LocalTransport this
-> is fine. On Supabase, those post-connect subscriptions need the transport to be
-> made order-independent (e.g. a single broadcast listener with internal dispatch).
-> Tracked in `plan.md`.
+> **Resolved (p4):** `SupabaseTransport` is now subscribe-order independent — it registers
+> a single catch-all broadcast listener at channel creation and dispatches to per-event
+> handlers from an in-memory map. `attachRelay` may therefore register `SecureChannel`
+> handlers after `waitForPeer` has connected without losing events.
 
 ## Security boundary
 

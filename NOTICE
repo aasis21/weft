@@ -1,0 +1,12 @@
+Helm
+Copyright 2026 aasis21
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Helm binds to live GitHub Copilot CLI sessions via a session-bound CLI
+extension and an end-to-end-encrypted Supabase Realtime relay.
+
+"GitHub" and "Copilot" are trademarks of GitHub, Inc. "Supabase" is a
+trademark of Supabase, Inc. This project is an independent companion and is
+not affiliated with, endorsed by, or sponsored by GitHub, Inc. or Supabase,
+Inc.
