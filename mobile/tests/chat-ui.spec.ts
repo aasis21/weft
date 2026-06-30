@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Helm chat UI v2', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.getByText('Demo / Simulator').click();
+    await page.getByRole('button', { name: 'Try the demo' }).click();
     await expect(page.locator('.helm-session')).toBeVisible();
     await expect(page.locator('.status-bar')).toBeVisible();
   });
@@ -36,9 +36,34 @@ test.describe('Helm chat UI v2', () => {
   test('user prompts appear as a right-aligned bubble', async ({ page }) => {
     await page.locator('.composer textarea').fill('Run the tests next?');
     await page.keyboard.press('Enter');
-    const userRow = page.locator('.row.user').first();
+    // Scope to a LIVE user row (backfilled history rows also carry .row.user).
+    const userRow = page.locator('.row.user:not(.history)').first();
     await expect(userRow).toBeVisible();
     await expect(userRow).toContainText('Run the tests next?');
+  });
+
+  test('backfilled history renders above an "Earlier in this session" divider', async ({ page }) => {
+    const divider = page.locator('.history-divider');
+    await expect(divider).toBeVisible({ timeout: 15_000 });
+    await expect(divider).toContainText('Earlier in this session');
+    // The history bubbles render inside the muted history block, above the divider.
+    await expect(page.locator('.row.history').first()).toContainText('what is Helm again?');
+  });
+
+  test('a terminal-typed prompt is shown with a "Laptop" device chip', async ({ page }) => {
+    const chip = page.locator('.device-chip.laptop').first();
+    await expect(chip).toBeVisible({ timeout: 15_000 });
+    await expect(chip).toContainText('Laptop');
+    // It is attached to the laptop-typed prompt relayed into the transcript.
+    await expect(page.locator('.row.user', { hasText: 'Did that build pass on the laptop?' })).toBeVisible();
+  });
+
+  test('a phone-typed prompt is shown with a "This phone" device chip', async ({ page }) => {
+    await page.locator('.composer textarea').fill('hello from the phone');
+    await page.keyboard.press('Enter');
+    const chip = page.locator('.device-chip.phone').first();
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText('This phone');
   });
 
   test('no horizontal scroll at phone width', async ({ page }) => {

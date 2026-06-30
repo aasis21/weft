@@ -1,4 +1,5 @@
 export * from "./messages";
+export * from "./history";
 export * from "./crypto";
 export * from "./pairing";
 export { SecureChannel } from "./channel";

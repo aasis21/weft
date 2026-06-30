@@ -233,8 +233,8 @@
   from { opacity: 0; transform: translateY(5px); }
 }
 
-/* user — right aligned */
-.row.user { display: flex; justify-content: flex-end; }
+/* user — right aligned, chip stacked beneath the bubble */
+.row.user { display: flex; flex-direction: column; align-items: flex-end; }
 .user-bubble {
   max-width: 84%;
   padding: 9px 13px;
@@ -297,6 +297,48 @@
 }
 .row.notice.error .notice-text { color: var(--error); }
 .row.notice.warning .notice-text { color: var(--warning); }
+
+/* device attribution chip on user prompts (which laptop/phone typed it) */
+.device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  padding: 1px 8px 1px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  background: color-mix(in srgb, var(--fg-faint) 12%, transparent);
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+}
+.device-chip.laptop {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.device-chip .device-glyph { display: inline-flex; }
+.device-chip .device-glyph svg { width: 11px; height: 11px; display: block; }
+
+/* backfilled pre-join history: muted, with a labelled divider before live items */
+.history-block { display: flex; flex-direction: column; }
+.row.history { opacity: 0.7; }
+.history-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 2px 8px;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.history-divider::before,
+.history-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  border-top: 1px dashed var(--bg-rule);
+}
 
 /* streaming caret + thinking row */
 .caret {

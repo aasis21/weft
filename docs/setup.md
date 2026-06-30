@@ -88,7 +88,7 @@ generic names still work as a fallback when the namespaced ones are unset.
 > of `mobile/dist` (or connect the repo — `netlify.toml` already has the build config).
 
 **3. Pair and drive it.** Start `gh copilot` in any repo; Helm prints a pairing QR via
-`session.log()` (run `/helm-pair` to re-show it). Scan/paste it, then trigger a Copilot
+`session.log()` (run `/helm` to re-show it). Scan/paste it, then trigger a Copilot
 action (e.g. a file write) and watch the stream — approve/deny and switch modes from the
 phone. Everything on the relay is AES-256-GCM ciphertext.
 

@@ -55,7 +55,7 @@ export function SessionScreen({
       />
 
       <main className="thread-scroll">
-        <ChatThread items={timeline.items} streaming={status === 'live'} />
+        <ChatThread items={timeline.items} history={timeline.history} streaming={status === 'live'} />
       </main>
 
       <div className="composer-dock">

@@ -1,14 +1,17 @@
-import { KIND, MODES } from '@aasis21/helm-shared';
+import { KIND, MODES, mergeHistory } from '@aasis21/helm-shared';
 import type {
   ApprovalRequest,
   AssistantDelta,
   AssistantMessage,
+  History as HistoryMessage,
+  HistoryItem,
   InnerMessage,
   LogLine,
   ModeChange,
   SessionMode,
   ToolComplete,
   ToolStart,
+  UserMessageEcho,
 } from '@aasis21/helm-shared';
 
 /**
@@ -23,6 +26,9 @@ export interface UserItem {
   id: string;
   text: string;
   ts: number;
+  /** Which device typed this prompt: 'phone' (this device) or 'terminal' (the laptop).
+   *  Undefined for backfilled history (turns carry no device). */
+  origin?: 'phone' | 'terminal';
 }
 export interface AssistantItem {
   kind: 'assistant';
@@ -61,9 +67,18 @@ export interface TimelineState {
   lastHeartbeat: number | null;
   sessionEnded: boolean;
   endedReason?: string;
+  /** Backfilled pre-join turns, ascending by turn. Kept SEPARATE from live `items`
+   *  (which are capped) so older history isn't evicted and ordering stays stable. */
+  history: HistoryItem[];
+  /** turn_index cursor for the next older page, or null when nothing older remains. */
+  historyCursor: number | null;
+  historyHasMore: boolean;
+  /** True while a history page request is in flight (drives the "Loading…" affordance). */
+  historyLoading: boolean;
 }
 
 const MAX_ITEMS = 240;
+const MAX_HISTORY = 500;
 const DEFAULT_MODE = MODES[0] as SessionMode;
 
 export function emptyTimeline(): TimelineState {
@@ -75,6 +90,10 @@ export function emptyTimeline(): TimelineState {
     title: null,
     lastHeartbeat: null,
     sessionEnded: false,
+    history: [],
+    historyCursor: null,
+    historyHasMore: false,
+    historyLoading: false,
   };
 }
 
@@ -89,8 +108,14 @@ export function appendUser(state: TimelineState, text: string, ts: number): Time
     id: `user-${ts}-${Math.random().toString(36).slice(2, 7)}`,
     text,
     ts,
+    origin: 'phone',
   };
   return { ...state, items: cap([...state.items, item]) };
+}
+
+/** Mark a history page request as in flight (drives the loading affordance). */
+export function markHistoryLoading(state: TimelineState, loading = true): TimelineState {
+  return { ...state, historyLoading: loading };
 }
 
 /** Fold one decrypted inner message into the timeline state. Pure. */
@@ -106,6 +131,10 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
       return completeTool(state, message);
     case KIND.LOG:
       return pushNotice(state, message);
+    case KIND.USER_MESSAGE:
+      return appendUserEcho(state, message as UserMessageEcho);
+    case KIND.HISTORY:
+      return mergeHistoryPage(state, message as HistoryMessage);
     case KIND.APPROVAL_REQUEST:
       return {
         ...state,
@@ -241,4 +270,79 @@ function pushNotice(state: TimelineState, message: LogLine): TimelineState {
     ts: message.ts,
   };
   return { ...state, items: cap([...state.items, item]) };
+}
+
+/**
+ * Append a user prompt echoed from the laptop. Phone-typed prompts already appear via
+ * `appendUser`, so the extension only broadcasts terminal-origin echoes; we still dedup
+ * by the stable SDK event id so a re-delivery (e.g. reconnect) can't double-add it.
+ */
+function appendUserEcho(state: TimelineState, message: UserMessageEcho): TimelineState {
+  const id = `umsg-${message.id ?? message.ts}`;
+  if (state.items.some((item) => item.id === id)) return state;
+  const item: UserItem = {
+    kind: 'user',
+    id,
+    text: message.text,
+    ts: message.ts,
+    origin: message.origin ?? 'terminal',
+  };
+  return { ...state, items: cap([...state.items, item]) };
+}
+
+/** Merge a backfilled history page (ascending, deduped) and advance the cursor. */
+function mergeHistoryPage(state: TimelineState, message: HistoryMessage): TimelineState {
+  const merged = mergeHistory(state.history, message.items ?? []);
+  const history = merged.length > MAX_HISTORY ? merged.slice(merged.length - MAX_HISTORY) : merged;
+  return {
+    ...state,
+    history,
+    historyCursor: message.nextCursor ?? null,
+    historyHasMore: Boolean(message.hasMore),
+    historyLoading: false,
+  };
+}
+
+/** A serializable snapshot of the durable parts of a timeline (no transient/live fields). */
+export interface PersistedTimeline {
+  items: TimelineItem[];
+  history: HistoryItem[];
+  historyCursor: number | null;
+  historyHasMore: boolean;
+  mode: SessionMode;
+  title: string | null;
+  cwd: string | null;
+}
+
+/** Extract the durable subset of a timeline for local persistence. */
+export function toPersisted(state: TimelineState): PersistedTimeline {
+  return {
+    items: state.items,
+    history: state.history,
+    historyCursor: state.historyCursor,
+    historyHasMore: state.historyHasMore,
+    mode: state.mode,
+    title: state.title,
+    cwd: state.cwd,
+  };
+}
+
+/**
+ * Rebuild a timeline from a persisted snapshot. Live/transient fields (approvals,
+ * heartbeat, ended flags) are reset — they belong to the fresh connection, not the
+ * restored transcript.
+ */
+export function restoreTimeline(persisted: PersistedTimeline | null | undefined): TimelineState {
+  const base = emptyTimeline();
+  if (!persisted) return base;
+  return {
+    ...base,
+    items: Array.isArray(persisted.items) ? persisted.items.slice(-MAX_ITEMS) : [],
+    history: Array.isArray(persisted.history) ? persisted.history.slice(-MAX_HISTORY) : [],
+    historyCursor: persisted.historyCursor ?? null,
+    historyHasMore: Boolean(persisted.historyHasMore),
+    mode: persisted.mode ?? base.mode,
+    title: persisted.title ?? null,
+    cwd: persisted.cwd ?? null,
+  };
 }

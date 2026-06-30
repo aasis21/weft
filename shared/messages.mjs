@@ -25,6 +25,10 @@ export const KIND = Object.freeze({
   TOOL_START: "tool.start",
   TOOL_COMPLETE: "tool.complete",
   LOG: "log",
+  // a user prompt typed at the laptop terminal, echoed to the phone so its local
+  // transcript isn't missing the user side of terminal-driven turns. `origin`
+  // distinguishes the source device ('phone' for this device, 'terminal' for the laptop).
+  USER_MESSAGE: "stream.user_message",
   // prompt (phone -> ext)
   PROMPT: "prompt",
   // approval (ext -> phone) / decision (phone -> ext)
@@ -36,6 +40,10 @@ export const KIND = Object.freeze({
   SESSION_END: "control.session_end",
   HEARTBEAT: "control.heartbeat",
   MODE: "control.mode",
+  // history backfill (phone <-> ext): the phone pulls older turns it never saw
+  // (first join, or scrollback) from the CLI session store.
+  HISTORY_REQUEST: "control.history_request",
+  HISTORY: "control.history",
 });
 
 /** Session modes the phone can request. (Applied best-effort by the extension; see spike.) */
@@ -75,6 +83,18 @@ export const logLine = (level, message) => ({
   kind: KIND.LOG,
   level,
   message,
+  ts: now(),
+});
+/**
+ * A user prompt echoed from the laptop to the phone. `origin` records which device
+ * typed it ('phone' = this device, already shown optimistically; 'terminal' = the
+ * laptop). `id` is a stable identifier (the SDK event id) so the phone can dedup.
+ */
+export const userMessage = (text, origin = "terminal", id) => ({
+  kind: KIND.USER_MESSAGE,
+  text,
+  origin,
+  id,
   ts: now(),
 });
 
@@ -131,6 +151,31 @@ export const sessionEnd = (reason) => ({
 export const heartbeat = () => ({ kind: KIND.HEARTBEAT, ts: now() });
 export const modeChange = (mode) => ({ kind: KIND.MODE, mode, ts: now() });
 
+// ---- factories (history backfill) ------------------------------------------
+/**
+ * Phone -> ext request for a page of older turns. `before` is a turn_index cursor
+ * (exclusive); null/undefined means "the latest page". `limit` is a hint — the
+ * extension clamps it to a safe maximum so each encrypted broadcast stays small.
+ */
+export const historyRequest = (before = null, limit) => ({
+  kind: KIND.HISTORY_REQUEST,
+  before,
+  limit,
+  ts: now(),
+});
+/**
+ * Ext -> phone page of history. `items` are HistoryItem[] in ascending turn order.
+ * `nextCursor` is the turn_index to pass as the next `before` (or null when there is
+ * nothing older); `hasMore` mirrors that as a convenience.
+ */
+export const history = (items, nextCursor = null, hasMore = false) => ({
+  kind: KIND.HISTORY,
+  items,
+  nextCursor,
+  hasMore,
+  ts: now(),
+});
+
 /** Map an inner message kind to the logical event it should be published on. */
 export function eventForKind(kind) {
   switch (kind) {
@@ -139,6 +184,7 @@ export function eventForKind(kind) {
     case KIND.TOOL_START:
     case KIND.TOOL_COMPLETE:
     case KIND.LOG:
+    case KIND.USER_MESSAGE:
       return EVENTS.STREAM;
     case KIND.PROMPT:
       return EVENTS.PROMPT;
@@ -151,6 +197,8 @@ export function eventForKind(kind) {
     case KIND.SESSION_END:
     case KIND.HEARTBEAT:
     case KIND.MODE:
+    case KIND.HISTORY_REQUEST:
+    case KIND.HISTORY:
       return EVENTS.CONTROL;
     default:
       throw new Error(`helm/messages: unknown kind "${kind}"`);

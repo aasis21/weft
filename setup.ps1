@@ -27,7 +27,7 @@ try {
     Write-Host "(or export those vars before 'gh copilot'). The extension auto-loads a colocated .env." -ForegroundColor Yellow
   }
 
-  Write-Host "`nDone. Start 'gh copilot' in any repo; Helm prints a pairing QR (or run /helm-pair). Scan it from the Helm app." -ForegroundColor Cyan
+  Write-Host "`nDone. Start 'gh copilot' in any repo; Helm prints a pairing QR (or run /helm). Scan it from the Helm app." -ForegroundColor Cyan
 } finally {
   Pop-Location
 }

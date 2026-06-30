@@ -448,7 +448,7 @@ textarea {
 }
 
 .mode-selector button.active {
-  color: #07100d;
+  color: #0a0e14;
   background: var(--accent);
 }
 

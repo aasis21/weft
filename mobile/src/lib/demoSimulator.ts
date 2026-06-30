@@ -8,6 +8,7 @@ import {
   createLocalTransport,
   generateKeyPair,
   heartbeat,
+  history,
   logLine,
   modeChange,
   randomChannelId,
@@ -15,6 +16,7 @@ import {
   sessionStart,
   toolComplete,
   toolStart,
+  userMessage,
   waitForPeer,
 } from '@aasis21/helm-shared';
 import type { ApprovalDecision, ModeChange, PromptMessage } from '@aasis21/helm-shared';
@@ -79,6 +81,25 @@ export async function startDemoSession(): Promise<DemoSession> {
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
   push(100, () => extension.send(sessionStart(channelId, 'demo-session', 'C:\\Users\\akash\\helm')));
+  // Backfilled pre-join history (what happened before this phone "joined") — rendered
+  // above the live stream under an "Earlier in this session" divider.
+  push(250, () =>
+    extension.send(
+      history(
+        [
+          { turnIndex: 0, role: 'user', text: 'Earlier: what is Helm again?', ts: Date.now() - 600_000 },
+          {
+            turnIndex: 0,
+            role: 'assistant',
+            text: 'Helm mirrors your live `gh copilot` terminal session to your phone over an E2E-encrypted relay.',
+            ts: Date.now() - 599_000,
+          },
+        ],
+        null,
+        false,
+      ),
+    ),
+  );
   push(450, () => extension.send(logLine('info', 'Encrypted LocalTransport linked; relay sees envelopes only.')));
   push(900, () =>
     extension.send(
@@ -89,6 +110,11 @@ export async function startDemoSession(): Promise<DemoSession> {
     ),
   );
   push(1_700, () => extension.send(toolStart('tool-1', 'powershell', { command: 'npm run build -w @aasis21/helm-mobile' })));
+  // A prompt typed at the LAPTOP terminal (origin 'terminal'), relayed so the phone's
+  // transcript isn't missing the user side of terminal-driven turns. Shows a "Laptop" chip.
+  push(2_400, () =>
+    extension.send(userMessage('Did that build pass on the laptop?', 'terminal', 'demo-terminal-1')),
+  );
   push(3_400, () =>
     extension.send(toolComplete('tool-1', 'powershell', true, 'vite build ✓  104 modules transformed · dist/ ready in 1.21s')),
   );

@@ -1,5 +1,7 @@
 // Type definitions for Helm shared message protocol.
 
+import type { HistoryItem } from "./history";
+
 export type LogicalEvent = "stream" | "prompt" | "approval" | "decision" | "control";
 
 export type SessionMode = "interactive" | "plan" | "autopilot";
@@ -18,6 +20,7 @@ export const KIND: {
   readonly TOOL_START: "tool.start";
   readonly TOOL_COMPLETE: "tool.complete";
   readonly LOG: "log";
+  readonly USER_MESSAGE: "stream.user_message";
   readonly PROMPT: "prompt";
   readonly APPROVAL_REQUEST: "approval.request";
   readonly APPROVAL_DECISION: "approval.decision";
@@ -26,6 +29,8 @@ export const KIND: {
   readonly SESSION_END: "control.session_end";
   readonly HEARTBEAT: "control.heartbeat";
   readonly MODE: "control.mode";
+  readonly HISTORY_REQUEST: "control.history_request";
+  readonly HISTORY: "control.history";
 };
 
 export const MODES: readonly SessionMode[];
@@ -73,6 +78,13 @@ export interface LogLine extends BaseMessage {
   level: "info" | "warning" | "error";
   message: string;
 }
+/** A user prompt echoed from the laptop to the phone, attributed by device. */
+export interface UserMessageEcho extends BaseMessage {
+  kind: "stream.user_message";
+  text: string;
+  origin: "phone" | "terminal";
+  id?: string;
+}
 export interface PromptMessage extends BaseMessage {
   kind: "prompt";
   text: string;
@@ -115,6 +127,19 @@ export interface ModeChange extends BaseMessage {
   kind: "control.mode";
   mode: SessionMode;
 }
+/** Phone -> ext: request a page of older turns (cursor = turn_index, exclusive). */
+export interface HistoryRequest extends BaseMessage {
+  kind: "control.history_request";
+  before?: number | null;
+  limit?: number;
+}
+/** Ext -> phone: a page of history items in ascending turn order. */
+export interface History extends BaseMessage {
+  kind: "control.history";
+  items: HistoryItem[];
+  nextCursor: number | null;
+  hasMore: boolean;
+}
 
 export type InnerMessage =
   | AssistantMessage
@@ -122,6 +147,7 @@ export type InnerMessage =
   | ToolStart
   | ToolComplete
   | LogLine
+  | UserMessageEcho
   | PromptMessage
   | ApprovalRequest
   | ApprovalDecision
@@ -129,7 +155,9 @@ export type InnerMessage =
   | SessionMeta
   | SessionEnd
   | Heartbeat
-  | ModeChange;
+  | ModeChange
+  | HistoryRequest
+  | History;
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
 export function assistantDelta(content: string, messageId?: string): AssistantDelta;
@@ -141,6 +169,11 @@ export function toolComplete(
   resultPreview?: string
 ): ToolComplete;
 export function logLine(level: "info" | "warning" | "error", message: string): LogLine;
+export function userMessage(
+  text: string,
+  origin?: "phone" | "terminal",
+  id?: string
+): UserMessageEcho;
 export function prompt(text: string): PromptMessage;
 export function approvalRequest(
   requestId: string,
@@ -163,5 +196,11 @@ export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function sessionEnd(reason?: string): SessionEnd;
 export function heartbeat(): Heartbeat;
 export function modeChange(mode: SessionMode): ModeChange;
+export function historyRequest(before?: number | null, limit?: number): HistoryRequest;
+export function history(
+  items: HistoryItem[],
+  nextCursor?: number | null,
+  hasMore?: boolean
+): History;
 export function eventForKind(kind: string): LogicalEvent;
 export function isValidInner(msg: unknown): msg is InnerMessage;

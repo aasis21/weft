@@ -1,4 +1,4 @@
-import { KIND, approvalDecision, modeChange, prompt } from '@aasis21/helm-shared';
+import { KIND, approvalDecision, historyRequest, modeChange, prompt, HISTORY_PAGE_DEFAULT } from '@aasis21/helm-shared';
 import type { InnerMessage, SessionMode } from '@aasis21/helm-shared';
 import { connectSession, pairSession } from './helmClient';
 import type { HelmClient } from './helmClient';
@@ -6,11 +6,15 @@ import {
   appendUser,
   dismissApproval,
   emptyTimeline,
+  markHistoryLoading,
   reduceTimeline,
+  restoreTimeline,
+  toPersisted,
 } from './timeline';
 import type { TimelineState } from './timeline';
 import { loadSessions, patchSession, removeSession, upsertSession } from './sessions';
 import type { StoredSession } from './sessions';
+import { clearTranscript, loadTranscript, saveTranscript } from './transcripts';
 import { startDemoSession } from './demoSimulator';
 import type { DemoSession } from './demoSimulator';
 import {
@@ -48,15 +52,20 @@ interface Runtime {
   timeline: TimelineState;
   client: HelmClient | null;
   ephemeral: boolean;
+  /** True until the one-time pre-join history backfill has been requested. */
+  firstJoin: boolean;
   error?: string;
   unsubscribe?: () => void;
   stopDemo?: () => Promise<void>;
+  saveTimer?: number;
 }
 
 // A healthy session heartbeats on a fixed interval (the extension beats every 15s —
 // see DEFAULT_HEARTBEAT_MS in extension/src/relay.mjs). Only flag a session "Quiet"
 // once a beat has been missed with slack, so a live session never flickers Live->Quiet.
 const IDLE_AFTER_MS = 20_000;
+// Coalesce transcript writes so a burst of stream deltas doesn't hammer storage.
+const PERSIST_THROTTLE_MS = 800;
 
 function basename(path: string | null): string | null {
   if (!path) return null;
@@ -110,21 +119,34 @@ class SessionManager {
     } catch {
       stored = [];
     }
+    // LOCAL-FIRST: restore each session's transcript from the device so a refresh shows
+    // the conversation instantly — before (and even without) a successful reconnect.
+    const restored = await Promise.all(
+      stored.map(async (s) => ({
+        channelId: s.pairing.channelId,
+        persisted: await loadTranscript(s.pairing.channelId).catch(() => null),
+      })),
+    );
+    const persistedById = new Map(restored.map((r) => [r.channelId, r.persisted]));
     for (const s of stored) {
       const channelId = s.pairing.channelId;
+      const persisted = persistedById.get(channelId) ?? null;
+      const timeline = restoreTimeline(persisted);
       const meta: SessionMeta = {
         channelId,
-        title: titleFor(channelId, s.cwd, s.title),
-        cwd: s.cwd,
+        title: titleFor(channelId, timeline.cwd ?? s.cwd, timeline.title ?? s.title),
+        cwd: timeline.cwd ?? s.cwd,
         kind: 'live',
         addedAt: s.addedAt,
       };
       this.runtimes.set(channelId, {
         meta,
         status: 'connecting',
-        timeline: emptyTimeline(),
+        timeline,
         client: null,
         ephemeral: false,
+        // No persisted transcript yet => never connected on this device => pull pre-join history.
+        firstJoin: persisted == null,
       });
       if (!this.order.includes(channelId)) this.order.push(channelId);
     }
@@ -163,6 +185,27 @@ class SessionManager {
     runtime.error = undefined;
     runtime.unsubscribe = client.subscribe((message) => this.onMessage(channelId, message));
     this.emit();
+    this.maybeRequestFirstHistory(channelId, client);
+  }
+
+  /**
+   * One-time backfill: the first time the phone ever connects to a session (no local
+   * transcript existed), pull the most recent page of pre-join turns. Refreshes and
+   * reconnects rely on the restored local transcript instead and never pull.
+   */
+  private maybeRequestFirstHistory(channelId: string, client: HelmClient): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral || !runtime.firstJoin) return;
+    runtime.firstJoin = false;
+    runtime.timeline = markHistoryLoading(runtime.timeline, true);
+    this.emit();
+    void client.send(historyRequest(null, HISTORY_PAGE_DEFAULT)).catch(() => {
+      const r = this.runtimes.get(channelId);
+      if (r) {
+        r.timeline = markHistoryLoading(r.timeline, false);
+        this.emit();
+      }
+    });
   }
 
   private onMessage(channelId: string, message: InnerMessage): void {
@@ -196,7 +239,22 @@ class SessionManager {
       void notifyApprovalRequest(message);
     }
 
+    // LOCAL-FIRST: persist the transcript so a refresh restores it without a pull.
+    this.schedulePersist(channelId);
+
     this.emit();
+  }
+
+  /** Coalesced, best-effort persist of a session's transcript to the local store. */
+  private schedulePersist(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral || runtime.saveTimer != null) return;
+    runtime.saveTimer = window.setTimeout(() => {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.saveTimer = undefined;
+      void saveTranscript(channelId, toPersisted(r.timeline));
+    }, PERSIST_THROTTLE_MS);
   }
 
   // --- adding sessions -------------------------------------------------
@@ -224,6 +282,7 @@ class SessionManager {
       timeline: emptyTimeline(),
       client: null,
       ephemeral: false,
+      firstJoin: true,
     });
     if (!this.order.includes(channelId)) this.order.push(channelId);
     this.activeId = channelId;
@@ -252,6 +311,7 @@ class SessionManager {
       timeline: emptyTimeline(),
       client: demo.client,
       ephemeral: true,
+      firstJoin: false,
       stopDemo: demo.stop,
     });
     if (!this.order.includes(channelId)) this.order.push(channelId);
@@ -272,13 +332,20 @@ class SessionManager {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
     runtime.unsubscribe?.();
+    if (runtime.saveTimer != null) {
+      window.clearTimeout(runtime.saveTimer);
+      runtime.saveTimer = undefined;
+    }
     try {
       await runtime.stopDemo?.();
       await runtime.client?.close();
     } catch {
       /* ignore */
     }
-    if (!runtime.ephemeral) await removeSession(channelId);
+    if (!runtime.ephemeral) {
+      await removeSession(channelId);
+      await clearTranscript(channelId);
+    }
     this.runtimes.delete(channelId);
     this.order = this.order.filter((id) => id !== channelId);
     if (this.activeId === channelId) this.activeId = this.order[0] ?? null;
@@ -306,8 +373,28 @@ class SessionManager {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
     runtime.timeline = appendUser(runtime.timeline, text, Date.now());
+    this.schedulePersist(channelId);
     this.emit();
     await runtime.client?.send(prompt(text));
+  }
+
+  /**
+   * Scrollback: pull the next older page of history on demand (phase 2 "Load earlier").
+   * No-op for demo sessions, while a page is already loading, or when nothing older remains.
+   */
+  async loadEarlierHistory(channelId: string): Promise<void> {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral) return;
+    if (runtime.timeline.historyLoading || !runtime.timeline.historyHasMore) return;
+    const cursor = runtime.timeline.historyCursor;
+    runtime.timeline = markHistoryLoading(runtime.timeline, true);
+    this.emit();
+    try {
+      await runtime.client?.send(historyRequest(cursor, HISTORY_PAGE_DEFAULT));
+    } catch {
+      runtime.timeline = markHistoryLoading(runtime.timeline, false);
+      this.emit();
+    }
   }
 
   async sendApproval(channelId: string, requestId: string, optionId: string): Promise<void> {

@@ -13,6 +13,7 @@
       "default": "./index.mjs"
     },
     "./messages": "./messages.mjs",
+    "./history": "./history.mjs",
     "./crypto": "./crypto.mjs",
     "./channel": "./channel.mjs",
     "./transport": "./transport.mjs",

@@ -17,6 +17,19 @@ import {
 } from "@aasis21/helm-shared";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 
+// Minimal ANSI styling for the pairing banner. The Copilot CLI forwards ANSI straight to the
+// terminal (the QR itself is rendered with ANSI escapes), so truecolor brand accents render in
+// any modern terminal. Honor NO_COLOR (https://no-color.org) and TERM=dumb — otherwise the
+// helpers just return the bare string, so the banner stays readable everywhere.
+const HELM_COLOR = !process.env.NO_COLOR && process.env.TERM !== "dumb";
+const paint = (codes) => (s) => (HELM_COLOR ? `\x1b[${codes}m${s}\x1b[0m` : `${s}`);
+const ui = {
+  brand: paint("1;38;2;198;242;78"), // bold signal-lime (#C6F24E) — Helm's primary
+  lime: paint("38;2;198;242;78"),
+  cyan: paint("38;2;63;224;206"), // secondary accent (#3FE0CE)
+  dim: paint("2"),
+};
+
 // Best-effort: load SUPABASE_URL / SUPABASE_ANON_KEY / HELM_TRANSPORT from a colocated
 // `.env` (next to the installed extension or in the launch cwd) so operators don't have to
 // export them by hand before every `gh copilot`. Already-exported shell vars always win;
@@ -70,6 +83,14 @@ let activeTransport = null;
 let currentPeerPub = null;
 let pairChain = Promise.resolve();
 
+// Show the full pairing walk-through (instructions + QR + status) and re-kick the relay listener
+// if it isn't currently live (initial connect gave up, or it was torn down). A live listener
+// already answers re-scans, so we never stack a second transport. Bound to the `/helm` command.
+const showPairing = async () => {
+  await logPairing(session, JSON.stringify(pairingPayload), { full: true });
+  if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
+};
+
 const session = await joinSession({
   streaming: true,
   onPermissionRequest: async (request, invocation) => {
@@ -84,14 +105,9 @@ const session = await joinSession({
   },
   commands: [
     {
-      name: "helm-pair",
-      description: "Show the Helm mobile pairing QR code for this Copilot session.",
-      handler: async () => {
-        await logPairingQr(session, JSON.stringify(pairingPayload));
-        // If pairing isn't currently listening (initial connect gave up, or it was torn down),
-        // re-kick it. A live listener already answers re-scans, so don't stack a second transport.
-        if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
-      },
+      name: "helm",
+      description: "Pair your phone with this Copilot session — shows the QR + setup steps.",
+      handler: showPairing,
     },
   ],
 });
@@ -104,8 +120,7 @@ session.on?.("session.shutdown", (event) => {
   void shutdown(reason);
 });
 
-await logPairingQr(session, JSON.stringify(pairingPayload));
-session.log?.("Helm: waiting for phone pairing hello…");
+await logPairing(session, JSON.stringify(pairingPayload));
 
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
@@ -120,7 +135,7 @@ void connectRelayWithRetry();
 // walk-away tool, so retry the subscribe with capped exponential backoff using a FRESH transport
 // each attempt (a realtime channel is single-use after an error). Once subscribed, `listenForPeers`
 // answers every hello — the first scan AND any later re-scan/reload — so pairing self-heals.
-// `/helm-pair` can re-kick this if all attempts gave up.
+// `/helm` can re-kick this if all attempts gave up.
 async function connectRelayWithRetry() {
   if (connecting || pairingStop || shuttingDown) return;
   connecting = true;
@@ -152,7 +167,7 @@ async function connectRelayWithRetry() {
             `Helm: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
           );
           session.log?.(
-            `Helm: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /helm-pair to retry.`,
+            `Helm: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /helm to retry.`,
             { level: "warning", ephemeral: false },
           );
           return;
@@ -218,7 +233,9 @@ async function attachForPeer(transport, { key, peer }) {
   relayHandle = await attachRelay({ session, channel, channelId, permissionRelay });
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
-  session.log?.(`Helm: encrypted relay attached to ${peer.deviceId ?? "phone"}.`);
+  session.log?.(
+    `${ui.lime("✓ Phone paired")} — ${peer.deviceId ?? "your phone"} is now mirroring this session.`,
+  );
 }
 
 // Tear everything down once: stop the pairing listener, stop the relay (which announces the session
@@ -259,12 +276,43 @@ function positiveIntFromEnv(name, fallback) {
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
 }
 
-async function logPairingQr(session, payload) {
-  const qr = await QRCode.toString(payload, { type: "terminal", small: true });
-  session.log?.(`Helm pairing payload:\n${qr}\n${payload}`, {
-    level: "info",
-    ephemeral: false,
-  });
+async function logPairing(session, payload, { full = false } = {}) {
+  const qr = (await QRCode.toString(payload, { type: "terminal", small: true })).replace(/\n+$/, "");
+  const transport = process.env.HELM_TRANSPORT || "local";
+  const channelShort = channelId.slice(0, 8);
+
+  // Session start prints a light banner — just the QR + one status line. `/helm` prints the full
+  // walk-through (value prop, numbered steps, manual-paste fallback, security footer).
+  const lines = full
+    ? [
+        `${ui.brand("HELM")}  ${ui.dim("·  pair your phone")}`,
+        "",
+        ui.dim("Mirror this Copilot session on your phone — watch the live token"),
+        ui.dim("stream, read diffs, and approve tool runs from anywhere."),
+        "",
+        qr,
+        "",
+        `${ui.lime("1")}  Open the Helm app   ${ui.dim("·")}  ${ui.cyan("usehelm.netlify.app")}`,
+        `${ui.lime("2")}  Tap ${ui.dim("“Scan QR to pair”")} and point it at the code above`,
+        `${ui.lime("3")}  Approve the link on your phone — it confirms right here`,
+        "",
+        ui.dim("Can’t scan? Tap “Paste a code” in the app and paste this:"),
+        ui.dim(payload),
+        "",
+        ui.dim(
+          `Relay ${transport} · Channel ${channelShort} · End-to-end encrypted (AES-256-GCM), keys live only this session`,
+        ),
+        "",
+        `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}`,
+      ]
+    : [
+        `${ui.brand("HELM")}  ${ui.dim("·  scan to pair your phone")}`,
+        "",
+        qr,
+        "",
+        `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}   ${ui.dim("·")}   ${ui.dim("run")} ${ui.lime("/helm")} ${ui.dim("for setup steps")}`,
+      ];
+  session.log?.(lines.join("\n"), { level: "info", ephemeral: false });
 }
 
 function createTransport({ channelId }) {

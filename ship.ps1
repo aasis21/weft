@@ -129,7 +129,7 @@ try {
         Write-Host '  Installer: irm https://usehelm.netlify.app/install.ps1 | iex' -ForegroundColor Green
     }
     if (-not $SkipInstall) {
-        Write-Host '  Local CLI: restart `gh copilot` to load the new extension; run /helm-pair to show the QR.' -ForegroundColor Green
+        Write-Host '  Local CLI: restart `gh copilot` to load the new extension; run /helm to show the QR.' -ForegroundColor Green
     }
 }
 finally {

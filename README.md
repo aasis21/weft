@@ -23,7 +23,7 @@ curl -fsSL https://usehelm.netlify.app/install.sh | bash
 ```
 
 Then start `gh copilot` in any repo, open **<https://usehelm.netlify.app>** on your phone,
-scan the QR (or run `/helm-pair` to re-show it), and approve/deny from anywhere.
+scan the QR (or run `/helm` to re-show it), and approve/deny from anywhere.
 
 - **Zero-config** — uses the creator's hosted relay (a client-safe publishable key + RLS +
   end-to-end AES-256-GCM; Supabase only ever sees ciphertext).

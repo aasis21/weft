@@ -68,7 +68,7 @@ fi
 
 cyan ""
 cyan "=== Done ==="
-echo "  1. Start Copilot CLI in any repo (run /helm-pair to re-show the QR)."
+echo "  1. Start Copilot CLI in any repo (run /helm to re-show the QR)."
 echo "  2. Open https://usehelm.netlify.app on your phone and scan the QR."
 echo "  3. Trigger a Copilot action and approve / deny from your phone."
 echo ""

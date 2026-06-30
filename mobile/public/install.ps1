@@ -86,7 +86,7 @@ if ((Test-Path $envPath) -and -not $Force) {
 }
 
 Step 'Done'
-Write-Host '  1. Start Copilot CLI in any repo (run /helm-pair to re-show the QR).'
+Write-Host '  1. Start Copilot CLI in any repo (run /helm to re-show the QR).'
 Write-Host '  2. Open https://usehelm.netlify.app on your phone and scan the QR.'
 Write-Host '  3. Trigger a Copilot action and approve / deny from your phone.'
 Write-Host ""

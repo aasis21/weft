@@ -27,4 +27,4 @@ else
 fi
 
 echo
-echo "Done. Start 'gh copilot'; Helm prints a pairing QR (or run /helm-pair). Scan it from the Helm app."
+echo "Done. Start 'gh copilot'; Helm prints a pairing QR (or run /helm). Scan it from the Helm app."

@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Helm — Product Design Dossier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#0A0F0B; --ink-2:#0E1611; --ink-3:#060907; --panel:#111A14;
+    --lime:#C6F24E; --lime-2:#A7D63B; --cyan:#3FE0CE; --blue:#4C8DFF;
+    --green:#2EA043; --amber:#E3A008; --coral:#FF6F5B;
+    --paper:#EAF2E6; --muted:#8FA395; --faint:#5E6F63;
+    --rule:rgba(198,242,78,.16); --rule-soft:rgba(234,242,230,.08);
+    --serif:"Fraunces",Georgia,serif; --sans:"Hanken Grotesk",system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#050806;color:var(--paper);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  @page{size:A4;margin:0}
+
+  .page{
+    position:relative;width:210mm;height:297mm;overflow:hidden;
+    background:
+      radial-gradient(120% 80% at 88% -8%, rgba(198,242,78,.10), transparent 55%),
+      radial-gradient(90% 70% at -10% 108%, rgba(63,224,206,.07), transparent 55%),
+      linear-gradient(180deg,var(--ink) 0%, var(--ink-3) 100%);
+    page-break-after:always;
+  }
+  .page:last-child{page-break-after:auto}
+  /* hairline grid texture */
+  .page::before{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background-image:
+      linear-gradient(rgba(234,242,230,.035) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(234,242,230,.035) 1px,transparent 1px);
+    background-size:18mm 18mm;
+    -webkit-mask-image:radial-gradient(120% 100% at 50% 0%,#000 55%,transparent 100%);
+            mask-image:radial-gradient(120% 100% at 50% 0%,#000 55%,transparent 100%);
+  }
+  .pad{position:relative;z-index:2;height:100%;padding:18mm 16mm 14mm}
+
+  /* running header / footer */
+  .rh{display:flex;align-items:center;justify-content:space-between;
+      font-family:var(--mono);font-size:8.5pt;letter-spacing:.16em;color:var(--muted);
+      text-transform:uppercase}
+  .brand{display:flex;align-items:center;gap:8px;color:var(--paper);font-weight:700}
+  .brand .mk{width:15px;height:15px;border-radius:5px;background:var(--lime);
+      box-shadow:0 0 14px rgba(198,242,78,.55);display:grid;place-items:center;
+      color:#0a0f0b;font-family:var(--serif);font-weight:900;font-size:10px}
+  .hair{height:1px;background:linear-gradient(90deg,var(--rule),transparent);margin:7mm 0 0}
+  .rf{position:absolute;left:16mm;right:16mm;bottom:11mm;z-index:2;display:flex;
+      align-items:center;justify-content:space-between;font-family:var(--mono);
+      font-size:8pt;letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
+  .rf b{color:var(--lime-2);font-weight:500}
+
+  .kicker{font-family:var(--mono);font-size:9pt;letter-spacing:.34em;text-transform:uppercase;
+      color:var(--lime);display:flex;align-items:center;gap:10px}
+  .kicker::before{content:"";width:22px;height:1px;background:var(--lime);display:inline-block}
+
+  h1.display{font-family:var(--serif);font-optical-sizing:auto;font-weight:600;
+      line-height:.96;letter-spacing:-.015em;color:var(--paper)}
+  .lead{font-size:11.5pt;line-height:1.55;color:var(--muted);max-width:62ch}
+  .lead b{color:var(--paper);font-weight:600}
+  em.ink{font-style:italic;color:var(--lime)}
+
+  /* ---------- COVER ---------- */
+  .cover .pad{display:flex;flex-direction:column}
+  .cover-no{font-family:var(--mono);font-size:8.5pt;letter-spacing:.3em;color:var(--muted)}
+  .cover h1{font-size:62pt;margin-top:auto}
+  .cover .sub{font-size:12pt;line-height:1.6;color:var(--muted);max-width:54ch;margin-top:10mm}
+  .cover .sub b{color:var(--paper);font-weight:600}
+  .cover-phone{position:absolute;right:12mm;top:50mm;width:60mm;z-index:3}
+  .cover-meta{display:flex;gap:26px;margin-top:12mm;font-family:var(--mono);
+      font-size:8.5pt;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;flex-wrap:wrap}
+  .cover-meta b{color:var(--lime-2);font-weight:500}
+  .bigmark{position:absolute;left:-6mm;bottom:-10mm;font-family:var(--serif);
+      font-weight:900;font-size:220pt;line-height:1;color:rgba(198,242,78,.05);z-index:1}
+
+  /* device frame */
+  .phone{position:relative;padding:7px;border-radius:30px;
+      background:linear-gradient(160deg,#1d281f,#0b110d 60%);
+      box-shadow:0 36px 70px -26px rgba(0,0,0,.85),0 0 0 1px rgba(198,242,78,.16),
+                 0 0 60px -14px rgba(198,242,78,.14)}
+  .phone::after{content:"";position:absolute;top:13px;left:50%;transform:translateX(-50%);
+      width:34%;height:5px;border-radius:5px;background:rgba(8,12,9,.9);z-index:4}
+  .phone img{display:block;width:100%;border-radius:24px}
+  .phone.sm{border-radius:24px;padding:6px}
+  .phone.sm img{border-radius:19px}
+  .phone.sm::after{height:4px;top:11px}
+
+  /* numbered callouts over a phone */
+  .anno{position:absolute;z-index:6;width:23px;height:23px;border-radius:50%;
+      background:var(--lime);color:#0a0f0b;font-family:var(--mono);font-weight:700;
+      font-size:9.5pt;display:grid;place-items:center;
+      box-shadow:0 0 0 4px rgba(198,242,78,.18),0 6px 14px rgba(0,0,0,.5)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:9mm}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:6mm}
+
+  .card{background:linear-gradient(180deg,var(--ink-2),rgba(8,12,9,.6));
+      border:1px solid var(--rule-soft);border-radius:14px;padding:7mm 6mm}
+  .card .ct{font-family:var(--mono);font-size:8.5pt;letter-spacing:.2em;text-transform:uppercase;
+      color:var(--lime);margin-bottom:6px}
+  .card .cb{font-size:10pt;line-height:1.5;color:var(--muted)}
+  .card .cb b{color:var(--paper);font-weight:600}
+
+  .legend{list-style:none;display:flex;flex-direction:column;gap:11px;margin-top:2mm}
+  .legend li{display:flex;gap:12px;font-size:10pt;line-height:1.45;color:var(--muted)}
+  .legend .n{flex:0 0 auto;width:21px;height:21px;border-radius:50%;background:rgba(198,242,78,.12);
+      border:1px solid var(--lime);color:var(--lime);font-family:var(--mono);font-weight:700;
+      font-size:8.5pt;display:grid;place-items:center}
+  .legend b{color:var(--paper);font-weight:600}
+
+  /* architecture */
+  .arch{display:flex;align-items:stretch;gap:0;margin-top:9mm}
+  .node{flex:1;background:linear-gradient(180deg,var(--ink-2),rgba(8,12,9,.5));
+      border:1px solid var(--rule);border-radius:16px;padding:8mm 6mm;text-align:center;position:relative}
+  .node .tag{font-family:var(--mono);font-size:8pt;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  .node .nm{font-family:var(--serif);font-size:17pt;font-weight:600;margin:7px 0 6px;color:var(--paper)}
+  .node .ds{font-size:9pt;line-height:1.45;color:var(--muted)}
+  .node .ic{width:40px;height:40px;margin:0 auto 9px;border-radius:11px;display:grid;place-items:center;
+      background:rgba(198,242,78,.08);border:1px solid var(--rule);font-size:18px}
+  .seam{flex:0 0 30mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;position:relative}
+  .seam .wire{height:2px;width:100%;background:repeating-linear-gradient(90deg,var(--lime) 0 6px,transparent 6px 12px);opacity:.7}
+  .seam .lock{width:30px;height:30px;border-radius:50%;background:var(--ink);border:1px solid var(--lime);
+      color:var(--lime);display:grid;place-items:center;font-size:13px;box-shadow:0 0 16px rgba(198,242,78,.3)}
+  .seam .lbl{font-family:var(--mono);font-size:7pt;letter-spacing:.16em;color:var(--lime-2);text-transform:uppercase;white-space:nowrap}
+
+  .flowstate{display:flex;align-items:center;gap:9px;margin-top:8mm;flex-wrap:wrap;font-family:var(--mono);font-size:8.5pt;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .flowstate .s{padding:5px 11px;border-radius:20px;border:1px solid var(--rule-soft);background:var(--ink-2)}
+  .flowstate .s.on{border-color:var(--lime);color:var(--lime)}
+  .flowstate .s.idle{border-color:var(--amber);color:var(--amber)}
+  .flowstate .s.end{border-color:var(--faint);color:var(--faint)}
+  .flowstate .arw{color:var(--faint)}
+
+  /* design system */
+  .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:5mm;margin-top:2mm}
+  .sw{border-radius:12px;overflow:hidden;border:1px solid var(--rule-soft);background:var(--ink-2)}
+  .sw .chip{height:24mm}
+  .sw .meta{padding:7px 9px}
+  .sw .role{font-family:var(--mono);font-size:7.5pt;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .sw .hex{font-family:var(--mono);font-size:9pt;color:var(--paper);margin-top:2px}
+
+  .specimen{display:flex;flex-direction:column;gap:5mm;margin-top:2mm}
+  .spec{border-bottom:1px solid var(--rule-soft);padding-bottom:5mm}
+  .spec .nm{font-family:var(--mono);font-size:8pt;letter-spacing:.16em;text-transform:uppercase;color:var(--lime);margin-bottom:4px}
+  .spec .big-serif{font-family:var(--serif);font-size:30pt;font-weight:600;line-height:1;color:var(--paper)}
+  .spec .big-sans{font-family:var(--sans);font-size:22pt;font-weight:700;line-height:1.05;color:var(--paper)}
+  .spec .big-mono{font-family:var(--mono);font-size:16pt;font-weight:500;color:var(--paper)}
+  .spec .sm{font-size:8.5pt;color:var(--faint);font-family:var(--mono);letter-spacing:.06em;margin-top:5px}
+
+  /* component anatomy — rebuilt tool card */
+  .anatomy{margin-top:2mm;position:relative}
+  .tcx{display:flex;align-items:center;gap:10px;background:#11161D;border:1px solid #20262e;
+      border-radius:12px;padding:11px 13px;font-family:var(--mono);font-size:10pt}
+  .tcx .ck{color:var(--green);font-weight:700}
+  .tcx .vb{color:var(--paper);font-weight:700;font-family:var(--sans)}
+  .tcx .tg{color:#9fb0c4}
+  .tcx .sp{flex:1}
+  .tcx .tm{color:var(--faint)}
+  .tcx .cv{color:var(--faint)}
+  .alabel{font-family:var(--mono);font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:var(--lime);position:relative;padding-top:14px}
+  .alabel::before{content:"";position:absolute;top:0;left:50%;width:1px;height:11px;background:var(--lime);opacity:.6}
+  .anrow{display:grid;grid-template-columns:auto auto 1fr auto auto;gap:18px;margin-top:2px;padding:0 6px}
+
+  /* spec sheet */
+  .sheet{display:grid;grid-template-columns:1fr 1fr;gap:0 9mm}
+  .srow{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid var(--rule-soft);font-size:9.5pt}
+  .srow .k{font-family:var(--mono);font-size:8pt;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .srow .v{color:var(--paper);text-align:right;font-weight:500}
+  .checks{list-style:none;display:flex;flex-direction:column;gap:8px;margin-top:3mm}
+  .checks li{display:flex;gap:10px;align-items:flex-start;font-size:9.5pt;color:var(--muted);line-height:1.4}
+  .checks .tick{color:var(--lime);font-weight:700;font-family:var(--mono)}
+  .pill-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:3mm}
+  .pill{font-family:var(--mono);font-size:8pt;letter-spacing:.1em;text-transform:uppercase;
+      padding:5px 10px;border-radius:20px;border:1px solid var(--rule);color:var(--lime-2);background:rgba(198,242,78,.05)}
+
+  /* back cover */
+  .back .pad{display:flex;flex-direction:column;justify-content:center}
+  .back h1{font-size:58pt;line-height:.95}
+  .back .colophon{margin-top:14mm;font-size:10pt;line-height:1.7;color:var(--muted);max-width:60ch}
+  .back .colophon b{color:var(--paper);font-weight:600}
+  .signoff{margin-top:10mm;display:flex;gap:26px;font-family:var(--mono);font-size:8.5pt;
+      letter-spacing:.14em;text-transform:uppercase;color:var(--faint);flex-wrap:wrap}
+  .signoff b{color:var(--lime-2);font-weight:500}
+</style>
+</head>
+<body>
+
+<!-- ============ 01 · COVER ============ -->
+<section class="page cover">
+  <div class="bigmark">H</div>
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span class="cover-no">No. 01 — MMXXVI</span>
+    </div>
+
+    <img class="cover-phone" src="assets/chat.png" alt="Helm chat surface" />
+
+    <div style="margin-top:auto">
+      <div class="kicker" style="margin-bottom:10mm;letter-spacing:.24em">Product Design Dossier · Chat Surface v2</div>
+      <h1 class="display cover-h1" style="font-size:60pt">A second screen<br/>for your <em class="ink" style="font-weight:600">terminal</em>.</h1>
+      <p class="sub">Helm binds to your live <b>gh&nbsp;copilot</b> session — watch the token stream, read the diffs, answer permission prompts, and steer the agent from your palm. <b>End-to-end encrypted.</b> Zero-persistence relay.</p>
+      <div class="cover-meta">
+        <span>Edition · <b>June 2026</b></span>
+        <span>Surface · <b>usehelm.netlify.app</b></span>
+        <span>Source · <b>github.com/aasis21/helm</b></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 02 · THE BRIEF ============ -->
+<section class="page">
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>01 — The Brief</span>
+    </div>
+    <div class="hair"></div>
+
+    <div style="margin-top:9mm;display:grid;grid-template-columns:1.15fr .85fr;gap:12mm;align-items:start">
+      <div>
+        <div class="kicker" style="margin-bottom:7mm">The problem</div>
+        <h1 class="display" style="font-size:38pt">Walk away<br/>from the desk.</h1>
+        <p class="lead" style="margin-top:8mm">Agent runs are long. Repo-wide refactors, <b>/fleet</b> commands, multi-step plans — they don't need you watching. Until, suddenly, they do: a file write to approve, a test to rerun, a wrong turn to stop.</p>
+        <p class="lead" style="margin-top:5mm">Helm is the encrypted viewport that lets you <b>leave the terminal and still hold the controls</b> — without devtunnels, inbound firewall rules, or a background daemon eating your RAM.</p>
+      </div>
+      <div>
+        <div class="kicker" style="margin-bottom:6mm">Contents</div>
+        <div style="font-family:var(--mono);font-size:9.5pt;line-height:2.1;color:var(--muted);letter-spacing:.04em">
+          <div><b style="color:var(--lime)">01</b> &nbsp;The Brief</div>
+          <div><b style="color:var(--lime)">02</b> &nbsp;System Architecture</div>
+          <div><b style="color:var(--lime)">03</b> &nbsp;The Interface</div>
+          <div><b style="color:var(--lime)">04</b> &nbsp;Multi-Session</div>
+          <div><b style="color:var(--lime)">05</b> &nbsp;Design System</div>
+          <div><b style="color:var(--lime)">06</b> &nbsp;Engineering &amp; Assurance</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="kicker" style="margin:13mm 0 6mm">Operating principles</div>
+    <div class="grid3">
+      <div class="card">
+        <div class="ct">⏻ &nbsp;Ephemeral</div>
+        <div class="cb">The channel lives exactly as long as your <b>gh&nbsp;copilot</b> session. Close the terminal and it vanishes — no zombies, no background service.</div>
+      </div>
+      <div class="card">
+        <div class="ct">🔒 &nbsp;Air-gapped</div>
+        <div class="cb">A fresh <b>AES-256-GCM</b> key is derived on-device from a scanned QR. The relay only ever carries ciphertext.</div>
+      </div>
+      <div class="card">
+        <div class="ct">⌘ &nbsp;Native</div>
+        <div class="cb">A true CLI extension on the agent's <b>RPC loop</b> — not a scraper, not a wrapper. It sees events as they happen.</div>
+      </div>
+    </div>
+  </div>
+  <div class="rf"><span>HELM · Product Design Dossier</span><span><b>02</b> / 08</span></div>
+</section>
+
+<!-- ============ 03 · ARCHITECTURE ============ -->
+<section class="page">
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>02 — System Architecture</span>
+    </div>
+    <div class="hair"></div>
+
+    <div style="margin-top:9mm">
+      <div class="kicker" style="margin-bottom:7mm">How it connects</div>
+      <h1 class="display" style="font-size:36pt">Three nodes,<br/>one encrypted seam.</h1>
+      <p class="lead" style="margin-top:7mm">Your phone never talks to the agent directly. It speaks to a volatile Supabase channel, which routes opaque envelopes to the extension riding inside your terminal. The relay is a <b>conduit, not a store.</b></p>
+    </div>
+
+    <div class="arch">
+      <div class="node">
+        <div class="ic">📱</div>
+        <div class="tag">The Viewport</div>
+        <div class="nm">Phone</div>
+        <div class="ds">React + Capacitor shell. Decrypts the stream, renders the chat, surfaces approvals.</div>
+      </div>
+      <div class="seam">
+        <div class="wire"></div>
+        <div class="lock">🔒</div>
+        <div class="lbl">AES-256-GCM</div>
+        <div class="wire"></div>
+      </div>
+      <div class="node" style="border-color:var(--rule-soft)">
+        <div class="ic" style="background:rgba(63,224,206,.08);border-color:rgba(63,224,206,.25)">⇄</div>
+        <div class="tag">The Conduit</div>
+        <div class="nm">Supabase</div>
+        <div class="ds">Realtime broadcast. Zero-persistence — sees envelopes only, logs nothing to a database.</div>
+      </div>
+      <div class="seam">
+        <div class="wire"></div>
+        <div class="lock">🔒</div>
+        <div class="lbl">ECDH-derived</div>
+        <div class="wire"></div>
+      </div>
+      <div class="node">
+        <div class="ic">▟</div>
+        <div class="tag">The Host</div>
+        <div class="nm">CLI Extension</div>
+        <div class="ds">Hooks the agent's JSON-RPC loop. Forwards tokens, holds the loop on tool requests.</div>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:12mm">
+      <div class="card">
+        <div class="ct">Lifecycle</div>
+        <div class="cb">The extension is a child of <b>gh&nbsp;copilot</b>. It opens the channel on launch, prints a pairing QR, and dies when you type <b>/exit</b>. The phone reports <em class="ink" style="font-weight:600">“Session ended.”</em></div>
+      </div>
+      <div class="card">
+        <div class="ct">Trust boundary</div>
+        <div class="cb">Keys are generated at the endpoints and never transit the relay. Intercepted traffic is <b>ciphertext only</b>. No inbound ports, no tunnels, no browser auth on the phone.</div>
+      </div>
+    </div>
+  </div>
+  <div class="rf"><span>HELM · Product Design Dossier</span><span><b>03</b> / 08</span></div>
+</section>
+
+<!-- ============ 04 · THE INTERFACE ============ -->
+<section class="page">
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>03 — The Interface</span>
+    </div>
+    <div class="hair"></div>
+
+    <div style="margin-top:9mm;display:grid;grid-template-columns:1fr 1fr;gap:10mm;align-items:end">
+      <div>
+        <div class="kicker" style="margin-bottom:7mm">The surface</div>
+        <h1 class="display" style="font-size:38pt">Reads like a<br/>real chat.</h1>
+      </div>
+      <p class="lead" style="font-size:10.5pt">Rebuilt to mirror VS Code, GitHub Copilot and Claude-mobile: assistant on the left, you on the right, and tool calls folded inline — collapsed until you want them. Full phone width, vertical only, no horizontal scroll.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9mm;margin-top:11mm;align-items:start">
+      <div style="position:relative">
+        <div class="phone sm">
+          <img src="assets/chat.png" alt="Chat" />
+          <span class="anno" style="top:4%;left:8%">1</span>
+          <span class="anno" style="top:30%;left:6%">2</span>
+          <span class="anno" style="top:42%;left:6%">3</span>
+          <span class="anno" style="bottom:7%;left:8%">5</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:7.5pt;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);text-align:center;margin-top:5mm">Live stream</div>
+      </div>
+      <div style="position:relative">
+        <div class="phone sm">
+          <img src="assets/tool.png" alt="Tool expanded" />
+          <span class="anno" style="top:27%;right:8%">4</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:7.5pt;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);text-align:center;margin-top:5mm">Tool, expanded</div>
+      </div>
+      <div style="position:relative">
+        <div class="phone sm">
+          <img src="assets/approval.png" alt="Approval" />
+          <span class="anno" style="bottom:14%;left:8%">6</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:7.5pt;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);text-align:center;margin-top:5mm">Approve / deny</div>
+      </div>
+    </div>
+
+    <ul class="legend" style="margin-top:11mm;display:grid;grid-template-columns:1fr 1fr;gap:10px 14mm">
+      <li><span class="n">1</span><span><b>Compact session header.</b> Title plus a live / quiet / ended dot — status at a glance, no wasted space.</span></li>
+      <li><span class="n">2</span><span><b>Inline tool calls.</b> Folded into the flow, collapsed by default — the Anya / VS Code pattern.</span></li>
+      <li><span class="n">3</span><span><b>Markdown, native.</b> Lists, bold, fenced code — rendered, not escaped.</span></li>
+      <li><span class="n">4</span><span><b>Tap to expand.</b> Arguments and result (or error) in monospace, contained — never overflowing the page.</span></li>
+      <li><span class="n">5</span><span><b>Space-smart composer.</b> One-row input that grows, with a mode pill and the working directory.</span></li>
+      <li><span class="n">6</span><span><b>Hold-the-loop approvals.</b> The agent pauses on a file write; you Allow once, always, or Deny — from the couch.</span></li>
+    </ul>
+  </div>
+  <div class="rf"><span>HELM · Product Design Dossier</span><span><b>04</b> / 08</span></div>
+</section>
+
+<!-- ============ 05 · MULTI-SESSION ============ -->
+<section class="page">
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>04 — Multi-Session</span>
+    </div>
+    <div class="hair"></div>
+
+    <div style="margin-top:9mm;display:grid;grid-template-columns:1fr 1.05fr;gap:12mm;align-items:center">
+      <div style="position:relative">
+        <div class="phone" style="width:64mm;margin:0 auto">
+          <img src="assets/drawer.png" alt="Session drawer" />
+        </div>
+      </div>
+      <div>
+        <div class="kicker" style="margin-bottom:7mm">Many terminals, one app</div>
+        <h1 class="display" style="font-size:34pt">Every session,<br/>kept warm.</h1>
+        <p class="lead" style="margin-top:7mm">Join more than one <b>gh&nbsp;copilot</b> session and Helm keeps them all connected at once — each with its own live timeline held in memory. <b>Switch in a tap; scrollback is preserved.</b></p>
+        <p class="lead" style="margin-top:5mm">Joined sessions persist to local storage and reconnect on launch. The drawer surfaces each one's status, message count, age and working directory — and flags any that are <em class="ink" style="font-weight:600">waiting on you.</em></p>
+
+        <div class="kicker" style="margin:11mm 0 5mm">Per-session state</div>
+        <div class="flowstate">
+          <span class="s on">● Connecting</span><span class="arw">→</span>
+          <span class="s on">● Live</span><span class="arw">→</span>
+          <span class="s idle">● Quiet</span><span class="arw">→</span>
+          <span class="s end">● Ended</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid3" style="margin-top:13mm">
+      <div class="card"><div class="ct">Concurrent</div><div class="cb">Each session keeps its own <b>SecureChannel</b> and reducer — switching never drops a stream.</div></div>
+      <div class="card"><div class="ct">Persistent</div><div class="cb">Stored under <b>helm.sessions.v1</b>, with migration from the legacy single-pairing key.</div></div>
+      <div class="card"><div class="ct">Self-healing</div><div class="cb">A heartbeat watchdog eases <b>live → quiet</b> after silence, instead of falsely declaring the session dead.</div></div>
+    </div>
+  </div>
+  <div class="rf"><span>HELM · Product Design Dossier</span><span><b>05</b> / 08</span></div>
+</section>
+
+<!-- ============ 06 · DESIGN SYSTEM ============ -->
+<section class="page">
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>05 — Design System</span>
+    </div>
+    <div class="hair"></div>
+
+    <div style="margin-top:9mm">
+      <div class="kicker" style="margin-bottom:6mm">The kit</div>
+      <h1 class="display" style="font-size:32pt">Signal-lime on terminal ink.</h1>
+    </div>
+
+    <div class="kicker" style="margin:10mm 0 5mm">Palette</div>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#C6F24E"></div><div class="meta"><div class="role">Signal · primary</div><div class="hex">#C6F24E</div></div></div>
+      <div class="sw"><div class="chip" style="background:#3FE0CE"></div><div class="meta"><div class="role">Relay · cyan</div><div class="hex">#3FE0CE</div></div></div>
+      <div class="sw"><div class="chip" style="background:#4C8DFF"></div><div class="meta"><div class="role">Agent · blue</div><div class="hex">#4C8DFF</div></div></div>
+      <div class="sw"><div class="chip" style="background:#E3A008"></div><div class="meta"><div class="role">Approval · amber</div><div class="hex">#E3A008</div></div></div>
+      <div class="sw"><div class="chip" style="background:#2EA043"></div><div class="meta"><div class="role">Live · green</div><div class="hex">#2EA043</div></div></div>
+      <div class="sw"><div class="chip" style="background:#0A0F0B;border-bottom:1px solid #1d271f"></div><div class="meta"><div class="role">Ink · surface</div><div class="hex">#0A0F0B</div></div></div>
+      <div class="sw"><div class="chip" style="background:#11161D"></div><div class="meta"><div class="role">Panel · elevated</div><div class="hex">#11161D</div></div></div>
+      <div class="sw"><div class="chip" style="background:#EAF2E6"></div><div class="meta"><div class="role">Paper · text</div><div class="hex">#EAF2E6</div></div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12mm;margin-top:11mm">
+      <div>
+        <div class="kicker" style="margin-bottom:5mm">Type</div>
+        <div class="specimen">
+          <div class="spec"><div class="nm">Fraunces · display</div><div class="big-serif">Helm keeps watch.</div><div class="sm">Editorial serif · opsz 9–144 · headlines &amp; numerals</div></div>
+          <div class="spec"><div class="nm">Hanken Grotesk · body</div><div class="big-sans">Steer the agent remotely.</div><div class="sm">Humanist grotesk · 400 / 600 / 800 · running text</div></div>
+          <div class="spec" style="border-bottom:0"><div class="nm">JetBrains Mono · system</div><div class="big-mono">tool · 1.7s · ✓</div><div class="sm">Kickers · labels · code · elapsed times</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="kicker" style="margin-bottom:5mm">Component anatomy — tool card</div>
+        <div class="anatomy">
+          <div class="tcx">
+            <span class="ck">✓</span><span class="vb">Run</span>
+            <span class="tg">npm run build -w …</span><span class="sp"></span>
+            <span class="tm">1.7s</span><span class="cv">›</span>
+          </div>
+          <div class="anrow">
+            <div class="alabel">Status</div>
+            <div class="alabel">Verb</div>
+            <div class="alabel">Target</div>
+            <div class="alabel">Elapsed</div>
+            <div class="alabel">Expand</div>
+          </div>
+        </div>
+        <p class="card" style="margin-top:8mm"><span class="cb">Collapsed, a tool is a single quiet line: outcome glyph, friendly verb, truncated target, time. One tap reveals arguments and result — detail on demand, never noise by default.</span></p>
+      </div>
+    </div>
+  </div>
+  <div class="rf"><span>HELM · Product Design Dossier</span><span><b>06</b> / 08</span></div>
+</section>
+
+<!-- ============ 07 · ENGINEERING ============ -->
+<section class="page">
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>06 — Engineering &amp; Assurance</span>
+    </div>
+    <div class="hair"></div>
+
+    <div style="margin-top:9mm">
+      <div class="kicker" style="margin-bottom:6mm">Under the hood</div>
+      <h1 class="display" style="font-size:32pt">Built to verify.</h1>
+    </div>
+
+    <div class="sheet" style="margin-top:10mm">
+      <div>
+        <div class="srow"><span class="k">Mobile</span><span class="v">React 18 · Vite 6 · Capacitor 7</span></div>
+        <div class="srow"><span class="k">Relay</span><span class="v">Supabase Realtime Broadcast</span></div>
+        <div class="srow"><span class="k">Host</span><span class="v">@github/copilot-sdk extension</span></div>
+        <div class="srow"><span class="k">State</span><span class="v">Vanilla store · useSyncExternalStore</span></div>
+      </div>
+      <div>
+        <div class="srow"><span class="k">Crypto</span><span class="v">ECDH · AES-256-GCM (WebCrypto)</span></div>
+        <div class="srow"><span class="k">Pairing</span><span class="v">QR → on-device key derivation</span></div>
+        <div class="srow"><span class="k">Persistence</span><span class="v">localStorage · helm.sessions.v1</span></div>
+        <div class="srow"><span class="k">Delivery</span><span class="v">Netlify · usehelm.netlify.app</span></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.1fr .9fr;gap:12mm;margin-top:12mm">
+      <div>
+        <div class="kicker" style="margin-bottom:5mm">Assurance — Playwright, 412 px</div>
+        <ul class="checks">
+          <li><span class="tick">✓</span><span>Compact status bar shows a live session status</span></li>
+          <li><span class="tick">✓</span><span>Tool calls render inline &amp; collapsed, then expand on tap</span></li>
+          <li><span class="tick">✓</span><span>Composer is space-smart (single row, not the legacy box)</span></li>
+          <li><span class="tick">✓</span><span>User prompts appear as a right-aligned bubble</span></li>
+          <li><span class="tick">✓</span><span>No horizontal scroll at phone width</span></li>
+          <li><span class="tick">✓</span><span>Session drawer opens and lists the joined session</span></li>
+        </ul>
+        <div style="font-family:var(--mono);font-size:8.5pt;color:var(--lime);margin-top:5mm;letter-spacing:.08em">6 passed · 15.9s — npm run test:e2e</div>
+      </div>
+      <div>
+        <div class="kicker" style="margin-bottom:5mm">Security model</div>
+        <div class="card" style="padding:6mm">
+          <div class="cb" style="line-height:1.6">
+            <b>Air-gapped keys.</b> Symmetric key born on the extension, scanned by QR.<br/><br/>
+            <b>Zero persistence.</b> The relay stores nothing; the channel dies with the terminal.<br/><br/>
+            <b>No inbound surface.</b> Outbound WebSocket only — no tunnels, ports, or phone-side auth.
+          </div>
+        </div>
+        <div class="pill-row">
+          <span class="pill">No daemons</span><span class="pill">No DB logs</span><span class="pill">Ciphertext only</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rf"><span>HELM · Product Design Dossier</span><span><b>07</b> / 08</span></div>
+</section>
+
+<!-- ============ 08 · BACK ============ -->
+<section class="page back">
+  <div class="bigmark" style="left:auto;right:-8mm;bottom:-14mm;color:rgba(198,242,78,.045)">H</div>
+  <div class="pad">
+    <div class="rh">
+      <span class="brand"><span class="mk">H</span> HELM</span>
+      <span>Colophon</span>
+    </div>
+
+    <div style="margin:auto 0">
+      <div class="kicker" style="margin-bottom:9mm">Fin</div>
+      <h1 class="display back-h1" style="font-size:56pt">Ship from<br/>anywhere.<span style="color:var(--lime)">_</span></h1>
+      <p class="colophon">
+        <b>Helm — Product Design Dossier</b>, Chat Surface v2. A secure mobile viewport for live <b>gh&nbsp;copilot</b> sessions: inline tool cards, right/left chat, multi-session, encrypted end to end.<br/><br/>
+        Set in <b>Fraunces</b>, <b>Hanken Grotesk</b> &amp; <b>JetBrains Mono</b>. Palette derived from the Helm signal-lime mark on terminal ink. Screens captured live at a 412&nbsp;px device viewport.
+      </p>
+      <div class="signoff">
+        <span>Surface · <b>usehelm.netlify.app</b></span>
+        <span>Source · <b>github.com/aasis21/helm</b></span>
+        <span>© <b>MMXXVI</b></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

@@ -8,17 +8,60 @@ import {
   toolStart,
   toolComplete,
   logLine,
+  userMessage,
   approvalRequest,
   sessionStart,
   sessionMeta,
   sessionEnd,
   heartbeat,
   modeChange,
+  history,
 } from "@aasis21/helm-shared";
-import { readSummary } from "./store.mjs";
+import { readSummary, readHistory } from "./store.mjs";
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 120_000;
 const DEFAULT_HEARTBEAT_MS = 15_000;
+// How long a phone-relayed prompt stays "claimable" so the echoed user.message session
+// event it produces is attributed to the phone (and not re-broadcast as a terminal msg).
+const PROMPT_CORRELATION_WINDOW_MS = 30_000;
+
+/**
+ * Tracks recent phone-originated prompts so that when the matching `user.message`
+ * session event fires we can tell it apart from a prompt typed at the laptop terminal.
+ * The SDK event carries no source device, so we correlate by exact content within a
+ * short time window. Pure + injectable clock → unit-testable.
+ *
+ * - `record(text)` — call right before relaying a phone prompt into the session.
+ * - `classify(text)` — call on each `user.message`; returns 'phone' (consuming the
+ *   match so a later identical terminal prompt isn't mis-attributed) or 'terminal'.
+ */
+export function createPromptOriginTracker({
+  windowMs = PROMPT_CORRELATION_WINDOW_MS,
+  now = () => Date.now(),
+} = {}) {
+  let pending = [];
+  const prune = () => {
+    const cutoff = now() - windowMs;
+    pending = pending.filter((p) => p.ts >= cutoff);
+  };
+  return {
+    record(text) {
+      if (typeof text !== "string") return;
+      prune();
+      pending.push({ text, ts: now() });
+    },
+    classify(text) {
+      prune();
+      const idx = pending.findIndex((p) => p.text === text);
+      if (idx === -1) return "terminal";
+      pending.splice(idx, 1);
+      return "phone";
+    },
+    get size() {
+      return pending.length;
+    },
+  };
+}
 
 export function createPermissionRelay({
   channel,
@@ -103,6 +146,9 @@ export async function attachRelay({
     createPermissionRelay({ channel, approvalTimeoutMs, logger });
   const unsubscribers = [];
   let stopped = false;
+  // Correlates phone-relayed prompts with their echoed user.message events so the relay
+  // only re-broadcasts prompts that were actually typed at the laptop terminal.
+  const promptOrigin = createPromptOriginTracker();
 
   const sendSafe = async (msg) => {
     try {
@@ -128,12 +174,18 @@ export async function attachRelay({
   heartbeatTimer.unref?.();
 
   if (typeof session.on === "function") {
-    unsubscribers.push(session.on((event) => void handleSessionEvent(event, sendSafe)));
+    unsubscribers.push(
+      session.on((event) => void handleSessionEvent(event, sendSafe, promptOrigin)),
+    );
   }
 
   unsubscribers.push(
     channel.onEvent(EVENTS.PROMPT, (msg) => {
       if (msg?.kind !== KIND.PROMPT || typeof msg.text !== "string") return;
+      // Remember this phone-typed prompt so its echoed user.message session event is
+      // attributed to the phone (which already shows it optimistically) and not
+      // re-broadcast as a terminal message.
+      promptOrigin.record(msg.text);
       void session
         .send?.({ prompt: msg.text, mode: "immediate" })
         ?.catch?.((err) =>
@@ -146,8 +198,13 @@ export async function attachRelay({
 
   unsubscribers.push(
     channel.onEvent(EVENTS.CONTROL, (msg) => {
-      if (msg?.kind !== KIND.MODE) return;
-      void applyMode(session, msg.mode, logger, sendSafe);
+      if (msg?.kind === KIND.MODE) {
+        void applyMode(session, msg.mode, logger, sendSafe);
+        return;
+      }
+      if (msg?.kind === KIND.HISTORY_REQUEST) {
+        void serveHistory(sessionId, msg, sendSafe, logger);
+      }
     }),
   );
 
@@ -168,7 +225,7 @@ export async function attachRelay({
   return { stop, onPermissionRequest: approvals.onPermissionRequest };
 }
 
-async function handleSessionEvent(event, sendSafe) {
+async function handleSessionEvent(event, sendSafe, promptOrigin) {
   if (!event?.type) return;
   const data = event.data ?? {};
   switch (event.type) {
@@ -178,6 +235,19 @@ async function handleSessionEvent(event, sendSafe) {
     case "assistant.message_delta":
       await sendSafe(assistantDelta(data.deltaContent ?? "", data.messageId ?? event.id));
       break;
+    case "user.message": {
+      // Echo prompts typed at the laptop terminal so the phone's transcript isn't missing
+      // the user side of terminal-driven turns. Skip messages the terminal itself hides
+      // (skill-injected `source`) or auto-injected autopilot continuations. Phone-relayed
+      // prompts are already shown optimistically on the phone, so only re-broadcast those
+      // we can't match to a recent phone injection (i.e. genuinely terminal-typed).
+      const text = data.content ?? "";
+      if (!text || data.source || data.isAutopilotContinuation) break;
+      const origin = promptOrigin?.classify(text) ?? "terminal";
+      if (origin === "phone") break;
+      await sendSafe(userMessage(text, "terminal", event.id));
+      break;
+    }
     case "tool.execution_start":
       await sendSafe(
         toolStart(data.toolCallId ?? event.id, data.toolName ?? data.name ?? "tool", data.arguments),
@@ -200,6 +270,18 @@ async function handleSessionEvent(event, sendSafe) {
     case "session.mode_changed":
       await sendSafe(modeChange(data.newMode ?? data.mode));
       break;
+  }
+}
+
+/** Answer a phone's HISTORY_REQUEST with a page of older turns from the CLI store. */
+async function serveHistory(sessionId, msg, sendSafe, logger) {
+  try {
+    const before = Number.isFinite(msg?.before) ? msg.before : null;
+    const page = await readHistory(sessionId, { before, limit: msg?.limit });
+    await sendSafe(history(page.items, page.nextCursor, page.hasMore));
+  } catch (err) {
+    logger?.(`Helm history request failed: ${err?.message ?? err}`, { level: "warning" });
+    await sendSafe(history([], null, false));
   }
 }
 
