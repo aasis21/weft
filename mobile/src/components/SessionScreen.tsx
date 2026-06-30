@@ -85,9 +85,12 @@ export function SessionScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { timeline, status, meta } = active;
   const ended = status === 'ended';
-  // The phone's reliable "agent is working" signal is a tool mid-execution — exactly the
-  // runaway-autopilot case where a Stop control matters most.
-  const agentBusy = status === 'live' && timeline.items.some((i) => i.kind === 'tool' && i.status === 'running');
+  // A turn is in flight whenever the agent reports it's busy (text/reasoning/tool) —
+  // which is exactly what the phone Stop aborts. Fall back to a running tool so a
+  // tool-first turn still shows Stop even if the activity signal is missed.
+  const agentBusy =
+    status === 'live' &&
+    (timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
   const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || status === 'idle');
 
   return (

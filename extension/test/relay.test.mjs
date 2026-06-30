@@ -181,6 +181,36 @@ test("relays a control.interrupt to the SDK turn-abort and notifies the phone", 
   });
 });
 
+test("forwards turn lifecycle as activity busy=true on message_start, false on idle", async () => {
+  await withRelay(async ({ channel, session }) => {
+    // A turn begins with the assistant streaming text (no tool yet) — Stop must show here.
+    session.emitEvent({ type: "assistant.message_start", id: "m1", data: {} });
+    await flush();
+    const start = channel.sent.find((m) => m.kind === KIND.ACTIVITY);
+    assert.ok(start, "expected an activity message on message_start");
+    assert.equal(start.busy, true);
+
+    // The agent's loop goes idle → the turn is over, nothing left to abort.
+    session.emitEvent({ type: "assistant.idle", id: "i1", data: {} });
+    await flush();
+    const idle = channel.sent.filter((m) => m.kind === KIND.ACTIVITY).at(-1);
+    assert.equal(idle.busy, false);
+  });
+});
+
+test("a tool-first turn still reports activity busy=true on tool start", async () => {
+  await withRelay(async ({ channel, session }) => {
+    session.emitEvent({
+      type: "tool.execution_start",
+      id: "t1",
+      data: { toolCallId: "t1", toolName: "powershell", arguments: { command: "ls" } },
+    });
+    await flush();
+    const busy = channel.sent.find((m) => m.kind === KIND.ACTIVITY);
+    assert.ok(busy && busy.busy === true, "expected activity busy=true alongside the tool start");
+  });
+});
+
 // ---- permission decisions → native CLI decision kinds ----------------------
 // The Copilot CLI native runtime (>= 1.0.66) only accepts the kebab-case decision
 // kinds approve-once / approve-for-session / reject / user-not-available; returning

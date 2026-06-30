@@ -8,6 +8,7 @@ import {
   toolStart,
   toolComplete,
   logLine,
+  activity,
   userMessage,
   approvalRequest,
   sessionStart,
@@ -231,6 +232,15 @@ async function handleSessionEvent(event, sendSafe, promptOrigin) {
   if (!event?.type) return;
   const data = event.data ?? {};
   switch (event.type) {
+    case "assistant.message_start":
+      // A turn is now in flight (text/reasoning) — tell the phone so its Stop control
+      // appears for the whole abortable turn, not only while a tool runs.
+      await sendSafe(activity(true));
+      break;
+    case "assistant.idle":
+      // The agent's processing loop went idle: the turn is over, nothing left to abort.
+      await sendSafe(activity(false));
+      break;
     case "assistant.message":
       await sendSafe(assistantMessage(data.content ?? "", data.messageId ?? event.id));
       break;
@@ -251,6 +261,7 @@ async function handleSessionEvent(event, sendSafe, promptOrigin) {
       break;
     }
     case "tool.execution_start":
+      await sendSafe(activity(true));
       await sendSafe(
         toolStart(data.toolCallId ?? event.id, data.toolName ?? data.name ?? "tool", data.arguments),
       );

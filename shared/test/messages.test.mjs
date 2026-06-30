@@ -9,6 +9,7 @@ import {
   userMessage,
   historyRequest,
   history,
+  activity,
   eventForKind,
   isValidInner,
 } from "../messages.mjs";
@@ -54,6 +55,15 @@ test("history factory carries items + pagination cursor", () => {
   assert.equal(empty.hasMore, false);
 });
 
+test("activity factory coerces busy to a boolean and routes to STREAM", () => {
+  const on = activity(true);
+  assert.equal(on.kind, KIND.ACTIVITY);
+  assert.equal(on.busy, true);
+  assert.equal(typeof on.ts, "number");
+  assert.equal(activity(0).busy, false); // coerced
+  assert.equal(eventForKind(KIND.ACTIVITY), EVENTS.STREAM);
+});
+
 test("eventForKind routes user_message to STREAM and history kinds to CONTROL", () => {
   assert.equal(eventForKind(KIND.USER_MESSAGE), EVENTS.STREAM);
   assert.equal(eventForKind(KIND.HISTORY_REQUEST), EVENTS.CONTROL);
@@ -68,4 +78,5 @@ test("the new factories pass isValidInner", () => {
   assert.ok(isValidInner(userMessage("a")));
   assert.ok(isValidInner(historyRequest()));
   assert.ok(isValidInner(history([])));
+  assert.ok(isValidInner(activity(true)));
 });

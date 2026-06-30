@@ -3,6 +3,7 @@ import type {
   ApprovalRequest,
   AssistantDelta,
   AssistantMessage,
+  ActivityMessage,
   History as HistoryMessage,
   HistoryItem,
   InnerMessage,
@@ -63,6 +64,10 @@ export interface TimelineState {
   /** Transient per-request decision-send error (requestId -> message). Drives a retry
    *  affordance when a decision couldn't be relayed; reset on reconnect, never persisted. */
   approvalErrors: Record<string, string>;
+  /** True while a turn is in flight (the agent is generating/acting). Transient — driven
+   *  by the extension's activity signal (assistant.message_start/idle); never persisted.
+   *  Gates the composer's Stop control so it tracks the whole abortable turn, not just tools. */
+  busy: boolean;
   mode: SessionMode;
   cwd: string | null;
   /** CLI chat summary ("title"); null until the extension reports one. */
@@ -89,6 +94,7 @@ export function emptyTimeline(): TimelineState {
     items: [],
     approvals: [],
     approvalErrors: {},
+    busy: false,
     mode: DEFAULT_MODE,
     cwd: null,
     title: null,
@@ -135,6 +141,8 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
       return completeTool(state, message);
     case KIND.LOG:
       return pushNotice(state, message);
+    case KIND.ACTIVITY:
+      return { ...state, busy: (message as ActivityMessage).busy };
     case KIND.USER_MESSAGE:
       return appendUserEcho(state, message as UserMessageEcho);
     case KIND.HISTORY:
@@ -155,6 +163,7 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
         lastHeartbeat: Date.now(),
         sessionEnded: false,
         endedReason: undefined,
+        busy: false,
       };
     case KIND.SESSION_META:
       return {
@@ -168,6 +177,7 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
         ...state,
         sessionEnded: true,
         endedReason: reason,
+        busy: false,
         items: cap([
           ...state.items,
           { kind: 'notice', id: `end-${message.ts}`, level: 'warning', text: reason, ts: message.ts },

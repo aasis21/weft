@@ -20,6 +20,7 @@ export const KIND: {
   readonly TOOL_START: "tool.start";
   readonly TOOL_COMPLETE: "tool.complete";
   readonly LOG: "log";
+  readonly ACTIVITY: "stream.activity";
   readonly USER_MESSAGE: "stream.user_message";
   readonly PROMPT: "prompt";
   readonly APPROVAL_REQUEST: "approval.request";
@@ -78,6 +79,11 @@ export interface LogLine extends BaseMessage {
   kind: "log";
   level: "info" | "warning" | "error";
   message: string;
+}
+/** Ext -> phone: true while a turn is in flight (generating/acting), false when idle. */
+export interface ActivityMessage extends BaseMessage {
+  kind: "stream.activity";
+  busy: boolean;
 }
 /** A user prompt echoed from the laptop to the phone, attributed by device. */
 export interface UserMessageEcho extends BaseMessage {
@@ -152,6 +158,7 @@ export type InnerMessage =
   | ToolStart
   | ToolComplete
   | LogLine
+  | ActivityMessage
   | UserMessageEcho
   | PromptMessage
   | ApprovalRequest
@@ -175,6 +182,7 @@ export function toolComplete(
   resultPreview?: string
 ): ToolComplete;
 export function logLine(level: "info" | "warning" | "error", message: string): LogLine;
+export function activity(busy: boolean): ActivityMessage;
 export function userMessage(
   text: string,
   origin?: "phone" | "terminal",

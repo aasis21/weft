@@ -25,6 +25,10 @@ export const KIND = Object.freeze({
   TOOL_START: "tool.start",
   TOOL_COMPLETE: "tool.complete",
   LOG: "log",
+  // turn-level activity (ext -> phone): true while the agent is generating/acting
+  // (a turn is in flight — text, reasoning, or a tool), false when its loop goes idle.
+  // Drives the phone's Stop control so it tracks the whole abortable turn, not just tools.
+  ACTIVITY: "stream.activity",
   // a user prompt typed at the laptop terminal, echoed to the phone so its local
   // transcript isn't missing the user side of terminal-driven turns. `origin`
   // distinguishes the source device ('phone' for this device, 'terminal' for the laptop).
@@ -85,6 +89,17 @@ export const logLine = (level, message) => ({
   kind: KIND.LOG,
   level,
   message,
+  ts: now(),
+});
+/**
+ * Turn-level activity (ext -> phone). `busy` is true when the agent starts a turn
+ * (assistant message_start / first delta / tool start) and false when its processing
+ * loop goes idle (SDK `assistant.idle`). The phone shows Stop while busy, matching the
+ * turn-abort the interrupt actually performs.
+ */
+export const activity = (busy) => ({
+  kind: KIND.ACTIVITY,
+  busy: Boolean(busy),
   ts: now(),
 });
 /**
@@ -191,6 +206,7 @@ export function eventForKind(kind) {
     case KIND.TOOL_START:
     case KIND.TOOL_COMPLETE:
     case KIND.LOG:
+    case KIND.ACTIVITY:
     case KIND.USER_MESSAGE:
       return EVENTS.STREAM;
     case KIND.PROMPT:

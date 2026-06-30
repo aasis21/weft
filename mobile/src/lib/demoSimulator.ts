@@ -2,6 +2,7 @@ import {
   EVENTS,
   SecureChannel,
   _resetLocalBus,
+  activity,
   approvalRequest,
   assistantMessage,
   buildPairingPayload,
@@ -80,7 +81,9 @@ export async function startDemoSession(): Promise<DemoSession> {
         return;
       }
       if ((message as { kind?: string }).kind === 'control.interrupt') {
-        // Make the phone's Stop button visibly take effect: end the running tool + ack.
+        // Make the phone's Stop button visibly take effect: end the turn (busy=false)
+        // and any running tool, then ack. busy=false hides Stop even mid text-stream.
+        void extension.send(activity(false));
         if (runningToolId) {
           const name = runningToolId === 'tool-1' ? 'powershell' : 'view';
           void extension.send(toolComplete(runningToolId, name, false, '■ interrupted by user'));
@@ -113,6 +116,9 @@ export async function startDemoSession(): Promise<DemoSession> {
     ),
   );
   push(450, () => extension.send(logLine('info', 'Encrypted LocalTransport linked; relay sees envelopes only.')));
+  // The turn begins: the agent starts generating text (no tool yet). This is exactly the
+  // window the old Stop button missed — busy=true makes Stop appear during text streaming.
+  push(600, () => extension.send(activity(true)));
   push(900, () =>
     extension.send(
       assistantMessage(
@@ -151,6 +157,8 @@ export async function startDemoSession(): Promise<DemoSession> {
     if (runningToolId !== 'tool-2') return; // user already interrupted it
     runningToolId = null;
     void extension.send(toolComplete('tool-2', 'view', true, 'read 204 lines'));
+    // The agent's loop goes idle here (next it just waits for the approval decision).
+    void extension.send(activity(false));
   });
   push(7_200, () =>
     extension.send(
