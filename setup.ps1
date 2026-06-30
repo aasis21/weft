@@ -23,7 +23,7 @@ try {
   } else {
     Write-Host "No .env at repo root. Create one next to $dest\extension.mjs with:" -ForegroundColor Yellow
     Write-Host "  HELM_TRANSPORT=supabase" -ForegroundColor Yellow
-    Write-Host "  SUPABASE_URL=...   SUPABASE_ANON_KEY=..." -ForegroundColor Yellow
+    Write-Host "  HELM_SUPABASE_URL=...   HELM_SUPABASE_ANON_KEY=..." -ForegroundColor Yellow
     Write-Host "(or export those vars before 'gh copilot'). The extension auto-loads a colocated .env." -ForegroundColor Yellow
   }
 

@@ -31,7 +31,7 @@ You only need a free Supabase project.
    broadcast channels (see [`setup.md`](./setup.md)).
 3. Set rate limits / quotas appropriate to your usage.
 4. Point the clients at your project:
-   - extension: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `HELM_TRANSPORT=supabase`
+   - extension: `HELM_SUPABASE_URL`, `HELM_SUPABASE_ANON_KEY`, `HELM_TRANSPORT=supabase`
    - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is

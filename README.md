@@ -30,7 +30,7 @@ scan the QR (or run `/helm-pair` to re-show it), and approve/deny from anywhere.
 - **Run your own relay** — installer flags let you point at your own Supabase project:
   `... | iex` becomes
   `& ([scriptblock]::Create((irm https://usehelm.netlify.app/install.ps1))) -SupabaseUrl <url> -SupabaseKey <key>`
-  on Windows, or `SUPABASE_URL=<url> SUPABASE_KEY=<key> bash -c "$(curl -fsSL https://usehelm.netlify.app/install.sh)"` on Unix.
+  on Windows, or `HELM_SUPABASE_URL=<url> HELM_SUPABASE_KEY=<key> bash -c "$(curl -fsSL https://usehelm.netlify.app/install.sh)"` on Unix.
   Prefer building from source? Use [`setup.ps1` / `setup.sh`](docs/setup.md).
 - **Uninstall** — delete `~/.copilot/extensions/helm/`.
 

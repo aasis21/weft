@@ -25,7 +25,7 @@ The reference public instance is provisioned and the migration applied + verifie
 | Postgres | 17 |
 | Auth | publishable/anon key (public by design); set via env, never committed |
 
-Credentials live in a gitignored `.env` (extension: `SUPABASE_URL` / `SUPABASE_ANON_KEY`)
+Credentials live in a gitignored `.env` (extension: `HELM_SUPABASE_URL` / `HELM_SUPABASE_ANON_KEY`)
 and `mobile/.env.local` (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`). The publishable
 key is safe to embed in clients; confidentiality rests on E2E encryption + channelId entropy
 (see the security note below). Self-hosters point these at their own project instead.

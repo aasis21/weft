@@ -75,14 +75,17 @@ export function createSupabaseTransport({ client, channelId } = {}) {
     if (connectPromise) return connectPromise;
 
     const promise = new Promise((resolve, reject) => {
-      channel.subscribe((status) => {
+      channel.subscribe((status, err) => {
         if (status === STATUS_SUBSCRIBED) {
           subscribed = true;
           resolve();
           return;
         }
         if (status === STATUS_CHANNEL_ERROR || status === STATUS_TIMED_OUT) {
-          reject(fail(`subscribe failed with status ${status}`));
+          const detail = err
+            ? `: ${err instanceof Error ? err.message : String(err)}`
+            : "";
+          reject(fail(`subscribe failed with status ${status}${detail}`));
         }
       });
     });

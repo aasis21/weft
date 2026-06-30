@@ -30,15 +30,20 @@ function loadLocalEnv() {
       return null;
     }
   })();
-  const candidates = [join(process.cwd(), ".env")];
+  // The install-dir .env (next to a shipped extension) is canonical, so it is tried first
+  // and its values win; the launch cwd .env is a secondary fallback. Both are merged — we do
+  // NOT stop after the first readable file, so a partial cwd/.env can't mask the install one.
+  // Any already-exported process env still wins per key (see the collision note in
+  // createTransport for why Helm uses HELM_SUPABASE_* rather than generic SUPABASE_*).
+  const candidates = [];
   if (here) candidates.push(join(here, ".env"));
+  candidates.push(join(process.cwd(), ".env"));
   for (const file of candidates) {
     try {
       const parsed = parseEnv(readFileSync(file, "utf8"));
       for (const [k, v] of Object.entries(parsed)) {
         if (process.env[k] === undefined) process.env[k] = v;
       }
-      return;
     } catch {
       // No readable .env here; try the next candidate.
     }
@@ -208,11 +213,23 @@ function createTransport({ channelId }) {
   const transportName = process.env.HELM_TRANSPORT || "local";
   if (transportName === "local") return createLocalTransport({ channelId });
 
-  const url = process.env.SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY;
+  // Prefer Helm-namespaced vars. The generic SUPABASE_URL / SUPABASE_ANON_KEY are extremely
+  // common and are frequently exported globally for an UNRELATED Supabase project; because an
+  // already-exported env var beats our .env, that ambient value silently hijacks the relay and
+  // the private-channel join is rejected (CHANNEL_ERROR). Namespacing avoids the collision; the
+  // generic names stay as a fallback for "bring your own relay" users who only set those.
+  const url = process.env.HELM_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.HELM_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
     throw new Error(
-      "Helm: HELM_TRANSPORT=supabase requires SUPABASE_URL and SUPABASE_ANON_KEY",
+      "Helm: HELM_TRANSPORT=supabase requires HELM_SUPABASE_URL and HELM_SUPABASE_ANON_KEY",
+    );
+  }
+  if (!process.env.HELM_SUPABASE_URL || !process.env.HELM_SUPABASE_ANON_KEY) {
+    process.stderr.write(
+      `Helm: using generic SUPABASE_* env (relay host ${safeHost(url)}). Set ` +
+        "HELM_SUPABASE_URL / HELM_SUPABASE_ANON_KEY so a global SUPABASE_URL for another " +
+        "project cannot hijack the relay.\n",
     );
   }
   const client = createClient(url, anonKey, {
@@ -223,4 +240,12 @@ function createTransport({ channelId }) {
   // setAuth + the RLS policies applied, channel joins are denied.
   client.realtime.setAuth(anonKey);
   return createSupabaseTransport({ client, channelId });
+}
+
+function safeHost(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "?";
+  }
 }

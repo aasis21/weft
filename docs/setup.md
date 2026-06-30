@@ -62,9 +62,11 @@ and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 # remove later with ./uninstall.ps1 / ./uninstall.sh
 ```
 
-The extension auto-loads `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `HELM_TRANSPORT=supabase`
-from a `.env` next to it (or inherit them from the shell that launches `gh copilot`; exported
-shell vars win).
+The extension auto-loads `HELM_SUPABASE_URL` / `HELM_SUPABASE_ANON_KEY` /
+`HELM_TRANSPORT=supabase` from a `.env` next to it (or inherits them from the shell that
+launches `gh copilot`; exported shell vars win). The names are Helm-namespaced so a generic
+`SUPABASE_URL` you may have exported for an unrelated project can't hijack the relay; the
+generic names still work as a fallback when the namespaced ones are unset.
 
 **2. Get the app on your phone** — pick one:
 
@@ -110,7 +112,8 @@ planned follow-up.)
    this migration is applied** (see [`security.md`](./security.md) and
    [`supabase/README.md`](../supabase/README.md)).
 3. Provide credentials via env (never commit secrets):
-   - extension: `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+   - extension: `HELM_SUPABASE_URL`, `HELM_SUPABASE_ANON_KEY` (generic `SUPABASE_URL` /
+     `SUPABASE_ANON_KEY` work as a fallback)
    - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
    - `HELM_TRANSPORT=supabase`
 4. The caller constructs a `@supabase/supabase-js` client, calls
@@ -130,7 +133,7 @@ planned follow-up.)
 | `HELM_TRANSPORT` | extension | `local` (default) or `supabase` |
 | `HELM_APPROVAL_TIMEOUT_MS` | extension | approval wait before auto-deny (default 120000) |
 | `HELM_CHANNEL_ID` | extension | force a channel id (tests); otherwise random 128-bit |
-| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | extension | relay credentials |
+| `HELM_SUPABASE_URL` / `HELM_SUPABASE_ANON_KEY` | extension | relay credentials (preferred; generic `SUPABASE_URL` / `SUPABASE_ANON_KEY` are a fallback) |
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | mobile | relay credentials |
 
 ## Docs index

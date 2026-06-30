@@ -45,18 +45,43 @@ Invoke-WebRequest -Uri "$base/extension.mjs" -OutFile (Join-Path $InstallDir 'ex
 Ok "extension.mjs -> $InstallDir"
 
 $envPath = Join-Path $InstallDir '.env'
-if ((Test-Path $envPath) -and -not $Force) {
-    Ok 'kept your existing .env (use -Force to overwrite)'
-} else {
-@"
+$envTemplate = @"
 # Helm relay config. The publishable key is client-safe by design; the channel is
 # guarded by Supabase RLS + end-to-end AES-256-GCM. To run your own relay, swap these
 # for your own Supabase project's URL + publishable key.
+#
+# Names are Helm-namespaced on purpose: a generic SUPABASE_URL / SUPABASE_ANON_KEY
+# exported globally for another Supabase project would otherwise hijack the relay.
 HELM_TRANSPORT=supabase
-SUPABASE_URL=$SupabaseUrl
-SUPABASE_ANON_KEY=$SupabaseKey
+HELM_SUPABASE_URL=$SupabaseUrl
+HELM_SUPABASE_ANON_KEY=$SupabaseKey
 HELM_APPROVAL_TIMEOUT_MS=120000
-"@ | Set-Content -Path $envPath -Encoding utf8
+"@
+
+if ((Test-Path $envPath) -and -not $Force) {
+    # Auto-migrate an older .env (generic SUPABASE_* only) by adding the namespaced keys,
+    # preserving any custom relay values the user already set. Existing installs self-heal.
+    $envText = Get-Content $envPath -Raw
+    $added = @()
+    if ($envText -notmatch '(?m)^\s*HELM_SUPABASE_URL=') {
+        $existing = ([regex]::Match($envText, '(?m)^\s*SUPABASE_URL=(.*)$')).Groups[1].Value.Trim()
+        $val = if ($existing) { $existing } else { $SupabaseUrl }
+        Add-Content -Path $envPath -Value "HELM_SUPABASE_URL=$val"
+        $added += 'HELM_SUPABASE_URL'
+    }
+    if ($envText -notmatch '(?m)^\s*HELM_SUPABASE_ANON_KEY=') {
+        $existingK = ([regex]::Match($envText, '(?m)^\s*SUPABASE_ANON_KEY=(.*)$')).Groups[1].Value.Trim()
+        $valK = if ($existingK) { $existingK } else { $SupabaseKey }
+        Add-Content -Path $envPath -Value "HELM_SUPABASE_ANON_KEY=$valK"
+        $added += 'HELM_SUPABASE_ANON_KEY'
+    }
+    if ($added.Count -gt 0) {
+        Ok ("migrated your .env to namespaced vars (+{0})" -f ($added -join ', '))
+    } else {
+        Ok 'kept your existing .env (use -Force to overwrite)'
+    }
+} else {
+    $envTemplate | Set-Content -Path $envPath -Encoding utf8
     Ok "wrote relay config -> $envPath"
 }
 

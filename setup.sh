@@ -22,7 +22,7 @@ if [ -f "$root/.env" ]; then
 else
   echo "No .env at repo root. Create one next to $dest/extension.mjs with:"
   echo "  HELM_TRANSPORT=supabase"
-  echo "  SUPABASE_URL=...   SUPABASE_ANON_KEY=..."
+  echo "  HELM_SUPABASE_URL=...   HELM_SUPABASE_ANON_KEY=..."
   echo "(or export those vars before 'gh copilot'). The extension auto-loads a colocated .env."
 fi
 
