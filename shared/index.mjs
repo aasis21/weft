@@ -1,0 +1,7 @@
+// Helm shared — single entry point.
+export * from "./messages.mjs";
+export * from "./crypto.mjs";
+export * from "./pairing.mjs";
+export { SecureChannel } from "./channel.mjs";
+export { createLocalTransport, createSupabaseTransport } from "./transport.mjs";
+export { _resetLocalBus } from "./transport-local.mjs";

@@ -1,0 +1,36 @@
+{
+  "name": "@aasis21/helm-mobile",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Helm mobile app (React + Vite + Capacitor, Android first).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:web": "npm run build",
+    "preview": "vite preview",
+    "cap:sync": "npx cap sync",
+    "cap:add:android": "npx cap add android",
+    "open:android": "npx cap open android"
+  },
+  "dependencies": {
+    "@aasis21/helm-shared": "*",
+    "@capacitor-mlkit/barcode-scanning": "^7.5.0",
+    "@capacitor/android": "^7.2.0",
+    "@capacitor/cli": "^7.2.0",
+    "@capacitor/core": "^7.2.0",
+    "@capacitor/preferences": "^7.0.1",
+    "@supabase/supabase-js": "^2.39.7",
+    "qrcode.react": "^4.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/react": "^18.2.56",
+    "@types/react-dom": "^18.2.19",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@aasis21/helm-extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Helm Copilot CLI extension (joinSession) + local test harness. Source in src/, bundled to dist/extension.mjs (esbuild) with @github/copilot-sdk external.",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "harness": "node harness/harness.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@aasis21/helm-shared": "*",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
+}

@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output
+dist/
+extension/dist/
+mobile/dist/
+
+# env & secrets
+.env
+.env.local
+*.local
+
+# capacitor / android
+mobile/android/
+mobile/ios/
+*.keystore
+
+# logs & os
+*.log
+.DS_Store
+Thumbs.db
