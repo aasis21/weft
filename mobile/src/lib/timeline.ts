@@ -12,6 +12,7 @@ import type {
   InnerMessage,
   LogLine,
   ModeChange,
+  PromptAttachment,
   SessionMode,
   StateSnapshot,
   ToolComplete,
@@ -35,6 +36,9 @@ export interface UserItem {
   /** Which device typed this prompt: 'phone' (this device) or 'terminal' (the laptop).
    *  Undefined for backfilled history (turns carry no device). */
   origin?: 'phone' | 'terminal';
+  /** Images the phone user attached (base64), for optimistic render + retry. Stripped
+   *  from persistence so the stored transcript stays small. */
+  attachments?: PromptAttachment[];
 }
 export interface AssistantItem {
   kind: 'assistant';
@@ -132,13 +136,19 @@ function cap(items: TimelineItem[]): TimelineItem[] {
 }
 
 /** Append a locally-echoed user prompt so it shows instantly as a right bubble. */
-export function appendUser(state: TimelineState, text: string, ts: number): { state: TimelineState; id: string } {
+export function appendUser(
+  state: TimelineState,
+  text: string,
+  ts: number,
+  attachments?: PromptAttachment[],
+): { state: TimelineState; id: string } {
   const item: UserItem = {
     kind: 'user',
     id: `user-${ts}-${Math.random().toString(36).slice(2, 7)}`,
     text,
     ts,
     origin: 'phone',
+    ...(attachments && attachments.length ? { attachments } : {}),
   };
   return { state: { ...state, items: cap([...state.items, item]) }, id: item.id };
 }
@@ -588,7 +598,9 @@ export interface PersistedTimeline {
 /** Extract the durable subset of a timeline for local persistence. */
 export function toPersisted(state: TimelineState): PersistedTimeline {
   return {
-    items: state.items,
+    items: state.items.map((item) =>
+      item.kind === 'user' && item.attachments ? { ...item, attachments: undefined } : item,
+    ),
     history: state.history,
     historyCursor: state.historyCursor,
     historyHasMore: state.historyHasMore,

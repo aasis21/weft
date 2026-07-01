@@ -111,9 +111,19 @@ export interface UserMessageEcho extends BaseMessage {
   origin: "phone" | "terminal";
   id?: string;
 }
+/** An inline image the phone user attached to a prompt (relayed as base64). */
+export interface PromptAttachment {
+  /** Base64-encoded image bytes (no `data:` URL prefix). */
+  data: string;
+  /** MIME type, e.g. "image/jpeg" or "image/png". */
+  mimeType: string;
+  /** Original file name, shown in the timeline and passed to the SDK as displayName. */
+  name: string;
+}
 export interface PromptMessage extends BaseMessage {
   kind: "prompt";
   text: string;
+  attachments?: PromptAttachment[];
 }
 export interface ApprovalRequest extends BaseMessage {
   kind: "approval.request";
@@ -271,7 +281,7 @@ export function userMessage(
   origin?: "phone" | "terminal",
   id?: string
 ): UserMessageEcho;
-export function prompt(text: string): PromptMessage;
+export function prompt(text: string, attachments?: PromptAttachment[]): PromptMessage;
 export function approvalRequest(
   requestId: string,
   toolName: string,

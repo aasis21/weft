@@ -1,10 +1,11 @@
 import '../composer.css';
 
 import { useEffect, useRef, useState } from 'react';
-import type { JSX, KeyboardEvent } from 'react';
+import type { ChangeEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/helm-shared';
-import type { SessionMode } from '@aasis21/helm-shared';
+import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { useSpeechInput } from '../lib/useSpeechInput';
+import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '../lib/imageAttachments';
 
 interface ComposerProps {
   sessionId: string;
@@ -12,10 +13,13 @@ interface ComposerProps {
   busy: boolean;
   mode: SessionMode;
   cwd: string | null;
-  onPrompt(text: string): Promise<void> | void;
+  onPrompt(text: string, attachments?: PromptAttachment[]): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
 }
+
+/** Max images per message — keeps the encrypted relay payload under the transport cap. */
+const MAX_ATTACHMENTS = 6;
 
 interface SlashCommand {
   command: string;
@@ -111,8 +115,12 @@ export function Composer({
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const modeWrapRef = useRef<HTMLDivElement | null>(null);
   const modeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const speechCommittedRef = useRef('');
   const speech = useSpeechInput();
+  const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
 
   const onTextChange = (value: string): void => {
     setText(value);
@@ -129,6 +137,8 @@ export function Composer({
 
   useEffect(() => {
     setText(loadDraft(sessionId));
+    setAttachments([]);
+    setAttachError(null);
   }, [sessionId]);
 
   useEffect(() => {
@@ -162,12 +172,53 @@ export function Composer({
 
   const send = async (): Promise<void> => {
     const trimmed = text.trim();
-    if (!trimmed || disabled || busy) return;
+    const outgoing = attachments;
+    if ((!trimmed && outgoing.length === 0) || disabled || busy) return;
     if (speech.listening) speech.stop();
     setText('');
+    setAttachments([]);
+    setAttachError(null);
     setSlashDismissed(false);
     saveDraft(sessionId, '');
-    await onPrompt(trimmed);
+    await onPrompt(trimmed, outgoing.length ? outgoing : undefined);
+  };
+
+  const openFilePicker = (): void => {
+    setAttachError(null);
+    fileInputRef.current?.click();
+  };
+
+  const onFilesPicked = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const input = event.target;
+    const files = Array.from(input.files ?? []);
+    input.value = ''; // let the user re-pick the same file after removing it
+    if (!files.length) return;
+    const room = MAX_ATTACHMENTS - attachments.length;
+    if (room <= 0) {
+      setAttachError(`Up to ${MAX_ATTACHMENTS} images per message.`);
+      return;
+    }
+    setAttaching(true);
+    setAttachError(null);
+    const picked = files.slice(0, room);
+    const next: PromptAttachment[] = [];
+    let failed = 0;
+    for (const file of picked) {
+      try {
+        next.push(await fileToAttachment(file));
+      } catch {
+        failed += 1;
+      }
+    }
+    if (next.length) setAttachments((prev) => [...prev, ...next]);
+    if (failed) setAttachError(`Couldn't attach ${failed} image${failed > 1 ? 's' : ''}.`);
+    else if (files.length > room) setAttachError(`Only ${room} more image${room > 1 ? 's' : ''} fit.`);
+    setAttaching(false);
+  };
+
+  const removeAttachment = (index: number): void => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setAttachError(null);
   };
 
   const selectSlashCommand = (item: SlashCommand): void => {
@@ -273,6 +324,44 @@ export function Composer({
       ) : null}
 
       <div className="composer-shell">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="composer-file-input"
+          accept={ACCEPTED_IMAGE_TYPES}
+          multiple
+          onChange={(event) => void onFilesPicked(event)}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
+
+        {attachments.length > 0 ? (
+          <div className="composer-attachments" aria-label="Attached images">
+            {attachments.map((attachment, index) => (
+              <div className="attachment-thumb" key={`${attachment.name}-${index}`}>
+                <img src={attachmentSrc(attachment)} alt={attachment.name} />
+                <button
+                  type="button"
+                  className="attachment-remove"
+                  aria-label={`Remove ${attachment.name}`}
+                  title="Remove"
+                  onClick={() => removeAttachment(index)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M6.4 5l5.6 5.6L17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"
+                    />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            {attaching ? <div className="attachment-thumb attachment-loading" aria-hidden="true" /> : null}
+          </div>
+        ) : null}
+
+        {attachError ? <div className="composer-attach-error" role="status">{attachError}</div> : null}
+
         <textarea
           ref={areaRef}
           className="composer-input"
@@ -288,6 +377,18 @@ export function Composer({
 
         <div className="composer-controls">
           <div className="composer-controls-left">
+            <button
+              type="button"
+              className="attach-btn"
+              onClick={openFilePicker}
+              disabled={disabled || attaching || attachments.length >= MAX_ATTACHMENTS}
+              aria-label="Attach image"
+              title={attachments.length >= MAX_ATTACHMENTS ? `Up to ${MAX_ATTACHMENTS} images` : 'Attach image'}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z" />
+              </svg>
+            </button>
             <div className="mode-wrap" ref={modeWrapRef}>
               <button
                 ref={modeButtonRef}
@@ -353,7 +454,12 @@ export function Composer({
                 </svg>
               </button>
             ) : (
-              <button className="send-btn" type="submit" disabled={disabled || !text.trim()} aria-label="Send">
+              <button
+                className="send-btn"
+                type="submit"
+                disabled={disabled || (!text.trim() && attachments.length === 0)}
+                aria-label="Send"
+              >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
                 </svg>

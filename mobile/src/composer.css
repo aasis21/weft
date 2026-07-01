@@ -29,6 +29,99 @@
   animation: composer-mic-pulse 1.7s ease-out infinite;
 }
 
+/* Attach (+) button — left-side ghost circle, twin of .mic-btn. */
+.attach-btn {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+.attach-btn:hover:not(:disabled) { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.attach-btn:disabled { color: var(--fg-faint); cursor: default; }
+.attach-btn svg { width: 1.2rem; height: 1.2rem; }
+
+/* Native file input is triggered programmatically; keep it out of the layout + a11y tree. */
+.composer-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* Pending-image tray above the textarea (Claude-style). */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 2px 0;
+}
+.attachment-thumb {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--bg-rule);
+  background: var(--bg);
+  flex: 0 0 auto;
+}
+.attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, #000 62%, transparent);
+  color: #fff;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.attachment-remove:hover { background: color-mix(in srgb, #000 80%, transparent); }
+.attachment-remove svg { width: 12px; height: 12px; }
+.attachment-loading {
+  background: linear-gradient(
+    100deg,
+    var(--bg) 30%,
+    color-mix(in srgb, var(--fg) 10%, var(--bg)) 50%,
+    var(--bg) 70%
+  );
+  background-size: 200% 100%;
+  animation: attachment-shimmer 1.1s ease-in-out infinite;
+}
+.composer-attach-error {
+  padding: 0 4px;
+  color: var(--error);
+  font-size: 12px;
+}
+
+@keyframes attachment-shimmer {
+  0% { background-position: 180% 0; }
+  100% { background-position: -80% 0; }
+}
+
 .slash-menu {
   background: var(--bg-elev);
   border: 1px solid var(--bg-rule);
@@ -84,6 +177,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mic-btn.listening {
+    animation: none;
+  }
+  .attachment-loading {
     animation: none;
   }
 }

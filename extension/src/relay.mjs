@@ -326,8 +326,24 @@ export async function attachRelay({
       // attributed to the phone (which already shows it optimistically) and not
       // re-broadcast as a terminal message.
       promptOrigin.record(msg.text);
+      // Map phone-relayed image attachments (base64) to Copilot SDK blob attachments.
+      // Defensive: drop anything missing base64 `data` or a `mimeType`. The SDK resizes
+      // images itself; the phone already downscales to keep the relay payload small.
+      const attachments = Array.isArray(msg.attachments)
+        ? msg.attachments
+            .filter((a) => a && typeof a.data === "string" && a.data && typeof a.mimeType === "string" && a.mimeType)
+            .map((a) => ({
+              type: "blob",
+              data: a.data,
+              mimeType: a.mimeType,
+              displayName: typeof a.name === "string" && a.name ? a.name : "image",
+            }))
+        : [];
+      const sendOptions = attachments.length
+        ? { prompt: msg.text, attachments, mode: "immediate" }
+        : { prompt: msg.text, mode: "immediate" };
       void session
-        .send?.({ prompt: msg.text, mode: "immediate" })
+        .send?.(sendOptions)
         ?.catch?.((err) =>
           logger(`Helm prompt relay failed: ${err?.message ?? err}`, {
             level: "warning",

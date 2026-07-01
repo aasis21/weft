@@ -113,7 +113,7 @@ export default function App(): JSX.Element {
       active={active}
       sessions={snapshot.sessions}
       activeId={active.meta.channelId}
-      onPrompt={(text) => void sessionManager.sendPrompt(active.meta.channelId, text)}
+      onPrompt={(text, attachments) => void sessionManager.sendPrompt(active.meta.channelId, text, attachments)}
       onApprove={(requestId, optionId) => void sessionManager.sendApproval(active.meta.channelId, requestId, optionId)}
       onElicitationRespond={(requestId, action, content) =>
         void sessionManager.sendElicitation(active.meta.channelId, requestId, action, content)

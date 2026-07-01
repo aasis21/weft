@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { SessionMode } from '@aasis21/helm-shared';
+import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import type { SessionView } from '../lib/sessionManager';
 import { ChatThread } from './ChatThread';
 import { Composer } from './Composer';
@@ -132,7 +132,7 @@ interface SessionScreenProps {
   active: SessionView;
   sessions: SessionView[];
   activeId: string;
-  onPrompt(text: string): void;
+  onPrompt(text: string, attachments?: PromptAttachment[]): void;
   onApprove(requestId: string, optionId: string): void;
   onElicitationRespond(
     requestId: string,
@@ -306,6 +306,7 @@ export function SessionScreen({
           items={timeline.items}
           history={timeline.history}
           streaming={status === 'live'}
+          busy={agentBusy}
           offline={offline}
           offlineLabel={offlineLabel}
           onRetry={onRetry}

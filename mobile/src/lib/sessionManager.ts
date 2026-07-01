@@ -1,5 +1,5 @@
 import { KIND, approvalDecision, elicitationResponse, historyRequest, interrupt, modeChange, prompt, stateRequest, HISTORY_PAGE_DEFAULT } from '@aasis21/helm-shared';
-import type { History as HistoryMessage, InnerMessage, SessionMode } from '@aasis21/helm-shared';
+import type { History as HistoryMessage, InnerMessage, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { connectSession, pairSession } from './helmClient';
 import type { HelmClient } from './helmClient';
 import {
@@ -60,8 +60,6 @@ interface Runtime {
   timeline: TimelineState;
   client: HelmClient | null;
   ephemeral: boolean;
-  /** True until the one-time pre-join history backfill has been requested. */
-  firstJoin: boolean;
   /** Forward catch-up pages fetched since the last (re)connect — bounds a huge gap (see D5). */
   catchupPages?: number;
   unread?: boolean;
@@ -184,8 +182,6 @@ class SessionManager {
         timeline,
         client: null,
         ephemeral: false,
-        // No persisted transcript yet => never connected on this device => pull pre-join history.
-        firstJoin: persisted == null,
       });
       if (!this.order.includes(channelId)) this.order.push(channelId);
     }
@@ -234,12 +230,9 @@ class SessionManager {
     // Ask for the current session state (busy/mode + any pending prompts) so a fresh, mid-turn,
     // or reconnecting join reflects the truth immediately instead of waiting for the next event.
     this.requestState(channelId);
-    // `maybeRequestFirstHistory` clears `firstJoin` as a side effect, so capture it first: a first
-    // join backfills the latest page (below); a reconnect/refresh/resume instead catches up on the
-    // turns that landed while we were away.
-    const wasFirstJoin = runtime.firstJoin;
-    this.maybeRequestFirstHistory(channelId, client);
-    if (!wasFirstJoin) this.maybeRequestCatchup(channelId, client);
+    // One self-healing history sync for every path (first join, reconnect, rescan, resume): pull the
+    // latest page when the thread is empty, otherwise catch up on the turns missed while away.
+    this.syncHistory(channelId, client);
   }
 
   /**
@@ -292,37 +285,35 @@ class SessionManager {
   }
 
   /**
-   * One-time backfill: the first time the phone ever connects to a session (no local
-   * transcript existed), pull the most recent page of pre-join turns. Refreshes and
-   * reconnects rely on the restored local transcript instead and never pull.
+   * One self-healing history sync, shared by every connect path (first join, reconnect, rescan,
+   * refresh, resume). It is driven by what the transcript already CONTAINS, not by a one-shot flag,
+   * so a failed pull simply heals on the next connect instead of leaving a permanent hole:
+   *
+   *   - empty thread            → pull the latest page (initial backfill of pre-join turns)
+   *   - has turns + a cursor    → forward catch-up of everything committed while we were away
+   *   - has turns, but no cursor → nothing to do; the state snapshot + live events cover it
+   *
+   * The forward page is appended to the transcript tail behind a "N new while you were away" divider
+   * by the reducer, so a phone that went offline/backgrounded/hard-refreshed returns with no gap.
    */
-  private maybeRequestFirstHistory(channelId: string, client: HelmClient): void {
-    const runtime = this.runtimes.get(channelId);
-    if (!runtime || runtime.ephemeral || !runtime.firstJoin) return;
-    runtime.firstJoin = false;
-    runtime.timeline = markHistoryLoading(runtime.timeline, true);
-    this.emit();
-    void client.send(historyRequest(null, HISTORY_PAGE_DEFAULT)).catch(() => {
-      const r = this.runtimes.get(channelId);
-      if (r) {
-        r.timeline = markHistoryLoading(r.timeline, false);
-        this.emit();
-      }
-    });
-  }
-
-  /**
-   * FORWARD catch-up: on every reconnect/refresh/resume (i.e. NOT the one-time first join), pull the
-   * turns that committed while this phone was away, starting just after the highest turn we've seen.
-   * The extension answers with a forward `control.history` page that the reducer appends to the
-   * transcript tail behind a "N new while you were away" divider — so a phone that went offline,
-   * backgrounded, or hard-refreshed comes back with no missing turns. No cursor yet (never caught a
-   * beat or snapshot) => nothing to catch up on; the state snapshot + live events cover it.
-   */
-  private maybeRequestCatchup(channelId: string, client: HelmClient): void {
+  private syncHistory(channelId: string, client: HelmClient): void {
     const runtime = this.runtimes.get(channelId);
     if (!runtime || runtime.ephemeral) return;
-    const since = runtime.timeline.latestTurnIndex;
+    const timeline = runtime.timeline;
+    const hasContent = timeline.history.length > 0 || timeline.items.length > 0;
+    if (!hasContent) {
+      runtime.timeline = markHistoryLoading(runtime.timeline, true);
+      this.emit();
+      void client.send(historyRequest(null, HISTORY_PAGE_DEFAULT)).catch(() => {
+        const r = this.runtimes.get(channelId);
+        if (r) {
+          r.timeline = markHistoryLoading(r.timeline, false);
+          this.emit();
+        }
+      });
+      return;
+    }
+    const since = timeline.latestTurnIndex;
     if (since == null) return;
     runtime.catchupPages = 0;
     void client.send(historyRequest(null, HISTORY_PAGE_DEFAULT, since)).catch(() => {
@@ -425,6 +416,32 @@ class SessionManager {
   async addByQr(raw: string): Promise<string> {
     const { client, pairing } = await pairSession(raw);
     const channelId = pairing.channelId;
+    const existing = this.runtimes.get(channelId);
+    if (existing && !existing.ephemeral) {
+      // Rescanning a session we already track (same channelId): refresh the pairing and rebind a
+      // fresh client while KEEPING the existing transcript. Overwriting the runtime would orphan the
+      // old client (a leaked socket that keeps delivering into the same timeline) and wipe history.
+      const prior = (await loadSessions()).find((s) => s.pairing.channelId === channelId);
+      await upsertSession({
+        pairing,
+        title: prior?.title ?? null,
+        cwd: prior?.cwd ?? null,
+        addedAt: prior?.addedAt ?? existing.meta.addedAt,
+        lastSeenAt: Date.now(),
+      });
+      try {
+        await existing.client?.close();
+      } catch {
+        // The old socket may already be gone; the fresh client supersedes it either way.
+      }
+      existing.client = null;
+      if (!this.order.includes(channelId)) this.order.push(channelId);
+      this.activeId = channelId;
+      // attach() rewires the transport and runs syncHistory: with a transcript already present this
+      // forward-catches-up the turns missed since the last cursor instead of pulling from scratch.
+      this.attach(channelId, client);
+      return channelId;
+    }
     const stored: StoredSession = {
       pairing,
       title: null,
@@ -446,7 +463,6 @@ class SessionManager {
       timeline: emptyTimeline(),
       client: null,
       ephemeral: false,
-      firstJoin: true,
     });
     if (!this.order.includes(channelId)) this.order.push(channelId);
     this.activeId = channelId;
@@ -475,7 +491,6 @@ class SessionManager {
       timeline: emptyTimeline(),
       client: demo.client,
       ephemeral: true,
-      firstJoin: false,
       stopDemo: demo.stop,
     });
     if (!this.order.includes(channelId)) this.order.push(channelId);
@@ -549,15 +564,15 @@ class SessionManager {
     }
   }
 
-  async sendPrompt(channelId: string, text: string): Promise<void> {
+  async sendPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
-    const appended = appendUser(runtime.timeline, text, Date.now());
+    const appended = appendUser(runtime.timeline, text, Date.now(), attachments);
     runtime.timeline = appended.state;
     this.schedulePersist(channelId);
     this.emit();
     try {
-      await this.deliverPrompt(channelId, text);
+      await this.deliverPrompt(channelId, text, attachments);
     } catch {
       const r = this.runtimes.get(channelId);
       if (!r) return;
@@ -576,7 +591,7 @@ class SessionManager {
     this.schedulePersist(channelId);
     this.emit();
     try {
-      await this.deliverPrompt(channelId, item.text);
+      await this.deliverPrompt(channelId, item.text, item.attachments);
     } catch {
       const r = this.runtimes.get(channelId);
       if (!r) return;
@@ -586,10 +601,10 @@ class SessionManager {
     }
   }
 
-  private async deliverPrompt(channelId: string, text: string): Promise<void> {
+  private async deliverPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
     const runtime = this.runtimes.get(channelId);
     if (!runtime?.client) throw new Error('No active connection.');
-    await runtime.client.send(prompt(text));
+    await runtime.client.send(prompt(text, attachments));
   }
 
   /**
@@ -741,10 +756,10 @@ class SessionManager {
         void this.reconnect(channelId);
       } else {
         // Healthy link: refresh the authoritative state and catch up on any turns that slipped in
-        // while backgrounded. Catch-up reads the pre-resume cursor, so a current session just gets an
-        // empty forward page (no-op); it only backfills when something was actually missed.
+        // while backgrounded. syncHistory reads the pre-resume cursor, so a current session just gets
+        // an empty forward page (no-op); it only backfills when something was actually missed.
         this.requestState(channelId);
-        if (runtime.client) this.maybeRequestCatchup(channelId, runtime.client);
+        if (runtime.client) this.syncHistory(channelId, runtime.client);
       }
     }
   };

@@ -130,7 +130,18 @@ export const userMessage = (text, origin = "terminal", id) => ({
 });
 
 // ---- factories (phone -> ext : prompt) -------------------------------------
-export const prompt = (text) => ({ kind: KIND.PROMPT, text, ts: now() });
+/**
+ * A phone-typed prompt relayed to the laptop session. `attachments` (optional) carries
+ * inline images the user picked in the composer: each is `{ data (base64, no `data:` URL
+ * prefix), mimeType, name }`. The extension maps them to Copilot SDK blob attachments.
+ * Images are downscaled on the phone so the encrypted payload stays under the transport cap.
+ */
+export const prompt = (text, attachments = null) => ({
+  kind: KIND.PROMPT,
+  text,
+  ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+  ts: now(),
+});
 
 // ---- factories (approval / decision) ---------------------------------------
 /**

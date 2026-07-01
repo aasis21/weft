@@ -8,6 +8,7 @@ import type {
 } from 'react';
 import type { HistoryItem } from '@aasis21/helm-shared';
 import type { TimelineItem } from '../lib/timeline';
+import { attachmentSrc } from '../lib/imageAttachments';
 import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
 import '../thread-extras.css';
@@ -18,6 +19,9 @@ interface ChatThreadProps {
   history?: HistoryItem[];
   /** True while the bound session is live, so we show a caret / working row. */
   streaming?: boolean;
+  /** Authoritative agent activity for the bound session — the working row follows this, not a
+   *  heuristic on the last item, so an idle join never shows a spurious "working…". */
+  busy?: boolean;
   /** Shown centered when there is nothing yet. */
   emptyHint?: string;
   onRetry?: (itemId: string) => void;
@@ -94,7 +98,7 @@ interface MenuState {
   y: number;
 }
 
-export function ChatThread({ items, history = [], streaming = false, emptyHint, onRetry, offline = false, offlineLabel, onLoadEarlier, historyHasMore = false, historyLoading = false }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, history = [], streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, onLoadEarlier, historyHasMore = false, historyLoading = false }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -118,7 +122,10 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
   const last = items[items.length - 1];
   const lastText = last && 'text' in last ? last.text : last?.kind;
   const lastIsUser = last?.kind === 'user';
-  const initialLoading = items.length === 0 && history.length === 0 && streaming;
+  // Skeleton belongs ONLY to a first history pull that is actually in flight (empty thread +
+  // historyLoading). Gating on `streaming` used to leave an empty live session stuck on the
+  // skeleton forever; now once the pull settles empty we fall through to the welcome.
+  const initialLoading = items.length === 0 && history.length === 0 && historyLoading;
   const renderUnits = useMemo<RenderUnit[]>(() => {
     const units: RenderUnit[] = [];
     let index = 0;
@@ -338,7 +345,12 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
     };
   }, [cancelLongPress]);
 
-  const showThinking = streaming && (!last || last.kind === 'user' || last.kind === 'notice');
+  // Show the working row from the AUTHORITATIVE busy flag (or the moment right after we send a
+  // prompt, before the extension reports activity) — never merely because the last item isn't an
+  // assistant bubble. That old heuristic lit up "working…" on every idle join, since backfilled
+  // history renders in `history[]` and leaves `items` empty. An assistant bubble is streaming its
+  // own caret, so we suppress the row there.
+  const showThinking = streaming && last?.kind !== 'assistant' && (busy || last?.kind === 'user');
 
   return (
     <div className="chat-thread" ref={rootRef}>
@@ -489,20 +501,37 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
         const isLast = idx === items.length - 1;
 
         if (item.kind === 'user') {
+          const hasText = item.text.trim().length > 0;
+          const images = item.attachments ?? [];
           return (
             <div key={item.id} className="row user">
-              <div
-                className="bubble user-bubble"
-                tabIndex={0}
-                onContextMenu={(event) => handleContextMenu(event, item.id, item.text)}
-                onKeyDown={(event) => handleBubbleKeyDown(event, item.id, item.text)}
-                onTouchStart={(event) => handleTouchStart(event, item.id, item.text)}
-                onTouchEnd={cancelLongPress}
-                onTouchMove={cancelLongPress}
-                onTouchCancel={cancelLongPress}
-              >
-                {item.text}
-              </div>
+              {images.length > 0 ? (
+                <div className="msg-attachments">
+                  {images.map((att, i) => (
+                    <img
+                      key={`${item.id}-att-${i}`}
+                      className="msg-attachment"
+                      src={attachmentSrc(att)}
+                      alt={att.name}
+                      loading="lazy"
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {hasText || images.length === 0 ? (
+                <div
+                  className="bubble user-bubble"
+                  tabIndex={0}
+                  onContextMenu={(event) => handleContextMenu(event, item.id, item.text)}
+                  onKeyDown={(event) => handleBubbleKeyDown(event, item.id, item.text)}
+                  onTouchStart={(event) => handleTouchStart(event, item.id, item.text)}
+                  onTouchEnd={cancelLongPress}
+                  onTouchMove={cancelLongPress}
+                  onTouchCancel={cancelLongPress}
+                >
+                  {item.text}
+                </div>
+              ) : null}
               <span className="ts user-ts">{formatTime(item.ts)}</span>
               {item.failed ? (
                 <div

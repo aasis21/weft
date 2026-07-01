@@ -278,6 +278,25 @@
   overflow-wrap: anywhere;
 }
 
+/* Images the phone user attached to a prompt — a small right-aligned grid above the bubble. */
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 84%;
+  margin-bottom: 5px;
+}
+.msg-attachment {
+  width: auto;
+  max-width: 190px;
+  max-height: 190px;
+  border-radius: 13px;
+  border: 1px solid var(--bg-rule);
+  object-fit: cover;
+  display: block;
+}
+
 /* assistant + tool — left aligned, full width */
 .row.assistant,
 .row.tool {
