@@ -129,7 +129,12 @@ try {
         Write-Host '  Installer: irm https://usehelm.netlify.app/install.ps1 | iex' -ForegroundColor Green
     }
     if (-not $SkipInstall) {
-        Write-Host '  Local CLI: restart `copilot` to load the new extension; run /helm to show the QR.' -ForegroundColor Green
+        # ship.ps1 can only refresh the files in ~/.copilot/extensions/helm; the running Copilot
+        # CLI still holds the OLD bundle in memory. When this script is run BY the Copilot agent,
+        # the agent should immediately call its `extensions_reload` tool to hot-load the new
+        # extension.mjs from disk (no `copilot` restart needed). Outside the agent, restart `copilot`.
+        Write-Host '  Local CLI: call the `extensions_reload` agent tool to hot-load the new bundle' -ForegroundColor Green
+        Write-Host '             (or restart `copilot` if not running under the agent); then /helm for the QR.' -ForegroundColor Green
     }
 }
 finally {
