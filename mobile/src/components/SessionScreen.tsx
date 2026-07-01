@@ -187,6 +187,13 @@ export function SessionScreen({
   const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || status === 'idle');
   const offline = status === 'connecting' || status === 'idle';
   const offlineLabel = status === 'connecting' ? 'Connecting to your session…' : 'Session idle — waiting to reconnect.';
+  // The initial connecting-skeleton is owned by LIVENESS (+ a bounded grace), not by whether a history
+  // reply has landed: a dead host never replies, so coupling the loader to the reply spins it forever.
+  // Show it only while the thread is genuinely empty AND we're connecting or in the brief post-Live
+  // settle window. The moment we hear the laptop we're ready (the composer is already enabled).
+  const threadEmpty = timeline.items.length === 0 && timeline.history.length === 0;
+  const initialLoading =
+    threadEmpty && (status === 'connecting' || (status === 'live' && active.settling === true));
   const approveRequest = (requestId: string, optionId: string, isDeny: boolean): void => {
     vibrate(isDeny ? [8, 40, 8] : 10);
     onApprove(requestId, optionId);
@@ -314,6 +321,7 @@ export function SessionScreen({
           onLoadEarlier={onLoadEarlier}
           historyHasMore={timeline.historyHasMore}
           historyLoading={timeline.historyLoading}
+          initialLoading={initialLoading}
         />
       </main>
 

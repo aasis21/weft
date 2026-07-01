@@ -64,10 +64,11 @@ export function SessionDrawer({
           return title.includes(q) || cwd.includes(q);
         })
       : sessions;
-    // Newest session first: sort by most-recent activity, falling back to when it was added so a
-    // freshly-joined session with no turns yet still lands on top.
-    const recency = (s: SessionView): number => Math.max(lastActivity(s) ?? 0, s.meta.addedAt ?? 0);
-    return [...matched].sort((a, b) => recency(b) - recency(a));
+    // STABLE order by when each session's QR was last scanned — deliberately NOT by last activity, so
+    // incoming events/heartbeats never reshuffle the list under the user. A re-scan bumps scannedAt so
+    // that card jumps to the top. Fall back to addedAt for legacy/demo cards without a scan time.
+    const scannedAt = (s: SessionView): number => s.meta.scannedAt ?? s.meta.addedAt ?? 0;
+    return [...matched].sort((a, b) => scannedAt(b) - scannedAt(a));
   }, [query, sessions]);
 
   useEffect(() => {

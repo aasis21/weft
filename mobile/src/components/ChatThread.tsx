@@ -35,6 +35,9 @@ interface ChatThreadProps {
   historyHasMore?: boolean;
   /** True while an older history page is loading. */
   historyLoading?: boolean;
+  /** Parent-supplied, liveness-driven initial-loading flag. When provided it OVERRIDES the local
+   *  historyLoading heuristic so a dead host (no history reply) can't spin the skeleton forever. */
+  initialLoading?: boolean;
 }
 
 const COPILOT_AVATAR: ReactNode = (
@@ -98,7 +101,7 @@ interface MenuState {
   y: number;
 }
 
-export function ChatThread({ items, history = [], streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, onLoadEarlier, historyHasMore = false, historyLoading = false }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, history = [], streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, onLoadEarlier, historyHasMore = false, historyLoading = false, initialLoading: initialLoadingProp }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -124,8 +127,9 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   const lastIsUser = last?.kind === 'user';
   // Skeleton belongs ONLY to a first history pull that is actually in flight (empty thread +
   // historyLoading). Gating on `streaming` used to leave an empty live session stuck on the
-  // skeleton forever; now once the pull settles empty we fall through to the welcome.
-  const initialLoading = items.length === 0 && history.length === 0 && historyLoading;
+  // skeleton forever; now once the pull settles empty we fall through to the welcome. Prefer the
+  // parent's liveness-driven flag when supplied; the local heuristic is the standalone fallback.
+  const initialLoading = initialLoadingProp ?? (items.length === 0 && history.length === 0 && historyLoading);
   const renderUnits = useMemo<RenderUnit[]>(() => {
     const units: RenderUnit[] = [];
     let index = 0;

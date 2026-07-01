@@ -41,6 +41,9 @@ export interface SessionMeta {
   cwd: string | null;
   kind: 'live' | 'demo';
   addedAt: number;
+  /** When this session's QR was last scanned (pairing.savedAt). Drives a STABLE sidebar order that
+   *  does not reshuffle on incoming events/heartbeats; a re-scan bumps it to the top. */
+  scannedAt?: number;
 }
 
 /** Immutable, React-facing view of one joined session. */
@@ -51,6 +54,9 @@ export interface SessionView {
   unread?: boolean;
   /** Last real host activity (ms). Drives the sidebar's newest-first ordering; survives reload. */
   lastEventAt?: number;
+  /** True during the brief, bounded post-Live grace while the first history page is still arriving —
+   *  the UI shows the connecting skeleton instead of flashing the empty-welcome. */
+  settling?: boolean;
   error?: string;
 }
 
@@ -78,6 +84,13 @@ interface Runtime {
   metaTimer?: number;
   /** Last real host activity (ms); recency for the warm-pool LRU + sidebar sort. */
   lastEventAt?: number;
+  /** Bounded grace after first going Live during which the initial history skeleton is held. */
+  settling?: boolean;
+  settleTimer?: number;
+  /** When the current 'connecting' attempt began. The confirm deadline only arms AFTER connect
+   *  resolves, so a hung connect (killed terminal) would spin forever; the watchdog stamps this and
+   *  fails the attempt past HOST_CONFIRM_MS. */
+  connectingSince?: number;
   unsubscribe?: () => void;
   stopDemo?: () => Promise<void>;
   saveTimer?: number;
@@ -93,6 +106,10 @@ const OFFLINE_AFTER_MS = 30_000;
 // host is treated as offline. Joining the relay channel or a socket 'connected' NEVER counts as
 // liveness — the relay outlives a killed terminal, so a channel join proves nothing about the host.
 const HOST_CONFIRM_MS = 30_000;
+// After a session first goes Live, hold the initial history skeleton for at most this long instead of
+// flashing the empty-welcome. The wait is bounded by THIS timer, never by the history reply, so a slow
+// or lost page can't spin the loader forever (a dead host is caught by HOST_CONFIRM_MS separately).
+const INITIAL_HISTORY_GRACE_MS = 700;
 // Keep at most this many sessions "warm" (a live subscription on the single shared socket), evicted
 // least-recently-active first. The rest stay "cold": their card + transcript are kept and they
 // reconnect on demand when opened. Bounds server fan-out for the handful of terminals a user runs.
@@ -132,7 +149,7 @@ function isUnreadActivity(message: InnerMessage): boolean {
   }
 }
 
-class SessionManager {
+export class SessionManager {
   private runtimes = new Map<string, Runtime>();
   private order: string[] = [];
   private activeId: string | null = null;
@@ -166,6 +183,7 @@ class SessionManager {
           timeline: r.timeline,
           ...(r.unread ? { unread: true } : {}),
           ...(r.lastEventAt ? { lastEventAt: r.lastEventAt } : {}),
+          ...(r.settling ? { settling: true } : {}),
           error: r.error,
         })),
     };
@@ -218,6 +236,7 @@ class SessionManager {
         cwd: timeline.cwd ?? s.cwd,
         kind: 'live',
         addedAt: s.addedAt,
+        scannedAt: s.pairing.savedAt ?? s.addedAt,
       };
       // Cold sessions rest at 'idle' with no client (the watchdog and resume both skip them); a warm
       // session starts 'connecting' and its liveness must be confirmed by a genuine host signal.
@@ -313,6 +332,8 @@ class SessionManager {
     if (!runtime || runtime.ephemeral || runtime.client !== client) return;
     runtime.status = 'connecting';
     runtime.error = undefined;
+    runtime.connectingSince = Date.now();
+    this.clearSettle(runtime);
     if (runtime.confirmTimer != null) window.clearTimeout(runtime.confirmTimer);
     runtime.confirmTimer = window.setTimeout(() => {
       const r = this.runtimes.get(channelId);
@@ -330,15 +351,51 @@ class SessionManager {
 
   /** Confirm the host is alive on the FIRST genuine inbound signal: clear the deadline and go Live. */
   private confirmHost(runtime: Runtime): void {
+    const wasLive = runtime.status === 'live';
     if (runtime.confirmTimer != null) {
       window.clearTimeout(runtime.confirmTimer);
       runtime.confirmTimer = undefined;
     }
-    if (runtime.status !== 'live') runtime.status = 'live';
+    runtime.connectingSince = undefined;
+    if (!wasLive) runtime.status = 'live';
     if (runtime.error) runtime.error = undefined;
     if (runtime.timeline.lastHeartbeat == null) {
       runtime.timeline = { ...runtime.timeline, lastHeartbeat: Date.now() };
     }
+    // The instant we FIRST hear the laptop, the session is ready to use. If its thread is empty and the
+    // first history page is still in flight, hold the skeleton for a short BOUNDED grace instead of
+    // flashing the empty-welcome; the initial page (onMessage) or the timer clears it, whichever first.
+    if (!wasLive) {
+      const t = runtime.timeline;
+      const emptyAndLoading = t.items.length === 0 && t.history.length === 0 && t.historyLoading;
+      if (emptyAndLoading) this.beginSettle(runtime);
+      else this.clearSettle(runtime);
+    }
+  }
+
+  /** Arm the bounded post-Live grace: keep the initial skeleton for at most INITIAL_HISTORY_GRACE_MS. */
+  private beginSettle(runtime: Runtime): void {
+    if (runtime.settleTimer != null) window.clearTimeout(runtime.settleTimer);
+    runtime.settling = true;
+    const channelId = runtime.meta.channelId;
+    runtime.settleTimer = window.setTimeout(() => {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.settleTimer = undefined;
+      if (r.settling) {
+        r.settling = false;
+        this.emit();
+      }
+    }, INITIAL_HISTORY_GRACE_MS);
+  }
+
+  /** Cancel the grace and drop the initial skeleton (first page arrived, or the session was torn down). */
+  private clearSettle(runtime: Runtime): void {
+    if (runtime.settleTimer != null) {
+      window.clearTimeout(runtime.settleTimer);
+      runtime.settleTimer = undefined;
+    }
+    runtime.settling = false;
   }
 
   /**
@@ -471,9 +528,12 @@ class SessionManager {
       this.markActivity(channelId);
     }
 
-    // A forward catch-up page may report more missed turns — page through the gap (bounded).
-    if (message.kind === KIND.HISTORY && (message as HistoryMessage).since != null) {
-      this.maybeContinueCatchup(channelId, message as HistoryMessage);
+    if (message.kind === KIND.HISTORY) {
+      const page = message as HistoryMessage;
+      // A forward catch-up page (since != null) may report more missed turns — page the gap (bounded).
+      if (page.since != null) this.maybeContinueCatchup(channelId, page);
+      // The initial page (since == null), empty or not, settles the thread: drop the loading grace.
+      else this.clearSettle(runtime);
     }
 
     if (message.kind === KIND.CHANNEL_DOWN) {
@@ -482,6 +542,7 @@ class SessionManager {
         window.clearTimeout(runtime.confirmTimer);
         runtime.confirmTimer = undefined;
       }
+      this.clearSettle(runtime);
       void notifySessionEnded(runtime.timeline.endedReason);
     } else {
       // ANY inbound message is genuinely from the laptop (broadcast self:false), so it proves the
@@ -598,6 +659,8 @@ class SessionManager {
       window.clearTimeout(runtime.confirmTimer);
       runtime.confirmTimer = undefined;
     }
+    this.clearSettle(runtime);
+    runtime.connectingSince = undefined;
     void runtime.client?.close();
     runtime.client = null;
     if (runtime.status !== 'ended') runtime.status = 'idle';
@@ -651,6 +714,7 @@ class SessionManager {
       if (stale.saveTimer != null) window.clearTimeout(stale.saveTimer);
       if (stale.metaTimer != null) window.clearTimeout(stale.metaTimer);
       if (stale.confirmTimer != null) window.clearTimeout(stale.confirmTimer);
+      if (stale.settleTimer != null) window.clearTimeout(stale.settleTimer);
       this.runtimes.delete(staleId);
       this.order = this.order.filter((id) => id !== staleId);
       this.warmLru = this.warmLru.filter((id) => id !== staleId);
@@ -684,6 +748,8 @@ class SessionManager {
         // The old socket may already be gone; the fresh client supersedes it either way.
       }
       existing.client = null;
+      // A re-scan is a fresh QR pairing: bump the scan time so the card jumps to the top of the sidebar.
+      existing.meta.scannedAt = pairing.savedAt ?? Date.now();
       if (!this.order.includes(channelId)) this.order.push(channelId);
       this.activeId = channelId;
       // attach() rewires the transport and runs syncHistory: with a transcript already present this
@@ -705,6 +771,7 @@ class SessionManager {
       cwd: null,
       kind: 'live',
       addedAt: stored.addedAt,
+      scannedAt: pairing.savedAt ?? stored.addedAt,
     };
     this.runtimes.set(channelId, {
       meta,
@@ -784,6 +851,10 @@ class SessionManager {
     if (runtime.confirmTimer != null) {
       window.clearTimeout(runtime.confirmTimer);
       runtime.confirmTimer = undefined;
+    }
+    if (runtime.settleTimer != null) {
+      window.clearTimeout(runtime.settleTimer);
+      runtime.settleTimer = undefined;
     }
     try {
       await runtime.stopDemo?.();
@@ -996,7 +1067,26 @@ class SessionManager {
       let changed = false;
       const now = Date.now();
       for (const runtime of this.runtimes.values()) {
-        if (runtime.ephemeral || (runtime.status !== 'live' && runtime.status !== 'idle')) continue;
+        if (runtime.ephemeral) continue;
+        // A connect that never completes (e.g. the laptop's session was killed and its channel never
+        // finishes joining) would otherwise sit on 'connecting' forever: the confirm deadline is armed
+        // only AFTER connectSession resolves. Stamp when connecting began and fail it past the liveness
+        // window. Placed ABOVE the cold-session skip below, since a hung connect has no client yet.
+        if (runtime.status === 'connecting') {
+          if (runtime.connectingSince == null) {
+            runtime.connectingSince = now;
+          } else if (now - runtime.connectingSince > HOST_CONFIRM_MS) {
+            runtime.status = 'error';
+            runtime.error = 'Couldn’t reach your session — the terminal may be closed. Tap Reconnect to try again.';
+            if (runtime.timeline.busy) runtime.timeline = { ...runtime.timeline, busy: false };
+            runtime.connectingSince = undefined;
+            this.clearSettle(runtime);
+            changed = true;
+          }
+          continue;
+        }
+        runtime.connectingSince = undefined;
+        if (runtime.status !== 'live' && runtime.status !== 'idle') continue;
         // Cold (evicted) sessions hold no live client and get no heartbeats — the watchdog must not
         // demote them to Offline; they reconnect when opened.
         if (!runtime.client) continue;
