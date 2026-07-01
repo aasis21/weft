@@ -224,11 +224,14 @@ export const sessionEnd = (reason) => ({
 /**
  * Ext -> phone liveness beat. `latestTurnIndex` is the highest committed turn_index in the CLI
  * store at beat time (or null when unknown), so a connected phone keeps a FRESH forward cursor
- * for post-away catch-up without waiting for a full state snapshot.
+ * for post-away catch-up without waiting for a full state snapshot. `busy` is the authoritative
+ * turn-in-flight flag re-asserted every beat, so a dropped `assistant.idle` self-corrects within
+ * one heartbeat instead of leaving the Stop control stuck; null means "unknown, don't touch".
  */
-export const heartbeat = (latestTurnIndex = null) => ({
+export const heartbeat = (latestTurnIndex = null, busy = null) => ({
   kind: KIND.HEARTBEAT,
   latestTurnIndex,
+  busy,
   ts: now(),
 });
 export const modeChange = (mode) => ({ kind: KIND.MODE, mode, ts: now() });

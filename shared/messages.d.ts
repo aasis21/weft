@@ -180,6 +180,8 @@ export interface Heartbeat extends BaseMessage {
   kind: "control.heartbeat";
   /** Highest committed turn_index in the CLI store at beat time (forward cursor); null if unknown. */
   latestTurnIndex?: number | null;
+  /** Authoritative turn-in-flight flag re-asserted each beat; null when unknown. */
+  busy?: boolean | null;
 }
 export interface ModeChange extends BaseMessage {
   kind: "control.mode";
@@ -304,7 +306,7 @@ export function sessionStart(
 ): SessionStart;
 export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function sessionEnd(reason?: string): SessionEnd;
-export function heartbeat(latestTurnIndex?: number | null): Heartbeat;
+export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
 export function modeChange(mode: SessionMode): ModeChange;
 export function interrupt(): InterruptMessage;
 export function historyRequest(

@@ -258,6 +258,40 @@ test("a STATE_REQUEST reflects busy/mode from the session metadata RPC when pres
   }
 });
 
+test("the heartbeat re-asserts busy from the activity RPC so a lost idle self-corrects", async () => {
+  const channel = makeFakeChannel();
+  const session = makeFakeSession();
+  session.rpc.metadata = {
+    async activity() {
+      return { hasActiveWork: true, abortable: true };
+    },
+  };
+  const relay = await attachRelay({ session, channel, channelId: "chan-1", heartbeatMs: 20 });
+  try {
+    await new Promise((r) => setTimeout(r, 55));
+    const beat = channel.sent.find((m) => m.kind === KIND.HEARTBEAT);
+    assert.ok(beat, "expected a heartbeat to be emitted");
+    assert.equal(beat.busy, true);
+  } finally {
+    await relay.stop("test", { closeTransport: false });
+  }
+});
+
+test("the heartbeat sends busy=null (unknown) when the host exposes no activity RPC", async () => {
+  const channel = makeFakeChannel();
+  const session = makeFakeSession(); // no metadata RPC
+  const relay = await attachRelay({ session, channel, channelId: "chan-1", heartbeatMs: 20 });
+  try {
+    await new Promise((r) => setTimeout(r, 55));
+    const beat = channel.sent.find((m) => m.kind === KIND.HEARTBEAT);
+    assert.ok(beat, "expected a heartbeat to be emitted");
+    // null, not false — the phone must keep its live busy rather than be forced idle each beat.
+    assert.equal(beat.busy, null);
+  } finally {
+    await relay.stop("test", { closeTransport: false });
+  }
+});
+
 test("createElicitationRelay.snapshotPending replays open ask_user payloads, cleared on complete", async () => {
   const channel = makeFakeChannel();
   const session = makeFakeSession();

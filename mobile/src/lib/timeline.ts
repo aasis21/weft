@@ -6,6 +6,7 @@ import type {
   ActivityMessage,
   ElicitationRequest,
   ElicitationComplete,
+  Heartbeat,
   History as HistoryMessage,
   HistoryItem,
   InnerMessage,
@@ -240,8 +241,13 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
         ]),
       };
     }
-    case KIND.HEARTBEAT:
-      return { ...state, lastHeartbeat: Date.now(), sessionEnded: false };
+    case KIND.HEARTBEAT: {
+      const beat = message as Heartbeat;
+      // Re-assert busy only when the extension actually knows it (boolean); a null/absent value
+      // means "unknown" and must not clobber the live busy driven by assistant.message_start/idle.
+      const busy = typeof beat.busy === 'boolean' ? beat.busy : state.busy;
+      return { ...state, busy, lastHeartbeat: Date.now(), sessionEnded: false };
+    }
     case KIND.MODE:
       return { ...state, mode: (message as ModeChange).mode };
     default:

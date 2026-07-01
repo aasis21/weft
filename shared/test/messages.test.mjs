@@ -59,12 +59,15 @@ test("historyRequest carries a forward `since` cursor, defaulting to null", () =
   assert.equal(historyRequest(42, 25).since, null);
 });
 
-test("heartbeat carries an optional latestTurnIndex forward cursor", () => {
-  const h = heartbeat(7);
+test("heartbeat carries an optional latestTurnIndex forward cursor and busy flag", () => {
+  const h = heartbeat(7, true);
   assert.equal(h.kind, KIND.HEARTBEAT);
   assert.equal(h.latestTurnIndex, 7);
+  assert.equal(h.busy, true);
   assert.equal(typeof h.ts, "number");
   assert.equal(heartbeat().latestTurnIndex, null); // default when unknown
+  assert.equal(heartbeat().busy, null); // default when unknown
+  assert.equal(heartbeat(3, false).busy, false);
 });
 
 test("stateRequest is a bare control request", () => {

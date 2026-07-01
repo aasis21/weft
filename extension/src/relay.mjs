@@ -295,9 +295,13 @@ export async function attachRelay({
   const heartbeatTimer = setInterval(() => {
     void (async () => {
       // Carry the store's latest turn_index so a connected phone keeps a fresh forward cursor
-      // (readLatestTurnIndex is best-effort and returns null on any read failure).
-      const latestTurnIndex = await readLatestTurnIndex(sessionId);
-      await sendSafe(heartbeat(latestTurnIndex));
+      // (readLatestTurnIndex is best-effort and returns null on any read failure), plus the
+      // authoritative busy flag so a dropped assistant.idle self-corrects within one beat.
+      const [latestTurnIndex, activity] = await Promise.all([
+        readLatestTurnIndex(sessionId),
+        readSessionActivity(session),
+      ]);
+      await sendSafe(heartbeat(latestTurnIndex, activity ? activity.busy : null));
       // The CLI keeps refining the chat title (summary) as the conversation grows; push the
       // latest to the phone whenever it changes so the header tracks the terminal.
       const title = await fetchTitle(session);
@@ -464,8 +468,9 @@ async function serveStateSnapshot({ session, sessionId, approvals, elicitations,
     ]);
     await sendSafe(
       stateSnapshot({
-        busy: activity.busy,
-        abortable: activity.abortable,
+        // A one-shot connect snapshot defaults to idle when the host can't tell us (null).
+        busy: activity?.busy ?? false,
+        abortable: activity?.abortable ?? false,
         mode,
         latestTurnIndex,
         approvals: approvals?.snapshotPending?.() ?? [],
@@ -482,24 +487,32 @@ async function serveStateSnapshot({ session, sessionId, approvals, elicitations,
 /**
  * Best-effort read of whether a turn is in flight and whether it can be stopped. Prefers the
  * experimental `metadata.activity()` RPC ({ hasActiveWork, abortable }); falls back to
- * `metadata.isProcessing()`; defaults to idle when neither is exposed by the host.
+ * `metadata.isProcessing()`. Returns null when NEITHER is exposed — the caller must treat that
+ * as "unknown", not "idle", so a per-beat heartbeat never clears a live Stop control on a host
+ * that can't report activity.
  */
 async function readSessionActivity(session) {
-  try {
-    const a = await session?.rpc?.metadata?.activity?.();
-    if (a && typeof a === "object") {
-      return { busy: Boolean(a.hasActiveWork), abortable: Boolean(a.abortable) };
+  const metadata = session?.rpc?.metadata;
+  if (metadata && typeof metadata.activity === "function") {
+    try {
+      const a = await metadata.activity();
+      if (a && typeof a === "object") {
+        return { busy: Boolean(a.hasActiveWork), abortable: Boolean(a.abortable) };
+      }
+    } catch {
+      // Experimental/absent — fall through to isProcessing.
     }
-  } catch {
-    // Experimental/absent — fall through to isProcessing.
   }
-  try {
-    const p = await session?.rpc?.metadata?.isProcessing?.();
-    const busy = Boolean(p && (typeof p === "object" ? p.isProcessing : p));
-    return { busy, abortable: busy };
-  } catch {
-    return { busy: false, abortable: false };
+  if (metadata && typeof metadata.isProcessing === "function") {
+    try {
+      const p = await metadata.isProcessing();
+      const busy = Boolean(p && (typeof p === "object" ? p.isProcessing : p));
+      return { busy, abortable: busy };
+    } catch {
+      // Fall through to unknown.
+    }
   }
+  return null;
 }
 
 /** Best-effort read of the session's current mode from the experimental metadata snapshot. */
