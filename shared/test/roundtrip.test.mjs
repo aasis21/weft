@@ -91,3 +91,42 @@ test("a wrong key cannot decrypt (message is dropped, not thrown)", async () => 
   await sender.close();
   await eavesdropper.close();
 });
+
+test("SecureChannel.onStatus reports connected on connect and disconnected on close", async () => {
+  _resetLocalBus();
+  const channelId = randomChannelId();
+  const ext = await generateKeyPair();
+  const phone = await generateKeyPair();
+  const key = await deriveSessionKey(ext.privateKey, phone.publicKeyB64);
+
+  const chan = new SecureChannel({
+    transport: createLocalTransport({ channelId }),
+    key,
+    identity: {},
+  });
+
+  const seen = [];
+  chan.onStatus((status) => seen.push(status));
+
+  await chan.connect();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(seen, ["connected"]);
+
+  await chan.close();
+  assert.deepEqual(seen, ["connected", "disconnected"]);
+});
+
+test("SecureChannel.onStatus is a no-op when the transport can't report status", () => {
+  const stub = {
+    connect: async () => {},
+    publish: async () => {},
+    subscribe: () => () => {},
+    close: async () => {},
+  };
+  const chan = new SecureChannel({ transport: stub, key: {}, identity: {} });
+  const off = chan.onStatus(() => {
+    throw new Error("should never be called");
+  });
+  assert.equal(typeof off, "function");
+  off();
+});

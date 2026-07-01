@@ -55,4 +55,15 @@ export class SecureChannel {
   async close() {
     await this.transport.close();
   }
+
+  /**
+   * Observe live connection-state changes (socket drop / rejoin) after connect(). Delegates to
+   * the transport; transports that can't detect this return a no-op unsubscribe.
+   * @param {(status: import("./transport.d.ts").TransportStatus, detail?: unknown) => void} handler
+   * @returns {() => void} unsubscribe
+   */
+  onStatus(handler) {
+    if (typeof this.transport.onStatus !== "function") return () => {};
+    return this.transport.onStatus(handler);
+  }
 }

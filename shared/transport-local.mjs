@@ -23,7 +23,19 @@ function busFor(channelId) {
 export function createLocalTransport({ channelId, deliverSelf = false } = {}) {
   if (!channelId) throw new Error("helm/transport-local: channelId is required");
   const localHandlers = new Map(); // event -> Set<handler> registered by THIS instance
+  const statusHandlers = new Set();
   let closed = false;
+  let connected = false;
+
+  function emitStatus(status) {
+    for (const h of statusHandlers) {
+      try {
+        h(status);
+      } catch {
+        /* isolate status-handler errors */
+      }
+    }
+  }
 
   function track(event, handler) {
     let s = localHandlers.get(event);
@@ -36,7 +48,8 @@ export function createLocalTransport({ channelId, deliverSelf = false } = {}) {
 
   return {
     async connect() {
-      /* no-op for local */
+      connected = true;
+      emitStatus("connected");
     },
 
     async publish(event, envelope) {
@@ -67,8 +80,18 @@ export function createLocalTransport({ channelId, deliverSelf = false } = {}) {
       };
     },
 
+    onStatus(handler) {
+      if (closed) return () => {};
+      statusHandlers.add(handler);
+      if (connected) queueMicrotask(() => statusHandlers.has(handler) && handler("connected"));
+      return () => statusHandlers.delete(handler);
+    },
+
     async close() {
       closed = true;
+      connected = false;
+      emitStatus("disconnected");
+      statusHandlers.clear();
       for (const [event, set] of localHandlers) {
         const shared = busFor(channelId).get(event);
         if (shared) for (const h of set) shared.delete(h);

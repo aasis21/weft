@@ -24,6 +24,7 @@ function createFakeSupabaseClient(bus = new Map()) {
         subscribe(cb) {
           this.subscribeCalls += 1;
           this.subscribed = true;
+          this.statusCb = cb;
           if (!bus.has(name)) bus.set(name, new Set());
           bus.get(name).add(this);
           queueMicrotask(() => cb("SUBSCRIBED"));
@@ -159,4 +160,75 @@ test("publish after close throws", async () => {
     () => transport.publish("stream", envelope),
     /helm\/transport-supabase: publish: transport is closed/
   );
+});
+
+test("onStatus reports connected on subscribe and disconnected on a live drop", async () => {
+  const client = createFakeSupabaseClient();
+  const transport = createSupabaseTransport({ client, channelId: "pair-status" });
+
+  const seen = [];
+  transport.onStatus((status) => seen.push(status));
+
+  await transport.connect();
+  await nextTick();
+  assert.deepEqual(seen, ["connected"]);
+
+  // Simulate a silent socket drop after we were live: realtime re-invokes the same status cb.
+  client.channels[0].statusCb("CHANNEL_ERROR", new Error("socket closed"));
+  assert.deepEqual(seen, ["connected", "disconnected"]);
+
+  // And a rejoin restores connected.
+  client.channels[0].statusCb("SUBSCRIBED");
+  assert.deepEqual(seen, ["connected", "disconnected", "connected"]);
+});
+
+test("onStatus gives a late subscriber the current connected state", async () => {
+  const client = createFakeSupabaseClient();
+  const transport = createSupabaseTransport({ client, channelId: "pair-late" });
+
+  await transport.connect();
+  await nextTick();
+
+  const seen = [];
+  transport.onStatus((status) => seen.push(status));
+  await nextTick();
+  assert.deepEqual(seen, ["connected"]);
+});
+
+test("onStatus does not fire disconnected for a pre-subscribe failure", async () => {
+  const client = createFakeSupabaseClient();
+  // Make the first subscribe fail instead of succeeding.
+  const realChannel = client.channel.bind(client);
+  client.channel = (name, opts) => {
+    const ch = realChannel(name, opts);
+    ch.subscribe = function subscribe(cb) {
+      this.subscribeCalls = (this.subscribeCalls ?? 0) + 1;
+      this.statusCb = cb;
+      queueMicrotask(() => cb("CHANNEL_ERROR", new Error("boom")));
+      return this;
+    };
+    return ch;
+  };
+  const transport = createSupabaseTransport({ client, channelId: "pair-fail" });
+
+  const seen = [];
+  transport.onStatus((status) => seen.push(status));
+  await assert.rejects(() => transport.connect());
+  await nextTick();
+  // Never became live, so there's no live-connection drop to report.
+  assert.deepEqual(seen, []);
+});
+
+test("onStatus unsubscribe stops further status delivery", async () => {
+  const client = createFakeSupabaseClient();
+  const transport = createSupabaseTransport({ client, channelId: "pair-unsub" });
+
+  const seen = [];
+  const off = transport.onStatus((status) => seen.push(status));
+
+  await transport.connect();
+  await nextTick();
+  off();
+  client.channels[0].statusCb("CHANNEL_ERROR");
+  assert.deepEqual(seen, ["connected"]);
 });

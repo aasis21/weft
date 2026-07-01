@@ -217,12 +217,55 @@ class SessionManager {
     runtime.client = client;
     runtime.status = 'live';
     runtime.error = undefined;
-    runtime.unsubscribe = client.subscribe((message) => this.onMessage(channelId, message));
+    const stopEvents = client.subscribe((message) => this.onMessage(channelId, message));
+    const stopStatus = client.onStatus((status) =>
+      this.handleTransportStatus(channelId, client, status),
+    );
+    runtime.unsubscribe = () => {
+      stopEvents();
+      stopStatus();
+    };
     this.emit();
     // Ask for the current session state (busy/mode + any pending prompts) so a fresh, mid-turn,
     // or reconnecting join reflects the truth immediately instead of waiting for the next event.
     this.requestState(channelId);
     this.maybeRequestFirstHistory(channelId, client);
+  }
+
+  /**
+   * React to live socket-state changes the transport reports (distinct from the heartbeat
+   * watchdog). A silent drop flips the session to Offline immediately — issue #44, where a
+   * dropped WebSocket otherwise lingered as "Quiet" for up to 45s — and a rejoin restores Live
+   * and re-pulls the authoritative state. `client` is captured so a late event from a superseded
+   * connection is ignored.
+   */
+  private handleTransportStatus(
+    channelId: string,
+    client: HelmClient,
+    status: 'connected' | 'disconnected',
+  ): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.client !== client || runtime.ephemeral || runtime.status === 'ended') {
+      return;
+    }
+    if (status === 'disconnected') {
+      if (runtime.status === 'live' || runtime.status === 'idle') {
+        runtime.status = 'error';
+        runtime.error = 'Connection lost — reconnect to resume.';
+        // A dead socket can't be actively working; drop a stuck Stop control.
+        if (runtime.timeline.busy) runtime.timeline = { ...runtime.timeline, busy: false };
+        this.emit();
+      }
+      return;
+    }
+    // 'connected' only matters as a RECOVERY here — attach() already handles the first connect,
+    // so acting on it while live would fire a redundant state request on every join.
+    if (runtime.status === 'error' || runtime.status === 'connecting') {
+      runtime.status = 'live';
+      runtime.error = undefined;
+      this.emit();
+      this.requestState(channelId);
+    }
   }
 
   /**

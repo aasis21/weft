@@ -17,6 +17,8 @@ export interface HelmClient {
   channel: SecureChannel;
   send(message: InnerMessage): Promise<void>;
   subscribe(handler: (message: InnerMessage, event: LogicalEvent) => void): () => void;
+  /** Observe live socket state (drop/rejoin) after connect; no-op on transports that can't detect it. */
+  onStatus(handler: (status: 'connected' | 'disconnected') => void): () => void;
   close(): Promise<void>;
 }
 
@@ -141,6 +143,9 @@ function wrapChannel(channelId: string, channel: SecureChannel): HelmClient {
       return () => {
         for (const unsub of unsubs) unsub();
       };
+    },
+    onStatus(handler) {
+      return channel.onStatus(handler as (status: string, detail?: unknown) => void);
     },
     close: () => channel.close(),
   };

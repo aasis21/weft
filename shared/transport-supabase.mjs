@@ -18,6 +18,7 @@
 const STATUS_SUBSCRIBED = "SUBSCRIBED";
 const STATUS_CHANNEL_ERROR = "CHANNEL_ERROR";
 const STATUS_TIMED_OUT = "TIMED_OUT";
+const STATUS_CLOSED = "CLOSED";
 
 function fail(message) {
   return new Error(`helm/transport-supabase: ${message}`);
@@ -41,6 +42,22 @@ export function createSupabaseTransport({ client, channelId } = {}) {
   let closed = false;
   let subscribed = false;
   let connectPromise;
+
+  // Handlers observing live connection-state changes (see onStatus). Supabase Realtime keeps
+  // invoking the subscribe() status callback for the channel's lifetime — SUBSCRIBED on
+  // (re)join, CHANNEL_ERROR/TIMED_OUT/CLOSED on a drop — so we forward those as connected/
+  // disconnected. Without this a silent socket drop is invisible until a heartbeat times out.
+  const statusHandlers = new Set();
+
+  function emitStatus(status, detail) {
+    for (const handler of statusHandlers) {
+      try {
+        handler(status, detail);
+      } catch {
+        // One faulty status subscriber must not break the others.
+      }
+    }
+  }
 
   // event -> Set<handler>. The catch-all listener below dispatches into this map, so
   // delivery is independent of when connect()/subscribe() are called.
@@ -76,12 +93,21 @@ export function createSupabaseTransport({ client, channelId } = {}) {
 
     const promise = new Promise((resolve, reject) => {
       channel.subscribe((status, err) => {
+        if (closed) return;
         if (status === STATUS_SUBSCRIBED) {
           subscribed = true;
+          emitStatus("connected");
           resolve();
           return;
         }
-        if (status === STATUS_CHANNEL_ERROR || status === STATUS_TIMED_OUT) {
+        if (
+          status === STATUS_CHANNEL_ERROR ||
+          status === STATUS_TIMED_OUT ||
+          status === STATUS_CLOSED
+        ) {
+          // A drop after we were already live is a live-connection event, not a connect
+          // failure — surface it to onStatus subscribers so the UI can go Offline at once.
+          if (subscribed) emitStatus("disconnected", err);
           const detail = err
             ? `: ${err instanceof Error ? err.message : String(err)}`
             : "";
@@ -157,10 +183,19 @@ export function createSupabaseTransport({ client, channelId } = {}) {
       };
     },
 
+    onStatus(handler) {
+      if (closed) return () => {};
+      statusHandlers.add(handler);
+      // Give a late subscriber the current truth so it isn't stuck at an assumed state.
+      if (subscribed) queueMicrotask(() => statusHandlers.has(handler) && handler("connected"));
+      return () => statusHandlers.delete(handler);
+    },
+
     async close() {
       if (closed) return;
       closed = true;
       eventHandlers.clear();
+      statusHandlers.clear();
       await removeChannel();
     },
   };
