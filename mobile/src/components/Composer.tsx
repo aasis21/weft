@@ -113,6 +113,28 @@ export function Composer({
     }
   };
 
+  const focusMenuItem = (direction: 1 | -1): void => {
+    const items = Array.from(modeWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+    if (!items.length) return;
+    const active = document.activeElement;
+    const index = active instanceof HTMLButtonElement ? items.indexOf(active) : -1;
+    items[(index + direction + items.length) % items.length]?.focus();
+  };
+
+  const onModeButtonKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    setMenuOpen(true);
+    window.requestAnimationFrame(() => focusMenuItem(event.key === 'ArrowDown' ? 1 : -1));
+  };
+
+  const onModeMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      focusMenuItem(event.key === 'ArrowDown' ? 1 : -1);
+    }
+  };
+
   const onTextChange = (value: string): void => {
     setText(value);
     saveDraft(sessionId, value);
@@ -137,13 +159,14 @@ export function Composer({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
+            onKeyDown={onModeButtonKeyDown}
           >
             <span className="pill-dot" aria-hidden="true" />
             {MODE_LABEL[mode] ?? mode}
             <span className="pill-caret" aria-hidden="true">▾</span>
           </button>
           {menuOpen ? (
-            <div className="mode-menu" role="menu">
+            <div className="mode-menu" role="menu" onKeyDown={onModeMenuKeyDown}>
               {MODES.map((item) => (
                 <button
                   key={item}

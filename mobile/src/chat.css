@@ -90,6 +90,7 @@
 .helm-session .composer textarea:focus-visible,
 .helm-session .send-btn:focus-visible,
 .helm-session .stop-btn:focus-visible,
+.helm-session details > summary:focus-visible,
 .helm-session .approval-args > summary:focus-visible,
 .helm-session .approval-btn:focus-visible,
 .helm-session .elicit-input:focus-visible,

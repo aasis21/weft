@@ -278,6 +278,30 @@ input:focus {
   box-shadow: 0 0 0 4px rgba(77, 141, 255, 0.16);
 }
 
+/* --- Focus-visible rings (a11y, WCAG 2.4.7) --- */
+textarea:focus-visible,
+input:focus-visible,
+.primary-action:focus-visible,
+.secondary-action:focus-visible,
+.demo-action:focus-visible,
+.danger-action:focus-visible,
+.mode-selector button:focus-visible,
+.install-tab:focus-visible,
+.copy-btn:focus-visible,
+.landing-footer a:focus-visible,
+.sessions-link:focus-visible,
+.pair-back:focus-visible,
+.link-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(77, 141, 255, 0.45);
+}
+
+.install-tab:focus-visible,
+.copy-btn:focus-visible {
+  outline-offset: -2px;
+}
+
 textarea {
   min-height: 136px;
   padding: 14px;
