@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { ElicitationRequest } from '@aasis21/helm-shared';
 
@@ -118,6 +118,21 @@ function initialValues(fields: Field[]): Record<string, FieldValue> {
   return out;
 }
 
+/** A required field is "missing" until answered; a boolean is always answered (false is valid). */
+function fieldMissing(f: Field, v: FieldValue | undefined): boolean {
+  if (!f.required) return false;
+  if (f.control === 'multiselect') return !Array.isArray(v) || v.length === 0;
+  if (f.control === 'boolean') return false;
+  return v == null || String(v).trim() === '';
+}
+
+/** Whether a field has been given a value at all (drives the "answered" dot in the stepper). */
+function hasValue(f: Field, v: FieldValue | undefined): boolean {
+  if (f.control === 'multiselect') return Array.isArray(v) && v.length > 0;
+  if (f.control === 'boolean') return true;
+  return v != null && String(v).trim() !== '';
+}
+
 const HTML_INPUT_TYPE: Record<string, string> = {
   email: 'email',
   uri: 'url',
@@ -135,29 +150,59 @@ export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: E
   const fields = useFields(req);
   const [values, setValues] = useState<Record<string, FieldValue>>(() => initialValues(fields));
   const [touched, setTouched] = useState(false);
+  const [step, setStep] = useState(0);
+  const swipeStartX = useRef<number | null>(null);
 
   const setValue = (name: string, value: FieldValue): void =>
     setValues((prev) => ({ ...prev, [name]: value }));
 
   const missing = useMemo(
-    () =>
-      fields
-        .filter((f) => {
-          if (!f.required) return false;
-          const v = values[f.name];
-          if (f.control === 'multiselect') return !Array.isArray(v) || v.length === 0;
-          if (f.control === 'boolean') return false; // a boolean is always answered (false is valid)
-          return v == null || String(v).trim() === '';
-        })
-        .map((f) => f.name),
+    () => fields.filter((f) => fieldMissing(f, values[f.name])).map((f) => f.name),
     [fields, values],
   );
 
   const isUrlMode = req.mode === 'url';
+  // Present many questions as a horizontal one-at-a-time slider so the card stays compact
+  // instead of growing into one tall scroll; a single question keeps the plain stacked form.
+  const isWizard = !isUrlMode && fields.length > 1;
+  const clampedStep = Math.min(step, Math.max(0, fields.length - 1));
+  const atLast = clampedStep >= fields.length - 1;
+
+  const goPrev = (): void => {
+    setTouched(false);
+    setStep((s) => Math.max(0, Math.min(s, fields.length - 1) - 1));
+  };
+  const goNext = (): void => {
+    const f = fields[clampedStep];
+    if (f && fieldMissing(f, values[f.name])) {
+      setTouched(true); // block advancing past an unanswered required question
+      return;
+    }
+    setTouched(false);
+    setStep(() => Math.min(clampedStep + 1, fields.length - 1));
+  };
+  const goTo = (i: number): void => {
+    setTouched(false);
+    setStep(Math.max(0, Math.min(i, fields.length - 1)));
+  };
+
+  const onTouchStart = (e: React.TouchEvent): void => {
+    swipeStartX.current = e.touches[0]?.clientX ?? null;
+  };
+  const onTouchEnd = (e: React.TouchEvent): void => {
+    const start = swipeStartX.current;
+    swipeStartX.current = null;
+    if (start == null) return;
+    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
+    if (Math.abs(dx) < 45) return;
+    if (dx < 0) goNext();
+    else goPrev();
+  };
 
   const submit = (): void => {
     if (missing.length > 0) {
       setTouched(true);
+      if (isWizard) goTo(fields.findIndex((f) => missing.includes(f.name))); // jump to the gap
       return;
     }
     const content: Record<string, FieldValue> = {};
@@ -179,6 +224,102 @@ export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: E
     onSubmit(content);
   };
 
+  const renderField = (f: Field): JSX.Element => {
+    const showError = touched && f.required && missing.includes(f.name);
+    const fieldId = `elicit-${req.requestId}-${f.name}`;
+    return (
+      <div className={`elicit-field${showError ? ' invalid' : ''}`}>
+        <label className="elicit-label" htmlFor={fieldId}>
+          {f.title}
+          {f.required ? <span className="elicit-req" aria-hidden="true"> *</span> : null}
+        </label>
+        {f.description ? <p className="elicit-desc">{f.description}</p> : null}
+
+        {f.control === 'text' ? (
+          <input
+            id={fieldId}
+            className="elicit-input"
+            type={f.format ? HTML_INPUT_TYPE[f.format] ?? 'text' : 'text'}
+            value={String(values[f.name] ?? '')}
+            maxLength={f.maxLength}
+            minLength={f.minLength}
+            onChange={(e) => setValue(f.name, e.target.value)}
+          />
+        ) : null}
+
+        {f.control === 'number' ? (
+          <input
+            id={fieldId}
+            className="elicit-input"
+            type="number"
+            inputMode={f.integer ? 'numeric' : 'decimal'}
+            value={String(values[f.name] ?? '')}
+            min={f.min}
+            max={f.max}
+            step={f.integer ? 1 : 'any'}
+            onChange={(e) => setValue(f.name, e.target.value)}
+          />
+        ) : null}
+
+        {f.control === 'boolean' ? (
+          <label className="elicit-toggle">
+            <input
+              id={fieldId}
+              type="checkbox"
+              checked={Boolean(values[f.name])}
+              onChange={(e) => setValue(f.name, e.target.checked)}
+            />
+            <span>{Boolean(values[f.name]) ? 'Yes' : 'No'}</span>
+          </label>
+        ) : null}
+
+        {f.control === 'select' ? (
+          <select
+            id={fieldId}
+            className="elicit-input"
+            value={String(values[f.name] ?? '')}
+            onChange={(e) => setValue(f.name, e.target.value)}
+          >
+            <option value="" disabled={f.required}>
+              {f.required ? 'Select…' : '— none —'}
+            </option>
+            {f.options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+
+        {f.control === 'multiselect' ? (
+          <div className="elicit-checks" role="group" aria-labelledby={fieldId}>
+            {f.options.map((opt) => {
+              const selected = Array.isArray(values[f.name]) && (values[f.name] as string[]).includes(opt.value);
+              return (
+                <label key={opt.value} className={`elicit-check${selected ? ' on' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={(e) => {
+                      const cur = Array.isArray(values[f.name]) ? (values[f.name] as string[]) : [];
+                      setValue(
+                        f.name,
+                        e.target.checked ? [...cur, opt.value] : cur.filter((v) => v !== opt.value),
+                      );
+                    }}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {showError ? <p className="elicit-field-error" role="alert">Please answer this question.</p> : null}
+      </div>
+    );
+  };
+
   return (
     <div className="elicit-card" role="group" aria-label={`Copilot asks: ${req.message}`}>
       <div className="elicit-head">
@@ -191,109 +332,64 @@ export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: E
           This step opens a page on your computer{req.url ? ':' : '.'}
           {req.url ? <code className="elicit-url">{req.url}</code> : null}
         </p>
-      ) : (
-        <div className="elicit-fields">
-          {fields.map((f) => {
-            const showError = touched && f.required && missing.includes(f.name);
-            const fieldId = `elicit-${req.requestId}-${f.name}`;
-            return (
-              <div key={f.name} className={`elicit-field${showError ? ' invalid' : ''}`}>
-                <label className="elicit-label" htmlFor={fieldId}>
-                  {f.title}
-                  {f.required ? <span className="elicit-req" aria-hidden="true"> *</span> : null}
-                </label>
-                {f.description ? <p className="elicit-desc">{f.description}</p> : null}
+      ) : isWizard ? (
+        <div className="elicit-wizard">
+          <div className="elicit-progress">
+            <span className="elicit-step-count">
+              Question {clampedStep + 1} of {fields.length}
+            </span>
+            <div className="elicit-dots" role="tablist" aria-label="Questions">
+              {fields.map((f, i) => (
+                <button
+                  key={f.name}
+                  type="button"
+                  role="tab"
+                  aria-selected={i === clampedStep}
+                  aria-label={`Question ${i + 1}: ${f.title}`}
+                  className={`elicit-dot${i === clampedStep ? ' on' : ''}${
+                    hasValue(f, values[f.name]) ? ' done' : ''
+                  }${touched && missing.includes(f.name) ? ' bad' : ''}`}
+                  onClick={() => goTo(i)}
+                />
+              ))}
+            </div>
+          </div>
 
-                {f.control === 'text' ? (
-                  <input
-                    id={fieldId}
-                    className="elicit-input"
-                    type={f.format ? HTML_INPUT_TYPE[f.format] ?? 'text' : 'text'}
-                    value={String(values[f.name] ?? '')}
-                    maxLength={f.maxLength}
-                    minLength={f.minLength}
-                    onChange={(e) => setValue(f.name, e.target.value)}
-                  />
-                ) : null}
+          <div className="elicit-viewport" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+            <div className="elicit-track" style={{ transform: `translateX(-${clampedStep * 100}%)` }}>
+              {fields.map((f) => (
+                <div key={f.name} className="elicit-slide" aria-hidden={fields[clampedStep]?.name !== f.name}>
+                  {renderField(f)}
+                </div>
+              ))}
+            </div>
+          </div>
 
-                {f.control === 'number' ? (
-                  <input
-                    id={fieldId}
-                    className="elicit-input"
-                    type="number"
-                    inputMode={f.integer ? 'numeric' : 'decimal'}
-                    value={String(values[f.name] ?? '')}
-                    min={f.min}
-                    max={f.max}
-                    step={f.integer ? 1 : 'any'}
-                    onChange={(e) => setValue(f.name, e.target.value)}
-                  />
-                ) : null}
-
-                {f.control === 'boolean' ? (
-                  <label className="elicit-toggle">
-                    <input
-                      id={fieldId}
-                      type="checkbox"
-                      checked={Boolean(values[f.name])}
-                      onChange={(e) => setValue(f.name, e.target.checked)}
-                    />
-                    <span>{Boolean(values[f.name]) ? 'Yes' : 'No'}</span>
-                  </label>
-                ) : null}
-
-                {f.control === 'select' ? (
-                  <select
-                    id={fieldId}
-                    className="elicit-input"
-                    value={String(values[f.name] ?? '')}
-                    onChange={(e) => setValue(f.name, e.target.value)}
-                  >
-                    <option value="" disabled={f.required}>
-                      {f.required ? 'Select…' : '— none —'}
-                    </option>
-                    {f.options.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-
-                {f.control === 'multiselect' ? (
-                  <div className="elicit-checks" role="group" aria-labelledby={fieldId}>
-                    {f.options.map((opt) => {
-                      const selected = Array.isArray(values[f.name]) && (values[f.name] as string[]).includes(opt.value);
-                      return (
-                        <label key={opt.value} className={`elicit-check${selected ? ' on' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={(e) => {
-                              const cur = Array.isArray(values[f.name]) ? (values[f.name] as string[]) : [];
-                              setValue(
-                                f.name,
-                                e.target.checked ? [...cur, opt.value] : cur.filter((v) => v !== opt.value),
-                              );
-                            }}
-                          />
-                          <span>{opt.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
+          <div className="elicit-nav">
+            <button
+              type="button"
+              className="elicit-nav-btn"
+              onClick={goPrev}
+              disabled={clampedStep === 0}
+            >
+              ← Back
+            </button>
+            {atLast ? (
+              <button type="button" className="elicit-btn submit" onClick={submit}>
+                <span className="elicit-btn-icon" aria-hidden="true">✓</span>
+                Submit
+              </button>
+            ) : (
+              <button type="button" className="elicit-nav-btn next" onClick={goNext}>
+                Next →
+              </button>
+            )}
+          </div>
         </div>
+      ) : (
+        <div className="elicit-fields">{fields.map((f) => <div key={f.name}>{renderField(f)}</div>)}</div>
       )}
 
-      {touched && missing.length > 0 ? (
-        <p className="elicit-error" role="alert">
-          ⚠ Please fill in the required field{missing.length > 1 ? 's' : ''}.
-        </p>
-      ) : null}
       {error ? (
         <p className="elicit-error" role="alert">
           ⚠ {error}
@@ -301,12 +397,12 @@ export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: E
       ) : null}
 
       <div className="elicit-actions">
-        {isUrlMode ? null : (
+        {!isUrlMode && !isWizard ? (
           <button type="button" className="elicit-btn submit" onClick={submit}>
             <span className="elicit-btn-icon" aria-hidden="true">✓</span>
             Submit
           </button>
-        )}
+        ) : null}
         <button type="button" className="elicit-btn decline" onClick={onDecline}>
           Decline
         </button>

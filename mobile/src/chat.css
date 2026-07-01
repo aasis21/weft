@@ -789,6 +789,50 @@
 .elicit-check.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .elicit-check input { width: 17px; height: 17px; accent-color: var(--accent); }
 
+/* Multi-question stepper: one field at a time, sliding horizontally, so the card
+   stays short instead of stacking every question into a tall scroll. */
+.elicit-wizard { display: flex; flex-direction: column; gap: 10px; }
+.elicit-progress { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.elicit-step-count { font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.elicit-dots { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.elicit-dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.elicit-dot.done { background: color-mix(in srgb, var(--accent) 50%, transparent); }
+.elicit-dot.on { background: var(--accent); border-color: var(--accent); transform: scale(1.3); }
+.elicit-dot.bad { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 45%, transparent); }
+
+.elicit-viewport { overflow: hidden; margin: 0 -2px; }
+.elicit-track { display: flex; align-items: stretch; transition: transform 0.28s ease; }
+.elicit-slide { flex: 0 0 100%; min-width: 0; box-sizing: border-box; padding: 2px; }
+
+.elicit-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.elicit-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  min-height: 38px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.elicit-nav-btn.next { font-weight: 600; border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+.elicit-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.elicit-nav .elicit-btn.submit { flex: 0 0 auto; }
+.elicit-field-error { margin: 3px 0 0; color: var(--danger); font-size: 11px; line-height: 1.3; }
+
 .elicit-error { margin: 0; color: var(--danger); font-size: 11.5px; line-height: 1.3; }
 
 .elicit-actions { display: flex; flex-wrap: wrap; gap: 7px; }
