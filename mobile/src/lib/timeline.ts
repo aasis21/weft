@@ -235,7 +235,7 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
       const { requestId } = message as ElicitationComplete;
       return dismissElicitation(state, requestId);
     }
-    case KIND.SESSION_START:
+    case KIND.CHANNEL_UP:
       return {
         ...state,
         cwd: message.cwd ?? state.cwd,
@@ -251,7 +251,7 @@ export function reduceTimeline(state: TimelineState, message: InnerMessage): Tim
         title: message.title || state.title,
         cwd: message.cwd ?? state.cwd,
       };
-    case KIND.SESSION_END: {
+    case KIND.CHANNEL_DOWN: {
       const reason = message.reason ?? 'Session ended.';
       return {
         ...state,

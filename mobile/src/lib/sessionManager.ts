@@ -1,5 +1,5 @@
 import { KIND, approvalDecision, elicitationResponse, historyRequest, interrupt, modeChange, prompt, stateRequest, HISTORY_PAGE_DEFAULT } from '@aasis21/helm-shared';
-import type { History as HistoryMessage, InnerMessage, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import type { ChannelUp, History as HistoryMessage, InnerMessage, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { connectSession, pairSession } from './helmClient';
 import type { HelmClient } from './helmClient';
 import {
@@ -33,6 +33,9 @@ export type SessionStatus = 'connecting' | 'live' | 'idle' | 'ended' | 'error';
 
 export interface SessionMeta {
   channelId: string;
+  /** The Copilot CLI session this card mirrors (announced via channel_up). The card is deduped by
+   *  this durable id, so a resume that rotates the channelId keeps the same card. */
+  sessionId?: string;
   title: string;
   cwd: string | null;
   kind: 'live' | 'demo';
@@ -100,7 +103,7 @@ function isUnreadActivity(message: InnerMessage): boolean {
     case KIND.ACTIVITY:
     case KIND.APPROVAL_REQUEST:
     case KIND.ELICITATION_REQUEST:
-    case KIND.SESSION_END:
+    case KIND.CHANNEL_DOWN:
       return true;
     default:
       return false;
@@ -171,6 +174,7 @@ class SessionManager {
       const timeline = restoreTimeline(persisted);
       const meta: SessionMeta = {
         channelId,
+        sessionId: s.sessionId ?? undefined,
         title: titleFor(channelId, timeline.cwd ?? s.cwd, timeline.title ?? s.title),
         cwd: timeline.cwd ?? s.cwd,
         kind: 'live',
@@ -364,12 +368,26 @@ class SessionManager {
       this.maybeContinueCatchup(channelId, message as HistoryMessage);
     }
 
-    if (message.kind === KIND.SESSION_END) {
+    if (message.kind === KIND.CHANNEL_DOWN) {
       runtime.status = 'ended';
       void notifySessionEnded(runtime.timeline.endedReason);
     } else {
       if (runtime.status !== 'live') runtime.status = 'live';
       if (runtime.error) runtime.error = undefined;
+    }
+
+    // A channel announces which Copilot session it serves. Key the card by that durable sessionId so
+    // a `copilot --resume` (which rotates the channelId) collapses onto the same card instead of
+    // forking a new one.
+    if (message.kind === KIND.CHANNEL_UP) {
+      const sid = (message as ChannelUp).sessionId;
+      if (sid && sid !== 'unknown-session') {
+        if (runtime.meta.sessionId !== sid) {
+          runtime.meta.sessionId = sid;
+          if (!runtime.ephemeral) void patchSession(channelId, { sessionId: sid });
+        }
+        this.reconcileBySessionId(channelId, sid);
+      }
     }
 
     if (runtime.timeline.cwd && runtime.timeline.cwd !== runtime.meta.cwd) {
@@ -412,6 +430,46 @@ class SessionManager {
     }, PERSIST_THROTTLE_MS);
   }
 
+  /** Collapse a stale duplicate card when a channel reports a sessionId we already track under a
+   *  different channelId (e.g. `copilot --resume` rotated the channelId). The live channel keeps its
+   *  card; the stale one is torn down. Continuity: seed the (empty) live timeline from the stale one,
+   *  then the self-healing history sync forward-catches-up. */
+  private reconcileBySessionId(keepId: string, sessionId: string): void {
+    const keep = this.runtimes.get(keepId);
+    if (!keep) return;
+    for (const [staleId, stale] of this.runtimes) {
+      if (staleId === keepId || stale.ephemeral) continue;
+      if (stale.meta.sessionId !== sessionId) continue;
+
+      // Keep the earliest addedAt so the merged card holds its place in the list.
+      keep.meta.addedAt = Math.min(keep.meta.addedAt, stale.meta.addedAt);
+      if (!keep.timeline.title && stale.meta.title) keep.meta.title = stale.meta.title;
+      // Seed the transcript for instant continuity when the live channel is still empty (a fresh
+      // resume); the history sync then forward-catches-up. If it already has content, leave it.
+      if (keep.timeline.items.length === 0 && keep.timeline.history.length === 0) {
+        keep.timeline = {
+          ...keep.timeline,
+          items: stale.timeline.items,
+          history: stale.timeline.history,
+          historyCursor: stale.timeline.historyCursor,
+          historyHasMore: stale.timeline.historyHasMore,
+          latestTurnIndex: keep.timeline.latestTurnIndex ?? stale.timeline.latestTurnIndex,
+        };
+      }
+      keep.unread = keep.unread || stale.unread;
+
+      // Tear down the stale channel + its card + its stored/transcript state.
+      stale.unsubscribe?.();
+      void stale.client?.close();
+      if (stale.saveTimer != null) window.clearTimeout(stale.saveTimer);
+      this.runtimes.delete(staleId);
+      this.order = this.order.filter((id) => id !== staleId);
+      if (this.activeId === staleId) this.activeId = keepId;
+      void removeSession(staleId);
+      void clearTranscript(staleId);
+    }
+  }
+
   // --- adding sessions -------------------------------------------------
   async addByQr(raw: string): Promise<string> {
     const { client, pairing } = await pairSession(raw);
@@ -424,6 +482,7 @@ class SessionManager {
       const prior = (await loadSessions()).find((s) => s.pairing.channelId === channelId);
       await upsertSession({
         pairing,
+        sessionId: prior?.sessionId ?? existing.meta.sessionId ?? null,
         title: prior?.title ?? null,
         cwd: prior?.cwd ?? null,
         addedAt: prior?.addedAt ?? existing.meta.addedAt,

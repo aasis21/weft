@@ -15,8 +15,8 @@ import {
   logLine,
   modeChange,
   randomChannelId,
-  sessionEnd,
-  sessionStart,
+  channelDown,
+  channelUp,
   toolComplete,
   toolStart,
   userMessage,
@@ -114,7 +114,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   ];
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
-  push(100, () => extension.send(sessionStart(channelId, 'demo-session', 'C:\\Users\\akash\\helm')));
+  push(100, () => extension.send(channelUp(channelId, 'demo-session', 'C:\\Users\\akash\\helm')));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>
@@ -215,7 +215,7 @@ export async function startDemoSession(): Promise<DemoSession> {
       ),
     ),
   );
-  push(120_000, () => extension.send(sessionEnd('Demo script finished.')));
+  push(120_000, () => extension.send(channelDown('Demo script finished.')));
 
   return {
     client,

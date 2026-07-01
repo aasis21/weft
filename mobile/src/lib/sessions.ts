@@ -7,6 +7,9 @@ const SESSIONS_KEY = 'helm.sessions.v1';
 /** A joined session: the ECDH pairing material plus light display metadata. */
 export interface StoredSession {
   pairing: StoredPairing;
+  /** The durable Copilot session id this card mirrors (learned from channel_up). Used to dedupe
+   *  cards across channels/resumes. Optional: older stored entries won't have it. */
+  sessionId?: string | null;
   title: string | null;
   cwd: string | null;
   addedAt: number;
@@ -31,12 +34,37 @@ async function write(list: StoredSession[]): Promise<void> {
   globalThis.localStorage?.setItem(SESSIONS_KEY, value);
 }
 
+/** Collapse stored entries that share a real sessionId (e.g. a session re-paired under a new
+ *  channelId before the live reconcile removed the old one). Keeps the most-recently-seen channel,
+ *  preserving list order. */
+function dedupeBySessionId(list: StoredSession[]): StoredSession[] {
+  const seen = new Map<string, StoredSession>();
+  const out: StoredSession[] = [];
+  for (const s of list) {
+    const sid = s.sessionId;
+    if (!sid || sid === 'unknown-session') {
+      out.push(s);
+      continue;
+    }
+    const prior = seen.get(sid);
+    if (!prior) {
+      seen.set(sid, s);
+      out.push(s);
+    } else if ((s.lastSeenAt ?? 0) > (prior.lastSeenAt ?? 0)) {
+      seen.set(sid, s);
+      const idx = out.indexOf(prior);
+      if (idx >= 0) out[idx] = s;
+    }
+  }
+  return out;
+}
+
 /**
  * Load every joined session. Transparently migrates a single legacy
  * `helm.pairing.v1` entry into the multi-session list on first run.
  */
 export async function loadSessions(): Promise<StoredSession[]> {
-  const list = await read();
+  const list = dedupeBySessionId(await read());
   if (list.length > 0) return list;
   const legacy = await loadStoredPairing();
   if (legacy?.channelId && legacy.publicKeyB64) {
@@ -64,7 +92,7 @@ export async function upsertSession(session: StoredSession): Promise<void> {
 
 export async function patchSession(
   channelId: string,
-  patch: Partial<Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt'>>,
+  patch: Partial<Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId'>>,
 ): Promise<void> {
   const list = await read();
   let changed = false;

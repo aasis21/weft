@@ -42,9 +42,9 @@ export const KIND: {
   readonly ELICITATION_REQUEST: "elicitation.request";
   readonly ELICITATION_RESPONSE: "elicitation.response";
   readonly ELICITATION_COMPLETE: "elicitation.complete";
-  readonly SESSION_START: "control.session_start";
+  readonly CHANNEL_UP: "control.channel_up";
   readonly SESSION_META: "control.session_meta";
-  readonly SESSION_END: "control.session_end";
+  readonly CHANNEL_DOWN: "control.channel_down";
   readonly HEARTBEAT: "control.heartbeat";
   readonly MODE: "control.mode";
   readonly INTERRUPT: "control.interrupt";
@@ -168,8 +168,8 @@ export interface ElicitationComplete extends BaseMessage {
   requestId: string;
   action?: ElicitationAction;
 }
-export interface SessionStart extends BaseMessage {
-  kind: "control.session_start";
+export interface ChannelUp extends BaseMessage {
+  kind: "control.channel_up";
   channelId: string;
   sessionId: string;
   cwd?: string;
@@ -182,8 +182,8 @@ export interface SessionMeta extends BaseMessage {
   title?: string;
   cwd?: string;
 }
-export interface SessionEnd extends BaseMessage {
-  kind: "control.session_end";
+export interface ChannelDown extends BaseMessage {
+  kind: "control.channel_down";
   reason?: string;
 }
 export interface Heartbeat extends BaseMessage {
@@ -254,9 +254,9 @@ export type InnerMessage =
   | ElicitationRequest
   | ElicitationResponse
   | ElicitationComplete
-  | SessionStart
+  | ChannelUp
   | SessionMeta
-  | SessionEnd
+  | ChannelDown
   | Heartbeat
   | ModeChange
   | InterruptMessage
@@ -310,14 +310,14 @@ export function elicitationComplete(
   requestId: string,
   action?: ElicitationAction
 ): ElicitationComplete;
-export function sessionStart(
+export function channelUp(
   channelId: string,
   sessionId: string,
   cwd?: string,
   title?: string
-): SessionStart;
+): ChannelUp;
 export function sessionMeta(title?: string, cwd?: string): SessionMeta;
-export function sessionEnd(reason?: string): SessionEnd;
+export function channelDown(reason?: string): ChannelDown;
 export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
 export function modeChange(mode: SessionMode): ModeChange;
 export function interrupt(): InterruptMessage;

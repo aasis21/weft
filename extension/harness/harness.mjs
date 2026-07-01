@@ -114,20 +114,20 @@ async function main() {
 
   const session = new FakeSession();
   const seen = {
-    sessionStart: false,
+    channelUp: false,
     assistant: false,
     delta: false,
     toolStart: false,
     toolComplete: false,
     approval: false,
     modeConfirm: false,
-    sessionEnd: false,
+    channelDown: false,
   };
 
   phoneChannel.onEvent(EVENTS.CONTROL, (msg) => {
-    if (msg.kind === KIND.SESSION_START) seen.sessionStart = true;
+    if (msg.kind === KIND.CHANNEL_UP) seen.channelUp = true;
     if (msg.kind === KIND.MODE && msg.mode === "plan") seen.modeConfirm = true;
-    if (msg.kind === KIND.SESSION_END) seen.sessionEnd = true;
+    if (msg.kind === KIND.CHANNEL_DOWN) seen.channelDown = true;
     print(auto, `[control] ${msg.kind}`);
   });
 
@@ -191,19 +191,19 @@ async function main() {
   await waitFor(() => seen.modeConfirm);
 
   await relay.stop("harness_complete");
-  await waitFor(() => seen.sessionEnd);
+  await waitFor(() => seen.channelDown);
   await phoneChannel.close();
 
   assert.equal(permission.kind, "approve-once");
   assert.deepEqual(seen, {
-    sessionStart: true,
+    channelUp: true,
     assistant: true,
     delta: true,
     toolStart: true,
     toolComplete: true,
     approval: true,
     modeConfirm: true,
-    sessionEnd: true,
+    channelDown: true,
   });
   assert.equal(session.sent[0].mode, "immediate");
   assert.equal((await session.rpc.mode.get()).mode, "plan");

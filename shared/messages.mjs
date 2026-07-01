@@ -48,9 +48,9 @@ export const KIND = Object.freeze({
   // device) — the phone must dismiss any open form for this requestId.
   ELICITATION_COMPLETE: "elicitation.complete",
   // control (both)
-  SESSION_START: "control.session_start",
+  CHANNEL_UP: "control.channel_up",
   SESSION_META: "control.session_meta",
-  SESSION_END: "control.session_end",
+  CHANNEL_DOWN: "control.channel_down",
   HEARTBEAT: "control.heartbeat",
   MODE: "control.mode",
   // interrupt (phone -> ext): stop/cancel the in-flight generation or tool run.
@@ -208,8 +208,8 @@ export const elicitationComplete = (requestId, action) => ({
 });
 
 // ---- factories (control) ---------------------------------------------------
-export const sessionStart = (channelId, sessionId, cwd, title) => ({
-  kind: KIND.SESSION_START,
+export const channelUp = (channelId, sessionId, cwd, title) => ({
+  kind: KIND.CHANNEL_UP,
   channelId,
   sessionId,
   cwd,
@@ -219,7 +219,7 @@ export const sessionStart = (channelId, sessionId, cwd, title) => ({
 /**
  * Lightweight, post-start metadata refresh (ext -> phone). The CLI keeps refining the
  * chat title (summary) as the conversation grows, so the extension re-sends just the
- * latest title (and cwd, if it changed) without the lifecycle semantics of session_start.
+ * latest title (and cwd, if it changed) without the lifecycle semantics of channel_up.
  */
 export const sessionMeta = (title, cwd) => ({
   kind: KIND.SESSION_META,
@@ -227,8 +227,8 @@ export const sessionMeta = (title, cwd) => ({
   cwd,
   ts: now(),
 });
-export const sessionEnd = (reason) => ({
-  kind: KIND.SESSION_END,
+export const channelDown = (reason) => ({
+  kind: KIND.CHANNEL_DOWN,
   reason,
   ts: now(),
 });
@@ -342,9 +342,9 @@ export function eventForKind(kind) {
       return EVENTS.ELICITATION;
     case KIND.ELICITATION_RESPONSE:
       return EVENTS.ELICITATION_RESPONSE;
-    case KIND.SESSION_START:
+    case KIND.CHANNEL_UP:
     case KIND.SESSION_META:
-    case KIND.SESSION_END:
+    case KIND.CHANNEL_DOWN:
     case KIND.HEARTBEAT:
     case KIND.MODE:
     case KIND.INTERRUPT:

@@ -13,9 +13,9 @@ import {
   approvalRequest,
   elicitationRequest,
   elicitationComplete,
-  sessionStart,
+  channelUp,
   sessionMeta,
-  sessionEnd,
+  channelDown,
   heartbeat,
   modeChange,
   history,
@@ -291,7 +291,7 @@ export async function attachRelay({
     }
   };
 
-  await sendSafe(sessionStart(channelId ?? channel.transport?.channelId, sessionId, cwd, lastTitle));
+  await sendSafe(channelUp(channelId ?? channel.transport?.channelId, sessionId, cwd, lastTitle));
   const heartbeatTimer = setInterval(() => {
     void (async () => {
       // Carry the store's latest turn_index so a connected phone keeps a fresh forward cursor
@@ -382,7 +382,7 @@ export async function attachRelay({
     // On a re-pair we keep the shared transport open for the next phone, so we neither announce a
     // session end (the new phone uses a different key and couldn't read it) nor close the channel.
     if (closeTransport) {
-      await sendSafe(sessionEnd(reason));
+      await sendSafe(channelDown(reason));
       await channel.close?.();
     }
   }
