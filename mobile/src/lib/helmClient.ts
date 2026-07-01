@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   EVENTS,
   SecureChannel,
@@ -113,6 +113,23 @@ export async function createClientFromMaterial(opts: {
   return wrapChannel(opts.channelId, channel);
 }
 
+// ONE Supabase client (hence one WebSocket) is shared across every channel. Supabase Realtime — like
+// Phoenix Channels underneath it — multiplexes many channel subscriptions over a single socket, so a
+// client-per-channel (the previous shape) opened N sockets for no reason. Memoizing it means N joined
+// sessions cost one socket and N cheap topic subscriptions, with a single managed reconnect loop.
+// Each channel still authorizes independently (private-channel RLS) and carries its own ECDH key.
+let sharedClient: SupabaseClient | undefined;
+
+function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
+  if (!sharedClient) {
+    sharedClient = createClient(url, anonKey);
+    // Private channels authorize against RLS on realtime.messages; the anon key is the realtime
+    // access token. Apply supabase/migrations first or joins are denied.
+    sharedClient.realtime.setAuth(anonKey);
+  }
+  return sharedClient;
+}
+
 function createTransport(channelId: string): Transport {
   if (import.meta.env.VITE_HELM_TRANSPORT === 'supabase') {
     const url = import.meta.env.VITE_SUPABASE_URL;
@@ -120,10 +137,7 @@ function createTransport(channelId: string): Transport {
     if (!url || !anonKey) {
       throw new Error('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before using Supabase transport.');
     }
-    const client = createClient(url, anonKey);
-    // Private channels authorize against RLS on realtime.messages; the anon key is the
-    // realtime access token. Apply supabase/migrations first or joins are denied.
-    client.realtime.setAuth(anonKey);
+    const client = getSupabaseClient(url, anonKey);
     return createSupabaseTransport({ client, channelId });
   }
   return createLocalTransport({ channelId });

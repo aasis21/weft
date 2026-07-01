@@ -28,6 +28,7 @@ import {
   notifyElicitationRequest,
   notifySessionEnded,
 } from './notifications';
+import { App } from '@capacitor/app';
 
 export type SessionStatus = 'connecting' | 'live' | 'idle' | 'ended' | 'error';
 
@@ -48,6 +49,8 @@ export interface SessionView {
   status: SessionStatus;
   timeline: TimelineState;
   unread?: boolean;
+  /** Last real host activity (ms). Drives the sidebar's newest-first ordering; survives reload. */
+  lastEventAt?: number;
   error?: string;
 }
 
@@ -67,6 +70,14 @@ interface Runtime {
   catchupPages?: number;
   unread?: boolean;
   error?: string;
+  /** Deadline timer that fires if no genuine host signal confirms liveness within HOST_CONFIRM_MS. */
+  confirmTimer?: number;
+  /** True while a reconnect is in flight, so concurrent triggers (resume + button) don't race. */
+  reconnecting?: boolean;
+  /** Coalesced timer for persisting lastEventAt / unread. */
+  metaTimer?: number;
+  /** Last real host activity (ms); recency for the warm-pool LRU + sidebar sort. */
+  lastEventAt?: number;
   unsubscribe?: () => void;
   stopDemo?: () => Promise<void>;
   saveTimer?: number;
@@ -76,7 +87,18 @@ interface Runtime {
 // see DEFAULT_HEARTBEAT_MS in extension/src/relay.mjs). Only flag a session "Quiet"
 // once a beat has been missed with slack, so a live session never flickers Live->Quiet.
 const IDLE_AFTER_MS = 20_000;
-const OFFLINE_AFTER_MS = 45_000;
+const OFFLINE_AFTER_MS = 30_000;
+// "Live" requires a genuine two-way signal from the laptop within this window. On every (re)connect
+// we arm this deadline; if no real host message (event / heartbeat / state snapshot) arrives, the
+// host is treated as offline. Joining the relay channel or a socket 'connected' NEVER counts as
+// liveness — the relay outlives a killed terminal, so a channel join proves nothing about the host.
+const HOST_CONFIRM_MS = 30_000;
+// Keep at most this many sessions "warm" (a live subscription on the single shared socket), evicted
+// least-recently-active first. The rest stay "cold": their card + transcript are kept and they
+// reconnect on demand when opened. Bounds server fan-out for the handful of terminals a user runs.
+const MAX_WARM_SESSIONS = 10;
+// Coalesce session-metadata writes (lastEventAt / unread) so an activity burst doesn't hammer storage.
+const META_PERSIST_THROTTLE_MS = 1_500;
 // Coalesce transcript writes so a burst of stream deltas doesn't hammer storage.
 const PERSIST_THROTTLE_MS = 800;
 // Cap the forward catch-up after a long absence so one reconnect can't flood the transcript with a
@@ -119,6 +141,9 @@ class SessionManager {
   private snapshot: ManagerSnapshot = { ready: false, activeId: null, sessions: [] };
   private initStarted = false;
   private watchdog: number | null = null;
+  // Warm sessions (a live subscription on the shared socket), most-recently-active LAST. Bounded by
+  // MAX_WARM_SESSIONS; the active session is never evicted.
+  private warmLru: string[] = [];
 
   // --- useSyncExternalStore wiring -------------------------------------
   subscribe = (listener: () => void): (() => void) => {
@@ -140,6 +165,7 @@ class SessionManager {
           status: r.status,
           timeline: r.timeline,
           ...(r.unread ? { unread: true } : {}),
+          ...(r.lastEventAt ? { lastEventAt: r.lastEventAt } : {}),
           error: r.error,
         })),
     };
@@ -168,6 +194,19 @@ class SessionManager {
       })),
     );
     const persistedById = new Map(restored.map((r) => [r.channelId, r.persisted]));
+
+    // Warm only the most-recently-active sessions on the single shared socket; the rest stay cold
+    // (card + transcript kept) and reconnect the moment they're opened. Recency prefers real activity
+    // (lastEventAt), then when the card was last opened, then when it was added.
+    const recencyOf = (s: StoredSession): number =>
+      Math.max(s.lastEventAt ?? 0, s.lastSeenAt ?? 0, s.addedAt ?? 0);
+    const warmIds = new Set(
+      [...stored]
+        .sort((a, b) => recencyOf(b) - recencyOf(a))
+        .slice(0, MAX_WARM_SESSIONS)
+        .map((s) => s.pairing.channelId),
+    );
+
     for (const s of stored) {
       const channelId = s.pairing.channelId;
       const persisted = persistedById.get(channelId) ?? null;
@@ -180,35 +219,46 @@ class SessionManager {
         kind: 'live',
         addedAt: s.addedAt,
       };
+      // Cold sessions rest at 'idle' with no client (the watchdog and resume both skip them); a warm
+      // session starts 'connecting' and its liveness must be confirmed by a genuine host signal.
       this.runtimes.set(channelId, {
         meta,
-        status: 'connecting',
+        status: warmIds.has(channelId) ? 'connecting' : 'idle',
         timeline,
         client: null,
         ephemeral: false,
+        unread: s.unread ?? false,
+        lastEventAt: s.lastEventAt ?? undefined,
       });
       if (!this.order.includes(channelId)) this.order.push(channelId);
     }
-    if (!this.activeId && this.order.length > 0) this.activeId = this.order[0];
+    // Default to the most-recently-active session so the one we open first is always warm.
+    if (!this.activeId && stored.length > 0) {
+      const first = [...stored].sort((a, b) => recencyOf(b) - recencyOf(a))[0];
+      this.activeId = first?.pairing.channelId ?? this.order[0];
+      if (this.activeId) warmIds.add(this.activeId);
+    }
     this.ready = true;
     this.emit();
 
-    // Connect each stored session concurrently.
+    // Connect only the warm sessions concurrently (one shared socket, N cheap subscriptions).
     await Promise.all(
-      stored.map(async (s) => {
-        const channelId = s.pairing.channelId;
-        try {
-          const client = await connectSession(s.pairing);
-          this.attach(channelId, client);
-        } catch (err) {
-          const runtime = this.runtimes.get(channelId);
-          if (runtime) {
-            runtime.status = 'error';
-            runtime.error = err instanceof Error ? err.message : 'Failed to reconnect.';
-            this.emit();
+      stored
+        .filter((s) => warmIds.has(s.pairing.channelId))
+        .map(async (s) => {
+          const channelId = s.pairing.channelId;
+          try {
+            const client = await connectSession(s.pairing);
+            this.attach(channelId, client);
+          } catch (err) {
+            const runtime = this.runtimes.get(channelId);
+            if (runtime) {
+              runtime.status = 'error';
+              runtime.error = err instanceof Error ? err.message : 'Failed to reconnect.';
+              this.emit();
+            }
           }
-        }
-      }),
+        }),
     );
   }
 
@@ -218,11 +268,13 @@ class SessionManager {
       void client.close();
       return;
     }
+    const previous = runtime.client;
     runtime.unsubscribe?.();
     runtime.client = client;
-    runtime.status = 'live';
     runtime.error = undefined;
-    const stopEvents = client.subscribe((message) => this.onMessage(channelId, message));
+    // Drop the superseded channel so a reconnect doesn't leak a subscription on the shared socket.
+    if (previous && previous !== client) void previous.close();
+    const stopEvents = client.subscribe((message) => this.onMessage(channelId, client, message));
     const stopStatus = client.onStatus((status) =>
       this.handleTransportStatus(channelId, client, status),
     );
@@ -230,9 +282,20 @@ class SessionManager {
       stopEvents();
       stopStatus();
     };
-    this.emit();
+    // Demo runs on an in-process simulator, so it's live the instant it's wired. A real session is
+    // only "Live" once the laptop actually answers — joining the relay proves nothing (the channel
+    // outlives a killed terminal). Hold at 'connecting' and arm the confirmation deadline; the
+    // stateRequest below makes the extension reply immediately when it's alive.
+    if (runtime.ephemeral) {
+      runtime.status = 'live';
+      this.emit();
+    } else {
+      this.touchWarm(channelId);
+      this.beginHostConfirm(channelId, client);
+    }
     // Ask for the current session state (busy/mode + any pending prompts) so a fresh, mid-turn,
     // or reconnecting join reflects the truth immediately instead of waiting for the next event.
+    // This is also the two-way probe: its stateSnapshot reply confirms the host is alive.
     this.requestState(channelId);
     // One self-healing history sync for every path (first join, reconnect, rescan, resume): pull the
     // latest page when the thread is empty, otherwise catch up on the turns missed while away.
@@ -240,11 +303,51 @@ class SessionManager {
   }
 
   /**
+   * Enter the unconfirmed 'connecting' state and arm the liveness deadline. If no genuine host
+   * signal (event / heartbeat / state snapshot) arrives within HOST_CONFIRM_MS, the host is offline:
+   * we surface an actionable error and clear any stuck "working". This is the single guard that keeps
+   * "Live" honest on EVERY path — first join, reconnect, socket-recovery, resume, cold→warm.
+   */
+  private beginHostConfirm(channelId: string, client: HelmClient): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral || runtime.client !== client) return;
+    runtime.status = 'connecting';
+    runtime.error = undefined;
+    if (runtime.confirmTimer != null) window.clearTimeout(runtime.confirmTimer);
+    runtime.confirmTimer = window.setTimeout(() => {
+      const r = this.runtimes.get(channelId);
+      // Ignore a fired timer whose connection has since been superseded or already confirmed/ended.
+      if (!r || r.client !== client || r.confirmTimer == null) return;
+      r.confirmTimer = undefined;
+      if (r.status !== 'connecting') return;
+      r.status = 'error';
+      r.error = 'Copilot terminal offline — reopen it on your laptop and scan the new QR.';
+      if (r.timeline.busy) r.timeline = { ...r.timeline, busy: false };
+      this.emit();
+    }, HOST_CONFIRM_MS);
+    this.emit();
+  }
+
+  /** Confirm the host is alive on the FIRST genuine inbound signal: clear the deadline and go Live. */
+  private confirmHost(runtime: Runtime): void {
+    if (runtime.confirmTimer != null) {
+      window.clearTimeout(runtime.confirmTimer);
+      runtime.confirmTimer = undefined;
+    }
+    if (runtime.status !== 'live') runtime.status = 'live';
+    if (runtime.error) runtime.error = undefined;
+    if (runtime.timeline.lastHeartbeat == null) {
+      runtime.timeline = { ...runtime.timeline, lastHeartbeat: Date.now() };
+    }
+  }
+
+  /**
    * React to live socket-state changes the transport reports (distinct from the heartbeat
    * watchdog). A silent drop flips the session to Offline immediately — issue #44, where a
-   * dropped WebSocket otherwise lingered as "Quiet" for up to 45s — and a rejoin restores Live
-   * and re-pulls the authoritative state. `client` is captured so a late event from a superseded
-   * connection is ignored.
+   * dropped WebSocket otherwise lingered as "Quiet" for up to 45s. A socket rejoin does NOT mean the
+   * host is back (the relay reconnects independently of the laptop), so we re-arm the confirmation
+   * gate and re-probe instead of assuming Live. `client` is captured so a late event from a
+   * superseded connection is ignored.
    */
   private handleTransportStatus(
     channelId: string,
@@ -265,12 +368,11 @@ class SessionManager {
       }
       return;
     }
-    // 'connected' only matters as a RECOVERY here — attach() already handles the first connect,
-    // so acting on it while live would fire a redundant state request on every join.
-    if (runtime.status === 'error' || runtime.status === 'connecting') {
-      runtime.status = 'live';
-      runtime.error = undefined;
-      this.emit();
+    // A socket RECOVERY (after a drop → 'error') re-joined the relay, but that's not proof the laptop
+    // is alive. Re-arm the confirmation gate and re-probe; the stateSnapshot reply flips us to Live.
+    // The first connect is handled by attach(), so a 'connected' while still 'connecting' is skipped.
+    if (runtime.status === 'error') {
+      this.beginHostConfirm(channelId, client);
       this.requestState(channelId);
     }
   }
@@ -355,12 +457,18 @@ class SessionManager {
       });
   }
 
-  private onMessage(channelId: string, message: InnerMessage): void {
+  private onMessage(channelId: string, client: HelmClient, message: InnerMessage): void {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
+    // Ignore a message that decrypted after its channel was superseded (reconnect) or cooled to cold
+    // (client=null): acting on it could set a stale card back to 'live' with no live connection.
+    if (runtime.client !== client) return;
     runtime.timeline = reduceTimeline(runtime.timeline, message);
     if (isUnreadActivity(message)) {
       runtime.unread = channelId !== this.activeId;
+      // Real host activity (not a bare heartbeat) is what "recently active" means: bump the sort/LRU
+      // recency and persist it (coalesced) so ordering + unread survive reload and cold eviction.
+      this.markActivity(channelId);
     }
 
     // A forward catch-up page may report more missed turns — page through the gap (bounded).
@@ -370,10 +478,15 @@ class SessionManager {
 
     if (message.kind === KIND.CHANNEL_DOWN) {
       runtime.status = 'ended';
+      if (runtime.confirmTimer != null) {
+        window.clearTimeout(runtime.confirmTimer);
+        runtime.confirmTimer = undefined;
+      }
       void notifySessionEnded(runtime.timeline.endedReason);
     } else {
-      if (runtime.status !== 'live') runtime.status = 'live';
-      if (runtime.error) runtime.error = undefined;
+      // ANY inbound message is genuinely from the laptop (broadcast self:false), so it proves the
+      // host is alive: confirm liveness and satisfy the confirmation gate.
+      this.confirmHost(runtime);
     }
 
     // A channel announces which Copilot session it serves. Key the card by that durable sessionId so
@@ -430,6 +543,80 @@ class SessionManager {
     }, PERSIST_THROTTLE_MS);
   }
 
+  /** Coalesced persist of the durable presence fields (lastEventAt + unread) into the session list. */
+  private scheduleMetaPersist(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral || runtime.metaTimer != null) return;
+    runtime.metaTimer = window.setTimeout(() => {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.metaTimer = undefined;
+      void patchSession(channelId, {
+        lastEventAt: r.lastEventAt ?? null,
+        unread: r.unread ?? false,
+      });
+    }, META_PERSIST_THROTTLE_MS);
+  }
+
+  /** Record real activity on a session: advance its recency (sort + warm-pool LRU) and persist it. */
+  private markActivity(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral) return;
+    runtime.lastEventAt = Date.now();
+    this.touchWarm(channelId);
+    this.scheduleMetaPersist(channelId);
+  }
+
+  /** Promote a session to most-recently-used in the warm pool, then evict any beyond the cap. */
+  private touchWarm(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral) return;
+    const i = this.warmLru.indexOf(channelId);
+    if (i >= 0) this.warmLru.splice(i, 1);
+    this.warmLru.push(channelId);
+    this.evictBeyondWarmLimit();
+  }
+
+  /** Cool down the least-recently-active warm sessions past the cap. The active session is spared. */
+  private evictBeyondWarmLimit(): void {
+    while (this.warmLru.length > MAX_WARM_SESSIONS) {
+      const victimIndex = this.warmLru.findIndex((id) => id !== this.activeId);
+      if (victimIndex < 0) break;
+      const [victimId] = this.warmLru.splice(victimIndex, 1);
+      this.coolDown(victimId);
+    }
+  }
+
+  /** Drop a session's live subscription/socket while keeping its card, transcript, and unread. A
+   *  cold session receives no events until it's opened again, which reconnects it via ensureConnected. */
+  private coolDown(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral) return;
+    runtime.unsubscribe?.();
+    runtime.unsubscribe = undefined;
+    if (runtime.confirmTimer != null) {
+      window.clearTimeout(runtime.confirmTimer);
+      runtime.confirmTimer = undefined;
+    }
+    void runtime.client?.close();
+    runtime.client = null;
+    if (runtime.status !== 'ended') runtime.status = 'idle';
+    runtime.error = undefined;
+    // A cold session isn't connected, so it can't be working.
+    if (runtime.timeline.busy) runtime.timeline = { ...runtime.timeline, busy: false };
+    this.emit();
+  }
+
+  /** Warm a session on demand (e.g. when it's opened): (re)connect unless it's already live or
+   *  actively connecting. Covers cold (evicted → 'idle', no client), quiet ('idle'), and dropped
+   *  ('error') sessions so opening one always drives it back toward Live. */
+  private ensureConnected(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral || runtime.status === 'ended') return;
+    if (runtime.status === 'live' || runtime.status === 'connecting') return;
+    void this.reconnect(channelId);
+  }
+
   /** Collapse a stale duplicate card when a channel reports a sessionId we already track under a
    *  different channelId (e.g. `copilot --resume` rotated the channelId). The live channel keeps its
    *  card; the stale one is torn down. Continuity: seed the (empty) live timeline from the stale one,
@@ -462,8 +649,11 @@ class SessionManager {
       stale.unsubscribe?.();
       void stale.client?.close();
       if (stale.saveTimer != null) window.clearTimeout(stale.saveTimer);
+      if (stale.metaTimer != null) window.clearTimeout(stale.metaTimer);
+      if (stale.confirmTimer != null) window.clearTimeout(stale.confirmTimer);
       this.runtimes.delete(staleId);
       this.order = this.order.filter((id) => id !== staleId);
+      this.warmLru = this.warmLru.filter((id) => id !== staleId);
       if (this.activeId === staleId) this.activeId = keepId;
       void removeSession(staleId);
       void clearTranscript(staleId);
@@ -565,13 +755,17 @@ class SessionManager {
     if (this.activeId === channelId) {
       if (runtime.unread) {
         runtime.unread = false;
+        if (!runtime.ephemeral) void patchSession(channelId, { unread: false });
         this.emit();
       }
       return;
     }
     this.activeId = channelId;
     runtime.unread = false;
-    if (!runtime.ephemeral) void patchSession(channelId, { lastSeenAt: Date.now() });
+    // Opening a session makes it most-recently-used and warms it if it had been cooled down.
+    this.touchWarm(channelId);
+    this.ensureConnected(channelId);
+    if (!runtime.ephemeral) void patchSession(channelId, { lastSeenAt: Date.now(), unread: false });
     this.emit();
   }
 
@@ -582,6 +776,14 @@ class SessionManager {
     if (runtime.saveTimer != null) {
       window.clearTimeout(runtime.saveTimer);
       runtime.saveTimer = undefined;
+    }
+    if (runtime.metaTimer != null) {
+      window.clearTimeout(runtime.metaTimer);
+      runtime.metaTimer = undefined;
+    }
+    if (runtime.confirmTimer != null) {
+      window.clearTimeout(runtime.confirmTimer);
+      runtime.confirmTimer = undefined;
     }
     try {
       await runtime.stopDemo?.();
@@ -595,11 +797,14 @@ class SessionManager {
     }
     this.runtimes.delete(channelId);
     this.order = this.order.filter((id) => id !== channelId);
+    this.warmLru = this.warmLru.filter((id) => id !== channelId);
     if (this.activeId === channelId) {
       this.activeId = this.order[0] ?? null;
       if (this.activeId) {
         const active = this.runtimes.get(this.activeId);
         if (active) active.unread = false;
+        // The newly-focused session must be connected.
+        this.ensureConnected(this.activeId);
       }
     }
     this.emit();
@@ -608,18 +813,29 @@ class SessionManager {
   async reconnect(channelId: string): Promise<void> {
     const runtime = this.runtimes.get(channelId);
     if (!runtime || runtime.ephemeral) return;
-    const stored = (await loadSessions()).find((s) => s.pairing.channelId === channelId);
-    if (!stored) return;
+    // A single reconnect at a time: foregrounding can fire visibilitychange AND appStateChange, and
+    // the Reconnect button can overlap resume — without this they'd race two sockets onto one card.
+    if (runtime.reconnecting) return;
+    runtime.reconnecting = true;
     runtime.status = 'connecting';
     runtime.error = undefined;
     this.emit();
     try {
+      const stored = (await loadSessions()).find((s) => s.pairing.channelId === channelId);
+      if (!stored) {
+        runtime.status = 'error';
+        runtime.error = 'This session is no longer saved on this device.';
+        this.emit();
+        return;
+      }
       const client = await connectSession(stored.pairing);
       this.attach(channelId, client);
     } catch (err) {
       runtime.status = 'error';
       runtime.error = err instanceof Error ? err.message : 'Failed to reconnect.';
       this.emit();
+    } finally {
+      runtime.reconnecting = false;
     }
   }
 
@@ -629,6 +845,8 @@ class SessionManager {
     const appended = appendUser(runtime.timeline, text, Date.now(), attachments);
     runtime.timeline = appended.state;
     this.schedulePersist(channelId);
+    // Sending keeps the session most-recently-active (recency for sort + warm-pool LRU).
+    this.markActivity(channelId);
     this.emit();
     try {
       await this.deliverPrompt(channelId, text, attachments);
@@ -678,7 +896,8 @@ class SessionManager {
     runtime.timeline = markHistoryLoading(runtime.timeline, true);
     this.emit();
     try {
-      await runtime.client?.send(historyRequest(cursor, HISTORY_PAGE_DEFAULT));
+      if (!runtime.client) throw new Error('No active connection.');
+      await runtime.client.send(historyRequest(cursor, HISTORY_PAGE_DEFAULT));
     } catch {
       runtime.timeline = markHistoryLoading(runtime.timeline, false);
       this.emit();
@@ -692,7 +911,8 @@ class SessionManager {
     runtime.timeline = dismissApproval(runtime.timeline, requestId);
     this.emit();
     try {
-      await runtime.client?.send(approvalDecision(requestId, optionId));
+      if (!runtime.client) throw new Error('No active connection.');
+      await runtime.client.send(approvalDecision(requestId, optionId));
     } catch (err) {
       // The decision never reached the laptop: restore the banner with a retry so the
       // user isn't left believing they answered while the agent stays blocked.
@@ -724,7 +944,8 @@ class SessionManager {
     runtime.timeline = dismissElicitation(runtime.timeline, requestId);
     this.emit();
     try {
-      await runtime.client?.send(elicitationResponse(requestId, action, content));
+      if (!runtime.client) throw new Error('No active connection.');
+      await runtime.client.send(elicitationResponse(requestId, action, content));
     } catch (err) {
       if (pending) {
         runtime.timeline = restoreElicitation(
@@ -776,6 +997,9 @@ class SessionManager {
       const now = Date.now();
       for (const runtime of this.runtimes.values()) {
         if (runtime.ephemeral || (runtime.status !== 'live' && runtime.status !== 'idle')) continue;
+        // Cold (evicted) sessions hold no live client and get no heartbeats — the watchdog must not
+        // demote them to Offline; they reconnect when opened.
+        if (!runtime.client) continue;
         const beat = runtime.timeline.lastHeartbeat;
         if (beat && now - beat > OFFLINE_AFTER_MS) {
           runtime.status = 'error';
@@ -799,15 +1023,17 @@ class SessionManager {
   /**
    * Revive connections when the app returns to the foreground or the network comes back. A
    * backgrounded mobile webview usually has its realtime socket silently dropped, so on resume we
-   * reconnect every dead/stale session and refresh the live state of the healthy ones — the phone
-   * should never come back to a session frozen on stale data. Covers ALL sessions, not just the
-   * active one, so background sessions are current the moment you switch to them.
+   * reconnect every dead/stale WARM session and refresh the live state of the healthy ones — the
+   * phone should never come back to a session frozen on stale data. Cold (evicted) sessions are left
+   * alone; they reconnect when opened, so resume stays cheap regardless of how many sessions exist.
    */
   private handleResume = (): void => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const now = Date.now();
-    for (const [channelId, runtime] of this.runtimes) {
-      if (runtime.ephemeral) continue;
+    // Snapshot: reconnect() → attach() → touchWarm() mutates warmLru while we iterate.
+    for (const channelId of [...this.warmLru]) {
+      const runtime = this.runtimes.get(channelId);
+      if (!runtime || runtime.ephemeral) continue;
       const beat = runtime.timeline.lastHeartbeat;
       const stale = beat != null && now - beat > IDLE_AFTER_MS;
       const revive = !runtime.client || runtime.status === 'error' || stale;
@@ -830,6 +1056,15 @@ class SessionManager {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleResume);
     }
+    // Native (Android/iOS) foregrounding doesn't reliably emit visibilitychange in the webview, so
+    // also listen to Capacitor's App state. On the web the plugin maps this onto visibility, and
+    // handleResume is idempotent, so a duplicate trigger is harmless. Guarded so a missing native
+    // bridge can never break startup.
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) this.handleResume();
+    }).catch(() => {
+      // No Capacitor App bridge here — the visibility/online triggers already cover the web path.
+    });
   }
 }
 

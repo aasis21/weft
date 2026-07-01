@@ -14,6 +14,11 @@ export interface StoredSession {
   cwd: string | null;
   addedAt: number;
   lastSeenAt: number;
+  /** Last real host activity (ms). Drives newest-first ordering + warm-pool recency across reloads.
+   *  Optional: older stored entries won't have it. */
+  lastEventAt?: number | null;
+  /** Whether the session has unread host activity, persisted so a reload keeps the badge. */
+  unread?: boolean;
 }
 
 async function read(): Promise<StoredSession[]> {
@@ -92,7 +97,9 @@ export async function upsertSession(session: StoredSession): Promise<void> {
 
 export async function patchSession(
   channelId: string,
-  patch: Partial<Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId'>>,
+  patch: Partial<
+    Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId' | 'lastEventAt' | 'unread'>
+  >,
 ): Promise<void> {
   const list = await read();
   let changed = false;

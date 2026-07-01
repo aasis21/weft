@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import type { SessionView, SessionStatus } from '../lib/sessionManager';
-
-// The list conveys ONLY connection state via a single dot; this is its hover tooltip.
-const CONN_TITLE: Record<SessionStatus, string> = {
-  connecting: 'Connecting…',
-  live: 'Connected',
-  idle: 'Quiet — reconnecting',
-  ended: 'Ended',
-  error: 'Offline',
-};
+import type { SessionView } from '../lib/sessionManager';
 
 interface SessionDrawerProps {
   sessions: SessionView[];
@@ -34,7 +25,9 @@ function fmtRelative(ts: number | null): string {
 function lastActivity(session: SessionView): number | null {
   const items = session.timeline.items;
   const lastTs = items.length > 0 ? items[items.length - 1].ts : null;
-  return Math.max(lastTs ?? 0, session.timeline.lastHeartbeat ?? 0) || null;
+  return (
+    Math.max(lastTs ?? 0, session.timeline.lastHeartbeat ?? 0, session.lastEventAt ?? 0) || null
+  );
 }
 
 function turnCount(session: SessionView): number {
@@ -188,9 +181,8 @@ export function SessionDrawer({
                   }}
                 >
                   <span
-                    className={`status-dot ${session.status}`}
-                    title={CONN_TITLE[session.status]}
-                    aria-label={CONN_TITLE[session.status]}
+                    className={`unread-dot ${session.unread && !isActive ? 'on' : ''}`}
+                    aria-label={session.unread && !isActive ? 'Unread activity' : undefined}
                   />
                   <span className="session-info">
                     <span className="session-title">
