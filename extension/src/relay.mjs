@@ -166,17 +166,20 @@ export function createElicitationRelay({
     clearPending(msg.requestId);
     if (!respond) {
       logger(
-        "Helm: this CLI build can't accept remote ask_user answers (respondToElicitation unavailable).",
+        "Helm: this CLI build can't accept remote ask_user answers (handlePendingElicitation unavailable).",
         { level: "warning", ephemeral: false },
       );
       return;
     }
-    const accepted = respond(msg.requestId, elicitResultFromResponse(msg));
-    if (accepted === false) {
-      logger("Helm: ask_user was already answered before the phone's reply arrived.", {
-        level: "info",
-      });
-    }
+    // Feed the phone's answer back into the runtime. success === false means another client
+    // (typically the terminal) already answered — harmless, the phone form is already dismissed.
+    void Promise.resolve(respond(msg.requestId, elicitResultFromResponse(msg))).then((accepted) => {
+      if (accepted === false) {
+        logger("Helm: ask_user was already answered before the phone's reply arrived.", {
+          level: "info",
+        });
+      }
+    });
   });
 
   async function offer(data = {}) {
@@ -570,22 +573,25 @@ function elicitResultFromResponse(msg) {
 }
 
 /**
- * Find the runtime's "answer an elicitation" method, probing the RPC surface then the session
- * (the same defensive probing helm uses for `session.rpc.abort` / `mode.set`). Prefers the
- * `try*` variant, which returns false instead of throwing when the request is already resolved.
- * Returns a `(requestId, result) => boolean` responder, or null when the host exposes neither.
+ * Find the runtime's "answer a pending elicitation" method. The native runtime exposes this as
+ * `session.rpc.ui.handlePendingElicitation({ requestId, result }) -> { success }` — NOT the
+ * `respondToElicitation(requestId, result)` shown in the stale SDK `.d.ts` (probing that returned
+ * nothing, which is exactly what blocked remote ask_user answers). We probe `session.rpc.ui` then
+ * `session.ui` defensively, matching helm's pattern for `session.rpc.abort` / `mode.set`.
+ * Returns an async `(requestId, result) => boolean` responder (false = another client won the
+ * race), or null when the host exposes no handler.
  */
 function pickElicitationResponder(session, logger = () => {}) {
-  for (const owner of [session?.rpc, session]) {
-    if (!owner) continue;
-    const fn = owner.tryRespondToElicitation ?? owner.respondToElicitation;
+  for (const ui of [session?.rpc?.ui, session?.ui]) {
+    const fn = ui?.handlePendingElicitation;
     if (typeof fn !== "function") continue;
-    return (requestId, result) => {
+    return async (requestId, result) => {
       try {
-        const outcome = fn.call(owner, requestId, result);
-        return outcome === undefined ? true : Boolean(outcome);
+        const outcome = await fn.call(ui, { requestId, result });
+        // `{ success: false }` means the terminal (or another device) already answered.
+        return outcome?.success !== false;
       } catch (err) {
-        logger(`Helm: respondToElicitation failed: ${err?.message ?? err}`, { level: "warning" });
+        logger(`Helm: handlePendingElicitation failed: ${err?.message ?? err}`, { level: "warning" });
         return false;
       }
     };

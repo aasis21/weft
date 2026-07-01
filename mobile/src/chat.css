@@ -81,6 +81,35 @@
 }
 .helm-session .icon-btn:hover { background: var(--bg-elev); color: var(--fg); }
 
+/* --- Focus-visible rings (a11y, WCAG 2.4.7) --- */
+.helm-session .icon-btn:focus-visible,
+.helm-session .bar-menu-item:focus-visible,
+.helm-session .tc-head:focus-visible,
+.helm-session .pill:focus-visible,
+.helm-session .mode-menu-item:focus-visible,
+.helm-session .composer textarea:focus-visible,
+.helm-session .send-btn:focus-visible,
+.helm-session .stop-btn:focus-visible,
+.helm-session .approval-args > summary:focus-visible,
+.helm-session .approval-btn:focus-visible,
+.helm-session .elicit-input:focus-visible,
+.helm-session .elicit-toggle input:focus-visible,
+.helm-session .elicit-check input:focus-visible,
+.helm-session .elicit-dot:focus-visible,
+.helm-session .elicit-nav-btn:focus-visible,
+.helm-session .elicit-btn:focus-visible,
+.helm-session .reconnect-btn:focus-visible,
+.helm-session .session-row:focus-visible,
+.helm-session .drawer-add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.helm-session .tc-head:focus-visible {
+  outline-offset: -3px;
+}
+
 /* ===================== top status bar ===================== */
 .status-bar {
   flex: 0 0 auto;

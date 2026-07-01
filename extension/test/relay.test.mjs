@@ -56,9 +56,12 @@ function makeFakeSession(sessionId = "unknown-session") {
         abortCalls.push(params);
         return { success: true };
       },
-      async tryRespondToElicitation(requestId, result) {
-        elicitationResponses.push({ requestId, result });
-        return true;
+      ui: {
+        // The real runtime answers a pending elicitation here (not respondToElicitation).
+        async handlePendingElicitation({ requestId, result }) {
+          elicitationResponses.push({ requestId, result });
+          return { success: true };
+        },
       },
       async registerInterest(params) {
         interestCalls.push(params);
@@ -257,7 +260,7 @@ test("relays an elicitation.requested to the phone as a KIND.ELICITATION_REQUEST
   });
 });
 
-test("feeds a phone elicitation answer back into the SDK via respondToElicitation", async () => {
+test("feeds a phone elicitation answer back into the SDK via handlePendingElicitation", async () => {
   await withRelay(async ({ channel, session }) => {
     session.emitEvent({
       type: "elicitation.requested",

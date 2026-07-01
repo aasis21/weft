@@ -243,6 +243,7 @@ export function SessionScreen({
         ))}
 
         <Composer
+          sessionId={activeId}
           disabled={ended}
           busy={agentBusy}
           mode={timeline.mode}

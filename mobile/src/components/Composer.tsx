@@ -4,6 +4,7 @@ import { MODES } from '@aasis21/helm-shared';
 import type { SessionMode } from '@aasis21/helm-shared';
 
 interface ComposerProps {
+  sessionId: string;
   disabled: boolean;
   busy: boolean;
   mode: SessionMode;
@@ -19,16 +20,53 @@ const MODE_LABEL: Record<string, string> = {
   autopilot: 'Autopilot',
 };
 
+const DRAFT_KEY_PREFIX = 'helm.draft.v1.';
+
+function draftKey(sessionId: string): string {
+  return `${DRAFT_KEY_PREFIX}${sessionId}`;
+}
+
+function loadDraft(sessionId: string): string {
+  try {
+    return globalThis.localStorage?.getItem(draftKey(sessionId)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function saveDraft(sessionId: string, value: string): void {
+  try {
+    if (value) {
+      globalThis.localStorage?.setItem(draftKey(sessionId), value);
+    } else {
+      globalThis.localStorage?.removeItem(draftKey(sessionId));
+    }
+  } catch {
+    // localStorage can be unavailable in private or embedded contexts.
+  }
+}
+
 function basename(path: string | null): string | null {
   if (!path) return null;
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
   return parts[parts.length - 1] || path;
 }
 
-export function Composer({ disabled, busy, mode, cwd, onPrompt, onInterrupt, onModeChange }: ComposerProps): JSX.Element {
+export function Composer({
+  sessionId,
+  disabled,
+  busy,
+  mode,
+  cwd,
+  onPrompt,
+  onInterrupt,
+  onModeChange,
+}: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  const modeWrapRef = useRef<HTMLDivElement | null>(null);
+  const modeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const el = areaRef.current;
@@ -37,10 +75,34 @@ export function Composer({ disabled, busy, mode, cwd, onPrompt, onInterrupt, onM
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
   }, [text]);
 
+  useEffect(() => {
+    setText(loadDraft(sessionId));
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onDocMouseDown = (event: MouseEvent): void => {
+      if (modeWrapRef.current && !modeWrapRef.current.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onDocKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+        modeButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onDocKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onDocKeyDown);
+    };
+  }, [menuOpen]);
+
   const send = async (): Promise<void> => {
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
     setText('');
+    saveDraft(sessionId, '');
     await onPrompt(trimmed);
   };
 
@@ -49,6 +111,11 @@ export function Composer({ disabled, busy, mode, cwd, onPrompt, onInterrupt, onM
       event.preventDefault();
       void send();
     }
+  };
+
+  const onTextChange = (value: string): void => {
+    setText(value);
+    saveDraft(sessionId, value);
   };
 
   const folder = basename(cwd);
@@ -62,8 +129,9 @@ export function Composer({ disabled, busy, mode, cwd, onPrompt, onInterrupt, onM
       }}
     >
       <div className="composer-toolbar">
-        <div className="mode-wrap">
+        <div className="mode-wrap" ref={modeWrapRef}>
           <button
+            ref={modeButtonRef}
             type="button"
             className="pill mode-pill"
             aria-haspopup="menu"
@@ -108,7 +176,7 @@ export function Composer({ disabled, busy, mode, cwd, onPrompt, onInterrupt, onM
           value={text}
           spellCheck={false}
           onKeyDown={onKeyDown}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => onTextChange(event.target.value)}
           placeholder={disabled ? 'Session ended — re-pair to continue.' : 'Message your Copilot session…'}
         />
         {busy ? (
