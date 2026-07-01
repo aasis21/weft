@@ -44,6 +44,7 @@ export interface SessionView {
   meta: SessionMeta;
   status: SessionStatus;
   timeline: TimelineState;
+  unread?: boolean;
   error?: string;
 }
 
@@ -61,6 +62,7 @@ interface Runtime {
   ephemeral: boolean;
   /** True until the one-time pre-join history backfill has been requested. */
   firstJoin: boolean;
+  unread?: boolean;
   error?: string;
   unsubscribe?: () => void;
   stopDemo?: () => Promise<void>;
@@ -83,6 +85,23 @@ function basename(path: string | null): string | null {
 
 function titleFor(channelId: string, cwd: string | null, stored: string | null): string {
   return stored || basename(cwd) || `Session ${channelId.slice(0, 6)}`;
+}
+
+function isUnreadActivity(message: InnerMessage): boolean {
+  switch (message.kind) {
+    case KIND.ASSISTANT_MESSAGE:
+    case KIND.ASSISTANT_DELTA:
+    case KIND.TOOL_START:
+    case KIND.TOOL_COMPLETE:
+    case KIND.LOG:
+    case KIND.ACTIVITY:
+    case KIND.APPROVAL_REQUEST:
+    case KIND.ELICITATION_REQUEST:
+    case KIND.SESSION_END:
+      return true;
+    default:
+      return false;
+  }
 }
 
 class SessionManager {
@@ -110,7 +129,13 @@ class SessionManager {
       sessions: this.order
         .map((id) => this.runtimes.get(id))
         .filter((r): r is Runtime => !!r)
-        .map((r) => ({ meta: { ...r.meta }, status: r.status, timeline: r.timeline, error: r.error })),
+        .map((r) => ({
+          meta: { ...r.meta },
+          status: r.status,
+          timeline: r.timeline,
+          ...(r.unread ? { unread: true } : {}),
+          error: r.error,
+        })),
     };
     for (const listener of this.listeners) listener();
   }
@@ -220,6 +245,9 @@ class SessionManager {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
     runtime.timeline = reduceTimeline(runtime.timeline, message);
+    if (isUnreadActivity(message)) {
+      runtime.unread = channelId !== this.activeId;
+    }
 
     if (message.kind === KIND.SESSION_END) {
       runtime.status = 'ended';
@@ -334,9 +362,18 @@ class SessionManager {
 
   // --- session controls ------------------------------------------------
   setActive(channelId: string): void {
-    if (!this.runtimes.has(channelId) || this.activeId === channelId) return;
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime) return;
+    if (this.activeId === channelId) {
+      if (runtime.unread) {
+        runtime.unread = false;
+        this.emit();
+      }
+      return;
+    }
     this.activeId = channelId;
-    if (!this.runtimes.get(channelId)?.ephemeral) void patchSession(channelId, { lastSeenAt: Date.now() });
+    runtime.unread = false;
+    if (!runtime.ephemeral) void patchSession(channelId, { lastSeenAt: Date.now() });
     this.emit();
   }
 
@@ -360,7 +397,13 @@ class SessionManager {
     }
     this.runtimes.delete(channelId);
     this.order = this.order.filter((id) => id !== channelId);
-    if (this.activeId === channelId) this.activeId = this.order[0] ?? null;
+    if (this.activeId === channelId) {
+      this.activeId = this.order[0] ?? null;
+      if (this.activeId) {
+        const active = this.runtimes.get(this.activeId);
+        if (active) active.unread = false;
+      }
+    }
     this.emit();
   }
 

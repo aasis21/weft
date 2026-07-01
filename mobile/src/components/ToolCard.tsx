@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { ToolItem } from '../lib/timeline';
 
@@ -40,8 +40,33 @@ function summarize(args: unknown): string {
     const value = record[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
-  const keys = Object.keys(record);
-  return keys.length > 0 ? JSON.stringify(record) : '';
+  return Object.entries(record)
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${summarizeValue(value)}`)
+    .join(', ');
+}
+
+function summarizeValue(value: unknown): string {
+  if (typeof value === 'string') return shorten(value.trim());
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `[${value.length}]`;
+  if (typeof value === 'object') return '{…}';
+  if (typeof value === 'undefined') return 'undefined';
+  return String(value);
+}
+
+function shorten(value: string): string {
+  return value.length > 40 ? `${value.slice(0, 39)}…` : value;
+}
+
+function isLongOutput(value: string): boolean {
+  return value.length > 600 || value.split('\n').length > 12;
+}
+
+function formatArgs(args: unknown): string {
+  const text = typeof args === 'object' ? JSON.stringify(args, null, 2) : String(args);
+  return text ?? '';
 }
 
 function elapsed(item: ToolItem): string {
@@ -54,9 +79,32 @@ function elapsed(item: ToolItem): string {
 
 export function ToolCard({ item }: ToolCardProps): JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState<'args' | 'result' | null>(null);
+  const [fullResult, setFullResult] = useState(false);
+  const copiedTimer = useRef<number | null>(null);
   const icon = item.status === 'running' ? '↻' : item.status === 'success' ? '✓' : '✕';
   const argLine = summarize(item.args);
   const hasDetail = !!argLine || !!item.resultPreview;
+  const argsText = formatArgs(item.args);
+  const resultText = item.resultPreview ?? '';
+  const canViewFull = isLongOutput(resultText);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+    };
+  }, []);
+
+  async function copyText(kind: 'args' | 'result', text: string): Promise<void> {
+    try {
+      await navigator.clipboard?.writeText(text);
+      setCopied(kind);
+      if (copiedTimer.current !== null) window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopied(null), 1200);
+    } catch {
+      setCopied(null);
+    }
+  }
 
   return (
     <div className={`tool-card ${item.status}${expanded ? ' open' : ''}`}>
@@ -76,16 +124,43 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
         <div className="tc-detail">
           {argLine ? (
             <>
-              <div className="tc-section">ARGUMENTS</div>
-              <pre className="tc-pre">
-                {typeof item.args === 'object' ? JSON.stringify(item.args, null, 2) : String(item.args)}
-              </pre>
+              <div className="tc-section">
+                <span>ARGUMENTS</span>
+                <button
+                  type="button"
+                  className="tc-copy"
+                  aria-label="Copy arguments"
+                  onClick={() => void copyText('args', argsText)}
+                >
+                  {copied === 'args' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <pre className="tc-pre">{argsText}</pre>
             </>
           ) : null}
           {item.resultPreview ? (
             <>
-              <div className="tc-section">{item.status === 'error' ? 'ERROR' : 'RESULT'}</div>
-              <pre className="tc-pre">{item.resultPreview}</pre>
+              <div className="tc-section">
+                <span>{item.status === 'error' ? 'ERROR' : 'RESULT'}</span>
+                <button
+                  type="button"
+                  className="tc-copy"
+                  aria-label={item.status === 'error' ? 'Copy error' : 'Copy result'}
+                  onClick={() => void copyText('result', resultText)}
+                >
+                  {copied === 'result' ? 'Copied' : 'Copy'}
+                </button>
+                {canViewFull ? (
+                  <button
+                    type="button"
+                    className="tc-viewfull"
+                    onClick={() => setFullResult((v) => !v)}
+                  >
+                    {fullResult ? 'Collapse' : 'View full'}
+                  </button>
+                ) : null}
+              </div>
+              <pre className={`tc-pre${fullResult && canViewFull ? ' full' : ''}`}>{item.resultPreview}</pre>
             </>
           ) : null}
         </div>

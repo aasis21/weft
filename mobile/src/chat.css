@@ -464,6 +464,8 @@
 .assistant-bubble p { margin: 0 0 8px; }
 .assistant-bubble strong { color: var(--strong); font-weight: 700; }
 .assistant-bubble em { color: var(--fg-dim); font-style: italic; }
+.assistant-bubble del,
+.assistant-bubble s { color: var(--fg-faint); text-decoration: line-through; }
 .assistant-bubble code {
   padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
@@ -488,7 +490,10 @@
 .assistant-bubble ol { margin: 6px 0 8px; padding-left: 22px; }
 .assistant-bubble li { margin: 2px 0; }
 .assistant-bubble li::marker { color: var(--accent); }
+.assistant-bubble li.task-item { list-style: none; margin-left: -20px; }
+.assistant-bubble li.task-item input { margin-right: 7px; vertical-align: middle; accent-color: var(--accent); }
 .assistant-bubble a { color: var(--accent); text-underline-offset: 2px; }
+.assistant-bubble img { max-width: 100%; height: auto; margin: 4px 0; border-radius: 8px; }
 .assistant-bubble h1,
 .assistant-bubble h2,
 .assistant-bubble h3 {
@@ -1057,4 +1062,419 @@
   .caret,
   .thinking-dots span,
   .tool-card.running .tc-icon { animation: none; }
+}
+
+/* ---- Concurrent CSS additions: chat controls, tool affordances, drawer status ---- */
+.helm-session {
+  --fg-dim: #9aa4b2;
+  --fg-faint: #8b949e;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.helm-session .icon-btn,
+.helm-session .send-btn,
+.helm-session .stop-btn,
+.helm-session .drawer-add,
+.helm-session .tc-head,
+.helm-session .mode-menu-item {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.helm-session .pill,
+.helm-session .mode-pill {
+  min-height: 44px;
+  padding-inline: 12px;
+}
+
+.helm-session .session-row .row-x {
+  min-width: 44px;
+  min-height: 44px;
+  margin: -7px -7px -7px 0;
+}
+
+.helm-session .scroll-latest {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(var(--helm-kb, 0px) + max(92px, env(safe-area-inset-bottom) + 82px));
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  color: var(--fg-dim);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  opacity: 0.96;
+  transform: translateY(0) scale(1);
+  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.helm-session .scroll-latest:hover,
+.helm-session .scroll-latest:active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--bg-rule));
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
+  color: var(--accent);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.helm-session .scroll-latest .new,
+.helm-session .scroll-latest .badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.helm-session .row.assistant {
+  position: relative;
+}
+
+.helm-session .msg-copy,
+.helm-session .tc-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-faint);
+  opacity: 0.45;
+}
+
+.helm-session .msg-copy {
+  position: absolute;
+  top: -8px;
+  right: -4px;
+  z-index: 2;
+}
+
+.helm-session .row.assistant:hover .msg-copy,
+.helm-session .row.assistant:focus-within .msg-copy,
+.helm-session .msg-copy:hover,
+.helm-session .msg-copy:focus-visible,
+.helm-session .tc-copy:hover,
+.helm-session .tc-copy:focus-visible {
+  background: var(--bg-elev);
+  color: var(--fg);
+  opacity: 1;
+}
+
+.helm-session .user-ts {
+  align-self: flex-end;
+  margin: 3px 2px 0 0;
+  color: var(--fg-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.helm-session .msg-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 174px;
+  padding: 6px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  animation: helm-pop 140ms ease;
+}
+
+.helm-session .msg-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+
+.helm-session .msg-menu-item:hover,
+.helm-session .msg-menu-item:focus-visible {
+  background: var(--bg);
+}
+
+.helm-session .tool-run-group {
+  margin: 6px 0;
+  padding: 6px 6px 6px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 48%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.helm-session .tool-run-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.helm-session .tool-run-toggle:hover,
+.helm-session .tool-run-toggle:focus-visible {
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+
+.helm-session .thread-empty-rich {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  min-height: min(56vh, 520px);
+  padding: 42px 22px;
+  color: var(--fg-dim);
+  text-align: center;
+}
+
+.helm-session .thread-empty-rich .empty-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 18px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 24px;
+}
+
+.helm-session .thread-empty-rich h2,
+.helm-session .thread-empty-rich h3,
+.helm-session .thread-empty-rich p {
+  margin: 0;
+}
+
+.helm-session .thread-empty-rich h2,
+.helm-session .thread-empty-rich h3 {
+  color: var(--fg);
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.helm-session .empty-suggest {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 11px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.helm-session .thread-empty-rich .empty-suggests,
+.helm-session .thread-empty-rich .empty-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.helm-session .thread-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 2px;
+}
+
+.helm-session .skeleton-line {
+  width: 100%;
+  height: 13px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--bg-elev), color-mix(in srgb, var(--fg-faint) 16%, var(--bg-elev)), var(--bg-elev));
+  background-size: 220% 100%;
+  animation: helm-skeleton 1.4s ease-in-out infinite;
+}
+
+.helm-session .skeleton-line:nth-child(2n) { width: 82%; }
+.helm-session .skeleton-line:nth-child(3n) { width: 58%; }
+.helm-session .skeleton-line:nth-child(4n) { width: 70%; }
+
+@keyframes helm-skeleton {
+  from { background-position: 100% 0; }
+  to { background-position: -120% 0; }
+}
+
+.helm-session .tc-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.helm-session .tc-viewfull {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.helm-session .tc-viewfull:hover,
+.helm-session .tc-viewfull:focus-visible {
+  background: var(--accent-soft);
+}
+
+.helm-session .tc-pre {
+  max-height: min(240px, 42vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.helm-session .tc-pre.full {
+  max-height: none;
+}
+
+.helm-session .drawer-head {
+  flex-wrap: wrap;
+}
+
+.helm-session .drawer-search {
+  flex: 1 0 100%;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 11px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.helm-session .drawer-search::placeholder {
+  color: var(--fg-faint);
+}
+
+.helm-session .drawer-search:focus,
+.helm-session .drawer-search:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.helm-session .session-row {
+  position: relative;
+  min-height: 44px;
+}
+
+.helm-session .unread-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.helm-session .session-row .unread-dot {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.helm-session .unread-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--bg);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+}
+
+.helm-session .approval-countdown {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.helm-session .approval-countdown-bar {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-faint) 22%, transparent);
+}
+
+.helm-session .approval-countdown-bar > span,
+.helm-session .approval-countdown-bar .fill,
+.helm-session .approval-countdown-bar [data-fill] {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #6ee7b7));
+  transition: width 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .helm-session .scroll-latest,
+  .helm-session .approval-countdown-bar > span,
+  .helm-session .approval-countdown-bar .fill,
+  .helm-session .approval-countdown-bar [data-fill] {
+    transition: none;
+  }
+
+  .helm-session .skeleton-line {
+    animation: none;
+    background-size: 100% 100%;
+  }
 }

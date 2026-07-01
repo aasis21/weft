@@ -54,6 +54,80 @@ function describeArgs(args: unknown): { line: string; full: string | null } | nu
   return { line, full: full.trim() && full.trim() !== line ? full : null };
 }
 
+function truncate(value: string, max = 96): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function approvalSummary(toolName: string, args: { line: string } | null): string {
+  return truncate(args ? `${toolName}: ${args.line}` : toolName);
+}
+
+function vibrate(pattern: VibratePattern): void {
+  try {
+    if (typeof navigator !== 'undefined') navigator.vibrate?.(pattern);
+  } catch {
+    // Unsupported or blocked vibration should never affect the approval flow.
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function toMillis(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber)) return toMillis(asNumber);
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function durationMillis(value: unknown, unit: 'ms' | 's' | 'auto' = 'auto'): number | null {
+  const duration =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(duration) || duration <= 0) return null;
+  if (unit === 'ms') return duration;
+  if (unit === 's') return duration * 1000;
+  return duration < 1000 ? duration * 1000 : duration;
+}
+
+function pickTime(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = toMillis(record[key]);
+    if (value != null) return value;
+  }
+  return null;
+}
+
+function pickDuration(record: Record<string, unknown>): number | null {
+  return (
+    durationMillis(record.timeoutMs, 'ms') ??
+    durationMillis(record.timeoutMillis, 'ms') ??
+    durationMillis(record.timeoutSeconds, 's') ??
+    durationMillis(record.timeoutSec, 's') ??
+    durationMillis(record.timeout, 'auto') ??
+    durationMillis(record.expiresInMs, 'ms') ??
+    durationMillis(record.expiresInSeconds, 's') ??
+    durationMillis(record.expiresIn, 'auto')
+  );
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds.toString().padStart(2, '0')}s` : `${seconds}s`;
+}
+
 interface SessionScreenProps {
   active: SessionView;
   sessions: SessionView[];
@@ -93,6 +167,8 @@ export function SessionScreen({
 }: SessionScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const approvalStackRef = useRef<HTMLDivElement | null>(null);
@@ -106,6 +182,10 @@ export function SessionScreen({
     status === 'live' &&
     (timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
   const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || status === 'idle');
+  const approveRequest = (requestId: string, optionId: string, isDeny: boolean): void => {
+    vibrate(isDeny ? [8, 40, 8] : 10);
+    onApprove(requestId, optionId);
+  };
   const requestRemove = (id: string): void => {
     setDrawerOpen(false);
     setConfirmRemoveId(id);
@@ -136,6 +216,31 @@ export function SessionScreen({
       approvalStackRef.current?.focus();
     }
     prevApprovalCount.current = count;
+  }, [timeline.approvals.length]);
+
+  useEffect(() => {
+    if (timeline.approvals.length === 0) {
+      setApprovalMountTimes((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    const currentIds = new Set(timeline.approvals.map((req) => req.requestId));
+    setApprovalMountTimes((prev) => {
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (const req of timeline.approvals) {
+        next[req.requestId] = prev[req.requestId] ?? Date.now();
+        changed = changed || next[req.requestId] !== prev[req.requestId];
+      }
+      changed = changed || Object.keys(prev).some((id) => !currentIds.has(id));
+      return changed ? next : prev;
+    });
+  }, [timeline.approvals]);
+
+  useEffect(() => {
+    if (timeline.approvals.length === 0) return undefined;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
   }, [timeline.approvals.length]);
 
   // Keep the composer above the iOS/Android soft keyboard. The session surface is
@@ -219,64 +324,113 @@ export function SessionScreen({
             tabIndex={-1}
           >
             {timeline.approvals.map((req) => {
-          const args = describeArgs(req.toolArgs);
-          const error = timeline.approvalErrors[req.requestId];
-          return (
-            <div
-              key={req.requestId}
-              className="approval-banner"
-              role="group"
-              aria-label={`Approval required: ${req.toolName}${args ? ` — ${args.line}` : ''}`}
-            >
-              <div className="approval-head">
-                <span className="approval-warn" aria-hidden="true">⚠</span>
-                <span className="approval-body">
-                  <span className="approval-tool">{req.toolName}</span>
-                  <span className="approval-hint">needs your approval</span>
-                </span>
-              </div>
+              const args = describeArgs(req.toolArgs);
+              const error = timeline.approvalErrors[req.requestId];
+              const summary = approvalSummary(req.toolName, args);
+              const reqRecord = readRecord(req);
+              const requestedAt =
+                pickTime(reqRecord, ['requestedAt', 'createdAt', 'created_at', 'timestamp', 'ts']) ??
+                approvalMountTimes[req.requestId] ??
+                now;
+              const timeoutMs = pickDuration(reqRecord);
+              const deadlineAt = pickTime(reqRecord, [
+                'deadline',
+                'deadlineAt',
+                'deadline_at',
+                'expiresAt',
+                'expires_at',
+                'expiration',
+                'timeoutAt',
+                'timeout_at',
+              ]);
+              const hasExplicitTimeout = timeoutMs != null || deadlineAt != null;
+              const totalMs = timeoutMs ?? (deadlineAt != null ? Math.max(deadlineAt - requestedAt, 1000) : null);
+              const remainingMs =
+                hasExplicitTimeout && totalMs != null
+                  ? Math.max(0, (deadlineAt ?? requestedAt + totalMs) - now)
+                  : null;
+              const elapsedMs = Math.max(0, now - requestedAt);
+              const countdownText =
+                remainingMs != null
+                  ? remainingMs > 0
+                    ? `${formatDuration(remainingMs)} remaining`
+                    : 'Approval timed out'
+                  : `Waiting ${formatDuration(elapsedMs)}`;
+              const countdownWidth =
+                remainingMs != null && totalMs != null
+                  ? `${Math.max(0, Math.min(100, (remainingMs / totalMs) * 100))}%`
+                  : `${20 + ((Math.floor(elapsedMs / 1000) % 20) / 20) * 60}%`;
+              return (
+                <div
+                  key={req.requestId}
+                  className="approval-banner"
+                  role="group"
+                  aria-label={`Approval required: ${req.toolName}${args ? ` — ${args.line}` : ''}`}
+                >
+                  <div className="approval-head">
+                    <span className="approval-warn" aria-hidden="true">⚠</span>
+                    <span className="approval-body">
+                      <span className="approval-tool">{req.toolName}</span>
+                      <span className="approval-hint">needs your approval</span>
+                    </span>
+                  </div>
 
-              {args ? (
-                args.full ? (
-                  <details className="approval-args">
-                    <summary>
-                      <code className="approval-args-line">{args.line}</code>
-                      <span className="approval-args-more" aria-hidden="true">details</span>
-                    </summary>
-                    <pre className="approval-args-full">{args.full}</pre>
-                  </details>
-                ) : (
-                  <code className="approval-args-line solo">{args.line}</code>
-                )
-              ) : null}
+                 {args ? (
+                   args.full ? (
+                     <details className="approval-args">
+                       <summary>
+                         <code className="approval-args-line">{args.line}</code>
+                         <span className="approval-args-more" aria-hidden="true">details</span>
+                       </summary>
+                       <pre className="approval-args-full">{args.full}</pre>
+                     </details>
+                   ) : (
+                     <code className="approval-args-line solo">{args.line}</code>
+                   )
+                 ) : null}
 
-              {error ? (
-                <p className="approval-error" role="alert">
-                  ⚠ {error}
-                </p>
-              ) : null}
+                 <div className="approval-countdown">
+                   <span>{countdownText}</span>
+                   <span
+                     className="approval-countdown-bar"
+                     aria-hidden="true"
+                     style={{
+                       opacity: remainingMs == null ? 0.45 : undefined,
+                       width: countdownWidth,
+                     }}
+                   />
+                 </div>
 
-              <div className="approval-actions">
-                {req.options.map((opt) => {
-                  const isDeny = /deny|reject|cancel|\bno\b/i.test(opt.id);
-                  const isSecondary = !isDeny && /always|session|all/i.test(opt.id);
-                  const variant = isDeny ? 'deny' : isSecondary ? 'allow secondary' : 'allow';
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      className={`approval-btn ${variant}`}
-                      onClick={() => onApprove(req.requestId, opt.id)}
-                    >
-                      <span className="approval-btn-icon" aria-hidden="true">{isDeny ? '✕' : '✓'}</span>
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-            })}
+                 {error ? (
+                   <p className="approval-error" role="alert">
+                     ⚠ {error}
+                   </p>
+                 ) : null}
+
+                 <div className="approval-actions">
+                   {req.options.map((opt) => {
+                     const isDeny = /deny|reject|cancel|\bno\b/i.test(opt.id);
+                     const isSecondary = !isDeny && /always|session|all/i.test(opt.id);
+                     const variant = isDeny ? 'deny' : isSecondary ? 'allow secondary' : 'allow';
+                     const decisionLabel = `${isDeny ? 'Deny' : 'Approve'} ${summary}`;
+                     return (
+                       <button
+                         key={opt.id}
+                         type="button"
+                         className={`approval-btn ${variant}`}
+                         aria-label={decisionLabel}
+                         title={decisionLabel}
+                         onClick={() => approveRequest(req.requestId, opt.id, isDeny)}
+                       >
+                         <span className="approval-btn-icon" aria-hidden="true">{isDeny ? '✕' : '✓'}</span>
+                         {opt.label}
+                       </button>
+                     );
+                   })}
+                 </div>
+               </div>
+             );
+           })}
           </div>
         ) : null}
 

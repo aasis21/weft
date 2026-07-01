@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import type { SessionStatus } from '../lib/sessionManager';
+import { sessionManager, type SessionStatus } from '../lib/sessionManager';
 
 interface StatusBarProps {
   title: string;
@@ -37,6 +37,8 @@ export function StatusBar({
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const snapshot = useSyncExternalStore(sessionManager.subscribe, sessionManager.getSnapshot);
+  const unreadCount = snapshot.sessions.filter((session) => session.unread && session.meta.channelId !== snapshot.activeId).length;
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -49,13 +51,19 @@ export function StatusBar({
 
   return (
     <header className="status-bar">
-      <button className="icon-btn drawer-btn" type="button" onClick={onOpenDrawer} aria-label="Open sessions">
+      <button
+        className="icon-btn drawer-btn"
+        type="button"
+        onClick={onOpenDrawer}
+        aria-label={unreadCount > 0 ? `Open sessions, ${unreadCount} unread` : 'Open sessions'}
+      >
         <span className="hamburger" aria-hidden="true">
           <span />
           <span />
           <span />
         </span>
         {sessionCount > 1 ? <span className="session-count">{sessionCount}</span> : null}
+        {unreadCount > 0 ? <span className="unread-badge">{unreadCount}</span> : null}
       </button>
 
       <div className="status-id">

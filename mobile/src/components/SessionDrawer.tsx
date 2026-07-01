@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '../lib/sessionManager';
 
 interface SessionDrawerProps {
@@ -13,6 +13,7 @@ interface SessionDrawerProps {
 function fmtRelative(ts: number | null): string {
   if (!ts) return '';
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 5) return 'now';
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
@@ -49,7 +50,18 @@ export function SessionDrawer({
   const drawerRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const [query, setQuery] = useState('');
   onCloseRef.current = onClose;
+
+  const filteredSessions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sessions;
+    return sessions.filter((session) => {
+      const title = session.meta.title.toLowerCase();
+      const cwd = session.meta.cwd?.toLowerCase() ?? '';
+      return title.includes(q) || cwd.includes(q);
+    });
+  }, [query, sessions]);
 
   useEffect(() => {
     const drawer = drawerRef.current;
@@ -131,11 +143,22 @@ export function SessionDrawer({
           </button>
         </div>
 
+        <input
+          className="drawer-search"
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Filter sessions"
+          placeholder="Filter sessions"
+        />
+
         <div className="drawer-list">
           {sessions.length === 0 ? (
             <p className="drawer-empty">No sessions joined yet.</p>
+          ) : filteredSessions.length === 0 ? (
+            <p className="drawer-empty">No matches.</p>
           ) : (
-            sessions.map((session) => {
+            filteredSessions.map((session) => {
               const id = session.meta.channelId;
               const isActive = id === activeId;
               const pending = session.timeline.approvals.length;
@@ -151,6 +174,7 @@ export function SessionDrawer({
                   }}
                 >
                   <span className={`status-dot ${session.status}`} aria-hidden="true" />
+                  {session.unread && !isActive ? <span className="unread-dot" aria-hidden="true" /> : null}
                   <span className="session-info">
                     <span className="session-title">
                       {session.meta.title}
