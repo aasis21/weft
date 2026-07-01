@@ -4,14 +4,15 @@ import type { CSSProperties, JSX, ReactNode } from 'react';
 /**
  * Minimal, dependency-free, XSS-safe Markdown -> React renderer.
  * Supports the subset Copilot streams emit: fenced + inline code, bold, italic,
- * links, ordered/unordered lists, tables, headings, blockquotes, and horizontal rules.
+ * strikethrough, links, images, ordered/unordered/task lists, tables, headings,
+ * blockquotes, and horizontal rules.
  * It renders real React nodes (never dangerouslySetInnerHTML), and only allows
  * http(s)/mailto links. Tolerant of partial markdown while a turn streams in
  * (e.g. an unterminated ``` fence is treated as code to the end of the text).
  */
 
 const SAFE_URL = /^(https?:|mailto:)/i;
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)]+\))|(\*[^*\s][^*]*\*)|(_[^_\s][^_]*_)/;
+const INLINE = /(`[^`]+`)|(~~[^~]+~~)|(\*\*[^*]+\*\*)|(!\[[^\]]*\]\([^)]+\))|(\[[^\]]+\]\([^)]+\))|(\*[^*\s][^*]*\*)|(_[^_\s][^_]*_)/;
 
 function renderInline(text: string, keyBase: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -28,8 +29,17 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
     const key = `${keyBase}-${n++}`;
     if (tok.startsWith('`')) {
       out.push(<code key={key}>{tok.slice(1, -1)}</code>);
+    } else if (tok.startsWith('~~')) {
+      out.push(<del key={key}>{tok.slice(2, -2)}</del>);
     } else if (tok.startsWith('**')) {
       out.push(<strong key={key}>{tok.slice(2, -2)}</strong>);
+    } else if (tok.startsWith('![')) {
+      const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(tok);
+      if (im && /^https?:/i.test(im[2].trim())) {
+        out.push(<img key={key} src={im[2].trim()} alt={im[1]} loading="lazy" />);
+      } else {
+        out.push(im ? im[1] || tok : tok);
+      }
     } else if (tok.startsWith('[')) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
       if (lm && SAFE_URL.test(lm[2].trim())) {
@@ -161,7 +171,7 @@ function renderTable(lines: string[], start: number, blockKey: string): { elemen
 }
 
 function renderList(lines: string[], start: number, blockKey: string): { element: JSX.Element; next: number } {
-  type ListItem = { key: string; children: ReactNode[] };
+  type ListItem = { key: string; children: ReactNode[]; checked?: boolean | null };
   type ListParse = { element: JSX.Element; next: number };
 
   function parseLevel(index: number, indent: number, ordered: boolean, keyBase: string): ListParse {
@@ -186,11 +196,25 @@ function renderList(lines: string[], start: number, blockKey: string): { element
       }
 
       const itemKey = `${keyBase}-i${items.length}`;
-      items.push({ key: itemKey, children: renderInline(match[3], itemKey) });
+      const task = /^\[([ xX])\]\s+(.*)$/.exec(match[3]);
+      if (task) {
+        items.push({ key: itemKey, checked: task[1].toLowerCase() === 'x', children: renderInline(task[2], itemKey) });
+      } else {
+        items.push({ key: itemKey, checked: null, children: renderInline(match[3], itemKey) });
+      }
       next++;
     }
 
-    const renderedItems = items.map((item) => <li key={item.key}>{item.children}</li>);
+    const renderedItems = items.map((item) =>
+      item.checked === null || item.checked === undefined ? (
+        <li key={item.key}>{item.children}</li>
+      ) : (
+        <li key={item.key} className="task-item">
+          <input type="checkbox" checked={item.checked} readOnly disabled />
+          {item.children}
+        </li>
+      ),
+    );
     return {
       element: ordered ? <ol key={keyBase}>{renderedItems}</ol> : <ul key={keyBase}>{renderedItems}</ul>,
       next,
