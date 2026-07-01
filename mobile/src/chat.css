@@ -1108,7 +1108,7 @@
 .helm-session .scroll-latest {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
-  bottom: calc(var(--helm-kb, 0px) + max(92px, env(safe-area-inset-bottom) + 82px));
+  bottom: calc(var(--helm-kb, 0px) + var(--composer-h, 132px) + 14px);
   z-index: 25;
   display: inline-flex;
   align-items: center;
@@ -1151,7 +1151,6 @@
   position: relative;
 }
 
-.helm-session .msg-copy,
 .helm-session .tc-copy {
   display: inline-flex;
   align-items: center;
@@ -1166,17 +1165,6 @@
   opacity: 0.45;
 }
 
-.helm-session .msg-copy {
-  position: absolute;
-  top: -8px;
-  right: -4px;
-  z-index: 2;
-}
-
-.helm-session .row.assistant:hover .msg-copy,
-.helm-session .row.assistant:focus-within .msg-copy,
-.helm-session .msg-copy:hover,
-.helm-session .msg-copy:focus-visible,
 .helm-session .tc-copy:hover,
 .helm-session .tc-copy:focus-visible {
   background: var(--bg-elev);
@@ -1373,13 +1361,14 @@
 }
 
 .helm-session .drawer-head {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .helm-session .drawer-search {
-  flex: 1 0 100%;
+  flex: 0 0 auto;
   width: 100%;
   min-height: 44px;
+  margin-bottom: 8px;
   padding: 9px 11px;
   border: 1px solid var(--bg-rule);
   border-radius: 11px;

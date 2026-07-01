@@ -173,6 +173,7 @@ export function SessionScreen({
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const composerDockRef = useRef<HTMLDivElement | null>(null);
   const approvalStackRef = useRef<HTMLDivElement | null>(null);
   const prevApprovalCount = useRef(0);
   const { timeline, status, meta } = active;
@@ -269,6 +270,22 @@ export function SessionScreen({
     };
   }, []);
 
+  // The "jump to latest" pill floats above the composer. Track the composer dock's
+  // live height in --composer-h so the pill always clears it (even when the composer
+  // grows with multi-line drafts or queued messages), instead of overlapping it.
+  useEffect(() => {
+    const dock = composerDockRef.current;
+    const root = rootRef.current;
+    if (!dock || !root) return undefined;
+    const apply = (): void => {
+      root.style.setProperty('--composer-h', `${dock.offsetHeight}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="helm-session" ref={rootRef}>
       <StatusBar
@@ -298,7 +315,7 @@ export function SessionScreen({
         />
       </main>
 
-      <div className="composer-dock">
+      <div className="composer-dock" ref={composerDockRef}>
         {ended ? (
           <div className="ended-banner">
             <span>Session ended{timeline.endedReason ? ` · ${timeline.endedReason}` : ''}.</span>

@@ -1,6 +1,7 @@
 import '../composer.css';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/helm-shared';
 import type { SessionMode } from '@aasis21/helm-shared';
@@ -56,7 +57,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const DRAFT_KEY_PREFIX = 'helm.draft.v1.';
-const ENTER_SENDS_KEY = 'helm.enterSends.v1';
 
 function draftKey(sessionId: string): string {
   return `${DRAFT_KEY_PREFIX}${sessionId}`;
@@ -77,22 +77,6 @@ function saveDraft(sessionId: string, value: string): void {
     } else {
       globalThis.localStorage?.removeItem(draftKey(sessionId));
     }
-  } catch {
-    // localStorage can be unavailable in private or embedded contexts.
-  }
-}
-
-function loadEnterSends(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(ENTER_SENDS_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-}
-
-function saveEnterSends(value: boolean): void {
-  try {
-    globalThis.localStorage?.setItem(ENTER_SENDS_KEY, value ? 'true' : 'false');
   } catch {
     // localStorage can be unavailable in private or embedded contexts.
   }
@@ -124,7 +108,6 @@ export function Composer({
   const [text, setText] = useState('');
   const [queued, setQueued] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [enterSends, setEnterSends] = useState(loadEnterSends);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -239,7 +222,9 @@ export function Composer({
     }
 
     if (event.key !== 'Enter') return;
-    const shouldSend = enterSends ? !event.shiftKey : event.ctrlKey || event.metaKey;
+    // On mobile the Send button sends; plain Enter inserts a newline.
+    // Ctrl/Cmd+Enter is kept as a hardware-keyboard shortcut to send.
+    const shouldSend = event.ctrlKey || event.metaKey;
     if (!shouldSend) return;
     event.preventDefault();
     void send();
@@ -252,14 +237,6 @@ export function Composer({
       return;
     }
     onKeyDown(event);
-  };
-
-  const toggleEnterSends = (): void => {
-    setEnterSends((value) => {
-      const next = !value;
-      saveEnterSends(next);
-      return next;
-    });
   };
 
   const toggleSpeech = (): void => {
@@ -348,15 +325,6 @@ export function Composer({
             </div>
           ) : null}
         </div>
-        <button
-          type="button"
-          className={`enter-toggle${enterSends ? ' active' : ''}`}
-          aria-pressed={enterSends}
-          title="Enter sends"
-          onClick={toggleEnterSends}
-        >
-          Enter sends
-        </button>
         {folder ? <span className="cwd-chip" title={cwd ?? undefined}>📁 {folder}</span> : null}
         <span className="composer-spacer" />
         <button
@@ -467,47 +435,50 @@ export function Composer({
         )}
       </div>
 
-      {fullscreenOpen ? (
-        <div className="composer-fullscreen" role="dialog" aria-modal="true" aria-label="Expanded composer editor">
-          <div className="composer-fullscreen-panel">
-            <div className="composer-fullscreen-header">
-              <span>Expanded editor</span>
-              <button
-                type="button"
-                className="composer-fullscreen-close"
-                aria-label="Close editor"
-                onClick={() => setFullscreenOpen(false)}
-              >
-                Done
-              </button>
-            </div>
-            <textarea
-              ref={fullscreenAreaRef}
-              className="composer-fullscreen-textarea"
-              aria-label="Expanded message editor"
-              disabled={disabled}
-              value={text}
-              spellCheck={false}
-              onKeyDown={onFullscreenKeyDown}
-              onChange={(event) => onTextChange(event.target.value)}
-            />
-            <div className="composer-fullscreen-actions">
-              <button
-                type="button"
-                className="send-btn composer-fullscreen-send"
-                disabled={disabled || !text.trim()}
-                aria-label={busy ? 'Queue message' : 'Send'}
-                onClick={() => {
-                  void send();
-                  setFullscreenOpen(false);
-                }}
-              >
-                {busy ? 'Queue message' : 'Send'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {fullscreenOpen
+        ? createPortal(
+            <div className="composer-fullscreen" role="dialog" aria-modal="true" aria-label="Expanded composer editor">
+              <div className="composer-fullscreen-panel">
+                <div className="composer-fullscreen-header">
+                  <span>Expanded editor</span>
+                  <button
+                    type="button"
+                    className="composer-fullscreen-close"
+                    aria-label="Close editor"
+                    onClick={() => setFullscreenOpen(false)}
+                  >
+                    Done
+                  </button>
+                </div>
+                <textarea
+                  ref={fullscreenAreaRef}
+                  className="composer-fullscreen-textarea"
+                  aria-label="Expanded message editor"
+                  disabled={disabled}
+                  value={text}
+                  spellCheck={false}
+                  onKeyDown={onFullscreenKeyDown}
+                  onChange={(event) => onTextChange(event.target.value)}
+                />
+                <div className="composer-fullscreen-actions">
+                  <button
+                    type="button"
+                    className="send-btn composer-fullscreen-send"
+                    disabled={disabled || !text.trim()}
+                    aria-label={busy ? 'Queue message' : 'Send'}
+                    onClick={() => {
+                      void send();
+                      setFullscreenOpen(false);
+                    }}
+                  >
+                    {busy ? 'Queue message' : 'Send'}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </form>
   );
 }

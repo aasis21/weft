@@ -98,7 +98,6 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const copyTimerRef = useRef<number | null>(null);
   const liveTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const lastLiveSignalRef = useRef<string>('');
@@ -108,7 +107,6 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
   const pinnedRef = useRef(true);
   const [isPinned, setIsPinned] = useState(true);
   const [hasNewWhileUnpinned, setHasNewWhileUnpinned] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedToolRuns, setCollapsedToolRuns] = useState<Record<string, boolean>>({});
   const [liveText, setLiveText] = useState('');
@@ -165,20 +163,17 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
     setMenu({ itemId, text, x, y });
   }, []);
 
-  const copyText = useCallback(async (itemId: string, text: string): Promise<void> => {
+  const copyText = useCallback(async (text: string): Promise<void> => {
     try {
       await navigator.clipboard?.writeText(text);
-      setCopiedId(itemId);
-      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 1200);
     } catch {
-      setCopiedId(null);
+      // Clipboard can be unavailable in private or embedded contexts.
     }
   }, []);
 
   const copyFromMenu = useCallback((): void => {
     if (!menu) return;
-    void copyText(menu.itemId, menu.text);
+    void copyText(menu.text);
     setMenu(null);
   }, [copyText, menu]);
 
@@ -339,7 +334,6 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
   useEffect(() => {
     return () => {
       cancelLongPress();
-      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       if (liveTimerRef.current !== null) window.clearTimeout(liveTimerRef.current);
     };
   }, [cancelLongPress]);
@@ -443,14 +437,6 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
                 >
                   <Markdown text={h.text} />
                 </div>
-                <button
-                  type="button"
-                  className="msg-copy"
-                  aria-label="Copy message"
-                  onClick={() => void copyText(`h-${h.turnIndex}-assistant`, h.text)}
-                >
-                  {copiedId === `h-${h.turnIndex}-assistant` ? 'Copied' : 'Copy'}
-                </button>
               </div>
             );
           })}
@@ -584,14 +570,6 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint, 
               <Markdown text={item.text} />
               {caret ? <span className="caret" aria-hidden="true" /> : null}
             </div>
-            <button
-              type="button"
-              className="msg-copy"
-              aria-label="Copy message"
-              onClick={() => void copyText(item.id, item.text)}
-            >
-              {copiedId === item.id ? 'Copied' : 'Copy'}
-            </button>
           </div>
         );
       })}
