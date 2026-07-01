@@ -475,6 +475,31 @@
   color: var(--fg-dim);
 }
 .assistant-bubble hr { margin: 12px 0; border: 0; border-top: 1px dashed var(--bg-rule); }
+.assistant-bubble table {
+  display: block;
+  max-width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+.assistant-bubble th,
+.assistant-bubble td {
+  padding: 6px 9px;
+  border: 1px solid var(--bg-rule);
+  vertical-align: top;
+}
+.assistant-bubble th {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--strong);
+  font-weight: 700;
+}
+.assistant-bubble td { color: var(--fg); }
+.assistant-bubble li > ul,
+.assistant-bubble li > ol {
+  margin: 3px 0 3px;
+  padding-left: 20px;
+}
 
 /* ===================== composer dock ===================== */
 .composer-dock {

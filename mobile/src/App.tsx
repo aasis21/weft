@@ -120,6 +120,7 @@ export default function App(): JSX.Element {
       }
       onInterrupt={() => void sessionManager.sendInterrupt(active.meta.channelId)}
       onModeChange={(mode: SessionMode) => void sessionManager.sendMode(active.meta.channelId, mode)}
+      onRetry={(itemId) => void sessionManager.retryPrompt(active.meta.channelId, itemId)}
       onSelectSession={(id) => sessionManager.setActive(id)}
       onAddSession={() => {
         setAddManual(false);

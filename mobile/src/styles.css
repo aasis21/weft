@@ -976,6 +976,26 @@ pre {
   border-color: rgba(255, 255, 255, 0.22);
 }
 
+@media (max-width: 430px) {
+  .install-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .install-code {
+    width: 100%;
+    overflow-x: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+
+  .copy-btn {
+    align-self: flex-end;
+  }
+}
+
 .landing-footer {
   display: flex;
   flex-wrap: wrap;

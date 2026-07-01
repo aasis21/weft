@@ -1,10 +1,10 @@
 import { Fragment } from 'react';
-import type { JSX, ReactNode } from 'react';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 
 /**
  * Minimal, dependency-free, XSS-safe Markdown -> React renderer.
  * Supports the subset Copilot streams emit: fenced + inline code, bold, italic,
- * links, ordered/unordered lists, headings, blockquotes, and horizontal rules.
+ * links, ordered/unordered lists, tables, headings, blockquotes, and horizontal rules.
  * It renders real React nodes (never dangerouslySetInnerHTML), and only allows
  * http(s)/mailto links. Tolerant of partial markdown while a turn streams in
  * (e.g. an unterminated ``` fence is treated as code to the end of the text).
@@ -47,6 +47,160 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
     rest = rest.slice(m.index + tok.length);
   }
   return out;
+}
+
+type TableAlign = CSSProperties['textAlign'];
+
+const LIST_ITEM = /^(\s*)([-*]|\d+\.)\s+(.*)$/;
+
+function indentationWidth(indent: string): number {
+  return Array.from(indent).reduce((width, char) => width + (char === '\t' ? 2 : 1), 0);
+}
+
+function isEscaped(text: string, index: number): boolean {
+  let backslashes = 0;
+  for (let i = index - 1; i >= 0 && text[i] === '\\'; i--) backslashes++;
+  return backslashes % 2 === 1;
+}
+
+function splitTableCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '|' && !isEscaped(line, i)) {
+      cells.push(cell);
+      cell = '';
+    } else {
+      cell += line[i];
+    }
+  }
+  cells.push(cell);
+
+  const trimmed = cells.map((part) => part.trim().replace(/\\\|/g, '|'));
+  if (trimmed[0] === '') trimmed.shift();
+  if (trimmed[trimmed.length - 1] === '') trimmed.pop();
+  return trimmed;
+}
+
+function parseTableAlignments(line: string): (TableAlign | undefined)[] | null {
+  if (!/^[\s|:-]+$/.test(line)) return null;
+
+  const cells = splitTableCells(line);
+  if (cells.length === 0) return null;
+
+  const alignments: (TableAlign | undefined)[] = [];
+  for (const cell of cells) {
+    const marker = cell.replace(/\s/g, '');
+    if (!/^:?-+:?$/.test(marker)) return null;
+
+    if (marker.startsWith(':') && marker.endsWith(':')) {
+      alignments.push('center');
+    } else if (marker.startsWith(':')) {
+      alignments.push('left');
+    } else if (marker.endsWith(':')) {
+      alignments.push('right');
+    } else {
+      alignments.push(undefined);
+    }
+  }
+
+  return alignments;
+}
+
+function alignmentStyle(textAlign: TableAlign | undefined): CSSProperties | undefined {
+  return textAlign ? { textAlign } : undefined;
+}
+
+function isTableStart(lines: string[], start: number): boolean {
+  return lines[start].includes('|') && start + 1 < lines.length && parseTableAlignments(lines[start + 1]) !== null;
+}
+
+function renderTable(lines: string[], start: number, blockKey: string): { element: JSX.Element; next: number } | null {
+  if (!isTableStart(lines, start)) return null;
+
+  const alignments = parseTableAlignments(lines[start + 1]);
+  if (!alignments) return null;
+
+  const headers = splitTableCells(lines[start]);
+  const rows: string[][] = [];
+  let next = start + 2;
+
+  while (next < lines.length && lines[next].includes('|')) {
+    rows.push(splitTableCells(lines[next]));
+    next++;
+  }
+
+  return {
+    element: (
+      <table key={blockKey}>
+        <thead>
+          <tr>
+            {headers.map((cell, cellIndex) => (
+              <th key={`${blockKey}-h${cellIndex}`} style={alignmentStyle(alignments[cellIndex])}>
+                {renderInline(cell, `${blockKey}-h${cellIndex}`)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`${blockKey}-r${rowIndex}`}>
+              {row.map((cell, cellIndex) => (
+                <td key={`${blockKey}-r${rowIndex}c${cellIndex}`} style={alignmentStyle(alignments[cellIndex])}>
+                  {renderInline(cell, `${blockKey}-r${rowIndex}c${cellIndex}`)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+    next,
+  };
+}
+
+function renderList(lines: string[], start: number, blockKey: string): { element: JSX.Element; next: number } {
+  type ListItem = { key: string; children: ReactNode[] };
+  type ListParse = { element: JSX.Element; next: number };
+
+  function parseLevel(index: number, indent: number, ordered: boolean, keyBase: string): ListParse {
+    const items: ListItem[] = [];
+    let next = index;
+
+    while (next < lines.length) {
+      const match = LIST_ITEM.exec(lines[next]);
+      if (!match) break;
+
+      const itemIndent = indentationWidth(match[1]);
+      const itemOrdered = /^\d+\.$/.test(match[2]);
+
+      if (itemIndent < indent || (itemIndent === indent && itemOrdered !== ordered)) break;
+
+      if (itemIndent > indent) {
+        if (items.length === 0) break;
+        const nested = parseLevel(next, itemIndent, itemOrdered, `${keyBase}-${items.length - 1}n`);
+        items[items.length - 1].children.push(nested.element);
+        next = nested.next;
+        continue;
+      }
+
+      const itemKey = `${keyBase}-i${items.length}`;
+      items.push({ key: itemKey, children: renderInline(match[3], itemKey) });
+      next++;
+    }
+
+    const renderedItems = items.map((item) => <li key={item.key}>{item.children}</li>);
+    return {
+      element: ordered ? <ol key={keyBase}>{renderedItems}</ol> : <ul key={keyBase}>{renderedItems}</ul>,
+      next,
+    };
+  }
+
+  const first = LIST_ITEM.exec(lines[start]);
+  const indent = first ? indentationWidth(first[1]) : 0;
+  const ordered = first ? /^\d+\.$/.test(first[2]) : false;
+  return parseLevel(start, indent, ordered, blockKey);
 }
 
 export function Markdown({ text }: { text: string }): JSX.Element {
@@ -96,6 +250,14 @@ export function Markdown({ text }: { text: string }): JSX.Element {
       continue;
     }
 
+    const table = renderTable(lines, i, `b${key}`);
+    if (table) {
+      blocks.push(table.element);
+      key++;
+      i = table.next;
+      continue;
+    }
+
     if (/^>\s?/.test(line)) {
       const quote: string[] = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) {
@@ -109,17 +271,11 @@ export function Markdown({ text }: { text: string }): JSX.Element {
     }
 
     // Unordered / ordered list.
-    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
-      const ordered = /^\s*\d+\.\s+/.test(line);
-      const items: ReactNode[] = [];
-      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
-        const content = lines[i].replace(/^\s*([-*]|\d+\.)\s+/, '');
-        items.push(<li key={`li${key}-${items.length}`}>{renderInline(content, `li${key}`)}</li>);
-        i++;
-      }
-      blocks.push(
-        ordered ? <ol key={`b${key++}`}>{items}</ol> : <ul key={`b${key++}`}>{items}</ul>,
-      );
+    if (LIST_ITEM.test(line)) {
+      const list = renderList(lines, i, `b${key}`);
+      blocks.push(list.element);
+      key++;
+      i = list.next;
       continue;
     }
 
@@ -131,7 +287,8 @@ export function Markdown({ text }: { text: string }): JSX.Element {
       !/^```/.test(lines[i].trim()) &&
       !/^(#{1,3})\s+/.test(lines[i]) &&
       !/^>\s?/.test(lines[i]) &&
-      !/^\s*([-*]|\d+\.)\s+/.test(lines[i]) &&
+      !isTableStart(lines, i) &&
+      !LIST_ITEM.test(lines[i]) &&
       !/^---+\s*$/.test(lines[i].trim())
     ) {
       para.push(lines[i]);

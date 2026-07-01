@@ -29,6 +29,7 @@ export interface UserItem {
   id: string;
   text: string;
   ts: number;
+  failed?: boolean;
   /** Which device typed this prompt: 'phone' (this device) or 'terminal' (the laptop).
    *  Undefined for backfilled history (turns carry no device). */
   origin?: 'phone' | 'terminal';
@@ -121,13 +122,43 @@ function cap(items: TimelineItem[]): TimelineItem[] {
 }
 
 /** Append a locally-echoed user prompt so it shows instantly as a right bubble. */
-export function appendUser(state: TimelineState, text: string, ts: number): TimelineState {
+export function appendUser(state: TimelineState, text: string, ts: number): { state: TimelineState; id: string } {
   const item: UserItem = {
     kind: 'user',
     id: `user-${ts}-${Math.random().toString(36).slice(2, 7)}`,
     text,
     ts,
     origin: 'phone',
+  };
+  return { state: { ...state, items: cap([...state.items, item]) }, id: item.id };
+}
+
+export function setUserFailed(state: TimelineState, id: string, failed: boolean): TimelineState {
+  let changed = false;
+  const items = state.items.map((item) => {
+    if (item.kind !== 'user' || item.id !== id) return item;
+    if (Boolean(item.failed) === failed) return item;
+    changed = true;
+    if (failed) return { ...item, failed: true };
+    const next = { ...item };
+    delete next.failed;
+    return next;
+  });
+  return changed ? { ...state, items } : state;
+}
+
+export function appendNotice(
+  state: TimelineState,
+  level: LogLine['level'],
+  text: string,
+  ts: number,
+): TimelineState {
+  const item: NoticeItem = {
+    kind: 'notice',
+    id: `notice-${ts}-${Math.random().toString(36).slice(2, 6)}`,
+    level,
+    text,
+    ts,
   };
   return { ...state, items: cap([...state.items, item]) };
 }
@@ -356,14 +387,7 @@ function completeTool(state: TimelineState, message: ToolComplete): TimelineStat
 }
 
 function pushNotice(state: TimelineState, message: LogLine): TimelineState {
-  const item: NoticeItem = {
-    kind: 'notice',
-    id: `log-${message.ts}-${Math.random().toString(36).slice(2, 6)}`,
-    level: message.level,
-    text: message.message,
-    ts: message.ts,
-  };
-  return { ...state, items: cap([...state.items, item]) };
+  return appendNotice(state, message.level, message.message, message.ts);
 }
 
 /**

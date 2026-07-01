@@ -3,6 +3,7 @@ import type { InnerMessage, SessionMode } from '@aasis21/helm-shared';
 import { connectSession, pairSession } from './helmClient';
 import type { HelmClient } from './helmClient';
 import {
+  appendNotice,
   appendUser,
   dismissApproval,
   dismissElicitation,
@@ -12,6 +13,7 @@ import {
   restoreApproval,
   restoreElicitation,
   restoreTimeline,
+  setUserFailed,
   toPersisted,
 } from './timeline';
 import type { TimelineState } from './timeline';
@@ -42,6 +44,7 @@ export interface SessionView {
   meta: SessionMeta;
   status: SessionStatus;
   timeline: TimelineState;
+  error?: string;
 }
 
 export interface ManagerSnapshot {
@@ -68,6 +71,7 @@ interface Runtime {
 // see DEFAULT_HEARTBEAT_MS in extension/src/relay.mjs). Only flag a session "Quiet"
 // once a beat has been missed with slack, so a live session never flickers Live->Quiet.
 const IDLE_AFTER_MS = 20_000;
+const OFFLINE_AFTER_MS = 45_000;
 // Coalesce transcript writes so a burst of stream deltas doesn't hammer storage.
 const PERSIST_THROTTLE_MS = 800;
 
@@ -106,7 +110,7 @@ class SessionManager {
       sessions: this.order
         .map((id) => this.runtimes.get(id))
         .filter((r): r is Runtime => !!r)
-        .map((r) => ({ meta: { ...r.meta }, status: r.status, timeline: r.timeline })),
+        .map((r) => ({ meta: { ...r.meta }, status: r.status, timeline: r.timeline, error: r.error })),
     };
     for (const listener of this.listeners) listener();
   }
@@ -222,6 +226,7 @@ class SessionManager {
       void notifySessionEnded(runtime.timeline.endedReason);
     } else {
       if (runtime.status !== 'live') runtime.status = 'live';
+      if (runtime.error) runtime.error = undefined;
     }
 
     if (runtime.timeline.cwd && runtime.timeline.cwd !== runtime.meta.cwd) {
@@ -365,6 +370,7 @@ class SessionManager {
     const stored = (await loadSessions()).find((s) => s.pairing.channelId === channelId);
     if (!stored) return;
     runtime.status = 'connecting';
+    runtime.error = undefined;
     this.emit();
     try {
       const client = await connectSession(stored.pairing);
@@ -379,10 +385,44 @@ class SessionManager {
   async sendPrompt(channelId: string, text: string): Promise<void> {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
-    runtime.timeline = appendUser(runtime.timeline, text, Date.now());
+    const appended = appendUser(runtime.timeline, text, Date.now());
+    runtime.timeline = appended.state;
     this.schedulePersist(channelId);
     this.emit();
-    await runtime.client?.send(prompt(text));
+    try {
+      await this.deliverPrompt(channelId, text);
+    } catch {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.timeline = setUserFailed(r.timeline, appended.id, true);
+      this.schedulePersist(channelId);
+      this.emit();
+    }
+  }
+
+  async retryPrompt(channelId: string, itemId: string): Promise<void> {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime) return;
+    const item = runtime.timeline.items.find((i) => i.kind === 'user' && i.id === itemId);
+    if (!item || item.kind !== 'user') return;
+    runtime.timeline = setUserFailed(runtime.timeline, itemId, false);
+    this.schedulePersist(channelId);
+    this.emit();
+    try {
+      await this.deliverPrompt(channelId, item.text);
+    } catch {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.timeline = setUserFailed(r.timeline, itemId, true);
+      this.schedulePersist(channelId);
+      this.emit();
+    }
+  }
+
+  private async deliverPrompt(channelId: string, text: string): Promise<void> {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime?.client) throw new Error('No active connection.');
+    await runtime.client.send(prompt(text));
   }
 
   /**
@@ -470,9 +510,22 @@ class SessionManager {
   async sendMode(channelId: string, mode: SessionMode): Promise<void> {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
+    const prev = runtime.timeline.mode;
     runtime.timeline = { ...runtime.timeline, mode };
     this.emit();
-    await runtime.client?.send(modeChange(mode));
+    try {
+      if (!runtime.client) throw new Error('No active connection.');
+      await runtime.client.send(modeChange(mode));
+    } catch {
+      runtime.timeline = appendNotice(
+        { ...runtime.timeline, mode: prev },
+        'warning',
+        `Couldn't switch to ${mode} — still in ${prev}.`,
+        Date.now(),
+      );
+      this.schedulePersist(channelId);
+      this.emit();
+    }
   }
 
   private startWatchdog(): void {
@@ -481,9 +534,13 @@ class SessionManager {
       let changed = false;
       const now = Date.now();
       for (const runtime of this.runtimes.values()) {
-        if (runtime.status !== 'live') continue;
+        if (runtime.ephemeral || (runtime.status !== 'live' && runtime.status !== 'idle')) continue;
         const beat = runtime.timeline.lastHeartbeat;
-        if (beat && now - beat > IDLE_AFTER_MS) {
+        if (beat && now - beat > OFFLINE_AFTER_MS) {
+          runtime.status = 'error';
+          runtime.error = 'Connection lost — reconnect to resume.';
+          changed = true;
+        } else if (runtime.status === 'live' && beat && now - beat > IDLE_AFTER_MS) {
           runtime.status = 'idle';
           changed = true;
         }

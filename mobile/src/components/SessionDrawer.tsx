@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useEffect, useRef, type JSX } from 'react';
 import type { SessionView } from '../lib/sessionManager';
 
 interface SessionDrawerProps {
@@ -31,6 +31,13 @@ function turnCount(session: SessionView): number {
   return session.timeline.items.filter((i) => i.kind === 'user' || i.kind === 'assistant').length;
 }
 
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function isFocusable(element: HTMLElement): boolean {
+  return element.tabIndex >= 0 && !element.hasAttribute('disabled') && element.getClientRects().length > 0;
+}
+
 export function SessionDrawer({
   sessions,
   activeId,
@@ -39,9 +46,81 @@ export function SessionDrawer({
   onRemove,
   onClose,
 }: SessionDrawerProps): JSX.Element {
+  const drawerRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const drawer = drawerRef.current;
+    const activeElement = document.activeElement;
+    triggerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+
+    const getFocusableElements = (): HTMLElement[] => {
+      if (!drawerRef.current) return [];
+      return Array.from(drawerRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isFocusable);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== 'Tab' || !drawerRef.current) return;
+
+      const focusableElements = getFocusableElements();
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        drawerRef.current.focus();
+        return;
+      }
+
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      const active = document.activeElement;
+
+      if (!drawerRef.current.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    const focusableElements = getFocusableElements();
+    if (focusableElements.length > 0) {
+      focusableElements[0].focus();
+    } else {
+      drawer?.focus();
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      const trigger = triggerRef.current;
+      if (trigger && document.contains(trigger) && isFocusable(trigger)) {
+        trigger.focus();
+      }
+    };
+  }, []);
+
   return (
     <>
-      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+      <aside
+        ref={drawerRef}
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sessions"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="drawer-head">
           <span className="drawer-title">SESSIONS</span>
           <button className="icon-btn" type="button" onClick={onAddSession} title="Join another session">
@@ -105,7 +184,7 @@ export function SessionDrawer({
           ＋ Join another Copilot session
         </button>
       </aside>
-      <div className="drawer-scrim" onClick={onClose} />
+      <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />
     </>
   );
 }

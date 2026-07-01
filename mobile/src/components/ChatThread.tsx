@@ -13,6 +13,7 @@ interface ChatThreadProps {
   streaming?: boolean;
   /** Shown centered when there is nothing yet. */
   emptyHint?: string;
+  onRetry?: (itemId: string) => void;
 }
 
 const COPILOT_AVATAR: ReactNode = (
@@ -64,7 +65,7 @@ function formatTime(ts: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(ts);
 }
 
-export function ChatThread({ items, history = [], streaming = false, emptyHint }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, history = [], streaming = false, emptyHint, onRetry }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   // True while the viewport is parked at (or near) the bottom. When the user has
@@ -142,6 +143,25 @@ export function ChatThread({ items, history = [], streaming = false, emptyHint }
           return (
             <div key={item.id} className="row user">
               <div className="bubble user-bubble">{item.text}</div>
+              {item.failed ? (
+                <div
+                  className="notice warning"
+                  role="alert"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end' }}
+                >
+                  <span className="notice-text">Not delivered</span>
+                  {onRetry ? (
+                    <button
+                      type="button"
+                      className="reconnect-btn"
+                      aria-label="Retry sending message"
+                      onClick={() => onRetry(item.id)}
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               <DeviceChip origin={item.origin} />
             </div>
           );

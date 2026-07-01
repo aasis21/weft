@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { SessionMode } from '@aasis21/helm-shared';
 import type { SessionView } from '../lib/sessionManager';
@@ -67,6 +67,7 @@ interface SessionScreenProps {
   ): void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): void;
+  onRetry(itemId: string): void;
   onSelectSession(channelId: string): void;
   onAddSession(): void;
   onRemoveSession(channelId: string): void;
@@ -83,6 +84,7 @@ export function SessionScreen({
   onElicitationRespond,
   onInterrupt,
   onModeChange,
+  onRetry,
   onSelectSession,
   onAddSession,
   onRemoveSession,
@@ -90,6 +92,8 @@ export function SessionScreen({
   onGoHome,
 }: SessionScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const { timeline, status, meta } = active;
   const ended = status === 'ended';
   // A turn is in flight whenever the agent reports it's busy (text/reasoning/tool) —
@@ -99,6 +103,26 @@ export function SessionScreen({
     status === 'live' &&
     (timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
   const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || status === 'idle');
+  const requestRemove = (id: string): void => {
+    setDrawerOpen(false);
+    setConfirmRemoveId(id);
+  };
+  const cancelRemove = (): void => setConfirmRemoveId(null);
+  const confirmRemove = (): void => {
+    if (!confirmRemoveId) return;
+    onRemoveSession(confirmRemoveId);
+    setConfirmRemoveId(null);
+  };
+
+  useEffect(() => {
+    if (!confirmRemoveId) return undefined;
+    confirmDialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setConfirmRemoveId(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [confirmRemoveId]);
 
   return (
     <div className="helm-session">
@@ -111,18 +135,34 @@ export function SessionScreen({
         onOpenDrawer={() => setDrawerOpen(true)}
         onAddSession={onAddSession}
         onReconnect={() => onReconnect(activeId)}
-        onRemove={() => onRemoveSession(activeId)}
+        onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}
       />
 
       <main className="thread-scroll">
-        <ChatThread items={timeline.items} history={timeline.history} streaming={status === 'live'} />
+        <ChatThread
+          items={timeline.items}
+          history={timeline.history}
+          streaming={status === 'live'}
+          onRetry={onRetry}
+        />
       </main>
 
       <div className="composer-dock">
         {ended ? (
           <div className="ended-banner">
             <span>Session ended{timeline.endedReason ? ` · ${timeline.endedReason}` : ''}.</span>
+            {meta.kind !== 'demo' ? (
+              <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
+                ↻ Reconnect
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {active.error && !ended ? (
+          <div className="ended-banner" role="alert">
+            <span>{active.error}</span>
             {meta.kind !== 'demo' ? (
               <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
                 ↻ Reconnect
@@ -225,9 +265,51 @@ export function SessionScreen({
             setDrawerOpen(false);
             onAddSession();
           }}
-          onRemove={onRemoveSession}
+          onRemove={requestRemove}
           onClose={() => setDrawerOpen(false)}
         />
+      ) : null}
+
+      {confirmRemoveId ? (
+        <div
+          ref={confirmDialogRef}
+          className="approval-banner"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="leave-session-title"
+          tabIndex={-1}
+          style={{
+            position: 'fixed',
+            left: '1rem',
+            right: '1rem',
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)',
+            zIndex: 50,
+            boxShadow: '0 18px 60px rgba(0, 0, 0, 0.35)',
+          }}
+        >
+          <div className="approval-head">
+            <span className="approval-warn" aria-hidden="true">⚠</span>
+            <div className="approval-body">
+              <h2 id="leave-session-title" className="approval-tool" style={{ margin: 0 }}>
+                Leave this session?
+              </h2>
+              <span className="approval-hint">This also clears its saved history on this phone.</span>
+            </div>
+          </div>
+          <div className="approval-actions">
+            <button type="button" className="reconnect-btn" onClick={cancelRemove}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="bar-menu-item danger"
+              onClick={confirmRemove}
+              style={{ width: 'auto' }}
+            >
+              Leave
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
