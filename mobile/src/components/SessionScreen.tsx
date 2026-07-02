@@ -264,10 +264,16 @@ export function SessionScreen({
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return undefined;
+    // Address-bar show/hide on scroll nudges visualViewport's height/offsetTop by a few
+    // px even when no keyboard is open, which produced a false-positive inset and made
+    // the composer jitter up/down while scrolling. Real soft keyboards are always well
+    // over this threshold, so ignore anything below it and pin the composer down.
+    const KEYBOARD_INSET_THRESHOLD = 120;
     const apply = (): void => {
       const el = rootRef.current;
       if (!el) return;
-      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const raw = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      const inset = raw >= KEYBOARD_INSET_THRESHOLD ? raw : 0;
       el.style.setProperty('--helm-kb', `${inset}px`);
     };
     apply();
