@@ -61,6 +61,10 @@ export const SUBTYPE = Object.freeze({
     INTERRUPT: "interrupt",
     HISTORY_REQUEST: "history_request",
     HISTORY: "history",
+    // In-memory recent-turns snapshot (higher fidelity than the DB: captures the full assistant
+    // text the CLI store drops for long/multi-tool turns). Requested on connect; see recentTurns().
+    RECENT_TURNS_REQUEST: "recent_turns_request",
+    RECENT_TURNS: "recent_turns",
     STATE_REQUEST: "state_request",
     STATE_SNAPSHOT: "state_snapshot",
   }),
@@ -196,6 +200,23 @@ export const historyRequest = (before = null, limit, since = null) =>
  */
 export const history = (items, nextCursor = null, hasMore = false, since = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.HISTORY, { items, nextCursor, hasMore, since });
+
+// ---- factories (recent-turns snapshot) -------------------------------------
+/**
+ * Phone -> ext request for the extension's in-memory recent-turns buffer (the last `limit` turns it
+ * knows). Preferred over history_request for the connect-time backfill because the buffer keeps the
+ * FULL assistant text the CLI store drops for long/multi-tool turns.
+ */
+export const recentTurnsRequest = (limit) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RECENT_TURNS_REQUEST, { limit });
+/**
+ * Ext -> phone snapshot of the last N turns as flat message entries, ascending (chronological).
+ * Each item is `{ role, text, ts, id }`; `id` is a stable per-message id (assistant messageId /
+ * user event id / `seed-<turn>-<role>` for store-seeded turns) so re-applying a snapshot is a no-op.
+ * Self-contained (no cursor): the phone merges it into the transcript tail by id + content dedup.
+ */
+export const recentTurns = (items) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RECENT_TURNS, { items: Array.isArray(items) ? items : [] });
 
 // ---- factories (state snapshot) --------------------------------------------
 /** Phone -> ext: request the current session state on (re)connect / refresh / resume. */

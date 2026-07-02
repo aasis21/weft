@@ -33,13 +33,15 @@ export {
   interrupt,
   historyRequest,
   history,
+  recentTurnsRequest,
+  recentTurns,
   stateRequest,
   stateSnapshot,
   isValidEnvelope,
 } from '@aasis21/helm-shared';
 
-import { channelUp as realChannelUp, history } from '@aasis21/helm-shared';
-import type { ChannelUp, EnvelopeBase, History, HistoryItem } from '@aasis21/helm-shared';
+import { channelUp as realChannelUp, history, recentTurns as realRecentTurns } from '@aasis21/helm-shared';
+import type { ChannelUp, EnvelopeBase, History, HistoryItem, RecentTurnItem, RecentTurns } from '@aasis21/helm-shared';
 
 /** Identity/ordering fields a test may want to pin on an inbound envelope (as the wire would carry). */
 export interface StampFields {
@@ -80,4 +82,19 @@ export function historyPage(
   opts: { nextCursor?: number | null; hasMore?: boolean; since?: number | null } = {},
 ): History {
   return history(items, opts.nextCursor ?? null, opts.hasMore ?? false, opts.since ?? null);
+}
+
+/** Build a single recent-turns message entry. */
+export function recentTurnItem(
+  role: 'user' | 'assistant',
+  text: string,
+  ts: number,
+  id?: string,
+): RecentTurnItem {
+  return { role, text, ts, id: id ?? `${role}-${ts}` };
+}
+
+/** Build a recent-turns snapshot envelope (ascending message entries). */
+export function recentTurnsSnapshot(items: RecentTurnItem[]): RecentTurns {
+  return realRecentTurns(items);
 }

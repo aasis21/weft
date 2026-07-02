@@ -16,7 +16,7 @@ describe('scenario: join', () => {
     vi.useRealTimers();
   });
 
-  it('creates a live card, probes state, and requests the empty latest page', async () => {
+  it('creates a live card, probes state, and requests the recent-turns snapshot', async () => {
     const { channelId, client } = await h!.pair('c1');
 
     expect(channelId).toBe('c1');
@@ -34,9 +34,11 @@ describe('scenario: join', () => {
     expect(h!.active()?.status).toBe('live');
 
     expect(client.sentOfKind('control.state_request')).toHaveLength(1);
-    const requests = client.sentOfKind('control.history_request');
+    // The connect-time backfill asks for the extension's in-memory recent-turns snapshot, not the
+    // DB history page. DB history_request is now reserved for "Load earlier" scrollback.
+    expect(client.sentOfKind('control.history_request')).toHaveLength(0);
+    const requests = client.sentOfKind('control.recent_turns_request');
     expect(requests).toHaveLength(1);
-    expect(requests[0].before).toBeNull();
-    expect(requests[0].since).toBeNull();
+    expect(requests[0].limit).toBe(50);
   });
 });

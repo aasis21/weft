@@ -52,9 +52,9 @@ describe('scenario: history', () => {
     await h!.flush();
 
     const requests = client.sentOfKind('control.history_request');
-    expect(requests).toHaveLength(2);
-    expect(requests[1].before).toBe(2);
-    expect(requests[1].since).toBeNull();
+    expect(requests).toHaveLength(1);
+    expect(requests[0].before).toBe(2);
+    expect(requests[0].since).toBeNull();
 
     client.emit(B.historyPage([B.historyItem(1, 'user', 'older', 100), B.historyItem(2, 'assistant', 'then', 200)], { nextCursor: 0, hasMore: false }));
     await h!.flush();

@@ -1,5 +1,5 @@
-import { EVENT_TYPE, SUBTYPE, approvalDecision, elicitationResponse, historyRequest, interrupt, modeChange, prompt, stateRequest, HISTORY_PAGE_DEFAULT } from '@aasis21/helm-shared';
-import type { HistoryMsg, EventEnvelope, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import { EVENT_TYPE, SUBTYPE, approvalDecision, elicitationResponse, historyRequest, recentTurnsRequest, interrupt, modeChange, prompt, stateRequest, HISTORY_PAGE_DEFAULT, RECENT_TURNS_DEFAULT } from '@aasis21/helm-shared';
+import type { EventEnvelope, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { connectSession, pairSession, getSenderName } from './helmClient';
 import type { HelmClient } from './helmClient';
 import {
@@ -77,8 +77,6 @@ interface Runtime {
   timeline: TimelineState;
   client: HelmClient | null;
   ephemeral: boolean;
-  /** Forward catch-up pages fetched since the last (re)connect — bounds a huge gap (see D5). */
-  catchupPages?: number;
   unread?: boolean;
   error?: string;
   /** Deadline timer that fires if no genuine host signal confirms liveness within HOST_CONFIRM_MS. */
@@ -92,6 +90,9 @@ interface Runtime {
   /** Bounded grace after first going Live during which the initial history skeleton is held. */
   settling?: boolean;
   settleTimer?: number;
+  /** Fail-safe deadline that clears historyLoading if the recent-turns/history reply is lost, so a
+   *  single dropped answer can't spin the loader forever (bug: no-response-received). */
+  historyTimer?: number;
   /** When the current 'connecting' attempt began. The confirm deadline only arms AFTER connect
    *  resolves, so a hung connect (killed terminal) would spin forever; the watchdog stamps this and
    *  fails the attempt past HOST_CONFIRM_MS. */
@@ -127,9 +128,10 @@ const MAX_WARM_SESSIONS = 10;
 const META_PERSIST_THROTTLE_MS = 1_500;
 // Coalesce transcript writes so a burst of stream deltas doesn't hammer storage.
 const PERSIST_THROTTLE_MS = 800;
-// Cap the forward catch-up after a long absence so one reconnect can't flood the transcript with a
-// huge gap in a single burst; the older middle stays reachable via "Load earlier" scrollback.
-const MAX_CATCHUP_PAGES = 4;
+// Fail-safe: if a recent-turns/history reply is lost (superseded channel after reconnect, transport
+// drop, decrypt miss, extension busy/teardown), clear the loading affordance after this long so the
+// UI never spins forever. The next connect re-requests and self-heals.
+const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
 
 function basename(path: string | null): string | null {
   if (!path) return null;
@@ -463,15 +465,14 @@ export class SessionManager {
 
   /**
    * One self-healing history sync, shared by every connect path (first join, reconnect, rescan,
-   * refresh, resume). It is driven by what the transcript already CONTAINS, not by a one-shot flag,
-   * so a failed pull simply heals on the next connect instead of leaving a permanent hole:
+   * refresh, resume). It asks the extension for its in-memory RECENT-TURNS snapshot — the last ~50
+   * turns it knows, with the FULL assistant text the CLI store drops for long/multi-tool turns.
    *
-   *   - empty thread            → pull the latest page (initial backfill of pre-join turns)
-   *   - has turns + a cursor    → forward catch-up of everything committed while we were away
-   *   - has turns, but no cursor → nothing to do; the state snapshot + live events cover it
-   *
-   * The forward page is appended to the transcript tail behind a "N new while you were away" divider
-   * by the reducer, so a phone that went offline/backgrounded/hard-refreshed returns with no gap.
+   * The snapshot is self-contained and idempotent, so ONE request covers every path: the reducer
+   * dedups whatever the transcript already shows (by id + content) and appends only genuinely-new
+   * turns at the tail behind a "N new while you were away" divider. An empty thread arms the loading
+   * affordance (with a bounded fail-safe so a lost reply can't spin forever); a thread that already
+   * has turns just merges silently. DB `historyRequest` is now used ONLY for "Load earlier" scrollback.
    */
   private syncHistory(channelId: string, client: HelmClient): void {
     const runtime = this.runtimes.get(channelId);
@@ -480,52 +481,41 @@ export class SessionManager {
     const hasContent = timeline.history.length > 0 || timeline.items.length > 0;
     if (!hasContent) {
       runtime.timeline = markHistoryLoading(runtime.timeline, true);
+      this.armHistoryTimeout(channelId);
       this.emit();
-      void this.dispatch(channelId, client, historyRequest(null, HISTORY_PAGE_DEFAULT)).catch(() => {
-        const r = this.runtimes.get(channelId);
-        if (r) {
-          r.timeline = markHistoryLoading(r.timeline, false);
-          this.emit();
-        }
-      });
-      return;
     }
-    const since = timeline.latestTurnIndex;
-    if (since == null) return;
-    runtime.catchupPages = 0;
-    void this.dispatch(channelId, client, historyRequest(null, HISTORY_PAGE_DEFAULT, since)).catch(() => {
-      // A failed catch-up must never break the connection; forward live events still flow.
+    void this.dispatch(channelId, client, recentTurnsRequest(RECENT_TURNS_DEFAULT)).catch(() => {
+      const r = this.runtimes.get(channelId);
+      if (r) {
+        r.timeline = markHistoryLoading(r.timeline, false);
+        this.clearHistoryTimeout(r);
+        this.emit();
+      }
     });
   }
 
-  /**
-   * Continue a bounded forward catch-up: if a catch-up page reports more missed turns, pull the next
-   * one (up to MAX_CATCHUP_PAGES) so a moderate absence fills in completely and in order. A very
-   * large gap stops at the cap with a notice, leaving the older middle to "Load earlier" scrollback,
-   * so one reconnect can't flood the transcript in a single burst.
-   */
-  private maybeContinueCatchup(channelId: string, page: HistoryMsg): void {
+  /** Arm the fail-safe that clears a stuck historyLoading if the recent-turns reply never lands. */
+  private armHistoryTimeout(channelId: string): void {
     const runtime = this.runtimes.get(channelId);
-    if (!runtime || runtime.ephemeral || !runtime.client) return;
-    if (!page.hasMore || page.nextCursor == null) return;
-    const loaded = (runtime.catchupPages ?? 0) + 1;
-    runtime.catchupPages = loaded;
-    if (loaded >= MAX_CATCHUP_PAGES) {
-      runtime.timeline = appendNotice(
-        runtime.timeline,
-        'info',
-        'A lot happened while you were away — scroll up to load the rest.',
-        Date.now(),
-      );
-      this.schedulePersist(channelId);
-      this.emit();
-      return;
+    if (!runtime) return;
+    if (runtime.historyTimer != null) window.clearTimeout(runtime.historyTimer);
+    runtime.historyTimer = window.setTimeout(() => {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.historyTimer = undefined;
+      if (r.timeline.historyLoading) {
+        r.timeline = markHistoryLoading(r.timeline, false);
+        this.emit();
+      }
+    }, HISTORY_REQUEST_TIMEOUT_MS);
+  }
+
+  /** Cancel the history fail-safe (reply arrived, or the session was torn down). */
+  private clearHistoryTimeout(runtime: Runtime): void {
+    if (runtime.historyTimer != null) {
+      window.clearTimeout(runtime.historyTimer);
+      runtime.historyTimer = undefined;
     }
-    void this
-      .dispatch(channelId, runtime.client, historyRequest(null, HISTORY_PAGE_DEFAULT, page.nextCursor))
-      .catch(() => {
-        // Best-effort: a dropped continuation just leaves the remaining gap to manual scrollback.
-      });
   }
 
   private onMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
@@ -545,11 +535,15 @@ export class SessionManager {
     }
 
     if (message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.HISTORY) {
-      const page = message.msg;
-      // A forward catch-up page (since != null) may report more missed turns — page the gap (bounded).
-      if (page.since != null) this.maybeContinueCatchup(channelId, page);
-      // The initial page (since == null), empty or not, settles the thread: drop the loading grace.
-      else this.clearSettle(runtime);
+      // Backward scrollback page ("Load earlier"), empty or not: settle the thread, drop the grace.
+      this.clearSettle(runtime);
+    }
+
+    // The recent-turns snapshot (the primary connect-time backfill) settles the thread and clears the
+    // loading fail-safe, whether or not it added anything — the reply landed.
+    if (message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.RECENT_TURNS) {
+      this.clearHistoryTimeout(runtime);
+      this.clearSettle(runtime);
     }
 
     if (message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN) {

@@ -123,7 +123,7 @@ describe('timeline reducer', () => {
     }
   });
 
-  it('merges backward history pages and appends forward catch-up pages', () => {
+  it('merges backward history pages into the scrollback store above the transcript', () => {
     const older = [B.historyItem(2, 'assistant', 'two-a', 2), B.historyItem(1, 'user', 'one-u', 1)];
     let state = reduceTimeline(emptyTimeline(), at(B.historyPage(older, { nextCursor: 1, hasMore: true }), 50));
     expect(state.history).toEqual([B.historyItem(1, 'user', 'one-u', 1), B.historyItem(2, 'assistant', 'two-a', 2)]);
@@ -136,14 +136,69 @@ describe('timeline reducer', () => {
       B.historyItem(3, 'user', 'three-u', 3),
     ]);
     expect(state).toMatchObject({ historyCursor: null, historyHasMore: false, latestTurnIndex: 3 });
+    // Backward pages never touch the live transcript.
+    expect(state.items).toEqual([]);
+  });
 
-    state = reduceTimeline(state, at(B.historyPage([B.historyItem(4, 'user', 'new user', 60), B.historyItem(4, 'assistant', 'new assistant', 61)], { since: 3 }), 52));
+  it('backfills an empty transcript from a recent-turns snapshot and clears loading', () => {
+    let state = markHistoryLoading(emptyTimeline(), true);
+    state = reduceTimeline(
+      state,
+      at(
+        B.recentTurnsSnapshot([
+          B.recentTurnItem('user', 'hi there', 100, 'u1'),
+          B.recentTurnItem('assistant', 'hello back', 200, 'a1'),
+        ]),
+        300,
+      ),
+    );
+    expect(state.historyLoading).toBe(false);
     expect(state.items).toMatchObject([
-      { kind: 'notice', id: 'catchup-4-1', level: 'info', text: '1 new while you were away', ts: 60 },
-      { kind: 'user', id: 'turn-4-user', text: 'new user', ts: 60 },
-      { kind: 'assistant', id: 'turn-4-assistant', text: 'new assistant', ts: 61 },
+      { kind: 'user', id: 'u1', text: 'hi there', ts: 100 },
+      { kind: 'assistant', id: 'a1', text: 'hello back', ts: 200 },
     ]);
-    expect(state.latestTurnIndex).toBe(4);
+    // Empty transcript backfill carries no "N new while you were away" divider.
+    expect(state.items.some((i) => i.kind === 'notice')).toBe(false);
+  });
+
+  it('reconnect recent-turns dedups seen turns, appends new ones, and prepends an away divider', () => {
+    // Existing transcript from the live session (assistant id matches the buffer id → id-dedup).
+    let state = reduceTimeline(emptyTimeline(), at(B.assistantMessage('live tail', 'a1'), 50));
+    expect(state.items).toHaveLength(1);
+
+    state = reduceTimeline(
+      state,
+      at(
+        B.recentTurnsSnapshot([
+          B.recentTurnItem('assistant', 'live tail', 40, 'a1'), // already shown (same id) → skip
+          B.recentTurnItem('user', 'while away', 60, 'u2'),
+          B.recentTurnItem('assistant', 'answer', 70, 'a2'),
+        ]),
+        80,
+      ),
+    );
+
+    expect(state.items.map((i) => ('text' in i ? i.text : i.kind))).toEqual([
+      'live tail',
+      '1 new while you were away',
+      'while away',
+      'answer',
+    ]);
+    // The already-shown bubble keeps its original local ts (merge preserves local time).
+    expect(state.items[0]).toMatchObject({ kind: 'assistant', id: 'a1', ts: 50 });
+    expect(state.items[1]).toMatchObject({ kind: 'notice', level: 'info' });
+  });
+
+  it('dedups an unclipped live bubble against its clipped recent-turns copy by content prefix', () => {
+    const long = 'x'.repeat(400);
+    let state = reduceTimeline(emptyTimeline(), at(B.assistantMessage(long, 'live-id'), 50));
+    // Buffer copy has a different id but the same 256-char content prefix → treated as a duplicate.
+    state = reduceTimeline(
+      state,
+      at(B.recentTurnsSnapshot([B.recentTurnItem('assistant', long.slice(0, 300), 40, 'buf-id')]), 80),
+    );
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0]).toMatchObject({ id: 'live-id', ts: 50 });
   });
 
   it('applies state snapshots and pending approval/elicitation messages', () => {

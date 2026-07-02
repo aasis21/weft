@@ -3,6 +3,7 @@ import {
   EVENT_TYPE,
   SUBTYPE,
   MODES,
+  RECENT_TURNS_DEFAULT,
   assistantMessage,
   assistantDelta,
   toolStart,
@@ -19,9 +20,11 @@ import {
   heartbeat,
   modeChange,
   history,
+  recentTurns,
   stateSnapshot,
 } from "@aasis21/helm-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
+import { createRecentTurns } from "./recentTurns.mjs";
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 120_000;
 // ask_user forms take longer to fill in than a one-tap approval, so allow more slack before
@@ -279,6 +282,16 @@ export async function attachRelay({
     permissionRelay ??
     createPermissionRelay({ channel, approvalTimeoutMs, logger });
   const elicitations = createElicitationRelay({ session, channel, logger });
+  // In-memory recent-turns buffer: captures FULL assistant text live (the CLI store drops it for
+  // long/multi-tool turns), so a connecting phone can backfill recent turns at full fidelity. Seeded
+  // best-effort from the store so turns from before this extension started still show.
+  const turnBuffer = createRecentTurns();
+  try {
+    const seedPage = await readHistory(sessionId, { limit: RECENT_TURNS_DEFAULT });
+    turnBuffer.seed(seedPage.items);
+  } catch {
+    // Seeding is best-effort; the buffer still fills from the live stream.
+  }
   const unsubscribers = [];
   let stopped = false;
   // Correlates phone-relayed prompts with their echoed user.message events so the relay
@@ -317,7 +330,7 @@ export async function attachRelay({
 
   if (typeof session.on === "function") {
     unsubscribers.push(
-      session.on((event) => void handleSessionEvent(event, sendSafe, promptOrigin, elicitations)),
+      session.on((event) => void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, turnBuffer)),
     );
   }
 
@@ -369,6 +382,10 @@ export async function attachRelay({
         void serveHistory(sessionId, msg.msg, sendSafe, logger);
         return;
       }
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.RECENT_TURNS_REQUEST) {
+        void serveRecentTurns(turnBuffer, msg.msg, sendSafe, logger);
+        return;
+      }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
         void serveStateSnapshot({ session, sessionId, approvals, elicitations, sendSafe, logger });
       }
@@ -393,7 +410,7 @@ export async function attachRelay({
   return { stop, onPermissionRequest: approvals.onPermissionRequest };
 }
 
-async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations) {
+async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, turnBuffer) {
   if (!event?.type) return;
   const data = event.data ?? {};
   switch (event.type) {
@@ -416,6 +433,7 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations) {
       if (elicitations) await elicitations.complete(data);
       break;
     case "assistant.message":
+      turnBuffer?.recordAssistant(data.content ?? "", event.ts ?? Date.now(), data.messageId ?? event.id);
       await sendSafe(assistantMessage(data.content ?? "", data.messageId ?? event.id));
       break;
     case "assistant.message_delta":
@@ -429,6 +447,10 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations) {
       // we can't match to a recent phone injection (i.e. genuinely terminal-typed).
       const text = data.content ?? "";
       if (!text || data.source || data.isAutopilotContinuation) break;
+      // Record the user side of EVERY real turn (both origins) so the phone can backfill it; the
+      // phone dedups its own optimistic prompts by content. Do this BEFORE classify(), which
+      // consumes the phone-prompt match used only for the terminal-echo decision below.
+      turnBuffer?.recordUser(text, event.ts ?? Date.now(), event.id);
       const origin = promptOrigin?.classify(text) ?? "terminal";
       if (origin === "phone") break;
       await sendSafe(userMessage(text, "terminal", event.id));
@@ -471,6 +493,18 @@ async function serveHistory(sessionId, req, sendSafe, logger) {
   } catch (err) {
     logger?.(`Helm history request failed: ${err?.message ?? err}`, { level: "warning" });
     await sendSafe(history([], null, false));
+  }
+}
+
+/** Answer a phone's RECENT_TURNS_REQUEST with the in-memory buffer's last `limit` turns (full
+ *  assistant text). Self-contained snapshot — the phone merges it into the transcript tail. */
+async function serveRecentTurns(turnBuffer, req, sendSafe, logger) {
+  try {
+    const items = turnBuffer?.snapshot?.(req?.limit) ?? [];
+    await sendSafe(recentTurns(items));
+  } catch (err) {
+    logger?.(`Helm recent-turns request failed: ${err?.message ?? err}`, { level: "warning" });
+    await sendSafe(recentTurns([]));
   }
 }
 

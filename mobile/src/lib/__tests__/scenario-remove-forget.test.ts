@@ -37,10 +37,10 @@ describe('scenario: remove forget', () => {
     expect(first.client.closed).toBe(true);
 
     const second = await h!.pair('c1');
-    const requests = second.client.sentOfKind('control.history_request');
+    const requests = second.client.sentOfKind('control.recent_turns_request');
     expect(requests).toHaveLength(1);
-    expect(requests[0].before).toBeNull();
-    expect(requests[0].since).toBeNull();
+    expect(requests[0].limit).toBe(50);
+    expect(second.client.sentOfKind('control.history_request')).toHaveLength(0);
     expect(h!.active()?.timeline.items).toEqual([]);
     expect(h!.active()?.timeline.history).toEqual([]);
 

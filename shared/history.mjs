@@ -11,6 +11,10 @@ export const HISTORY_PAGE_MAX = 50;
 /** Per-message text clip (characters) applied to each history item. */
 export const HISTORY_TEXT_CLIP = 4000;
 
+/** How many trailing turns the extension keeps in its in-memory recent-turns buffer (and the phone
+ *  asks for). One "turn" ≈ a user message plus the assistant reply that follows it. */
+export const RECENT_TURNS_DEFAULT = 50;
+
 /** Stable id for a history item: a turn yields at most one user + one assistant item. */
 export function historyItemId(item) {
   return `${item.turnIndex}:${item.role}`;

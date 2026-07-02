@@ -55,6 +55,8 @@ export const SUBTYPE: {
     readonly INTERRUPT: "interrupt";
     readonly HISTORY_REQUEST: "history_request";
     readonly HISTORY: "history";
+    readonly RECENT_TURNS_REQUEST: "recent_turns_request";
+    readonly RECENT_TURNS: "recent_turns";
     readonly STATE_REQUEST: "state_request";
     readonly STATE_SNAPSHOT: "state_snapshot";
   };
@@ -204,6 +206,22 @@ export interface HistoryMsg {
   /** Echo of the request's forward cursor: non-null => FORWARD catch-up page; null => latest/backward. */
   since?: number | null;
 }
+export interface RecentTurnsRequestMsg {
+  /** How many trailing turns the phone wants (clamped by the extension). */
+  limit?: number;
+}
+/** One flat message entry in a recent-turns snapshot. Like HistoryItem but carries a stable per-
+ *  message `id` (assistant messageId / user event id / `seed-<turn>-<role>`) and no turnIndex. */
+export interface RecentTurnItem {
+  role: "user" | "assistant";
+  text: string;
+  ts: number;
+  id: string;
+}
+export interface RecentTurnsMsg {
+  /** Ascending (chronological) message entries for the last N turns the extension knows. */
+  items: RecentTurnItem[];
+}
 export type StateRequestMsg = Record<string, never>;
 export interface StateSnapshotMsg {
   /** A turn is in flight (agent working). */
@@ -251,6 +269,8 @@ export type ModeChange = Envelope<"control", "mode", ModeChangeMsg>;
 export type InterruptMessage = Envelope<"control", "interrupt", InterruptMsg>;
 export type HistoryRequest = Envelope<"control", "history_request", HistoryRequestMsg>;
 export type History = Envelope<"control", "history", HistoryMsg>;
+export type RecentTurnsRequest = Envelope<"control", "recent_turns_request", RecentTurnsRequestMsg>;
+export type RecentTurns = Envelope<"control", "recent_turns", RecentTurnsMsg>;
 export type StateRequest = Envelope<"control", "state_request", StateRequestMsg>;
 export type StateSnapshot = Envelope<"control", "state_snapshot", StateSnapshotMsg>;
 export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
@@ -279,6 +299,8 @@ export type EventEnvelope =
   | InterruptMessage
   | HistoryRequest
   | History
+  | RecentTurnsRequest
+  | RecentTurns
   | StateRequest
   | StateSnapshot;
 
@@ -344,6 +366,8 @@ export function history(
   hasMore?: boolean,
   since?: number | null
 ): History;
+export function recentTurnsRequest(limit?: number): RecentTurnsRequest;
+export function recentTurns(items: RecentTurnItem[]): RecentTurns;
 export function stateRequest(): StateRequest;
 export function stateSnapshot(snapshot?: {
   busy?: boolean;

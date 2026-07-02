@@ -10,6 +10,7 @@ import type {
   LogLine,
   LogLineMsg,
   PromptAttachment,
+  RecentTurnsMsg,
   SessionMode,
   StateSnapshotMsg,
   ToolComplete,
@@ -102,9 +103,12 @@ export interface TimelineState {
 
 const MAX_ITEMS = 240;
 const MAX_HISTORY = 500;
-// How many trailing live items a forward catch-up checks for an exact-text overlap with its oldest
-// turns — enough to cover the ~1–2 turns that could have been seen live in the last beat before a drop.
-const CATCHUP_OVERLAP_SCAN = 8;
+// Recent-turns merge: how many trailing transcript items to scan for a content overlap with the
+// snapshot (covers a ~50-turn overlap on reconnect without swallowing a far-back short repeat).
+const RECENT_OVERLAP_SCAN = 120;
+// Content-dedup key length. A prefix (not full text) so a live (un-clipped) bubble and its clipped
+// buffer copy for the SAME message still match; long enough that two distinct messages rarely collide.
+const RECENT_DEDUPE_PREFIX = 256;
 const DEFAULT_MODE = MODES[0] as SessionMode;
 
 export function emptyTimeline(): TimelineState {
@@ -233,13 +237,12 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
       return state;
     case EVENT_TYPE.CONTROL:
       switch (message.eventSubtype) {
-        case SUBTYPE.CONTROL.HISTORY: {
-          // A FORWARD catch-up page (its `since` cursor is echoed back) carries the turns that landed
-          // while we were away — append them to the transcript tail. A latest/backward page (no
-          // `since`) is scrollback — merge it into `history[]` ABOVE the transcript.
-          const page = message.msg;
-          return page.since != null ? applyForwardCatchup(state, page) : mergeHistoryPage(state, page);
-        }
+        case SUBTYPE.CONTROL.HISTORY:
+          // Backward scrollback only ("Load earlier"): merge into `history[]` ABOVE the transcript.
+          // Forward catch-up now flows through the recent-turns snapshot, so pages carry no `since`.
+          return mergeHistoryPage(state, message.msg);
+        case SUBTYPE.CONTROL.RECENT_TURNS:
+          return applyRecentTurns(state, message.msg);
         case SUBTYPE.CONTROL.STATE_SNAPSHOT:
           return applyStateSnapshot(state, message.msg);
         case SUBTYPE.CONTROL.CHANNEL_UP:
@@ -457,6 +460,66 @@ function appendUserEcho(state: TimelineState, message: UserMessageEcho): Timelin
   return { ...state, items: cap([...state.items, item]) };
 }
 
+/**
+ * Merge a recent-turns SNAPSHOT (the extension's in-memory buffer of the last N turns, full-fidelity
+ * assistant text) into the transcript. Unlike DB history this is self-contained and idempotent: it's
+ * requested on every connect and re-applying it is a no-op. New turns land at the tail (they're the
+ * newest); turns already shown are dropped by id (assistant seen live shares its messageId) or by a
+ * content-prefix match against the recent tail. Items already present KEEP their local timestamp
+ * (we skip, never rewrite them) — only genuinely-new backfill uses the extension's ts. Also clears
+ * the history-loading affordance, so a stuck spinner can't outlive the reply.
+ */
+function applyRecentTurns(state: TimelineState, message: RecentTurnsMsg): TimelineState {
+  const incoming = message.items ?? [];
+  const clearLoading = (s: TimelineState) => (s.historyLoading ? { ...s, historyLoading: false } : s);
+  if (incoming.length === 0) return clearLoading(state);
+
+  const dedupeKey = (role: string, text: string) => `${role}\u0000${text.slice(0, RECENT_DEDUPE_PREFIX)}`;
+  const existingIds = new Set(state.items.map((i) => i.id));
+  const overlapKeys = new Set(
+    state.items
+      .slice(-RECENT_OVERLAP_SCAN)
+      .filter((i): i is UserItem | AssistantItem => i.kind === 'user' || i.kind === 'assistant')
+      .map((i) => dedupeKey(i.kind, i.text)),
+  );
+
+  const additions: TimelineItem[] = [];
+  for (const it of incoming) {
+    if ((it.role !== 'user' && it.role !== 'assistant') || !it.text) continue;
+    if (existingIds.has(it.id) || overlapKeys.has(dedupeKey(it.role, it.text))) continue;
+    // Dedup exact-id re-entries within THIS snapshot; do NOT add its content key so a legitimately
+    // repeated short turn ("ok") later in the same snapshot is still kept.
+    existingIds.add(it.id);
+    additions.push(
+      it.role === 'user'
+        ? { kind: 'user', id: it.id, text: it.text, ts: it.ts }
+        : { kind: 'assistant', id: it.id, text: it.text, ts: it.ts },
+    );
+  }
+  if (additions.length === 0) return clearLoading(state);
+
+  // On a reconnect (transcript already had turns), mark where the caught-up turns begin.
+  const newTurns = additions.filter((a) => a.kind === 'user').length;
+  const prefix =
+    state.items.length > 0 && newTurns > 0 ? [recentDivider(newTurns, additions[0].ts)] : [];
+  return {
+    ...state,
+    items: cap([...state.items, ...prefix, ...additions]),
+    historyLoading: false,
+  };
+}
+
+/** "N new while you were away" boundary before a batch of caught-up recent turns. */
+function recentDivider(turnCount: number, ts: number): NoticeItem {
+  return {
+    kind: 'notice',
+    id: `recent-${ts}-${turnCount}`,
+    level: 'info',
+    text: `${turnCount} new while you were away`,
+    ts,
+  };
+}
+
 /** Merge a backfilled history page (ascending, deduped) and advance the cursor. */
 function mergeHistoryPage(state: TimelineState, message: HistoryMsg): TimelineState {
   const items = message.items ?? [];
@@ -470,72 +533,6 @@ function mergeHistoryPage(state: TimelineState, message: HistoryMsg): TimelineSt
     historyLoading: false,
     // The first-join latest page seeds the forward cursor so a later resume knows where "now" is.
     latestTurnIndex: maxCursor(state.latestTurnIndex, highestTurnIndex(items)),
-  };
-}
-
-/**
- * Apply a FORWARD catch-up page — the extension's answer to `historyRequest({ since })`, i.e. the
- * turns that committed while this phone was away/offline. Unlike backward scrollback (which fills
- * `history[]` ABOVE the transcript), these turns are NEWER than everything shown, so they're
- * converted to normal user/assistant items and appended at the BOTTOM, exactly where the live stream
- * resumes. A "N new while you were away" divider marks the boundary. Idempotent: re-applying the same
- * page is a no-op (dedup by a stable `turn-<i>-<role>` id), and a turn already seen live is dropped
- * by an exact (role,text) match so it never double-renders (live items carry no turn_index).
- */
-function applyForwardCatchup(state: TimelineState, message: HistoryMsg): TimelineState {
-  const incoming = message.items ?? [];
-  const cursor = maxCursor(state.latestTurnIndex, highestTurnIndex(incoming));
-  if (incoming.length === 0) return { ...state, latestTurnIndex: cursor };
-
-  // A catch-up that continues a large multi-page gap appends right after earlier catch-up turns;
-  // the very first page of a burst instead lands on the live tail, which is the ONLY place a turn
-  // could have been seen live already (committed + streamed within the last beat before the drop).
-  const lastId = state.items.length ? state.items[state.items.length - 1].id : '';
-  const continuing = lastId.startsWith('turn-') || lastId.startsWith('catchup-');
-  const existingIds = new Set(state.items.map((i) => i.id));
-  // Overlap guard (first page only): drop a turn whose text exactly matches a recent LIVE bubble so
-  // it never double-renders. Scoped to the tail — matching against the whole transcript would wrongly
-  // swallow a genuinely new short turn ("yes"/"ok") that repeats an old one.
-  const liveTail = continuing
-    ? new Set<string>()
-    : new Set(
-        state.items
-          .slice(-CATCHUP_OVERLAP_SCAN)
-          .filter((i): i is UserItem | AssistantItem => i.kind === 'user' || i.kind === 'assistant')
-          .map((i) => `${i.kind}\u0000${i.text}`),
-      );
-  const additions: TimelineItem[] = [];
-  const turns = new Set<number>();
-  for (const h of incoming) {
-    const id = `turn-${h.turnIndex}-${h.role}`;
-    if (existingIds.has(id) || liveTail.has(`${h.role}\u0000${h.text}`)) continue;
-    additions.push(
-      h.role === 'user'
-        ? { kind: 'user', id, text: h.text, ts: h.ts }
-        : { kind: 'assistant', id, text: h.text, ts: h.ts },
-    );
-    turns.add(h.turnIndex);
-  }
-  if (additions.length === 0) return { ...state, latestTurnIndex: cursor };
-
-  // One divider per catch-up burst: skip it on continuation pages so a multi-page fill shows a
-  // single boundary marker instead of one per page.
-  const appended = continuing ? additions : [catchupDivider(cursor, turns.size, additions[0].ts), ...additions];
-  return {
-    ...state,
-    items: cap([...state.items, ...appended]),
-    latestTurnIndex: cursor,
-  };
-}
-
-/** The "N new while you were away" boundary marker inserted before a forward catch-up batch. */
-function catchupDivider(cursor: number | null, turnCount: number, ts: number): NoticeItem {
-  return {
-    kind: 'notice',
-    id: `catchup-${cursor}-${turnCount}`,
-    level: 'info',
-    text: `${turnCount} new while you were away`,
-    ts,
   };
 }
 
