@@ -391,6 +391,27 @@ textarea {
   background: rgba(255, 107, 107, 0.11);
 }
 
+.error-banner-wrap { display: flex; flex-direction: column; gap: 6px; }
+
+.error-debug-detail {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed rgba(255, 107, 107, 0.28);
+  border-radius: 12px;
+  color: #ffc9c9;
+  background: rgba(255, 107, 107, 0.06);
+  font-size: 0.78rem;
+}
+.error-debug-detail summary { cursor: pointer; font-weight: 600; }
+.error-debug-detail pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+
+.debug-toggle { opacity: 0.7; font-size: 0.82rem; }
+
 .topbar {
   display: flex;
   gap: 18px;

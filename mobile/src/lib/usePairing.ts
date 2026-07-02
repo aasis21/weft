@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { describeError } from './debugSettings';
 
 interface ScannerApi {
   isSupported?: () => Promise<{ supported: boolean }>;
@@ -30,26 +31,32 @@ export async function scanNativeQr(): Promise<string> {
 
 /**
  * Shared busy/error wrapper for pairing actions (scan, paste, demo). Keeps the Landing
- * and Join screens free of duplicated try/finally bookkeeping.
+ * and Join screens free of duplicated try/finally bookkeeping. Also captures a technical
+ * detail string (raw cause chain + platform/transport context) for the debug-mode panel,
+ * so a pairing failure remains diagnosable from the phone alone when a PC isn't handy.
  */
 export function usePairing(onError: (message: string | null) => void): {
   busy: boolean;
   run: (task: () => Promise<void>) => Promise<void>;
+  errorDetail: string | null;
 } {
   const [busy, setBusy] = useState(false);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const run = useCallback(
     async (task: () => Promise<void>): Promise<void> => {
       setBusy(true);
       onError(null);
+      setErrorDetail(null);
       try {
         await task();
       } catch (err) {
         onError(err instanceof Error ? err.message : 'Pairing failed.');
+        setErrorDetail(describeError(err));
       } finally {
         setBusy(false);
       }
     },
     [onError],
   );
-  return { busy, run };
+  return { busy, run, errorDetail };
 }

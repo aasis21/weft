@@ -111,7 +111,7 @@ export function createSupabaseTransport({ client, channelId } = {}) {
           const detail = err
             ? `: ${err instanceof Error ? err.message : String(err)}`
             : "";
-          reject(fail(`subscribe failed with status ${status}${detail}`));
+          reject(fail(`subscribe failed with status ${status}${detail} (channel ${name})`));
         }
       });
     });

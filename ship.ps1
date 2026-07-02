@@ -79,6 +79,17 @@ try {
         npm run build -w '@aasis21/helm-mobile' | Out-Null
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "mobile build did not produce $distDir" }
         Ok 'mobile/dist'
+
+        # The Android APK lives in mobile/release/ (NOT mobile/public/) so `cap sync` never bundles
+        # it into the native app's own assets. It's only stitched into the web dist here, so the
+        # hosted /app download page (mobile/public/app.html) has something to link to.
+        $apkSource = Join-Path $PSScriptRoot 'mobile\release\helm-debug.apk'
+        if (Test-Path $apkSource) {
+            Copy-Item $apkSource (Join-Path $distDir 'helm-debug.apk') -Force
+            Ok 'mobile/dist/helm-debug.apk  (served as /helm-debug.apk for the /app download page)'
+        } else {
+            Info 'No mobile/release/helm-debug.apk yet - /app download page will 404 until one is built'
+        }
     } else {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle - run once without -SkipBuild first" }

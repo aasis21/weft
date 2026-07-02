@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { WebQrScanner } from './WebQrScanner';
 import { isNativeRuntime, scanNativeQr, usePairing } from '../lib/usePairing';
+import { isDebugModeEnabled, setDebugModeEnabled } from '../lib/debugSettings';
 
 interface JoinSessionScreenProps {
   /** Native first run: no prior sessions to go back to. */
@@ -27,12 +28,23 @@ export function JoinSessionScreen({
   onCancel,
 }: JoinSessionScreenProps): JSX.Element {
   const native = isNativeRuntime();
-  const { busy, run } = usePairing(onError);
+  const { busy, run, errorDetail } = usePairing(onError);
   const [manual, setManual] = useState('');
   const [showManual, setShowManual] = useState(initialManual);
+  const [debugMode, setDebugMode] = useState(false);
   // Bumped after a failed pair so the inline web scanner remounts and resumes scanning.
   const [scanNonce, setScanNonce] = useState(0);
   const autoScanned = useRef(false);
+
+  useEffect(() => {
+    void isDebugModeEnabled().then(setDebugMode);
+  }, []);
+
+  const toggleDebugMode = (): void => {
+    const next = !debugMode;
+    setDebugMode(next);
+    void setDebugModeEnabled(next);
+  };
 
   const pair = (raw: string): Promise<void> =>
     run(async () => {
@@ -95,9 +107,22 @@ export function JoinSessionScreen({
         )}
       </div>
 
-      {error ? <p className="error-banner">{error}</p> : null}
+      {error ? (
+        <div className="error-banner-wrap">
+          <p className="error-banner">{error}</p>
+          {debugMode && errorDetail ? (
+            <details className="error-debug-detail" open>
+              <summary>Technical details</summary>
+              <pre>{errorDetail}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="join-fallback">
+        <button type="button" className="link-btn debug-toggle" onClick={toggleDebugMode}>
+          Debug mode: {debugMode ? 'On' : 'Off'}
+        </button>
         <button
           type="button"
           className="link-btn"
