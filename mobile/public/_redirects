@@ -1,2 +1,5 @@
+# Android APK download landing page — must come before the SPA catch-all.
+/app   /app.html   200
+
 # Helm is a single-page app — serve index.html for any path so deep links / reloads work.
 /*    /index.html   200

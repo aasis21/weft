@@ -14,3 +14,8 @@
 /install.sh
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: text/plain; charset=utf-8
+/helm-debug.apk
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: application/vnd.android.package-archive
+/app.html
+  Cache-Control: no-cache, no-store, must-revalidate
