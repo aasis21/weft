@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionDrawer } from '@/components/SessionDrawer';
 import { emptyTimeline, type TimelineState } from '@/lib/timeline';
-import type { SessionView } from '@/lib/sessionManager';
+import type { SessionView } from '@/session/view';
 
 function session(
   channelId: string,

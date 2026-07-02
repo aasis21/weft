@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
-import type { SessionView } from '../lib/sessionManager';
+import type { SessionView } from '../session/view';
 import { ChatThread } from './ChatThread';
 import { Composer } from './Composer';
 import { DebugPanel } from './DebugPanel';

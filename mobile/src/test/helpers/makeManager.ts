@@ -11,7 +11,7 @@
 //   expect(h.active()?.meta.title).toBe('Refactor auth');
 //   expect(client.sentOfKind('control.state_request')).toHaveLength(1);
 import { createSessionRuntime, type SessionRuntime } from '@/session/runtime/sessionRuntime';
-import type { ManagerSnapshot, SessionView } from '@/lib/sessionManager';
+import type { ManagerSnapshot, SessionView } from '@/session/view';
 import { registry } from './fakeHelmClient';
 import type { FakeHelmClient } from './fakeHelmClient';
 

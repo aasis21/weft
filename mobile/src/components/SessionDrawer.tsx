@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import type { SessionView } from '../lib/sessionManager';
+import type { SessionView } from '../session/view';
 
 interface SessionDrawerProps {
   sessions: SessionView[];

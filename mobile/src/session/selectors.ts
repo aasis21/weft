@@ -1,5 +1,5 @@
 import { createSelector } from '@reduxjs/toolkit';
-import type { ManagerSnapshot, SessionView } from '@/lib/sessionManager';
+import type { ManagerSnapshot, SessionView } from './view';
 import type { TimelineState } from '@/lib/timeline';
 import type { Session } from './model';
 import { sessionsAdapter, type SessionsState } from './sessionsSlice';
