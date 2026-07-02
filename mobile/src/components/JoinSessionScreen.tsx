@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import { WebQrScanner } from './WebQrScanner';
 import { isNativeRuntime, scanNativeQr, usePairing } from '../lib/usePairing';
 import { isDebugModeEnabled, setDebugModeEnabled } from '../lib/debugSettings';
+import { runConnectivityProbe } from '../lib/wsProbe';
 
 interface JoinSessionScreenProps {
   /** Native first run: no prior sessions to go back to. */
@@ -32,6 +33,8 @@ export function JoinSessionScreen({
   const [manual, setManual] = useState('');
   const [showManual, setShowManual] = useState(initialManual);
   const [debugMode, setDebugMode] = useState(false);
+  const [probeRunning, setProbeRunning] = useState(false);
+  const [probeResult, setProbeResult] = useState<string | null>(null);
   // Bumped after a failed pair so the inline web scanner remounts and resumes scanning.
   const [scanNonce, setScanNonce] = useState(0);
   const autoScanned = useRef(false);
@@ -39,6 +42,16 @@ export function JoinSessionScreen({
   useEffect(() => {
     void isDebugModeEnabled().then(setDebugMode);
   }, []);
+
+  const runProbe = async (): Promise<void> => {
+    setProbeRunning(true);
+    setProbeResult(null);
+    try {
+      setProbeResult(await runConnectivityProbe());
+    } finally {
+      setProbeRunning(false);
+    }
+  };
 
   const toggleDebugMode = (): void => {
     const next = !debugMode;
@@ -114,6 +127,20 @@ export function JoinSessionScreen({
             <details className="error-debug-detail" open>
               <summary>Technical details</summary>
               <pre>{errorDetail}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+
+      {debugMode ? (
+        <div className="join-fallback">
+          <button type="button" className="secondary-action" disabled={probeRunning} onClick={() => void runProbe()}>
+            {probeRunning ? 'Testing connectivity…' : 'Run connectivity test'}
+          </button>
+          {probeResult ? (
+            <details className="error-debug-detail" open>
+              <summary>Connectivity test result</summary>
+              <pre>{probeResult}</pre>
             </details>
           ) : null}
         </div>
