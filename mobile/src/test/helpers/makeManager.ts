@@ -10,13 +10,13 @@
 //   await h.flush();
 //   expect(h.active()?.meta.title).toBe('Refactor auth');
 //   expect(client.sentOfKind('control.state_request')).toHaveLength(1);
-import { SessionManager } from '@/lib/sessionManager';
+import { createSessionRuntime, type SessionRuntime } from '@/session/runtime/sessionRuntime';
 import type { ManagerSnapshot, SessionView } from '@/lib/sessionManager';
 import { registry } from './fakeHelmClient';
 import type { FakeHelmClient } from './fakeHelmClient';
 
 export interface ManagerHarness {
-  manager: SessionManager;
+  manager: SessionRuntime;
   /** Every snapshot the manager has emitted, in order. */
   snapshots: ManagerSnapshot[];
   /** The current snapshot. */
@@ -51,7 +51,7 @@ export interface PairResult {
 let channelCounter = 0;
 
 export function makeManager(): ManagerHarness {
-  const manager = new SessionManager();
+  const manager = createSessionRuntime();
   const snapshots: ManagerSnapshot[] = [];
   const unsub = manager.subscribe(() => snapshots.push(manager.getSnapshot()));
 
@@ -92,6 +92,9 @@ export function makeManager(): ManagerHarness {
     },
     client,
     flush,
-    dispose: () => unsub(),
+    dispose: () => {
+      unsub();
+      manager.dispose();
+    },
   };
 }

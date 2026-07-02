@@ -49,6 +49,13 @@ function cap(items: TimelineItem[]): TimelineItem[] {
   return items.length > MAX_ITEMS ? items.slice(items.length - MAX_ITEMS) : items;
 }
 
+/** Last path segment of a cwd, used as a display-title fallback until the CLI reports a real title. */
+function basename(path: string | null): string | null {
+  if (!path) return null;
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
 function omitKey(map: Record<string, string>, key: string): Record<string, string> {
   if (!(key in map)) return map;
   const next = { ...map };
@@ -181,15 +188,15 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         case SUBTYPE.CONTROL.CHANNEL_UP:
           if (message.sessionId && message.sessionId !== 'unknown-session') session.meta.sessionId = message.sessionId;
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
-          session.meta.title = message.msg.title || session.meta.title;
+          session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
           session.connection.lastHeartbeat = message.ts;
           session.connection.ended = false;
           session.connection.endedReason = undefined;
           session.connection.busy = false;
           return;
         case SUBTYPE.CONTROL.SESSION_META:
-          session.meta.title = message.msg.title || session.meta.title;
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
+          session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
           return;
         case SUBTYPE.CONTROL.CHANNEL_DOWN: {
           const reason = message.msg.reason ?? 'Session ended.';
