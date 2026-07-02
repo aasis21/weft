@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import { sessionRuntime } from '../session/runtime/instance';
-import type { SessionStatus } from '../session/model';
+import { sessionRuntime } from '@/session/runtime/instance';
+import type { SessionStatus } from '@/session/model';
 
 interface StatusBarProps {
   title: string;

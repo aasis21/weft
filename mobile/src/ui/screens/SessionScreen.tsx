@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
-import type { SessionView } from '../session/view';
-import { ChatThread } from './ChatThread';
-import { Composer } from './Composer';
-import { DebugPanel } from './DebugPanel';
-import { ElicitationCard } from './ElicitationCard';
-import { SessionDrawer } from './SessionDrawer';
-import { StatusBar } from './StatusBar';
+import type { SessionView } from '@/session/view';
+import { ChatThread } from '@/ui/thread/ChatThread';
+import { Composer } from '@/ui/composer/Composer';
+import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
+import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
+import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { StatusBar } from '@/ui/sessions/StatusBar';
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;

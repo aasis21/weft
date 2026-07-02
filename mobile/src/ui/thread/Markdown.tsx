@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useMemo, useState } from 'react';
 import type { CSSProperties, JSX, ReactNode } from 'react';
-import '../markdown-code.css';
+import '@/ui/styles/markdown-code.css';
 
 /**
  * Minimal, dependency-free, XSS-safe Markdown -> React renderer.

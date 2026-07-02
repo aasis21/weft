@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { ToolItem } from '../lib/timeline';
+import type { ToolItem } from '@/lib/timeline';
 
 interface ToolCardProps {
   item: ToolItem;

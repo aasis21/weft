@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { ChatThread } from '@/components/ChatThread';
+import { ChatThread } from '@/ui/thread/ChatThread';
 import type { TimelineItem } from '@/lib/timeline';
 import * as B from '@/test/helpers/builders';
 

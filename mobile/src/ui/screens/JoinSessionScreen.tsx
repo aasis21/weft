@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { WebQrScanner } from './WebQrScanner';
-import { isNativeRuntime, scanNativeQr, usePairing } from '../lib/usePairing';
-import { isDebugModeEnabled, setDebugModeEnabled } from '../lib/debugSettings';
-import { runConnectivityProbe } from '../lib/wsProbe';
+import { WebQrScanner } from '@/ui/pairing/WebQrScanner';
+import { isNativeRuntime, scanNativeQr, usePairing } from '@/ui/hooks/usePairing';
+import { isDebugModeEnabled, setDebugModeEnabled } from '@/lib/debugSettings';
+import { runConnectivityProbe } from '@/lib/wsProbe';
 
 interface JoinSessionScreenProps {
   /** Native first run: no prior sessions to go back to. */

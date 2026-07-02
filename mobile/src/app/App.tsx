@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import type { SessionMode } from '@aasis21/helm-shared';
-import { LandingScreen } from './components/LandingScreen';
-import { JoinSessionScreen } from './components/JoinSessionScreen';
-import { SessionScreen } from './components/SessionScreen';
-import { isNativeRuntime } from './lib/usePairing';
-import { sessionRuntime } from './session/runtime/instance';
+import { LandingScreen } from '@/ui/screens/LandingScreen';
+import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
+import { SessionScreen } from '@/ui/screens/SessionScreen';
+import { isNativeRuntime } from '@/ui/hooks/usePairing';
+import { sessionRuntime } from '@/session/runtime/instance';
 
 export default function App(): JSX.Element {
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);

@@ -1,11 +1,11 @@
-import '../composer.css';
+import '@/ui/styles/composer.css';
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/helm-shared';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
-import { useSpeechInput } from '../lib/useSpeechInput';
-import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '../lib/imageAttachments';
+import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
+import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 
 interface ComposerProps {
   sessionId: string;

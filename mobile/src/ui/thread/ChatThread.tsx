@@ -7,11 +7,11 @@ import type {
   TouchEvent as ReactTouchEvent,
 } from 'react';
 import type { HistoryItem } from '@aasis21/helm-shared';
-import type { TimelineItem } from '../lib/timeline';
-import { attachmentSrc } from '../lib/imageAttachments';
+import type { TimelineItem } from '@/lib/timeline';
+import { attachmentSrc } from '@/lib/imageAttachments';
 import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
-import '../thread-extras.css';
+import '@/ui/styles/thread-extras.css';
 
 interface ChatThreadProps {
   items: TimelineItem[];
