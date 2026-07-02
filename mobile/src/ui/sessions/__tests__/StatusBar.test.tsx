@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
-import { StatusBar } from '@/components/StatusBar';
+import { StatusBar } from '@/ui/sessions/StatusBar';
 
 function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) {
   const defaults: ComponentProps<typeof StatusBar> = {

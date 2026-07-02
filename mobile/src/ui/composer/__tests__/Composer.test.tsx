@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
-import { Composer } from '@/components/Composer';
+import { Composer } from '@/ui/composer/Composer';
 
 const mockAttachment: PromptAttachment = {
   data: 'ZmFrZS1qcGVn',

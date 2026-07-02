@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { SessionDrawer } from '@/components/SessionDrawer';
+import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { emptyTimeline, type TimelineState } from '@/lib/timeline';
 import type { SessionView } from '@/session/view';
 

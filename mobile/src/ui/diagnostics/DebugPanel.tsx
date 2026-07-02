@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { JSX } from 'react';
-import type { DebugEvent } from '../lib/eventLog';
+import type { DebugEvent } from '@/lib/eventLog';
 
 interface DebugPanelProps {
   events: DebugEvent[];

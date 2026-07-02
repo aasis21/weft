@@ -1,10 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { JoinSessionScreen } from '@/components/JoinSessionScreen';
-import { LandingScreen } from '@/components/LandingScreen';
+import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
+import { LandingScreen } from '@/ui/screens/LandingScreen';
 
-vi.mock('@/components/WebQrScanner', () => ({
+vi.mock('@/ui/pairing/WebQrScanner', () => ({
   WebQrScanner: ({ onResult }: { onResult(raw: string): void }) => (
     <button type="button" data-testid="mock-scanner" onClick={() => onResult('scanner-payload')}>
       Mock scanner

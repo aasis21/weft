@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { describeError } from './debugSettings';
+import { describeError } from '@/lib/debugSettings';
 
 interface ScannerApi {
   isSupported?: () => Promise<{ supported: boolean }>;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { JSX } from 'react';
-import { usePairing } from '../lib/usePairing';
+import { usePairing } from '@/ui/hooks/usePairing';
 
 interface LandingScreenProps {
   onBeginPair(manual?: boolean): void;
