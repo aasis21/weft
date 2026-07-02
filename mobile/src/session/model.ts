@@ -1,0 +1,137 @@
+import { MODES } from '@aasis21/helm-shared';
+import type {
+  ApprovalRequestMsg,
+  ElicitationRequestMsg,
+  HistoryItem,
+  LogLineMsg,
+  PromptAttachment,
+  SessionMode,
+} from '@aasis21/helm-shared';
+
+export type SessionStatus = 'connecting' | 'live' | 'idle' | 'ended' | 'error';
+
+export type ToolStatus = 'running' | 'success' | 'error';
+
+export interface UserItem {
+  kind: 'user';
+  id: string;
+  text: string;
+  ts: number;
+  failed?: boolean;
+  origin?: 'phone' | 'terminal';
+  attachments?: PromptAttachment[];
+}
+
+export interface AssistantItem {
+  kind: 'assistant';
+  id: string;
+  text: string;
+  ts: number;
+}
+
+export interface ToolItem {
+  kind: 'tool';
+  id: string;
+  name: string;
+  args?: unknown;
+  status: ToolStatus;
+  resultPreview?: string;
+  startedAt: number;
+  finishedAt?: number;
+  ts: number;
+}
+
+export interface NoticeItem {
+  kind: 'notice';
+  id: string;
+  level: LogLineMsg['level'];
+  text: string;
+  ts: number;
+}
+
+export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem;
+
+export type { ApprovalRequestMsg, ElicitationRequestMsg, HistoryItem, PromptAttachment, SessionMode };
+
+export interface DebugEvent {
+  id: string;
+  dir: 'in' | 'out';
+  eventType: string;
+  eventSubtype: string;
+  senderName: string;
+  ts: number;
+  msg: unknown;
+}
+
+export interface SessionMeta {
+  channelId: string;
+  sessionId?: string;
+  title: string;
+  cwd: string | null;
+  kind: 'live' | 'demo';
+  addedAt: number;
+  scannedAt?: number;
+}
+
+export interface SessionConnection {
+  status: SessionStatus;
+  busy: boolean;
+  mode: SessionMode;
+  reconnecting: boolean;
+  settling: boolean;
+  lastHeartbeat: number | null;
+  ended: boolean;
+  endedReason?: string;
+  error?: string;
+}
+
+export interface SessionHistory {
+  items: HistoryItem[];
+  cursor: number | null;
+  hasMore: boolean;
+  loading: boolean;
+  latestTurnIndex: number | null;
+}
+
+export interface SessionRequests {
+  approvals: ApprovalRequestMsg[];
+  approvalErrors: Record<string, string>;
+  elicitations: ElicitationRequestMsg[];
+  elicitationErrors: Record<string, string>;
+}
+
+export interface Session {
+  id: string;
+  meta: SessionMeta;
+  unread: boolean;
+  lastEventAt: number | null;
+  transcript: { items: TimelineItem[] };
+  history: SessionHistory;
+  connection: SessionConnection;
+  requests: SessionRequests;
+  debug: DebugEvent[];
+}
+
+const DEFAULT_MODE = MODES[0] as SessionMode;
+
+export function emptySession(id: string, meta: SessionMeta): Session {
+  return {
+    id,
+    meta: { ...meta },
+    unread: false,
+    lastEventAt: null,
+    transcript: { items: [] },
+    history: { items: [], cursor: null, hasMore: false, loading: false, latestTurnIndex: null },
+    connection: {
+      status: 'idle',
+      busy: false,
+      mode: DEFAULT_MODE,
+      reconnecting: false,
+      settling: false,
+      lastHeartbeat: null,
+      ended: false,
+    },
+    requests: { approvals: [], approvalErrors: {}, elicitations: [], elicitationErrors: {} },
+    debug: [],
+  };
+}
