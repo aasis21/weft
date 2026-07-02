@@ -35,7 +35,7 @@ export const selectRequests = (id: string) =>
 export const selectHistory = (id: string) =>
   createSelector([(state: MaybeRootState) => selectSessionById(state, id)], (session) => session?.history);
 
-function toTimelineState(session: Session): TimelineState {
+export function toTimelineState(session: Session): TimelineState {
   return {
     items: session.transcript.items,
     approvals: session.requests.approvals,
@@ -73,10 +73,9 @@ export function toSessionView(session: Session): SessionView {
 export const selectManagerSnapshot = createSelector(
   [selectReady, selectActiveId, selectAllSessions],
   (ready, activeId, sessions): ManagerSnapshot => {
-    const views = sessions
-      .map(toSessionView)
-      .sort((a, b) => (b.meta.scannedAt ?? b.meta.addedAt ?? 0) - (a.meta.scannedAt ?? a.meta.addedAt ?? 0));
+    const views = sessions.map(toSessionView);
     const active = activeId ? sessions.find((session) => session.id === activeId) : undefined;
     return { ready, activeId: active?.meta.channelId ?? null, sessions: views };
   },
 );
+

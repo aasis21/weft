@@ -58,11 +58,11 @@ describe('sessionsSlice', () => {
     state = sessionsReducer(state, sessionActivated('new'));
     state = sessionsReducer(state, sessionReconciled({ id: 'new', sessionId: 'sess-shared' }));
 
-    expect(state.ids).toEqual(['old']);
-    expect(state.activeId).toBe('old');
-    expect(state.entities.old?.meta).toMatchObject({ channelId: 'new-channel', sessionId: 'sess-shared', addedAt: 10, scannedAt: 20 });
-    expect(state.entities.old?.unread).toBe(true);
-    expect(state.entities.old?.transcript.items).toMatchObject([{ id: 'a1', text: 'kept transcript' }]);
+    expect(state.ids).toEqual(['new']);
+    expect(state.activeId).toBe('new');
+    expect(state.entities.new?.meta).toMatchObject({ channelId: 'new-channel', sessionId: 'sess-shared', addedAt: 10, scannedAt: 20 });
+    expect(state.entities.new?.unread).toBe(true);
+    expect(state.entities.new?.transcript.items).toMatchObject([{ id: 'a1', text: 'kept transcript' }]);
   });
 
   it('projects the current ManagerSnapshot shape using channel ids at the facade boundary', () => {
@@ -76,7 +76,7 @@ describe('sessionsSlice', () => {
 
     expect(snap.ready).toBe(true);
     expect(snap.activeId).toBe('ch-one');
-    expect(snap.sessions.map((s) => s.meta.channelId)).toEqual(['ch-two', 'ch-one']);
+    expect(snap.sessions.map((s) => s.meta.channelId)).toEqual(['ch-one', 'ch-two']);
     const active = snap.sessions.find((s) => s.meta.channelId === snap.activeId);
     expect(active).toMatchObject({
       meta: { channelId: 'ch-one', title: 'One', cwd: 'C:\\one', kind: 'live' },
@@ -86,3 +86,4 @@ describe('sessionsSlice', () => {
     });
   });
 });
+

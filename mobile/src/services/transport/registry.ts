@@ -14,6 +14,10 @@ export type ConnectOpts =
 
 export interface TransportRegistry {
   connect(id: string, opts: ConnectOpts): Promise<HelmClient>;
+  /** Register an already-created client (e.g. one the runtime paired directly to keep the pairing). */
+  adopt(id: string, client: HelmClient): void;
+  /** Move a client to a new id (identity reconcile after a channel rotation). */
+  rehome(from: string, to: string): void;
   get(id: string): HelmClient | undefined;
   has(id: string): boolean;
   dispose(id: string): void;
@@ -36,6 +40,19 @@ export function createTransportRegistry(deps?: {
       const client = await createClient(opts);
       clients.set(id, client);
       return client;
+    },
+    adopt(id, client) {
+      const existing = clients.get(id);
+      if (existing && existing !== client) void existing.close().catch(() => {});
+      clients.set(id, client);
+    },
+    rehome(from, to) {
+      const client = clients.get(from);
+      if (!client) return;
+      const displaced = clients.get(to);
+      if (displaced && displaced !== client) void displaced.close().catch(() => {});
+      clients.delete(from);
+      clients.set(to, client);
     },
     get(id) {
       return clients.get(id);

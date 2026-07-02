@@ -5,12 +5,14 @@ import type {
   ApprovalRequestMsg,
   DebugEvent,
   ElicitationRequestMsg,
+  NoticeItem,
   Session,
   SessionStatus,
   UserItem,
 } from './model';
 import {
   applyEnvelope,
+  appendNotice,
   appendUser,
   dismissApproval,
   dismissElicitation,
@@ -105,11 +107,9 @@ const sessionsSlice = createSlice({
       if (!duplicateId) return;
       const duplicate = state.entities[duplicateId];
       if (!duplicate) return;
-      const keep = duplicate.meta.addedAt <= incoming.meta.addedAt ? duplicate : incoming;
-      const drop = keep === duplicate ? incoming : duplicate;
-      mergeSessions(keep, drop, incoming.meta.channelId);
-      sessionsAdapter.removeOne(state, drop.id);
-      if (state.activeId === drop.id) state.activeId = keep.id;
+      mergeSessions(incoming, duplicate, incoming.meta.channelId);
+      sessionsAdapter.removeOne(state, duplicate.id);
+      if (state.activeId === duplicate.id) state.activeId = incoming.id;
     },
     envelopeReceived(state, action: PayloadAction<{ id: string; envelope: EventEnvelope }>) {
       const session = state.entities[action.payload.id];
@@ -123,6 +123,13 @@ const sessionsSlice = createSlice({
     userPromptAppended(state, action: PayloadAction<{ id: string; item: UserItem }>) {
       const session = state.entities[action.payload.id];
       if (session) appendUser(session, action.payload.item);
+    },
+    noticeAppended(
+      state,
+      action: PayloadAction<{ id: string; level: NoticeItem['level']; text: string; ts: number }>,
+    ) {
+      const session = state.entities[action.payload.id];
+      if (session) appendNotice(session, action.payload.level, action.payload.text, action.payload.ts);
     },
     promptFailed(state, action: PayloadAction<{ id: string; itemId: string; failed: boolean }>) {
       const session = state.entities[action.payload.id];
@@ -233,6 +240,7 @@ export const {
   sessionReconciled,
   envelopeReceived,
   userPromptAppended,
+  noticeAppended,
   promptFailed,
   approvalDismissed,
   elicitationDismissed,
@@ -261,5 +269,6 @@ export const {
 export const sessionsSelectors = sessionsAdapter.getSelectors();
 export const sessionsReducer = sessionsSlice.reducer;
 export default sessionsReducer;
+
 
 
