@@ -30,10 +30,10 @@ describe('scenario: state snapshot', () => {
           B.approvalRequest('r1', 'write_file', {}, [
             { id: 'allow', label: 'Allow' },
             { id: 'deny', label: 'Deny' },
-          ]),
+          ]).msg,
         ],
         elicitations: [
-          B.elicitationRequest('e1', 'Pick one', 'form', { type: 'object', properties: {} }),
+          B.elicitationRequest('e1', 'Pick one', 'form', { type: 'object', properties: {} }).msg,
         ],
       }),
     );

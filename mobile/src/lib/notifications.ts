@@ -15,7 +15,7 @@
 // planned follow-up; this layer covers the common "phone in hand / app recent" case.
 
 import { Capacitor } from '@capacitor/core';
-import type { ApprovalRequest, ElicitationRequest } from '@aasis21/helm-shared';
+import type { ApprovalRequestMsg, ElicitationRequestMsg } from '@aasis21/helm-shared';
 
 const APPROVAL_CHANNEL = 'helm-approvals';
 
@@ -60,7 +60,7 @@ export function notificationIdFor(requestId: string): number {
 }
 
 /** OS-visible copy for an approval. Tool name only — never arguments. */
-export function approvalNotification(req: ApprovalRequest): { title: string; body: string } {
+export function approvalNotification(req: ApprovalRequestMsg): { title: string; body: string } {
   const tool = req.toolName?.trim() || 'an action';
   return { title: 'Copilot needs your approval', body: `Allow ${tool}?` };
 }
@@ -131,7 +131,7 @@ function buzz(): void {
  * notification only when the app is backgrounded (in the foreground the ApprovalCard is
  * already on screen, so a banner would just be noise).
  */
-export async function notifyApprovalRequest(req: ApprovalRequest): Promise<void> {
+export async function notifyApprovalRequest(req: ApprovalRequestMsg): Promise<void> {
   buzz();
   if (!appIsHidden()) return;
   if (!(await ensureNotificationPermission())) return;
@@ -171,7 +171,7 @@ export async function notifyApprovalRequest(req: ApprovalRequest): Promise<void>
  * nudge as approvals — buzz always, OS banner only when backgrounded. Privacy: the banner is
  * generic (no question text or field values); the form itself travels E2E-encrypted.
  */
-export async function notifyElicitationRequest(req: ElicitationRequest): Promise<void> {
+export async function notifyElicitationRequest(req: ElicitationRequestMsg): Promise<void> {
   buzz();
   if (!appIsHidden()) return;
   if (!(await ensureNotificationPermission())) return;

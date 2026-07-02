@@ -36,8 +36,8 @@ describe('scenario: approvals', () => {
 
     await h!.manager.sendApproval('c1', 'r1', 'allow');
     expect(h!.active()!.timeline.approvals).toHaveLength(0);
-    expect(client.sentOfKind('approval.decision')).toHaveLength(1);
-    expect(client.sentOfKind('approval.decision')[0]).toMatchObject({ requestId: 'r1', optionId: 'allow' });
+    expect(client.sentOfKind('decision.approval_decision')).toHaveLength(1);
+    expect(client.sentOfKind('decision.approval_decision')[0]).toMatchObject({ requestId: 'r1', optionId: 'allow' });
 
     client.emit(request);
     client.emit(request);

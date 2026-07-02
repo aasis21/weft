@@ -147,8 +147,9 @@ async function connectRelayWithRetry() {
           transport,
           keyPair: laptopKeys,
           connect: true,
-          onPeer: (info) => onPeerPaired(transport, info),
-        });
+                channelId,
+                onPeer: (info) => onPeerPaired(transport, info),
+              });
         if (shuttingDown) {
           listener.stop();
           await closeQuietly(transport);
@@ -217,9 +218,10 @@ async function attachForPeer(transport, { key, peer }) {
     transport,
     key,
     identity: {
-      userId: process.env.HELM_USER_ID || "copilot",
-      deviceId: process.env.HELM_DEVICE_ID || "laptop",
+      channelId,
       sessionId: session.sessionId || channelId,
+      senderId: "copilot",
+      senderName: "Copilot",
     },
   });
   permissionRelay = createPermissionRelay({
@@ -233,7 +235,7 @@ async function attachForPeer(transport, { key, peer }) {
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
   session.log?.(
-    `${ui.lime("✓ Phone paired")} — ${peer.deviceId ?? "your phone"} is now mirroring this session.`,
+    `${ui.lime("✓ Phone paired")} — ${peer.senderName ?? peer.deviceId ?? "your phone"} is now mirroring this session.`,
   );
 }
 

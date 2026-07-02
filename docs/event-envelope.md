@@ -1,9 +1,11 @@
-# Event envelope redesign (proposed)
+# Event envelope redesign (implemented)
 
-> **Status: proposed, not yet implemented.** Nothing in `shared/`, `extension/`, or
-> `mobile/` matches this doc yet — it captures a design decision made in conversation,
-> to implement later. The *current* wire shape is still `EVENTS` + `KIND` +
-> `eventForKind()` as described in the "Current state" section below.
+> **Status: IMPLEMENTED.** `shared/`, `extension/`, and `mobile/` all speak the nested
+> envelope described here. The wire shape is `{ eventType, eventSubtype, channelId,
+> sessionId, senderId, senderName, msg, ts }`; `EVENT_TYPE` + `SUBTYPE` (nested per type)
+> replace the old `EVENTS` + `KIND` + `eventForKind()` mapping, which have been removed.
+> Pairing (`PAIR.HELLO`/`ACK`) travels on the same envelope. The "Current state" section
+> below is retained for historical context only.
 
 ## Problem with the current shape
 

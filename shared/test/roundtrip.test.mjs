@@ -1,19 +1,17 @@
 // End-to-end glue smoke test: crypto (ECDH->AES-GCM) + SecureChannel + LocalTransport + messages.
-// Proves the shared contracts work together. The `shared-crypto` task extends this with vectors.
+// Proves the shared contracts work together with the standardized event envelope: the channel
+// stamps identity (senderId/senderName/sessionId/channelId) onto each outgoing envelope, encrypts
+// it, and the peer receives the decrypted envelope with its payload nested under `msg`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  generateKeyPair,
-  deriveSessionKey,
-  randomChannelId,
-} from "../crypto.mjs";
+import { generateKeyPair, deriveSessionKey, randomChannelId } from "../crypto.mjs";
 import { SecureChannel } from "../channel.mjs";
 import { createLocalTransport, _resetLocalBus } from "../transport-local.mjs";
-import { EVENTS, assistantMessage, prompt } from "../messages.mjs";
+import { EVENT_TYPE, assistantMessage, prompt } from "../messages.mjs";
 
-test("ECDH session keys match on both sides and round-trip an encrypted message", async () => {
+test("ECDH session keys match on both sides and round-trip an encrypted envelope", async () => {
   _resetLocalBus();
   const channelId = randomChannelId();
 
@@ -27,33 +25,36 @@ test("ECDH session keys match on both sides and round-trip an encrypted message"
   const extChan = new SecureChannel({
     transport: createLocalTransport({ channelId }),
     key: extKey,
-    identity: { userId: "u1", deviceId: "laptop", sessionId: "s1" },
+    identity: { senderId: "copilot", senderName: "Copilot", sessionId: "s1", channelId },
   });
   const phoneChan = new SecureChannel({
     transport: createLocalTransport({ channelId }),
     key: phoneKey,
-    identity: { userId: "u1", deviceId: "phone", sessionId: "s1" },
+    identity: { senderId: "phone-1", senderName: "App", sessionId: "s1", channelId },
   });
 
   // phone listens on STREAM; ext sends an assistant message
   const gotOnPhone = new Promise((resolve) => {
-    phoneChan.onEvent(EVENTS.STREAM, resolve);
+    phoneChan.onEvent(EVENT_TYPE.STREAM, resolve);
   });
   await extChan.send(assistantMessage("hello from laptop", "m1"));
   const streamMsg = await gotOnPhone;
-  assert.equal(streamMsg.kind, "assistant.message");
-  assert.equal(streamMsg.content, "hello from laptop");
-  assert.equal(streamMsg.deviceId, "laptop");
+  assert.equal(streamMsg.eventType, EVENT_TYPE.STREAM);
+  assert.equal(streamMsg.eventSubtype, "assistant_message");
+  assert.equal(streamMsg.msg.content, "hello from laptop");
+  assert.equal(streamMsg.senderId, "copilot"); // identity stamped by the channel
+  assert.equal(streamMsg.senderName, "Copilot");
 
   // ext listens on PROMPT; phone sends a prompt
   const gotOnExt = new Promise((resolve) => {
-    extChan.onEvent(EVENTS.PROMPT, resolve);
+    extChan.onEvent(EVENT_TYPE.PROMPT, resolve);
   });
   await phoneChan.send(prompt("run the tests"));
   const promptMsg = await gotOnExt;
-  assert.equal(promptMsg.kind, "prompt");
-  assert.equal(promptMsg.text, "run the tests");
-  assert.equal(promptMsg.deviceId, "phone");
+  assert.equal(promptMsg.eventType, EVENT_TYPE.PROMPT);
+  assert.equal(promptMsg.msg.text, "run the tests");
+  assert.equal(promptMsg.senderId, "phone-1");
+  assert.equal(promptMsg.senderName, "App");
 
   await extChan.close();
   await phoneChan.close();
@@ -81,7 +82,7 @@ test("a wrong key cannot decrypt (message is dropped, not thrown)", async () => 
   });
 
   let received = false;
-  eavesdropper.onEvent(EVENTS.STREAM, () => {
+  eavesdropper.onEvent(EVENT_TYPE.STREAM, () => {
     received = true;
   });
   await sender.send(assistantMessage("secret"));

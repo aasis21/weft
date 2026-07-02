@@ -1,15 +1,17 @@
-// Type definitions for Helm shared message protocol.
+// Type definitions for the Helm standardized event-envelope protocol.
 
 import type { HistoryItem } from "./history";
 
-export type LogicalEvent =
+/** Top-level event type — also the transport topic the message travels on. */
+export type EventType =
   | "stream"
   | "prompt"
   | "approval"
   | "decision"
   | "elicitation"
   | "elicitation_response"
-  | "control";
+  | "control"
+  | "pair";
 
 export type SessionMode = "interactive" | "plan" | "autopilot";
 
@@ -18,7 +20,7 @@ export type ElicitationAction = "accept" | "decline" | "cancel";
 /** A submitted form value; matches a single JSON-Schema field's accepted types. */
 export type ElicitationValue = string | number | boolean | string[];
 
-export const EVENTS: {
+export const EVENT_TYPE: {
   readonly STREAM: "stream";
   readonly PROMPT: "prompt";
   readonly APPROVAL: "approval";
@@ -26,32 +28,37 @@ export const EVENTS: {
   readonly ELICITATION: "elicitation";
   readonly ELICITATION_RESPONSE: "elicitation_response";
   readonly CONTROL: "control";
+  readonly PAIR: "pair";
 };
 
-export const KIND: {
-  readonly ASSISTANT_MESSAGE: "assistant.message";
-  readonly ASSISTANT_DELTA: "assistant.delta";
-  readonly TOOL_START: "tool.start";
-  readonly TOOL_COMPLETE: "tool.complete";
-  readonly LOG: "log";
-  readonly ACTIVITY: "stream.activity";
-  readonly USER_MESSAGE: "stream.user_message";
-  readonly PROMPT: "prompt";
-  readonly APPROVAL_REQUEST: "approval.request";
-  readonly APPROVAL_DECISION: "approval.decision";
-  readonly ELICITATION_REQUEST: "elicitation.request";
-  readonly ELICITATION_RESPONSE: "elicitation.response";
-  readonly ELICITATION_COMPLETE: "elicitation.complete";
-  readonly CHANNEL_UP: "control.channel_up";
-  readonly SESSION_META: "control.session_meta";
-  readonly CHANNEL_DOWN: "control.channel_down";
-  readonly HEARTBEAT: "control.heartbeat";
-  readonly MODE: "control.mode";
-  readonly INTERRUPT: "control.interrupt";
-  readonly HISTORY_REQUEST: "control.history_request";
-  readonly HISTORY: "control.history";
-  readonly STATE_REQUEST: "control.state_request";
-  readonly STATE_SNAPSHOT: "control.state_snapshot";
+export const SUBTYPE: {
+  readonly STREAM: {
+    readonly ASSISTANT_MESSAGE: "assistant_message";
+    readonly ASSISTANT_DELTA: "assistant_delta";
+    readonly TOOL_START: "tool_start";
+    readonly TOOL_COMPLETE: "tool_complete";
+    readonly LOG: "log";
+    readonly ACTIVITY: "activity";
+    readonly USER_MESSAGE: "user_message";
+  };
+  readonly PROMPT: { readonly PROMPT: "prompt" };
+  readonly APPROVAL: { readonly REQUEST: "request" };
+  readonly DECISION: { readonly APPROVAL_DECISION: "approval_decision" };
+  readonly ELICITATION: { readonly REQUEST: "request"; readonly COMPLETE: "complete" };
+  readonly ELICITATION_RESPONSE: { readonly RESPONSE: "response" };
+  readonly CONTROL: {
+    readonly CHANNEL_UP: "channel_up";
+    readonly SESSION_META: "session_meta";
+    readonly CHANNEL_DOWN: "channel_down";
+    readonly HEARTBEAT: "heartbeat";
+    readonly MODE: "mode";
+    readonly INTERRUPT: "interrupt";
+    readonly HISTORY_REQUEST: "history_request";
+    readonly HISTORY: "history";
+    readonly STATE_REQUEST: "state_request";
+    readonly STATE_SNAPSHOT: "state_snapshot";
+  };
+  readonly PAIR: { readonly HELLO: "hello"; readonly ACK: "ack" };
 };
 
 export const MODES: readonly SessionMode[];
@@ -62,51 +69,53 @@ export interface ApprovalOption {
   label: string;
 }
 
-export interface BaseMessage {
-  kind: string;
+/** Identity + classification fields common to every envelope. */
+export interface EnvelopeBase {
+  eventType: EventType;
+  eventSubtype: string;
   ts: number;
-  /** Injected by SecureChannel on publish. */
-  userId?: string;
-  deviceId?: string;
+  /** Stamped by SecureChannel on publish. */
+  channelId?: string;
   sessionId?: string;
+  senderId?: string;
+  senderName?: string;
 }
 
-export interface AssistantMessage extends BaseMessage {
-  kind: "assistant.message";
+/** The standardized wire envelope: classification + identity + a nested type-specific `msg`. */
+export interface Envelope<T extends EventType, S extends string, M> extends EnvelopeBase {
+  eventType: T;
+  eventSubtype: S;
+  msg: M;
+}
+
+// ---- payload (`msg`) shapes ------------------------------------------------
+export interface AssistantMessageMsg {
   content: string;
   messageId?: string;
 }
-export interface AssistantDelta extends BaseMessage {
-  kind: "assistant.delta";
+export interface AssistantDeltaMsg {
   content: string;
   messageId?: string;
 }
-export interface ToolStart extends BaseMessage {
-  kind: "tool.start";
+export interface ToolStartMsg {
   toolCallId: string;
   toolName: string;
   args?: unknown;
 }
-export interface ToolComplete extends BaseMessage {
-  kind: "tool.complete";
+export interface ToolCompleteMsg {
   toolCallId: string;
   toolName: string;
   success: boolean;
   resultPreview?: string;
 }
-export interface LogLine extends BaseMessage {
-  kind: "log";
+export interface LogLineMsg {
   level: "info" | "warning" | "error";
   message: string;
 }
-/** Ext -> phone: true while a turn is in flight (generating/acting), false when idle. */
-export interface ActivityMessage extends BaseMessage {
-  kind: "stream.activity";
+export interface ActivityMsg {
   busy: boolean;
 }
-/** A user prompt echoed from the laptop to the phone, attributed by device. */
-export interface UserMessageEcho extends BaseMessage {
-  kind: "stream.user_message";
+export interface UserMessageMsg {
   text: string;
   origin: "phone" | "terminal";
   id?: string;
@@ -120,20 +129,17 @@ export interface PromptAttachment {
   /** Original file name, shown in the timeline and passed to the SDK as displayName. */
   name: string;
 }
-export interface PromptMessage extends BaseMessage {
-  kind: "prompt";
+export interface PromptMsg {
   text: string;
   attachments?: PromptAttachment[];
 }
-export interface ApprovalRequest extends BaseMessage {
-  kind: "approval.request";
+export interface ApprovalRequestMsg {
   requestId: string;
   toolName: string;
   toolArgs?: unknown;
   options: ApprovalOption[];
 }
-export interface ApprovalDecision extends BaseMessage {
-  kind: "approval.decision";
+export interface ApprovalDecisionMsg {
   requestId: string;
   optionId: string;
   raw?: unknown;
@@ -144,9 +150,7 @@ export interface ElicitationSchema {
   properties: Record<string, unknown>;
   required?: string[];
 }
-/** Ext -> phone: the agent's `ask_user` / elicitation prompt to render as a form. */
-export interface ElicitationRequest extends BaseMessage {
-  kind: "elicitation.request";
+export interface ElicitationRequestMsg {
   requestId: string;
   message: string;
   mode: ElicitationMode;
@@ -155,77 +159,53 @@ export interface ElicitationRequest extends BaseMessage {
   /** Present only for url-mode elicitations: a link to open on the computer. */
   url?: string;
 }
-/** Phone -> ext: the user's answer to an elicitation form. */
-export interface ElicitationResponse extends BaseMessage {
-  kind: "elicitation.response";
+export interface ElicitationResponseMsg {
   requestId: string;
   action: ElicitationAction;
   content?: Record<string, ElicitationValue>;
 }
-/** Ext -> phone: an elicitation was resolved elsewhere; dismiss any open form for it. */
-export interface ElicitationComplete extends BaseMessage {
-  kind: "elicitation.complete";
+export interface ElicitationCompleteMsg {
   requestId: string;
   action?: ElicitationAction;
 }
-export interface ChannelUp extends BaseMessage {
-  kind: "control.channel_up";
-  channelId: string;
-  sessionId: string;
+export interface ChannelUpMsg {
   cwd?: string;
   /** CLI chat summary ("title"); may be empty until the CLI derives one. */
   title?: string;
 }
-export interface SessionMeta extends BaseMessage {
-  kind: "control.session_meta";
-  /** Latest CLI chat summary ("title"). */
+export interface SessionMetaMsg {
   title?: string;
   cwd?: string;
 }
-export interface ChannelDown extends BaseMessage {
-  kind: "control.channel_down";
+export interface ChannelDownMsg {
   reason?: string;
 }
-export interface Heartbeat extends BaseMessage {
-  kind: "control.heartbeat";
+export interface HeartbeatMsg {
   /** Highest committed turn_index in the CLI store at beat time (forward cursor); null if unknown. */
   latestTurnIndex?: number | null;
   /** Authoritative turn-in-flight flag re-asserted each beat; null when unknown. */
   busy?: boolean | null;
 }
-export interface ModeChange extends BaseMessage {
-  kind: "control.mode";
+export interface ModeChangeMsg {
   mode: SessionMode;
 }
-/** Phone -> ext: stop/cancel the in-flight generation or tool run. */
-export interface InterruptMessage extends BaseMessage {
-  kind: "control.interrupt";
-}
-/** Phone -> ext: request a page of turns (cursor = turn_index, exclusive). */
-export interface HistoryRequest extends BaseMessage {
-  kind: "control.history_request";
+export type InterruptMsg = Record<string, never>;
+export interface HistoryRequestMsg {
   /** Backward cursor: return turns OLDER than this ("load earlier"). */
   before?: number | null;
   /** Forward cursor: return turns NEWER than this, ascending (post-away catch-up). */
   since?: number | null;
   limit?: number;
 }
-/** Ext -> phone: a page of history items in ascending turn order. */
-export interface History extends BaseMessage {
-  kind: "control.history";
+export interface HistoryMsg {
   items: HistoryItem[];
   nextCursor: number | null;
   hasMore: boolean;
   /** Echo of the request's forward cursor: non-null => FORWARD catch-up page; null => latest/backward. */
   since?: number | null;
 }
-/** Phone -> ext: request the current session state on (re)connect / refresh / resume. */
-export interface StateRequest extends BaseMessage {
-  kind: "control.state_request";
-}
-/** Ext -> phone: a snapshot of the live session state, answering a StateRequest. */
-export interface StateSnapshot extends BaseMessage {
-  kind: "control.state_snapshot";
+export type StateRequestMsg = Record<string, never>;
+export interface StateSnapshotMsg {
   /** A turn is in flight (agent working). */
   busy: boolean;
   /** The in-flight work can be stopped (drives the Stop control at connect time). */
@@ -234,13 +214,50 @@ export interface StateSnapshot extends BaseMessage {
   mode: SessionMode | null;
   /** Highest committed turn_index in the store (the phone's forward cursor); null if none. */
   latestTurnIndex: number | null;
-  /** Pending approval prompts to (re)render, in approvalRequest shape. */
-  approvals: ApprovalRequest[];
-  /** Pending ask_user / elicitation prompts to (re)render, in elicitationRequest shape. */
-  elicitations: ElicitationRequest[];
+  /** Pending approval prompt payloads to (re)render. */
+  approvals: ApprovalRequestMsg[];
+  /** Pending ask_user / elicitation prompt payloads to (re)render. */
+  elicitations: ElicitationRequestMsg[];
+}
+/** The pre-key pairing handshake payloads (plaintext; only ever carry PUBLIC keys). */
+export interface PairHelloMsg {
+  v: number;
+  pub: string;
+}
+export interface PairAckMsg {
+  v: number;
+  ok: boolean;
 }
 
-export type InnerMessage =
+// ---- concrete envelope types (eventType + eventSubtype + typed msg) --------
+export type AssistantMessage = Envelope<"stream", "assistant_message", AssistantMessageMsg>;
+export type AssistantDelta = Envelope<"stream", "assistant_delta", AssistantDeltaMsg>;
+export type ToolStart = Envelope<"stream", "tool_start", ToolStartMsg>;
+export type ToolComplete = Envelope<"stream", "tool_complete", ToolCompleteMsg>;
+export type LogLine = Envelope<"stream", "log", LogLineMsg>;
+export type ActivityMessage = Envelope<"stream", "activity", ActivityMsg>;
+export type UserMessageEcho = Envelope<"stream", "user_message", UserMessageMsg>;
+export type PromptMessage = Envelope<"prompt", "prompt", PromptMsg>;
+export type ApprovalRequest = Envelope<"approval", "request", ApprovalRequestMsg>;
+export type ApprovalDecision = Envelope<"decision", "approval_decision", ApprovalDecisionMsg>;
+export type ElicitationRequest = Envelope<"elicitation", "request", ElicitationRequestMsg>;
+export type ElicitationComplete = Envelope<"elicitation", "complete", ElicitationCompleteMsg>;
+export type ElicitationResponse = Envelope<"elicitation_response", "response", ElicitationResponseMsg>;
+export type ChannelUp = Envelope<"control", "channel_up", ChannelUpMsg>;
+export type SessionMeta = Envelope<"control", "session_meta", SessionMetaMsg>;
+export type ChannelDown = Envelope<"control", "channel_down", ChannelDownMsg>;
+export type Heartbeat = Envelope<"control", "heartbeat", HeartbeatMsg>;
+export type ModeChange = Envelope<"control", "mode", ModeChangeMsg>;
+export type InterruptMessage = Envelope<"control", "interrupt", InterruptMsg>;
+export type HistoryRequest = Envelope<"control", "history_request", HistoryRequestMsg>;
+export type History = Envelope<"control", "history", HistoryMsg>;
+export type StateRequest = Envelope<"control", "state_request", StateRequestMsg>;
+export type StateSnapshot = Envelope<"control", "state_snapshot", StateSnapshotMsg>;
+export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
+export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
+
+/** The discriminated union of every encrypted (post-pairing) envelope. */
+export type EventEnvelope =
   | AssistantMessage
   | AssistantDelta
   | ToolStart
@@ -281,7 +298,7 @@ export function userMessage(
   origin?: "phone" | "terminal",
   id?: string
 ): UserMessageEcho;
-export function prompt(text: string, attachments?: PromptAttachment[]): PromptMessage;
+export function prompt(text: string, attachments?: PromptAttachment[] | null): PromptMessage;
 export function approvalRequest(
   requestId: string,
   toolName: string,
@@ -310,12 +327,7 @@ export function elicitationComplete(
   requestId: string,
   action?: ElicitationAction
 ): ElicitationComplete;
-export function channelUp(
-  channelId: string,
-  sessionId: string,
-  cwd?: string,
-  title?: string
-): ChannelUp;
+export function channelUp(cwd?: string, title?: string): ChannelUp;
 export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function channelDown(reason?: string): ChannelDown;
 export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
@@ -338,8 +350,7 @@ export function stateSnapshot(snapshot?: {
   abortable?: boolean;
   mode?: SessionMode | null;
   latestTurnIndex?: number | null;
-  approvals?: ApprovalRequest[];
-  elicitations?: ElicitationRequest[];
+  approvals?: ApprovalRequestMsg[];
+  elicitations?: ElicitationRequestMsg[];
 }): StateSnapshot;
-export function eventForKind(kind: string): LogicalEvent;
-export function isValidInner(msg: unknown): msg is InnerMessage;
+export function isValidEnvelope(env: unknown): env is EventEnvelope;

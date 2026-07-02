@@ -1,20 +1,17 @@
-import { KIND, MODES, mergeHistory } from '@aasis21/helm-shared';
+import { EVENT_TYPE, SUBTYPE, MODES, mergeHistory } from '@aasis21/helm-shared';
 import type {
-  ApprovalRequest,
+  ApprovalRequestMsg,
   AssistantDelta,
   AssistantMessage,
-  ActivityMessage,
-  ElicitationRequest,
-  ElicitationComplete,
-  Heartbeat,
-  History as HistoryMessage,
+  ElicitationRequestMsg,
+  EventEnvelope,
   HistoryItem,
-  InnerMessage,
+  HistoryMsg,
   LogLine,
-  ModeChange,
+  LogLineMsg,
   PromptAttachment,
   SessionMode,
-  StateSnapshot,
+  StateSnapshotMsg,
   ToolComplete,
   ToolStart,
   UserMessageEcho,
@@ -60,7 +57,7 @@ export interface ToolItem {
 export interface NoticeItem {
   kind: 'notice';
   id: string;
-  level: LogLine['level'];
+  level: LogLineMsg['level'];
   text: string;
   ts: number;
 }
@@ -69,13 +66,13 @@ export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem;
 
 export interface TimelineState {
   items: TimelineItem[];
-  approvals: ApprovalRequest[];
+  approvals: ApprovalRequestMsg[];
   /** Transient per-request decision-send error (requestId -> message). Drives a retry
    *  affordance when a decision couldn't be relayed; reset on reconnect, never persisted. */
   approvalErrors: Record<string, string>;
   /** Pending `ask_user` elicitation forms awaiting an answer (ext -> phone). Transient,
    *  like approvals: cleared when answered/dismissed, reset on reconnect, never persisted. */
-  elicitations: ElicitationRequest[];
+  elicitations: ElicitationRequestMsg[];
   /** Transient per-request answer-send error (requestId -> message); mirrors approvalErrors. */
   elicitationErrors: Record<string, string>;
   /** True while a turn is in flight (the agent is generating/acting). Transient — driven
@@ -169,7 +166,7 @@ export function setUserFailed(state: TimelineState, id: string, failed: boolean)
 
 export function appendNotice(
   state: TimelineState,
-  level: LogLine['level'],
+  level: LogLineMsg['level'],
   text: string,
   ts: number,
 ): TimelineState {
@@ -188,98 +185,111 @@ export function markHistoryLoading(state: TimelineState, loading = true): Timeli
   return { ...state, historyLoading: loading };
 }
 
-/** Fold one decrypted inner message into the timeline state. Pure. */
-export function reduceTimeline(state: TimelineState, message: InnerMessage): TimelineState {
-  switch (message.kind) {
-    case KIND.ASSISTANT_MESSAGE:
-      return upsertAssistant(state, message);
-    case KIND.ASSISTANT_DELTA:
-      return appendDelta(state, message);
-    case KIND.TOOL_START:
-      return startTool(state, message);
-    case KIND.TOOL_COMPLETE:
-      return completeTool(state, message);
-    case KIND.LOG:
-      return pushNotice(state, message);
-    case KIND.ACTIVITY:
-      return { ...state, busy: (message as ActivityMessage).busy };
-    case KIND.USER_MESSAGE:
-      return appendUserEcho(state, message as UserMessageEcho);
-    case KIND.HISTORY: {
-      // A FORWARD catch-up page (its `since` cursor is echoed back) carries the turns that landed
-      // while we were away — append them to the transcript tail. A latest/backward page (no `since`)
-      // is scrollback — merge it into `history[]` ABOVE the transcript.
-      const page = message as HistoryMessage;
-      return page.since != null ? applyForwardCatchup(state, page) : mergeHistoryPage(state, page);
-    }
-    case KIND.STATE_SNAPSHOT:
-      return applyStateSnapshot(state, message as StateSnapshot);
-    case KIND.APPROVAL_REQUEST: {
-      const req = message as ApprovalRequest;
-      return {
-        ...state,
-        approvals: [...state.approvals.filter((a) => a.requestId !== req.requestId), req],
-        approvalErrors: omitKey(state.approvalErrors, req.requestId),
-      };
-    }
-    case KIND.ELICITATION_REQUEST: {
-      const req = message as ElicitationRequest;
-      return {
-        ...state,
-        elicitations: [...state.elicitations.filter((e) => e.requestId !== req.requestId), req],
-        elicitationErrors: omitKey(state.elicitationErrors, req.requestId),
-      };
-    }
-    case KIND.ELICITATION_COMPLETE: {
-      // Resolved here, at the terminal, or on another device — drop any open form for it.
-      const { requestId } = message as ElicitationComplete;
-      return dismissElicitation(state, requestId);
-    }
-    case KIND.CHANNEL_UP:
-      return {
-        ...state,
-        cwd: message.cwd ?? state.cwd,
-        title: message.title || state.title,
-        lastHeartbeat: Date.now(),
-        sessionEnded: false,
-        endedReason: undefined,
-        busy: false,
-      };
-    case KIND.SESSION_META:
-      return {
-        ...state,
-        title: message.title || state.title,
-        cwd: message.cwd ?? state.cwd,
-      };
-    case KIND.CHANNEL_DOWN: {
-      const reason = message.reason ?? 'Session ended.';
-      return {
-        ...state,
-        sessionEnded: true,
-        endedReason: reason,
-        busy: false,
-        items: cap([
-          ...state.items,
-          { kind: 'notice', id: `end-${message.ts}`, level: 'warning', text: reason, ts: message.ts },
-        ]),
-      };
-    }
-    case KIND.HEARTBEAT: {
-      const beat = message as Heartbeat;
-      // Re-assert busy only when the extension actually knows it (boolean); a null/absent value
-      // means "unknown" and must not clobber the live busy driven by assistant.message_start/idle.
-      const busy = typeof beat.busy === 'boolean' ? beat.busy : state.busy;
-      return {
-        ...state,
-        busy,
-        lastHeartbeat: Date.now(),
-        sessionEnded: false,
-        // Advance the forward cursor so a later refresh/resume catches up from the right point.
-        latestTurnIndex: maxCursor(state.latestTurnIndex, beat.latestTurnIndex),
-      };
-    }
-    case KIND.MODE:
-      return { ...state, mode: (message as ModeChange).mode };
+/** Fold one decrypted event envelope into the timeline state. Pure. */
+export function reduceTimeline(state: TimelineState, message: EventEnvelope): TimelineState {
+  switch (message.eventType) {
+    case EVENT_TYPE.STREAM:
+      switch (message.eventSubtype) {
+        case SUBTYPE.STREAM.ASSISTANT_MESSAGE:
+          return upsertAssistant(state, message);
+        case SUBTYPE.STREAM.ASSISTANT_DELTA:
+          return appendDelta(state, message);
+        case SUBTYPE.STREAM.TOOL_START:
+          return startTool(state, message);
+        case SUBTYPE.STREAM.TOOL_COMPLETE:
+          return completeTool(state, message);
+        case SUBTYPE.STREAM.LOG:
+          return pushNotice(state, message);
+        case SUBTYPE.STREAM.ACTIVITY:
+          return { ...state, busy: message.msg.busy };
+        case SUBTYPE.STREAM.USER_MESSAGE:
+          return appendUserEcho(state, message);
+        default:
+          return state;
+      }
+    case EVENT_TYPE.APPROVAL:
+      if (message.eventSubtype === SUBTYPE.APPROVAL.REQUEST) {
+        const req = message.msg;
+        return {
+          ...state,
+          approvals: [...state.approvals.filter((a) => a.requestId !== req.requestId), req],
+          approvalErrors: omitKey(state.approvalErrors, req.requestId),
+        };
+      }
+      return state;
+    case EVENT_TYPE.ELICITATION:
+      if (message.eventSubtype === SUBTYPE.ELICITATION.REQUEST) {
+        const req = message.msg;
+        return {
+          ...state,
+          elicitations: [...state.elicitations.filter((e) => e.requestId !== req.requestId), req],
+          elicitationErrors: omitKey(state.elicitationErrors, req.requestId),
+        };
+      }
+      if (message.eventSubtype === SUBTYPE.ELICITATION.COMPLETE) {
+        // Resolved here, at the terminal, or on another device — drop any open form for it.
+        return dismissElicitation(state, message.msg.requestId);
+      }
+      return state;
+    case EVENT_TYPE.CONTROL:
+      switch (message.eventSubtype) {
+        case SUBTYPE.CONTROL.HISTORY: {
+          // A FORWARD catch-up page (its `since` cursor is echoed back) carries the turns that landed
+          // while we were away — append them to the transcript tail. A latest/backward page (no
+          // `since`) is scrollback — merge it into `history[]` ABOVE the transcript.
+          const page = message.msg;
+          return page.since != null ? applyForwardCatchup(state, page) : mergeHistoryPage(state, page);
+        }
+        case SUBTYPE.CONTROL.STATE_SNAPSHOT:
+          return applyStateSnapshot(state, message.msg);
+        case SUBTYPE.CONTROL.CHANNEL_UP:
+          return {
+            ...state,
+            cwd: message.msg.cwd ?? state.cwd,
+            title: message.msg.title || state.title,
+            lastHeartbeat: Date.now(),
+            sessionEnded: false,
+            endedReason: undefined,
+            busy: false,
+          };
+        case SUBTYPE.CONTROL.SESSION_META:
+          return {
+            ...state,
+            title: message.msg.title || state.title,
+            cwd: message.msg.cwd ?? state.cwd,
+          };
+        case SUBTYPE.CONTROL.CHANNEL_DOWN: {
+          const reason = message.msg.reason ?? 'Session ended.';
+          return {
+            ...state,
+            sessionEnded: true,
+            endedReason: reason,
+            busy: false,
+            items: cap([
+              ...state.items,
+              { kind: 'notice', id: `end-${message.ts}`, level: 'warning', text: reason, ts: message.ts },
+            ]),
+          };
+        }
+        case SUBTYPE.CONTROL.HEARTBEAT: {
+          const beat = message.msg;
+          // Re-assert busy only when the extension actually knows it (boolean); a null/absent value
+          // means "unknown" and must not clobber the live busy driven by assistant.message_start/idle.
+          const busy = typeof beat.busy === 'boolean' ? beat.busy : state.busy;
+          return {
+            ...state,
+            busy,
+            lastHeartbeat: Date.now(),
+            sessionEnded: false,
+            // Advance the forward cursor so a later refresh/resume catches up from the right point.
+            latestTurnIndex: maxCursor(state.latestTurnIndex, beat.latestTurnIndex),
+          };
+        }
+        case SUBTYPE.CONTROL.MODE:
+          return { ...state, mode: message.msg.mode };
+        default:
+          return state;
+      }
     default:
       return state;
   }
@@ -315,7 +325,7 @@ export function dismissElicitation(state: TimelineState, requestId: string): Tim
  */
 export function restoreElicitation(
   state: TimelineState,
-  req: ElicitationRequest,
+  req: ElicitationRequestMsg,
   message: string,
 ): TimelineState {
   const elicitations = state.elicitations.some((e) => e.requestId === req.requestId)
@@ -334,7 +344,7 @@ export function restoreElicitation(
  */
 export function restoreApproval(
   state: TimelineState,
-  req: ApprovalRequest,
+  req: ApprovalRequestMsg,
   message: string,
 ): TimelineState {
   const approvals = state.approvals.some((a) => a.requestId === req.requestId)
@@ -348,46 +358,46 @@ export function restoreApproval(
 }
 
 function upsertAssistant(state: TimelineState, message: AssistantMessage): TimelineState {
-  const id = message.messageId ?? `assistant-${message.ts}`;
+  const id = message.msg.messageId ?? `assistant-${message.ts}`;
   const index = state.items.findIndex((item) => item.id === id && item.kind === 'assistant');
   if (index === -1) {
-    const item: AssistantItem = { kind: 'assistant', id, text: message.content, ts: message.ts };
+    const item: AssistantItem = { kind: 'assistant', id, text: message.msg.content, ts: message.ts };
     return { ...state, items: cap([...state.items, item]) };
   }
   return {
     ...state,
     items: state.items.map((item, i) =>
-      i === index ? { ...(item as AssistantItem), text: message.content, ts: message.ts } : item,
+      i === index ? { ...(item as AssistantItem), text: message.msg.content, ts: message.ts } : item,
     ),
   };
 }
 
 function appendDelta(state: TimelineState, message: AssistantDelta): TimelineState {
-  const id = message.messageId ?? `assistant-${message.ts}`;
+  const id = message.msg.messageId ?? `assistant-${message.ts}`;
   const index = state.items.findIndex((item) => item.id === id && item.kind === 'assistant');
   if (index === -1) {
-    const item: AssistantItem = { kind: 'assistant', id, text: message.content, ts: message.ts };
+    const item: AssistantItem = { kind: 'assistant', id, text: message.msg.content, ts: message.ts };
     return { ...state, items: cap([...state.items, item]) };
   }
   return {
     ...state,
     items: state.items.map((item, i) =>
       i === index
-        ? { ...(item as AssistantItem), text: `${(item as AssistantItem).text}${message.content}`, ts: message.ts }
+        ? { ...(item as AssistantItem), text: `${(item as AssistantItem).text}${message.msg.content}`, ts: message.ts }
         : item,
     ),
   };
 }
 
 function startTool(state: TimelineState, message: ToolStart): TimelineState {
-  if (state.items.some((item) => item.kind === 'tool' && item.id === message.toolCallId)) {
+  if (state.items.some((item) => item.kind === 'tool' && item.id === message.msg.toolCallId)) {
     return state;
   }
   const item: ToolItem = {
     kind: 'tool',
-    id: message.toolCallId,
-    name: message.toolName,
-    args: message.args,
+    id: message.msg.toolCallId,
+    name: message.msg.toolName,
+    args: message.msg.args,
     status: 'running',
     startedAt: message.ts,
     ts: message.ts,
@@ -396,14 +406,14 @@ function startTool(state: TimelineState, message: ToolStart): TimelineState {
 }
 
 function completeTool(state: TimelineState, message: ToolComplete): TimelineState {
-  const index = state.items.findIndex((item) => item.kind === 'tool' && item.id === message.toolCallId);
+  const index = state.items.findIndex((item) => item.kind === 'tool' && item.id === message.msg.toolCallId);
   if (index === -1) {
     const item: ToolItem = {
       kind: 'tool',
-      id: message.toolCallId,
-      name: message.toolName,
-      status: message.success ? 'success' : 'error',
-      resultPreview: message.resultPreview,
+      id: message.msg.toolCallId,
+      name: message.msg.toolName,
+      status: message.msg.success ? 'success' : 'error',
+      resultPreview: message.msg.resultPreview,
       startedAt: message.ts,
       finishedAt: message.ts,
       ts: message.ts,
@@ -416,8 +426,8 @@ function completeTool(state: TimelineState, message: ToolComplete): TimelineStat
       i === index
         ? {
             ...(item as ToolItem),
-            status: message.success ? 'success' : 'error',
-            resultPreview: message.resultPreview,
+            status: message.msg.success ? 'success' : 'error',
+            resultPreview: message.msg.resultPreview,
             finishedAt: message.ts,
           }
         : item,
@@ -426,7 +436,7 @@ function completeTool(state: TimelineState, message: ToolComplete): TimelineStat
 }
 
 function pushNotice(state: TimelineState, message: LogLine): TimelineState {
-  return appendNotice(state, message.level, message.message, message.ts);
+  return appendNotice(state, message.msg.level, message.msg.message, message.ts);
 }
 
 /**
@@ -435,20 +445,20 @@ function pushNotice(state: TimelineState, message: LogLine): TimelineState {
  * by the stable SDK event id so a re-delivery (e.g. reconnect) can't double-add it.
  */
 function appendUserEcho(state: TimelineState, message: UserMessageEcho): TimelineState {
-  const id = `umsg-${message.id ?? message.ts}`;
+  const id = `umsg-${message.msg.id ?? message.ts}`;
   if (state.items.some((item) => item.id === id)) return state;
   const item: UserItem = {
     kind: 'user',
     id,
-    text: message.text,
+    text: message.msg.text,
     ts: message.ts,
-    origin: message.origin ?? 'terminal',
+    origin: message.msg.origin ?? 'terminal',
   };
   return { ...state, items: cap([...state.items, item]) };
 }
 
 /** Merge a backfilled history page (ascending, deduped) and advance the cursor. */
-function mergeHistoryPage(state: TimelineState, message: HistoryMessage): TimelineState {
+function mergeHistoryPage(state: TimelineState, message: HistoryMsg): TimelineState {
   const items = message.items ?? [];
   const merged = mergeHistory(state.history, items);
   const history = merged.length > MAX_HISTORY ? merged.slice(merged.length - MAX_HISTORY) : merged;
@@ -472,7 +482,7 @@ function mergeHistoryPage(state: TimelineState, message: HistoryMessage): Timeli
  * page is a no-op (dedup by a stable `turn-<i>-<role>` id), and a turn already seen live is dropped
  * by an exact (role,text) match so it never double-renders (live items carry no turn_index).
  */
-function applyForwardCatchup(state: TimelineState, message: HistoryMessage): TimelineState {
+function applyForwardCatchup(state: TimelineState, message: HistoryMsg): TimelineState {
   const incoming = message.items ?? [];
   const cursor = maxCursor(state.latestTurnIndex, highestTurnIndex(incoming));
   if (incoming.length === 0) return { ...state, latestTurnIndex: cursor };
@@ -555,7 +565,7 @@ function highestTurnIndex(items: HistoryItem[]): number | null {
  * the truth — a live Stop control, the real mode, and any prompt still waiting for an answer —
  * instead of a stale "Ready" with no pending prompts. A snapshot also counts as a heartbeat.
  */
-function applyStateSnapshot(state: TimelineState, snap: StateSnapshot): TimelineState {
+function applyStateSnapshot(state: TimelineState, snap: StateSnapshotMsg): TimelineState {
   return {
     ...state,
     busy: Boolean(snap.busy),

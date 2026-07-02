@@ -6,20 +6,35 @@
 // traffic on the channel, and it only ever carries PUBLIC keys (safe to send in the clear).
 // Everything after pairing flows through SecureChannel (fully encrypted).
 //
+// STANDARDIZED SHAPE: even though pairing is pre-key (plaintext), its two messages use the same
+// event-envelope shape as everything else — eventType "pair", eventSubtype "hello" | "ack", with
+// the public key in `msg` and the sender in `senderId`/`senderName`. Both travel on the single
+// "pair" transport topic (== eventType) and are told apart by `eventSubtype`. Broadcast is
+// self:false on both transports, and each side additionally filters by subtype, so a laptop never
+// mistakes its own ack for a hello (or vice-versa).
+//
 // ORDERING NOTE (real Supabase Broadcast transport): handlers are registered with channel.on()
 // inside transport.subscribe(), and channel.subscribe() runs in transport.connect(). Supabase
 // delivers only to handlers registered BEFORE connect(). These helpers therefore register their
 // handler, THEN connect. The in-process LocalTransport has no such constraint. See docs/pairing.md.
 
 import { deriveSessionKey } from "./crypto.mjs";
+import { EVENT_TYPE, SUBTYPE } from "./messages.mjs";
 
 export const PAIR_VERSION = 1;
 
-/** Reserved transport events used only for the pre-encryption handshake. */
-export const PAIR_EVENTS = Object.freeze({
-  HELLO: "pair.hello", // phone  -> laptop: { v, pub, deviceId, ts }
-  ACK: "pair.ack", // laptop -> phone:  { v, ok, ts }
-});
+/** Build a standardized plaintext pairing envelope (hello or ack). */
+function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {}) {
+  return {
+    eventType: EVENT_TYPE.PAIR,
+    eventSubtype,
+    channelId,
+    senderId,
+    senderName,
+    msg,
+    ts: Date.now(),
+  };
+}
 
 /** Build the QR payload shown by the laptop. Carries the laptop PUBLIC key only. */
 export function buildPairingPayload({ channelId, publicKeyB64 }) {
@@ -43,6 +58,14 @@ export function parsePairingPayload(input) {
   return { channelId: o.channelId, publicKeyB64: o.pub };
 }
 
+/** Read a hello envelope's public key + sender, tolerating a missing/foreign message. */
+function readHello(payload) {
+  if (!payload || payload.eventSubtype !== SUBTYPE.PAIR.HELLO) return null;
+  const pub = payload.msg?.pub;
+  if (typeof pub !== "string") return null;
+  return { pub, deviceId: payload.senderId, senderName: payload.senderName };
+}
+
 /**
  * Laptop/extension side, PERSISTENT variant: keep listening for phone hellos and ACK EVERY one,
  * deriving a fresh session key per hello. Unlike `waitForPeer` (single-shot), this never stops
@@ -52,30 +75,45 @@ export function parsePairingPayload(input) {
  * confirms fast even if relay (re)attach is slow. `stop()` only unsubscribes — it does NOT close
  * the transport (the caller owns the transport lifecycle).
  *
- * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey }, onPeer: (info: { key: CryptoKey, peer: { publicKeyB64: string, deviceId?: string } }) => void | Promise<void>, connect?: boolean }} opts
+ * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey }, onPeer: (info: { key: CryptoKey, peer: { publicKeyB64: string, deviceId?: string, senderName?: string } }) => void | Promise<void>, connect?: boolean, channelId?: string, senderId?: string, senderName?: string }} opts
  * @returns {Promise<{ stop: () => void }>}
  */
-export async function listenForPeers({ transport, keyPair, onPeer, connect = true } = {}) {
+export async function listenForPeers({
+  transport,
+  keyPair,
+  onPeer,
+  connect = true,
+  channelId,
+  senderId = "copilot",
+  senderName = "Copilot",
+} = {}) {
   if (!transport) throw new Error("helm/pairing: transport is required");
   if (!keyPair?.privateKey) throw new Error("helm/pairing: keyPair is required");
   if (typeof onPeer !== "function") throw new Error("helm/pairing: onPeer is required");
 
-  const unsub = transport.subscribe(PAIR_EVENTS.HELLO, async (payload) => {
-    if (!payload || typeof payload.pub !== "string") return;
+  const unsub = transport.subscribe(EVENT_TYPE.PAIR, async (payload) => {
+    const hello = readHello(payload);
+    if (!hello) return;
     let key;
     try {
-      key = await deriveSessionKey(keyPair.privateKey, payload.pub);
+      key = await deriveSessionKey(keyPair.privateKey, hello.pub);
     } catch {
       return; // malformed/incompatible public key — ignore.
     }
     // ACK first: the phone re-broadcasts HELLO until it hears this, so answer every hello fast.
     try {
-      await transport.publish(PAIR_EVENTS.ACK, { v: PAIR_VERSION, ok: true, ts: Date.now() });
+      await transport.publish(
+        EVENT_TYPE.PAIR,
+        pairEnvelope(SUBTYPE.PAIR.ACK, { v: PAIR_VERSION, ok: true }, { channelId, senderId, senderName }),
+      );
     } catch {
       /* ack is best-effort */
     }
     try {
-      await onPeer({ key, peer: { publicKeyB64: payload.pub, deviceId: payload.deviceId } });
+      await onPeer({
+        key,
+        peer: { publicKeyB64: hello.pub, deviceId: hello.deviceId, senderName: hello.senderName },
+      });
     } catch {
       /* the caller is responsible for surfacing its own (re)attach failures */
     }
@@ -87,10 +125,18 @@ export async function listenForPeers({ transport, keyPair, onPeer, connect = tru
 
 /**
  * Laptop/extension side: wait for the phone's hello, derive the shared session key.
- * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey }, timeoutMs?: number, connect?: boolean }} opts
- * @returns {Promise<{ key: CryptoKey, peer: { publicKeyB64: string, deviceId?: string } }>}
+ * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey }, timeoutMs?: number, connect?: boolean, channelId?: string, senderId?: string, senderName?: string }} opts
+ * @returns {Promise<{ key: CryptoKey, peer: { publicKeyB64: string, deviceId?: string, senderName?: string } }>}
  */
-export async function waitForPeer({ transport, keyPair, timeoutMs = 0, connect = true } = {}) {
+export async function waitForPeer({
+  transport,
+  keyPair,
+  timeoutMs = 0,
+  connect = true,
+  channelId,
+  senderId = "copilot",
+  senderName = "Copilot",
+} = {}) {
   if (!transport) throw new Error("helm/pairing: transport is required");
   if (!keyPair?.privateKey) throw new Error("helm/pairing: keyPair is required");
 
@@ -106,17 +152,25 @@ export async function waitForPeer({ transport, keyPair, timeoutMs = 0, connect =
       fn(arg);
     };
 
-    const unsub = transport.subscribe(PAIR_EVENTS.HELLO, async (payload) => {
-      if (settled || !payload || typeof payload.pub !== "string") return;
+    const unsub = transport.subscribe(EVENT_TYPE.PAIR, async (payload) => {
+      if (settled) return;
+      const hello = readHello(payload);
+      if (!hello) return;
       try {
-        const key = await deriveSessionKey(keyPair.privateKey, payload.pub);
+        const key = await deriveSessionKey(keyPair.privateKey, hello.pub);
         // Best-effort ACK so the phone can confirm the laptop derived the key.
         try {
-          await transport.publish(PAIR_EVENTS.ACK, { v: PAIR_VERSION, ok: true, ts: Date.now() });
+          await transport.publish(
+            EVENT_TYPE.PAIR,
+            pairEnvelope(SUBTYPE.PAIR.ACK, { v: PAIR_VERSION, ok: true }, { channelId, senderId, senderName }),
+          );
         } catch {
           /* ack is optional */
         }
-        finish(resolve, { key, peer: { publicKeyB64: payload.pub, deviceId: payload.deviceId } });
+        finish(resolve, {
+          key,
+          peer: { publicKeyB64: hello.pub, deviceId: hello.deviceId, senderName: hello.senderName },
+        });
       } catch (err) {
         finish(reject, err);
       }
@@ -140,11 +194,14 @@ export async function waitForPeer({ transport, keyPair, timeoutMs = 0, connect =
  *
  * When `waitForAck` is true we RE-BROADCAST the hello on an interval until the laptop ACKs (or we
  * hit `timeoutMs`). Supabase Broadcast has no replay, so a single hello is lost if the laptop's
- * channel finishes subscribing a moment after we publish (common right after `copilot` starts,
- * since the QR prints immediately). Re-announcing makes the handshake self-healing — the laptop's
- * persistent `listenForPeers` simply answers each hello and the phone resolves on the first ACK.
+ * channel finishes subscribing a moment after we publish. Re-announcing makes the handshake
+ * self-healing — the laptop's persistent `listenForPeers` answers each hello and the phone resolves
+ * on the first ACK.
  *
- * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey, publicKeyB64: string }, peerPublicKeyB64: string, deviceId?: string, waitForAck?: boolean, timeoutMs?: number, retryMs?: number }} opts
+ * `deviceId` is the phone's stable id (stamped as `senderId`); `senderName` is its display label
+ * ("App" | "WebApp"). Both ride the standardized hello envelope.
+ *
+ * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey, publicKeyB64: string }, peerPublicKeyB64: string, deviceId?: string, senderName?: string, channelId?: string, waitForAck?: boolean, timeoutMs?: number, retryMs?: number }} opts
  * @returns {Promise<{ key: CryptoKey }>}
  */
 export async function sayHello({
@@ -152,6 +209,8 @@ export async function sayHello({
   keyPair,
   peerPublicKeyB64,
   deviceId,
+  senderName,
+  channelId,
   waitForAck = false,
   timeoutMs = 20_000,
   retryMs = 1_200,
@@ -163,17 +222,18 @@ export async function sayHello({
   if (!peerPublicKeyB64) throw new Error("helm/pairing: peerPublicKeyB64 is required");
 
   const key = await deriveSessionKey(keyPair.privateKey, peerPublicKeyB64);
-  const buildHello = () => ({
-    v: PAIR_VERSION,
-    pub: keyPair.publicKeyB64,
-    deviceId,
-    ts: Date.now(),
-  });
+  const buildHello = () =>
+    pairEnvelope(
+      SUBTYPE.PAIR.HELLO,
+      { v: PAIR_VERSION, pub: keyPair.publicKeyB64 },
+      { channelId, senderId: deviceId, senderName },
+    );
+  const isAck = (payload) => payload && payload.eventSubtype === SUBTYPE.PAIR.ACK;
 
   // Fire-and-forget path (e.g. restoring a saved pairing): publish once, don't block on an ack.
   if (!waitForAck) {
     await transport.connect?.();
-    await transport.publish(PAIR_EVENTS.HELLO, buildHello());
+    await transport.publish(EVENT_TYPE.PAIR, buildHello());
     return { key };
   }
 
@@ -190,15 +250,15 @@ export async function sayHello({
     };
 
     // Register the ACK listener BEFORE connecting so no ack can race ahead of us.
-    unsub = transport.subscribe(PAIR_EVENTS.ACK, () => {
-      if (settled) return;
+    unsub = transport.subscribe(EVENT_TYPE.PAIR, (payload) => {
+      if (settled || !isAck(payload)) return;
       settled = true;
       cleanup();
       resolve({ key });
     });
 
     const announce = () => {
-      Promise.resolve(transport.publish(PAIR_EVENTS.HELLO, buildHello())).catch(() => {
+      Promise.resolve(transport.publish(EVENT_TYPE.PAIR, buildHello())).catch(() => {
         // Ignore transient publish failures; the interval will try again.
       });
     };

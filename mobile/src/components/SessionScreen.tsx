@@ -4,6 +4,7 @@ import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import type { SessionView } from '../lib/sessionManager';
 import { ChatThread } from './ChatThread';
 import { Composer } from './Composer';
+import { DebugPanel } from './DebugPanel';
 import { ElicitationCard } from './ElicitationCard';
 import { SessionDrawer } from './SessionDrawer';
 import { StatusBar } from './StatusBar';
@@ -168,6 +169,7 @@ export function SessionScreen({
   onLoadEarlier,
 }: SessionScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
@@ -307,7 +309,12 @@ export function SessionScreen({
         onReconnect={() => onReconnect(activeId)}
         onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}
+        onOpenDebug={() => setDebugOpen(true)}
       />
+
+      {debugOpen ? (
+        <DebugPanel events={active.events} title={meta.title} onClose={() => setDebugOpen(false)} />
+      ) : null}
 
       <main className="thread-scroll">
         <ChatThread

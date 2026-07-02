@@ -1,16 +1,15 @@
 // SecureChannel — ties a Transport + an AES-GCM session key + an identity together so callers
-// deal only in typed inner messages (messages.mjs). It encrypts on send, decrypts on receive,
-// and stamps every outgoing message with { userId, deviceId, sessionId }.
+// deal only in typed event envelopes (messages.mjs). It encrypts on send, decrypts on receive,
+// and stamps every outgoing envelope with its identity { channelId, sessionId, senderId, senderName }.
 
 import { encryptJSON, decryptJSON } from "./crypto.mjs";
-import { eventForKind } from "./messages.mjs";
 
 export class SecureChannel {
   /**
    * @param {object} opts
    * @param {import("./transport.d.ts").Transport} opts.transport
    * @param {CryptoKey} opts.key - AES-GCM session key from crypto.deriveSessionKey()
-   * @param {{ userId?: string, deviceId?: string, sessionId?: string }} [opts.identity]
+   * @param {{ channelId?: string, sessionId?: string, senderId?: string, senderName?: string }} [opts.identity]
    */
   constructor({ transport, key, identity = {} }) {
     if (!transport) throw new Error("helm/channel: transport is required");
@@ -25,20 +24,21 @@ export class SecureChannel {
   }
 
   /**
-   * Encrypt and publish a typed inner message. The logical event is derived from message.kind.
-   * @param {import("./messages.d.ts").InnerMessage} message
+   * Encrypt and publish a typed event envelope. Stamps identity (channelId/sessionId/senderId/
+   * senderName) and publishes on the message's own `eventType` (which IS the transport topic).
+   * @param {import("./messages.d.ts").EventEnvelope} message
    */
   async send(message) {
-    const tagged = { ...this.identity, ...message };
-    const event = eventForKind(message.kind);
-    const enc = await encryptJSON(this.key, tagged);
-    await this.transport.publish(event, { ...enc, ts: message.ts ?? Date.now() });
+    const ts = message.ts ?? Date.now();
+    const full = { ...message, ...this.identity, ts };
+    const enc = await encryptJSON(this.key, full);
+    await this.transport.publish(full.eventType, { ...enc, ts });
   }
 
   /**
-   * Subscribe to a logical event; the handler receives the DECRYPTED inner message.
-   * @param {string} event - one of EVENTS.*
-   * @param {(msg: import("./messages.d.ts").InnerMessage) => void} handler
+   * Subscribe to a logical event type; the handler receives the DECRYPTED envelope.
+   * @param {string} event - one of EVENT_TYPE.*
+   * @param {(msg: import("./messages.d.ts").EventEnvelope) => void} handler
    * @returns {() => void} unsubscribe
    */
   onEvent(event, handler) {

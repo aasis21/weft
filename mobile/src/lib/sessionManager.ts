@@ -1,6 +1,6 @@
-import { KIND, approvalDecision, elicitationResponse, historyRequest, interrupt, modeChange, prompt, stateRequest, HISTORY_PAGE_DEFAULT } from '@aasis21/helm-shared';
-import type { ChannelUp, History as HistoryMessage, InnerMessage, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
-import { connectSession, pairSession } from './helmClient';
+import { EVENT_TYPE, SUBTYPE, approvalDecision, elicitationResponse, historyRequest, interrupt, modeChange, prompt, stateRequest, HISTORY_PAGE_DEFAULT } from '@aasis21/helm-shared';
+import type { HistoryMsg, EventEnvelope, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import { connectSession, pairSession, getSenderName } from './helmClient';
 import type { HelmClient } from './helmClient';
 import {
   appendNotice,
@@ -20,6 +20,8 @@ import type { TimelineState } from './timeline';
 import { loadSessions, patchSession, removeSession, upsertSession } from './sessions';
 import type { StoredSession } from './sessions';
 import { clearTranscript, loadTranscript, saveTranscript } from './transcripts';
+import { clearEventLog, loadEventLog, saveEventLog, toDebugEvent, EVENT_LOG_CAP } from './eventLog';
+import type { DebugEvent } from './eventLog';
 import { startDemoSession } from './demoSimulator';
 import type { DemoSession } from './demoSimulator';
 import {
@@ -57,6 +59,9 @@ export interface SessionView {
   /** True during the brief, bounded post-Live grace while the first history page is still arriving —
    *  the UI shows the connecting skeleton instead of flashing the empty-welcome. */
   settling?: boolean;
+  /** Raw wire events exchanged with the laptop (both directions), oldest-first — the debug panel
+   *  renders them newest-first. Persisted per session and restored on reload. */
+  events: DebugEvent[];
   error?: string;
 }
 
@@ -94,6 +99,10 @@ interface Runtime {
   unsubscribe?: () => void;
   stopDemo?: () => Promise<void>;
   saveTimer?: number;
+  /** Raw wire events (both directions), oldest-first; a bounded ring capped at EVENT_LOG_CAP. */
+  events?: DebugEvent[];
+  /** Coalesced timer for persisting the debug event log. */
+  eventSaveTimer?: number;
 }
 
 // A healthy session heartbeats on a fixed interval (the extension beats every 15s —
@@ -132,18 +141,17 @@ function titleFor(channelId: string, cwd: string | null, stored: string | null):
   return stored || basename(cwd) || `Session ${channelId.slice(0, 6)}`;
 }
 
-function isUnreadActivity(message: InnerMessage): boolean {
-  switch (message.kind) {
-    case KIND.ASSISTANT_MESSAGE:
-    case KIND.ASSISTANT_DELTA:
-    case KIND.TOOL_START:
-    case KIND.TOOL_COMPLETE:
-    case KIND.LOG:
-    case KIND.ACTIVITY:
-    case KIND.APPROVAL_REQUEST:
-    case KIND.ELICITATION_REQUEST:
-    case KIND.CHANNEL_DOWN:
-      return true;
+function isUnreadActivity(message: EventEnvelope): boolean {
+  switch (message.eventType) {
+    case EVENT_TYPE.STREAM:
+      // Any streamed host activity except a bare terminal-typed echo counts as "new".
+      return message.eventSubtype !== SUBTYPE.STREAM.USER_MESSAGE;
+    case EVENT_TYPE.APPROVAL:
+      return message.eventSubtype === SUBTYPE.APPROVAL.REQUEST;
+    case EVENT_TYPE.ELICITATION:
+      return message.eventSubtype === SUBTYPE.ELICITATION.REQUEST;
+    case EVENT_TYPE.CONTROL:
+      return message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN;
     default:
       return false;
   }
@@ -161,6 +169,8 @@ export class SessionManager {
   // Warm sessions (a live subscription on the shared socket), most-recently-active LAST. Bounded by
   // MAX_WARM_SESSIONS; the active session is never evicted.
   private warmLru: string[] = [];
+  // Monotonic sequence for unique debug-event ids within this run.
+  private eventSeq = 0;
 
   // --- useSyncExternalStore wiring -------------------------------------
   subscribe = (listener: () => void): (() => void) => {
@@ -184,6 +194,7 @@ export class SessionManager {
           ...(r.unread ? { unread: true } : {}),
           ...(r.lastEventAt ? { lastEventAt: r.lastEventAt } : {}),
           ...(r.settling ? { settling: true } : {}),
+          events: r.events ?? [],
           error: r.error,
         })),
     };
@@ -209,9 +220,11 @@ export class SessionManager {
       stored.map(async (s) => ({
         channelId: s.pairing.channelId,
         persisted: await loadTranscript(s.pairing.channelId).catch(() => null),
+        events: await loadEventLog(s.pairing.channelId).catch(() => []),
       })),
     );
     const persistedById = new Map(restored.map((r) => [r.channelId, r.persisted]));
+    const eventsById = new Map(restored.map((r) => [r.channelId, r.events]));
 
     // Warm only the most-recently-active sessions on the single shared socket; the rest stay cold
     // (card + transcript kept) and reconnect the moment they're opened. Recency prefers real activity
@@ -248,6 +261,7 @@ export class SessionManager {
         ephemeral: false,
         unread: s.unread ?? false,
         lastEventAt: s.lastEventAt ?? undefined,
+        events: eventsById.get(channelId) ?? [],
       });
       if (!this.order.includes(channelId)) this.order.push(channelId);
     }
@@ -442,7 +456,7 @@ export class SessionManager {
   private requestState(channelId: string): void {
     const runtime = this.runtimes.get(channelId);
     if (!runtime || runtime.ephemeral || !runtime.client) return;
-    void runtime.client.send(stateRequest()).catch(() => {
+    void this.dispatch(channelId, runtime.client, stateRequest()).catch(() => {
       // A failed state request must never break the connection; live events still flow.
     });
   }
@@ -467,7 +481,7 @@ export class SessionManager {
     if (!hasContent) {
       runtime.timeline = markHistoryLoading(runtime.timeline, true);
       this.emit();
-      void client.send(historyRequest(null, HISTORY_PAGE_DEFAULT)).catch(() => {
+      void this.dispatch(channelId, client, historyRequest(null, HISTORY_PAGE_DEFAULT)).catch(() => {
         const r = this.runtimes.get(channelId);
         if (r) {
           r.timeline = markHistoryLoading(r.timeline, false);
@@ -479,7 +493,7 @@ export class SessionManager {
     const since = timeline.latestTurnIndex;
     if (since == null) return;
     runtime.catchupPages = 0;
-    void client.send(historyRequest(null, HISTORY_PAGE_DEFAULT, since)).catch(() => {
+    void this.dispatch(channelId, client, historyRequest(null, HISTORY_PAGE_DEFAULT, since)).catch(() => {
       // A failed catch-up must never break the connection; forward live events still flow.
     });
   }
@@ -490,7 +504,7 @@ export class SessionManager {
    * large gap stops at the cap with a notice, leaving the older middle to "Load earlier" scrollback,
    * so one reconnect can't flood the transcript in a single burst.
    */
-  private maybeContinueCatchup(channelId: string, page: HistoryMessage): void {
+  private maybeContinueCatchup(channelId: string, page: HistoryMsg): void {
     const runtime = this.runtimes.get(channelId);
     if (!runtime || runtime.ephemeral || !runtime.client) return;
     if (!page.hasMore || page.nextCursor == null) return;
@@ -507,19 +521,21 @@ export class SessionManager {
       this.emit();
       return;
     }
-    void runtime.client
-      .send(historyRequest(null, HISTORY_PAGE_DEFAULT, page.nextCursor))
+    void this
+      .dispatch(channelId, runtime.client, historyRequest(null, HISTORY_PAGE_DEFAULT, page.nextCursor))
       .catch(() => {
         // Best-effort: a dropped continuation just leaves the remaining gap to manual scrollback.
       });
   }
 
-  private onMessage(channelId: string, client: HelmClient, message: InnerMessage): void {
+  private onMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
     // Ignore a message that decrypted after its channel was superseded (reconnect) or cooled to cold
     // (client=null): acting on it could set a stale card back to 'live' with no live connection.
     if (runtime.client !== client) return;
+    // Capture the raw inbound event for the debug panel before we reduce/route it.
+    this.recordEvent(channelId, 'in', message);
     runtime.timeline = reduceTimeline(runtime.timeline, message);
     if (isUnreadActivity(message)) {
       runtime.unread = channelId !== this.activeId;
@@ -528,15 +544,15 @@ export class SessionManager {
       this.markActivity(channelId);
     }
 
-    if (message.kind === KIND.HISTORY) {
-      const page = message as HistoryMessage;
+    if (message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.HISTORY) {
+      const page = message.msg;
       // A forward catch-up page (since != null) may report more missed turns — page the gap (bounded).
       if (page.since != null) this.maybeContinueCatchup(channelId, page);
       // The initial page (since == null), empty or not, settles the thread: drop the loading grace.
       else this.clearSettle(runtime);
     }
 
-    if (message.kind === KIND.CHANNEL_DOWN) {
+    if (message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN) {
       runtime.status = 'ended';
       if (runtime.confirmTimer != null) {
         window.clearTimeout(runtime.confirmTimer);
@@ -553,8 +569,8 @@ export class SessionManager {
     // A channel announces which Copilot session it serves. Key the card by that durable sessionId so
     // a `copilot --resume` (which rotates the channelId) collapses onto the same card instead of
     // forking a new one.
-    if (message.kind === KIND.CHANNEL_UP) {
-      const sid = (message as ChannelUp).sessionId;
+    if (message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_UP) {
+      const sid = message.sessionId;
       if (sid && sid !== 'unknown-session') {
         if (runtime.meta.sessionId !== sid) {
           runtime.meta.sessionId = sid;
@@ -579,11 +595,11 @@ export class SessionManager {
       }
     }
 
-    if (message.kind === KIND.APPROVAL_REQUEST) {
-      void notifyApprovalRequest(message);
+    if (message.eventType === EVENT_TYPE.APPROVAL && message.eventSubtype === SUBTYPE.APPROVAL.REQUEST) {
+      void notifyApprovalRequest(message.msg);
     }
-    if (message.kind === KIND.ELICITATION_REQUEST) {
-      void notifyElicitationRequest(message);
+    if (message.eventType === EVENT_TYPE.ELICITATION && message.eventSubtype === SUBTYPE.ELICITATION.REQUEST) {
+      void notifyElicitationRequest(message.msg);
     }
 
     // LOCAL-FIRST: persist the transcript so a refresh restores it without a pull.
@@ -602,6 +618,44 @@ export class SessionManager {
       r.saveTimer = undefined;
       void saveTranscript(channelId, toPersisted(r.timeline));
     }, PERSIST_THROTTLE_MS);
+  }
+
+  /**
+   * Append one wire event to a session's debug log (a bounded ring, oldest fall off the front) and
+   * schedule a coalesced persist. Captured for BOTH directions so the debug panel shows the full
+   * event chain; the caller is responsible for emitting so React re-renders.
+   */
+  private recordEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime) return;
+    const fallback = dir === 'out' ? getSenderName() : 'Copilot';
+    const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
+    const next = runtime.events ? [...runtime.events, event] : [event];
+    runtime.events = next.length > EVENT_LOG_CAP ? next.slice(next.length - EVENT_LOG_CAP) : next;
+    this.scheduleEventPersist(channelId);
+  }
+
+  /** Coalesced, best-effort persist of a session's debug event log. Skips demo (ephemeral) sessions. */
+  private scheduleEventPersist(channelId: string): void {
+    const runtime = this.runtimes.get(channelId);
+    if (!runtime || runtime.ephemeral || runtime.eventSaveTimer != null) return;
+    runtime.eventSaveTimer = window.setTimeout(() => {
+      const r = this.runtimes.get(channelId);
+      if (!r) return;
+      r.eventSaveTimer = undefined;
+      void saveEventLog(channelId, r.events ?? []);
+    }, PERSIST_THROTTLE_MS);
+  }
+
+  /**
+   * The single outbound funnel: record the envelope to the session's debug log (so every phone→laptop
+   * message shows in the panel), then hand it to the transport. Returns the send promise unchanged so
+   * existing `.catch()` recovery on every call site keeps working.
+   */
+  private dispatch(channelId: string, client: HelmClient, message: EventEnvelope): Promise<void> {
+    this.recordEvent(channelId, 'out', message);
+    this.emit();
+    return client.send(message);
   }
 
   /** Coalesced persist of the durable presence fields (lastEventAt + unread) into the session list. */
@@ -715,12 +769,14 @@ export class SessionManager {
       if (stale.metaTimer != null) window.clearTimeout(stale.metaTimer);
       if (stale.confirmTimer != null) window.clearTimeout(stale.confirmTimer);
       if (stale.settleTimer != null) window.clearTimeout(stale.settleTimer);
+      if (stale.eventSaveTimer != null) window.clearTimeout(stale.eventSaveTimer);
       this.runtimes.delete(staleId);
       this.order = this.order.filter((id) => id !== staleId);
       this.warmLru = this.warmLru.filter((id) => id !== staleId);
       if (this.activeId === staleId) this.activeId = keepId;
       void removeSession(staleId);
       void clearTranscript(staleId);
+      void clearEventLog(staleId);
     }
   }
 
@@ -856,6 +912,10 @@ export class SessionManager {
       window.clearTimeout(runtime.settleTimer);
       runtime.settleTimer = undefined;
     }
+    if (runtime.eventSaveTimer != null) {
+      window.clearTimeout(runtime.eventSaveTimer);
+      runtime.eventSaveTimer = undefined;
+    }
     try {
       await runtime.stopDemo?.();
       await runtime.client?.close();
@@ -865,6 +925,7 @@ export class SessionManager {
     if (!runtime.ephemeral) {
       await removeSession(channelId);
       await clearTranscript(channelId);
+      await clearEventLog(channelId);
     }
     this.runtimes.delete(channelId);
     this.order = this.order.filter((id) => id !== channelId);
@@ -952,7 +1013,7 @@ export class SessionManager {
   private async deliverPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
     const runtime = this.runtimes.get(channelId);
     if (!runtime?.client) throw new Error('No active connection.');
-    await runtime.client.send(prompt(text, attachments));
+    await this.dispatch(channelId, runtime.client, prompt(text, attachments));
   }
 
   /**
@@ -968,7 +1029,7 @@ export class SessionManager {
     this.emit();
     try {
       if (!runtime.client) throw new Error('No active connection.');
-      await runtime.client.send(historyRequest(cursor, HISTORY_PAGE_DEFAULT));
+      await this.dispatch(channelId, runtime.client, historyRequest(cursor, HISTORY_PAGE_DEFAULT));
     } catch {
       runtime.timeline = markHistoryLoading(runtime.timeline, false);
       this.emit();
@@ -983,7 +1044,7 @@ export class SessionManager {
     this.emit();
     try {
       if (!runtime.client) throw new Error('No active connection.');
-      await runtime.client.send(approvalDecision(requestId, optionId));
+      await this.dispatch(channelId, runtime.client, approvalDecision(requestId, optionId));
     } catch (err) {
       // The decision never reached the laptop: restore the banner with a retry so the
       // user isn't left believing they answered while the agent stays blocked.
@@ -1016,7 +1077,7 @@ export class SessionManager {
     this.emit();
     try {
       if (!runtime.client) throw new Error('No active connection.');
-      await runtime.client.send(elicitationResponse(requestId, action, content));
+      await this.dispatch(channelId, runtime.client, elicitationResponse(requestId, action, content));
     } catch (err) {
       if (pending) {
         runtime.timeline = restoreElicitation(
@@ -1034,7 +1095,7 @@ export class SessionManager {
     const runtime = this.runtimes.get(channelId);
     if (!runtime) return;
     try {
-      await runtime.client?.send(interrupt());
+      if (runtime.client) await this.dispatch(channelId, runtime.client, interrupt());
     } catch {
       // A failed interrupt send must never crash the UI; the user can retry.
     }
@@ -1048,7 +1109,7 @@ export class SessionManager {
     this.emit();
     try {
       if (!runtime.client) throw new Error('No active connection.');
-      await runtime.client.send(modeChange(mode));
+      await this.dispatch(channelId, runtime.client, modeChange(mode));
     } catch {
       runtime.timeline = appendNotice(
         { ...runtime.timeline, mode: prev },

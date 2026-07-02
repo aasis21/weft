@@ -17,6 +17,7 @@ function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) 
     onReconnect: vi.fn(),
     onRemove: vi.fn(),
     onGoHome: vi.fn(),
+    onOpenDebug: vi.fn(),
   };
   return {
     ...render(<StatusBar {...defaults} {...props} />),
@@ -53,6 +54,7 @@ describe('StatusBar', () => {
         onReconnect={vi.fn()}
         onRemove={vi.fn()}
         onGoHome={vi.fn()}
+        onOpenDebug={vi.fn()}
       />,
     );
     expect(screen.getByText('Quiet').closest('.status-line')).toHaveClass('idle');

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  EVENTS,
-  KIND,
+  EVENT_TYPE,
+  SUBTYPE,
   MODES,
   assistantMessage,
   assistantDelta,
@@ -78,13 +78,14 @@ export function createPermissionRelay({
   if (!channel) throw new Error("helm relay: channel is required");
   const pending = new Map();
 
-  const unsubscribe = channel.onEvent(EVENTS.DECISION, (msg) => {
-    if (msg?.kind !== KIND.APPROVAL_DECISION) return;
-    const entry = pending.get(msg.requestId);
+  const unsubscribe = channel.onEvent(EVENT_TYPE.DECISION, (msg) => {
+    if (msg?.eventSubtype !== SUBTYPE.DECISION.APPROVAL_DECISION) return;
+    const decision = msg.msg;
+    const entry = pending.get(decision.requestId);
     if (!entry) return;
-    pending.delete(msg.requestId);
+    pending.delete(decision.requestId);
     clearTimeout(entry.timer);
-    entry.resolve(permissionResultFromDecision(msg));
+    entry.resolve(permissionResultFromDecision(decision));
   });
 
   async function onPermissionRequest(request, invocation = {}) {
@@ -115,10 +116,10 @@ export function createPermissionRelay({
     });
   }
 
-  /** The still-pending approval prompts, as their original approvalRequest payloads, so a phone
+  /** The still-pending approval prompts, as flat approvalRequest PAYLOADS (msg), so a phone
    *  that (re)connects mid-request can render them from a state snapshot. */
   function snapshotPending() {
-    return [...pending.values()].map((entry) => entry.payload).filter(Boolean);
+    return [...pending.values()].map((entry) => entry.payload?.msg).filter(Boolean);
   }
 
   function close() {
@@ -169,11 +170,12 @@ export function createElicitationRelay({
     releaseInterest = release;
   });
 
-  const unsubscribe = channel.onEvent(EVENTS.ELICITATION_RESPONSE, (msg) => {
-    if (msg?.kind !== KIND.ELICITATION_RESPONSE) return;
-    const entry = pending.get(msg.requestId);
+  const unsubscribe = channel.onEvent(EVENT_TYPE.ELICITATION_RESPONSE, (msg) => {
+    if (msg?.eventSubtype !== SUBTYPE.ELICITATION_RESPONSE.RESPONSE) return;
+    const answer = msg.msg;
+    const entry = pending.get(answer.requestId);
     if (!entry) return; // already resolved at the terminal, or timed out
-    clearPending(msg.requestId);
+    clearPending(answer.requestId);
     if (!respond) {
       logger(
         "Helm: this CLI build can't accept remote ask_user answers (handlePendingElicitation unavailable).",
@@ -183,7 +185,7 @@ export function createElicitationRelay({
     }
     // Feed the phone's answer back into the runtime. success === false means another client
     // (typically the terminal) already answered — harmless, the phone form is already dismissed.
-    void Promise.resolve(respond(msg.requestId, elicitResultFromResponse(msg))).then((accepted) => {
+    void Promise.resolve(respond(answer.requestId, elicitResultFromResponse(answer))).then((accepted) => {
       if (accepted === false) {
         logger("Helm: ask_user was already answered before the phone's reply arrived.", {
           level: "info",
@@ -220,10 +222,10 @@ export function createElicitationRelay({
     pending.set(requestId, { timer, payload });
   }
 
-  /** The still-open ask_user prompts, as their original elicitationRequest payloads, so a phone
+  /** The still-open ask_user prompts, as flat elicitationRequest PAYLOADS (msg), so a phone
    *  that (re)connects mid-prompt can render them from a state snapshot. */
   function snapshotPending() {
-    return [...pending.values()].map((entry) => entry.payload).filter(Boolean);
+    return [...pending.values()].map((entry) => entry.payload?.msg).filter(Boolean);
   }
 
   async function complete(data = {}) {
@@ -291,7 +293,7 @@ export async function attachRelay({
     }
   };
 
-  await sendSafe(channelUp(channelId ?? channel.transport?.channelId, sessionId, cwd, lastTitle));
+  await sendSafe(channelUp(cwd, lastTitle));
   const heartbeatTimer = setInterval(() => {
     void (async () => {
       // Carry the store's latest turn_index so a connected phone keeps a fresh forward cursor
@@ -320,17 +322,18 @@ export async function attachRelay({
   }
 
   unsubscribers.push(
-    channel.onEvent(EVENTS.PROMPT, (msg) => {
-      if (msg?.kind !== KIND.PROMPT || typeof msg.text !== "string") return;
+    channel.onEvent(EVENT_TYPE.PROMPT, (msg) => {
+      if (msg?.eventSubtype !== SUBTYPE.PROMPT.PROMPT || typeof msg.msg?.text !== "string") return;
+      const body = msg.msg;
       // Remember this phone-typed prompt so its echoed user.message session event is
       // attributed to the phone (which already shows it optimistically) and not
       // re-broadcast as a terminal message.
-      promptOrigin.record(msg.text);
+      promptOrigin.record(body.text);
       // Map phone-relayed image attachments (base64) to Copilot SDK blob attachments.
       // Defensive: drop anything missing base64 `data` or a `mimeType`. The SDK resizes
       // images itself; the phone already downscales to keep the relay payload small.
-      const attachments = Array.isArray(msg.attachments)
-        ? msg.attachments
+      const attachments = Array.isArray(body.attachments)
+        ? body.attachments
             .filter((a) => a && typeof a.data === "string" && a.data && typeof a.mimeType === "string" && a.mimeType)
             .map((a) => ({
               type: "blob",
@@ -340,8 +343,8 @@ export async function attachRelay({
             }))
         : [];
       const sendOptions = attachments.length
-        ? { prompt: msg.text, attachments, mode: "immediate" }
-        : { prompt: msg.text, mode: "immediate" };
+        ? { prompt: body.text, attachments, mode: "immediate" }
+        : { prompt: body.text, mode: "immediate" };
       void session
         .send?.(sendOptions)
         ?.catch?.((err) =>
@@ -353,20 +356,20 @@ export async function attachRelay({
   );
 
   unsubscribers.push(
-    channel.onEvent(EVENTS.CONTROL, (msg) => {
-      if (msg?.kind === KIND.MODE) {
-        void applyMode(session, msg.mode, logger, sendSafe);
+    channel.onEvent(EVENT_TYPE.CONTROL, (msg) => {
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.MODE) {
+        void applyMode(session, msg.msg?.mode, logger, sendSafe);
         return;
       }
-      if (msg?.kind === KIND.INTERRUPT) {
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.INTERRUPT) {
         void applyInterrupt(session, logger, sendSafe);
         return;
       }
-      if (msg?.kind === KIND.HISTORY_REQUEST) {
-        void serveHistory(sessionId, msg, sendSafe, logger);
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.HISTORY_REQUEST) {
+        void serveHistory(sessionId, msg.msg, sendSafe, logger);
         return;
       }
-      if (msg?.kind === KIND.STATE_REQUEST) {
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
         void serveStateSnapshot({ session, sessionId, approvals, elicitations, sendSafe, logger });
       }
     }),
@@ -457,12 +460,13 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations) {
   }
 }
 
-/** Answer a phone's HISTORY_REQUEST with a page of turns (forward, backward, or latest). */
-async function serveHistory(sessionId, msg, sendSafe, logger) {
+/** Answer a phone's HISTORY_REQUEST with a page of turns (forward, backward, or latest). `req` is
+ *  the flat history_request payload (msg). */
+async function serveHistory(sessionId, req, sendSafe, logger) {
   try {
-    const before = Number.isFinite(msg?.before) ? msg.before : null;
-    const since = Number.isFinite(msg?.since) ? msg.since : null;
-    const page = await readHistory(sessionId, { before, since, limit: msg?.limit });
+    const before = Number.isFinite(req?.before) ? req.before : null;
+    const since = Number.isFinite(req?.since) ? req.since : null;
+    const page = await readHistory(sessionId, { before, since, limit: req?.limit });
     await sendSafe(history(page.items, page.nextCursor, page.hasMore, since));
   } catch (err) {
     logger?.(`Helm history request failed: ${err?.message ?? err}`, { level: "warning" });

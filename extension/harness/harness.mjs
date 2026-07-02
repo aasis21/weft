@@ -4,8 +4,8 @@ import { EventEmitter } from "node:events";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import {
-  EVENTS,
-  KIND,
+  EVENT_TYPE,
+  SUBTYPE,
   approvalDecision,
   modeChange,
   prompt,
@@ -87,13 +87,16 @@ async function main() {
   const laptopPairing = waitForPeer({
     transport: laptopTransport,
     keyPair: laptop,
+    channelId,
     timeoutMs: 5_000,
   });
   const phonePairing = await sayHello({
     transport: phoneTransport,
     keyPair: phone,
     peerPublicKeyB64: parsed.publicKeyB64,
+    channelId,
     deviceId: "harness-phone",
+    senderName: "WebApp",
     waitForAck: true,
   });
   const laptopPairingResult = await laptopPairing;
@@ -103,12 +106,12 @@ async function main() {
   const extChannel = new SecureChannel({
     transport: laptopTransport,
     key: laptopPairingResult.key,
-    identity: { userId: "u1", deviceId: "laptop", sessionId: "fake-session-1" },
+    identity: { channelId, sessionId: "fake-session-1", senderId: "copilot", senderName: "Copilot" },
   });
   const phoneChannel = new SecureChannel({
     transport: phoneTransport,
     key: phonePairing.key,
-    identity: { userId: "u1", deviceId: "phone", sessionId: "fake-session-1" },
+    identity: { channelId, sessionId: "fake-session-1", senderId: "harness-phone", senderName: "WebApp" },
   });
   await phoneChannel.connect();
 
@@ -124,27 +127,27 @@ async function main() {
     channelDown: false,
   };
 
-  phoneChannel.onEvent(EVENTS.CONTROL, (msg) => {
-    if (msg.kind === KIND.CHANNEL_UP) seen.channelUp = true;
-    if (msg.kind === KIND.MODE && msg.mode === "plan") seen.modeConfirm = true;
-    if (msg.kind === KIND.CHANNEL_DOWN) seen.channelDown = true;
-    print(auto, `[control] ${msg.kind}`);
+  phoneChannel.onEvent(EVENT_TYPE.CONTROL, (msg) => {
+    if (msg.eventSubtype === SUBTYPE.CONTROL.CHANNEL_UP) seen.channelUp = true;
+    if (msg.eventSubtype === SUBTYPE.CONTROL.MODE && msg.msg.mode === "plan") seen.modeConfirm = true;
+    if (msg.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN) seen.channelDown = true;
+    print(auto, `[control] ${msg.eventSubtype}`);
   });
 
-  phoneChannel.onEvent(EVENTS.STREAM, (msg) => {
-    if (msg.kind === KIND.ASSISTANT_MESSAGE) seen.assistant = true;
-    if (msg.kind === KIND.ASSISTANT_DELTA) seen.delta = true;
-    if (msg.kind === KIND.TOOL_START) seen.toolStart = true;
-    if (msg.kind === KIND.TOOL_COMPLETE) seen.toolComplete = true;
-    print(auto, `[stream] ${msg.kind} ${summarize(msg)}`);
+  phoneChannel.onEvent(EVENT_TYPE.STREAM, (msg) => {
+    if (msg.eventSubtype === SUBTYPE.STREAM.ASSISTANT_MESSAGE) seen.assistant = true;
+    if (msg.eventSubtype === SUBTYPE.STREAM.ASSISTANT_DELTA) seen.delta = true;
+    if (msg.eventSubtype === SUBTYPE.STREAM.TOOL_START) seen.toolStart = true;
+    if (msg.eventSubtype === SUBTYPE.STREAM.TOOL_COMPLETE) seen.toolComplete = true;
+    print(auto, `[stream] ${msg.eventSubtype} ${summarize(msg.msg)}`);
   });
 
-  phoneChannel.onEvent(EVENTS.APPROVAL, async (msg) => {
-    if (msg.kind !== KIND.APPROVAL_REQUEST) return;
+  phoneChannel.onEvent(EVENT_TYPE.APPROVAL, async (msg) => {
+    if (msg.eventSubtype !== SUBTYPE.APPROVAL.REQUEST) return;
     seen.approval = true;
-    print(auto, `[approval] ${msg.toolName} ${JSON.stringify(msg.toolArgs)}`);
-    const optionId = auto ? "approved" : await askApproval(msg);
-    await phoneChannel.send(approvalDecision(msg.requestId, optionId));
+    print(auto, `[approval] ${msg.msg.toolName} ${JSON.stringify(msg.msg.toolArgs)}`);
+    const optionId = auto ? "approved" : await askApproval(msg.msg);
+    await phoneChannel.send(approvalDecision(msg.msg.requestId, optionId));
   });
 
   const relay = await attachRelay({
@@ -215,15 +218,15 @@ function print(quiet, message) {
   if (!quiet) console.log(message);
 }
 
-function summarize(msg) {
-  return msg.content ?? msg.toolName ?? msg.message ?? "";
+function summarize(payload) {
+  return payload?.content ?? payload?.toolName ?? payload?.message ?? "";
 }
 
-async function askApproval(msg) {
+async function askApproval(payload) {
   const rl = readline.createInterface({ input, output });
   try {
     const answer = await rl.question(
-      `Approve ${msg.toolName}? [Y/n] `,
+      `Approve ${payload.toolName}? [Y/n] `,
     );
     return answer.trim().toLowerCase().startsWith("n")
       ? "denied-interactively-by-user"

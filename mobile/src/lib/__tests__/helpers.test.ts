@@ -36,21 +36,27 @@ describe('shared history helpers', () => {
 });
 
 describe('shared message helpers', () => {
-  it('eventForKind maps representative kinds to logical events', () => {
-    expect(B.eventForKind(B.KIND.ASSISTANT_DELTA)).toBe('stream');
-    expect(B.eventForKind(B.KIND.APPROVAL_REQUEST)).toBe('approval');
-    expect(B.eventForKind(B.KIND.APPROVAL_DECISION)).toBe('decision');
-    expect(B.eventForKind(B.KIND.ELICITATION_REQUEST)).toBe('elicitation');
-    expect(B.eventForKind(B.KIND.PROMPT)).toBe('prompt');
-    expect(B.eventForKind(B.KIND.MODE)).toBe('control');
+  it('factories stamp the (eventType, eventSubtype) pair that identifies each message', () => {
+    const pair = (m: { eventType: string; eventSubtype: string }) => [m.eventType, m.eventSubtype];
+    expect(pair(B.assistantDelta('x'))).toEqual([B.EVENT_TYPE.STREAM, B.SUBTYPE.STREAM.ASSISTANT_DELTA]);
+    expect(pair(B.approvalRequest('a1', 'shell', {}, []))).toEqual([B.EVENT_TYPE.APPROVAL, B.SUBTYPE.APPROVAL.REQUEST]);
+    expect(pair(B.approvalDecision('a1', 'allow'))).toEqual([B.EVENT_TYPE.DECISION, B.SUBTYPE.DECISION.APPROVAL_DECISION]);
+    expect(pair(B.elicitationRequest('e1', 'q', 'form', { type: 'object', properties: {} }))).toEqual([
+      B.EVENT_TYPE.ELICITATION,
+      B.SUBTYPE.ELICITATION.REQUEST,
+    ]);
+    expect(pair(B.prompt('hi'))).toEqual([B.EVENT_TYPE.PROMPT, B.SUBTYPE.PROMPT.PROMPT]);
+    expect(pair(B.modeChange('plan'))).toEqual([B.EVENT_TYPE.CONTROL, B.SUBTYPE.CONTROL.MODE]);
   });
 
-  it('isValidInner accepts real factory messages and rejects invalid shapes', () => {
-    expect(B.isValidInner(B.assistantMessage('ok'))).toBe(true);
-    expect(B.isValidInner({})).toBe(false);
-    expect(B.isValidInner(null)).toBe(false);
-    expect(B.isValidInner({ kind: 1, ts: 1 })).toBe(false);
-    expect(B.isValidInner({ kind: B.KIND.ASSISTANT_MESSAGE })).toBe(false);
+  it('isValidEnvelope accepts real factory envelopes and rejects malformed shapes', () => {
+    expect(B.isValidEnvelope(B.assistantMessage('ok'))).toBe(true);
+    expect(B.isValidEnvelope({})).toBe(false);
+    expect(B.isValidEnvelope(null)).toBe(false);
+    // missing msg
+    expect(B.isValidEnvelope({ eventType: 'stream', eventSubtype: 'assistant_message', ts: 1 })).toBe(false);
+    // non-string type
+    expect(B.isValidEnvelope({ eventType: 1, eventSubtype: 'x', ts: 1, msg: {} })).toBe(false);
   });
 });
 

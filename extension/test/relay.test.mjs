@@ -2,11 +2,24 @@
 // Tests for the relay's new behaviors: phone/terminal prompt-origin correlation,
 // terminal user.message echoing, and serving history requests. The pure tracker is
 // tested directly; the wiring is tested via lightweight fake session/channel objects.
+//
+// Everything on the wire is the standardized event envelope: messages are routed by
+// (eventType, eventSubtype) and their payload lives under `msg`. The fakes therefore emit
+// factory-built envelopes and assert on `m.eventSubtype` + `m.msg.*`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { EVENTS, KIND } from "@aasis21/helm-shared";
+import {
+  EVENT_TYPE,
+  SUBTYPE,
+  prompt,
+  historyRequest,
+  stateRequest,
+  interrupt,
+  elicitationResponse,
+  approvalDecision,
+} from "@aasis21/helm-shared";
 import {
   attachRelay,
   createElicitationRelay,
@@ -135,18 +148,18 @@ test("relays a terminal-typed user.message to the phone as origin=terminal", asy
   await withRelay(async ({ channel, session }) => {
     session.emitEvent({ type: "user.message", id: "e1", data: { content: "typed at laptop" } });
     await flush();
-    const echo = channel.sent.find((m) => m.kind === KIND.USER_MESSAGE);
+    const echo = channel.sent.find((m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE);
     assert.ok(echo, "expected a user_message echo");
-    assert.equal(echo.text, "typed at laptop");
-    assert.equal(echo.origin, "terminal");
-    assert.equal(echo.id, "e1");
+    assert.equal(echo.msg.text, "typed at laptop");
+    assert.equal(echo.msg.origin, "terminal");
+    assert.equal(echo.msg.id, "e1");
   });
 });
 
 test("does NOT re-broadcast a phone-relayed prompt's echoed user.message", async () => {
   await withRelay(async ({ channel, session }) => {
     // Phone sends a prompt; the relay records it and forwards into the session.
-    channel.emit(EVENTS.PROMPT, { kind: KIND.PROMPT, text: "from my phone" });
+    channel.emit(EVENT_TYPE.PROMPT, prompt("from my phone"));
     await flush();
     assert.deepEqual(session.prompts.at(-1), { prompt: "from my phone", mode: "immediate" });
 
@@ -154,7 +167,7 @@ test("does NOT re-broadcast a phone-relayed prompt's echoed user.message", async
     session.emitEvent({ type: "user.message", id: "e2", data: { content: "from my phone" } });
     await flush();
     const echoes = channel.sent.filter(
-      (m) => m.kind === KIND.USER_MESSAGE && m.text === "from my phone"
+      (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "from my phone"
     );
     assert.equal(echoes.length, 0);
   });
@@ -173,33 +186,36 @@ test("skips skill-injected (source) and autopilot-continuation user messages", a
       data: { content: "auto continue", isAutopilotContinuation: true },
     });
     await flush();
-    assert.equal(channel.sent.filter((m) => m.kind === KIND.USER_MESSAGE).length, 0);
+    assert.equal(
+      channel.sent.filter((m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE).length,
+      0,
+    );
   });
 });
 
 test("answers a HISTORY_REQUEST with a control.history message", async () => {
   await withRelay(async ({ channel }) => {
-    channel.emit(EVENTS.CONTROL, { kind: KIND.HISTORY_REQUEST, before: null, limit: 50 });
+    channel.emit(EVENT_TYPE.CONTROL, historyRequest(null, 50));
     await flush();
-    const hist = channel.sent.find((m) => m.kind === KIND.HISTORY);
+    const hist = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.HISTORY);
     assert.ok(hist, "expected a control.history response");
     // Unknown session id → empty page, but the shape must be correct.
-    assert.deepEqual(hist.items, []);
-    assert.equal(hist.nextCursor, null);
-    assert.equal(hist.hasMore, false);
+    assert.deepEqual(hist.msg.items, []);
+    assert.equal(hist.msg.nextCursor, null);
+    assert.equal(hist.msg.hasMore, false);
     // A latest/backward request carries no forward cursor to echo.
-    assert.equal(hist.since, null);
+    assert.equal(hist.msg.since, null);
   });
 });
 
 test("echoes the forward `since` cursor on a catch-up HISTORY_REQUEST", async () => {
   await withRelay(async ({ channel }) => {
-    channel.emit(EVENTS.CONTROL, { kind: KIND.HISTORY_REQUEST, before: null, since: 12, limit: 50 });
+    channel.emit(EVENT_TYPE.CONTROL, historyRequest(null, 50, 12));
     await flush();
-    const hist = channel.sent.find((m) => m.kind === KIND.HISTORY);
+    const hist = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.HISTORY);
     assert.ok(hist, "expected a control.history response");
     // The echo lets the phone route this page to forward catch-up (append) vs scrollback.
-    assert.equal(hist.since, 12);
+    assert.equal(hist.msg.since, 12);
   });
 });
 
@@ -210,16 +226,16 @@ test("echoes the forward `since` cursor on a catch-up HISTORY_REQUEST", async ()
 
 test("answers a STATE_REQUEST with a control.state_snapshot (safe idle defaults)", async () => {
   await withRelay(async ({ channel }) => {
-    channel.emit(EVENTS.CONTROL, { kind: KIND.STATE_REQUEST });
+    channel.emit(EVENT_TYPE.CONTROL, stateRequest());
     await flush();
-    const snap = channel.sent.find((m) => m.kind === KIND.STATE_SNAPSHOT);
+    const snap = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT);
     assert.ok(snap, "expected a control.state_snapshot response");
     // The fake session exposes no metadata RPC → idle defaults, no pending prompts.
-    assert.equal(snap.busy, false);
-    assert.equal(snap.abortable, false);
-    assert.equal(snap.mode, null);
-    assert.deepEqual(snap.approvals, []);
-    assert.deepEqual(snap.elicitations, []);
+    assert.equal(snap.msg.busy, false);
+    assert.equal(snap.msg.abortable, false);
+    assert.equal(snap.msg.mode, null);
+    assert.deepEqual(snap.msg.approvals, []);
+    assert.deepEqual(snap.msg.elicitations, []);
   });
 });
 
@@ -236,13 +252,16 @@ test("a STATE_REQUEST replays a still-open ask_user prompt to a late-joining pho
       },
     });
     await flush();
-    channel.emit(EVENTS.CONTROL, { kind: KIND.STATE_REQUEST });
+    channel.emit(EVENT_TYPE.CONTROL, stateRequest());
     await flush();
-    const snap = channel.sent.filter((m) => m.kind === KIND.STATE_SNAPSHOT).at(-1);
+    const snap = channel.sent
+      .filter((m) => m.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT)
+      .at(-1);
     assert.ok(snap, "expected a state snapshot");
-    assert.equal(snap.elicitations.length, 1);
-    assert.equal(snap.elicitations[0].requestId, "req-late");
-    assert.equal(snap.elicitations[0].message, "Still deciding?");
+    // Pending prompts are carried as FLAT payloads (msg), so the phone reuses its renderers.
+    assert.equal(snap.msg.elicitations.length, 1);
+    assert.equal(snap.msg.elicitations[0].requestId, "req-late");
+    assert.equal(snap.msg.elicitations[0].message, "Still deciding?");
   });
 });
 
@@ -259,13 +278,13 @@ test("a STATE_REQUEST reflects busy/mode from the session metadata RPC when pres
   };
   const relay = await attachRelay({ session, channel, channelId: "chan-1", heartbeatMs: 10_000_000 });
   try {
-    channel.emit(EVENTS.CONTROL, { kind: KIND.STATE_REQUEST });
+    channel.emit(EVENT_TYPE.CONTROL, stateRequest());
     await flush();
-    const snap = channel.sent.find((m) => m.kind === KIND.STATE_SNAPSHOT);
+    const snap = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT);
     assert.ok(snap, "expected a state snapshot");
-    assert.equal(snap.busy, true);
-    assert.equal(snap.abortable, true);
-    assert.equal(snap.mode, "plan");
+    assert.equal(snap.msg.busy, true);
+    assert.equal(snap.msg.abortable, true);
+    assert.equal(snap.msg.mode, "plan");
   } finally {
     await relay.stop("test", { closeTransport: false });
   }
@@ -282,9 +301,9 @@ test("the heartbeat re-asserts busy from the activity RPC so a lost idle self-co
   const relay = await attachRelay({ session, channel, channelId: "chan-1", heartbeatMs: 20 });
   try {
     await new Promise((r) => setTimeout(r, 55));
-    const beat = channel.sent.find((m) => m.kind === KIND.HEARTBEAT);
+    const beat = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT);
     assert.ok(beat, "expected a heartbeat to be emitted");
-    assert.equal(beat.busy, true);
+    assert.equal(beat.msg.busy, true);
   } finally {
     await relay.stop("test", { closeTransport: false });
   }
@@ -296,10 +315,10 @@ test("the heartbeat sends busy=null (unknown) when the host exposes no activity 
   const relay = await attachRelay({ session, channel, channelId: "chan-1", heartbeatMs: 20 });
   try {
     await new Promise((r) => setTimeout(r, 55));
-    const beat = channel.sent.find((m) => m.kind === KIND.HEARTBEAT);
+    const beat = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT);
     assert.ok(beat, "expected a heartbeat to be emitted");
     // null, not false — the phone must keep its live busy rather than be forced idle each beat.
-    assert.equal(beat.busy, null);
+    assert.equal(beat.msg.busy, null);
   } finally {
     await relay.stop("test", { closeTransport: false });
   }
@@ -316,9 +335,9 @@ test("createElicitationRelay.snapshotPending replays open ask_user payloads, cle
       mode: "form",
       requestedSchema: { type: "object", properties: { env: { type: "string" } } },
     });
+    // snapshotPending returns FLAT payloads (msg), ready to drop into a state snapshot.
     const snap = relay.snapshotPending();
     assert.equal(snap.length, 1);
-    assert.equal(snap[0].kind, KIND.ELICITATION_REQUEST);
     assert.equal(snap[0].requestId, "req-open");
     assert.equal(snap[0].message, "Which env?");
     // Resolving it (here or at the terminal) removes it from the snapshot.
@@ -331,11 +350,11 @@ test("createElicitationRelay.snapshotPending replays open ask_user payloads, cle
 
 test("relays a control.interrupt to the SDK turn-abort and notifies the phone", async () => {
   await withRelay(async ({ channel, session }) => {
-    channel.emit(EVENTS.CONTROL, { kind: KIND.INTERRUPT });
+    channel.emit(EVENT_TYPE.CONTROL, interrupt());
     await flush();
     assert.deepEqual(session.abortCalls, [{ reason: "remote_command" }]);
     const notice = channel.sent.find(
-      (m) => m.kind === KIND.LOG && /stopped from your phone/i.test(m.message ?? "")
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /stopped from your phone/i.test(m.msg.message ?? "")
     );
     assert.ok(notice, "expected a stop notice to be relayed to the phone");
   });
@@ -346,15 +365,15 @@ test("forwards turn lifecycle as activity busy=true on message_start, false on i
     // A turn begins with the assistant streaming text (no tool yet) — Stop must show here.
     session.emitEvent({ type: "assistant.message_start", id: "m1", data: {} });
     await flush();
-    const start = channel.sent.find((m) => m.kind === KIND.ACTIVITY);
+    const start = channel.sent.find((m) => m.eventSubtype === SUBTYPE.STREAM.ACTIVITY);
     assert.ok(start, "expected an activity message on message_start");
-    assert.equal(start.busy, true);
+    assert.equal(start.msg.busy, true);
 
     // The agent's loop goes idle → the turn is over, nothing left to abort.
     session.emitEvent({ type: "assistant.idle", id: "i1", data: {} });
     await flush();
-    const idle = channel.sent.filter((m) => m.kind === KIND.ACTIVITY).at(-1);
-    assert.equal(idle.busy, false);
+    const idle = channel.sent.filter((m) => m.eventSubtype === SUBTYPE.STREAM.ACTIVITY).at(-1);
+    assert.equal(idle.msg.busy, false);
   });
 });
 
@@ -366,8 +385,8 @@ test("a tool-first turn still reports activity busy=true on tool start", async (
       data: { toolCallId: "t1", toolName: "powershell", arguments: { command: "ls" } },
     });
     await flush();
-    const busy = channel.sent.find((m) => m.kind === KIND.ACTIVITY);
-    assert.ok(busy && busy.busy === true, "expected activity busy=true alongside the tool start");
+    const busy = channel.sent.find((m) => m.eventSubtype === SUBTYPE.STREAM.ACTIVITY);
+    assert.ok(busy && busy.msg.busy === true, "expected activity busy=true alongside the tool start");
   });
 });
 
@@ -377,7 +396,7 @@ test("a tool-first turn still reports activity busy=true on tool start", async (
 // SDK via respondToElicitation, dismiss the phone when any side answers, and never let
 // a walked-away phone hang the turn (fail-safe cancel on timeout).
 
-test("relays an elicitation.requested to the phone as a KIND.ELICITATION_REQUEST", async () => {
+test("relays an elicitation.requested to the phone as an elicitation request envelope", async () => {
   await withRelay(async ({ channel, session }) => {
     session.emitEvent({
       type: "elicitation.requested",
@@ -391,11 +410,13 @@ test("relays an elicitation.requested to the phone as a KIND.ELICITATION_REQUEST
       },
     });
     await flush();
-    const req = channel.sent.find((m) => m.kind === KIND.ELICITATION_REQUEST);
+    const req = channel.sent.find(
+      (m) => m.eventType === EVENT_TYPE.ELICITATION && m.eventSubtype === SUBTYPE.ELICITATION.REQUEST,
+    );
     assert.ok(req, "expected an elicitation.request relayed to the phone");
-    assert.equal(req.requestId, "req-1");
-    assert.equal(req.message, "Where should I deploy?");
-    assert.equal(req.requestedSchema.properties.env.type, "string");
+    assert.equal(req.msg.requestId, "req-1");
+    assert.equal(req.msg.message, "Where should I deploy?");
+    assert.equal(req.msg.requestedSchema.properties.env.type, "string");
   });
 });
 
@@ -407,12 +428,10 @@ test("feeds a phone elicitation answer back into the SDK via handlePendingElicit
       data: { requestId: "req-2", message: "Pick", mode: "form", requestedSchema: { type: "object", properties: {} } },
     });
     await flush();
-    channel.emit(EVENTS.ELICITATION_RESPONSE, {
-      kind: KIND.ELICITATION_RESPONSE,
-      requestId: "req-2",
-      action: "accept",
-      content: { env: "staging", migrate: true },
-    });
+    channel.emit(
+      EVENT_TYPE.ELICITATION_RESPONSE,
+      elicitationResponse("req-2", "accept", { env: "staging", migrate: true }),
+    );
     await flush();
     assert.deepEqual(session.elicitationResponses, [
       { requestId: "req-2", result: { action: "accept", content: { env: "staging", migrate: true } } },
@@ -428,10 +447,10 @@ test("dismisses the phone form when any side completes the elicitation", async (
       data: { requestId: "req-3", action: "accept" },
     });
     await flush();
-    const done = channel.sent.find((m) => m.kind === KIND.ELICITATION_COMPLETE);
+    const done = channel.sent.find((m) => m.eventSubtype === SUBTYPE.ELICITATION.COMPLETE);
     assert.ok(done, "expected an elicitation.complete dismiss relayed to the phone");
-    assert.equal(done.requestId, "req-3");
-    assert.equal(done.action, "accept");
+    assert.equal(done.msg.requestId, "req-3");
+    assert.equal(done.msg.action, "accept");
   });
 });
 
@@ -450,8 +469,8 @@ test("cancels a stale elicitation on timeout so a walked-away phone can't hang t
     assert.deepEqual(session.elicitationResponses, [
       { requestId: "req-4", result: { action: "cancel" } },
     ]);
-    const dismiss = channel.sent.find((m) => m.kind === KIND.ELICITATION_COMPLETE);
-    assert.ok(dismiss && dismiss.action === "cancel", "expected a cancel dismiss after timeout");
+    const dismiss = channel.sent.find((m) => m.eventSubtype === SUBTYPE.ELICITATION.COMPLETE);
+    assert.ok(dismiss && dismiss.msg.action === "cancel", "expected a cancel dismiss after timeout");
   } finally {
     relay.close();
   }
@@ -469,14 +488,9 @@ async function decideWith(optionId, raw) {
   try {
     const pending = relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
     await flush();
-    const req = channel.sent.find((m) => m.kind === KIND.APPROVAL_REQUEST);
+    const req = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
     assert.ok(req, "expected an approval request to be sent to the phone");
-    channel.emit(EVENTS.DECISION, {
-      kind: KIND.APPROVAL_DECISION,
-      requestId: req.requestId,
-      optionId,
-      raw,
-    });
+    channel.emit(EVENT_TYPE.DECISION, approvalDecision(req.msg.requestId, optionId, raw));
     return await pending;
   } finally {
     relay.close();
@@ -520,20 +534,16 @@ test("createPermissionRelay.snapshotPending replays pending approval payloads ve
   try {
     void relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
     await flush();
+    // snapshotPending returns FLAT payloads (msg).
     const snap = relay.snapshotPending();
     assert.equal(snap.length, 1);
-    assert.equal(snap[0].kind, KIND.APPROVAL_REQUEST);
     assert.equal(snap[0].toolName, "powershell");
     // The replayed payload reuses the SAME requestId sent to the phone, so a decision on the
     // replayed prompt still resolves the original pending entry.
-    const sent = channel.sent.find((m) => m.kind === KIND.APPROVAL_REQUEST);
-    assert.equal(snap[0].requestId, sent.requestId);
+    const sent = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
+    assert.equal(snap[0].requestId, sent.msg.requestId);
     // Answering it removes it from the snapshot.
-    channel.emit(EVENTS.DECISION, {
-      kind: KIND.APPROVAL_DECISION,
-      requestId: sent.requestId,
-      optionId: "approved",
-    });
+    channel.emit(EVENT_TYPE.DECISION, approvalDecision(sent.msg.requestId, "approved"));
     await flush();
     assert.deepEqual(relay.snapshotPending(), []);
   } finally {

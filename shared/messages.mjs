@@ -1,69 +1,70 @@
-// Helm shared message protocol.
+// Helm shared message protocol — standardized event envelope.
 //
 // Two layers:
 //  1. TransportMessage — the opaque, E2E-encrypted envelope that travels over the relay.
-//     Shape: { channelId, event, iv, ciphertext, ts }. The relay never sees plaintext.
-//  2. Inner messages — the decrypted, typed objects below. SecureChannel (channel.mjs)
-//     handles encrypt/decrypt + identity tagging so callers only deal with inner messages.
+//     Shape: { channelId, event, iv, ciphertext, ts }. The relay never sees plaintext. The
+//     transport-level `event` is ALWAYS the message's `eventType` (see EVENT_TYPE below).
+//  2. EventEnvelope — the decrypted, standardized object every message uses:
+//
+//       { eventType, eventSubtype, channelId, sessionId, senderId, senderName, msg, ts }
+//
+//     `eventType`/`eventSubtype` classify the message; `msg` carries EVERYTHING type-specific
+//     (never flattened onto the envelope). Identity fields (channelId/sessionId/senderId/
+//     senderName) are stamped by SecureChannel (channel.mjs) on send, so factories only build
+//     { eventType, eventSubtype, msg, ts } and the channel fills in who/where.
 //
 // Zero dependencies on purpose: importable as-is by the Node extension and the browser app.
 
-/** Logical events multiplexed over the single per-pairing Broadcast channel. */
-export const EVENTS = Object.freeze({
-  STREAM: "stream", // ext -> phone: assistant tokens, tool activity, logs
+/**
+ * Top-level event types. Each is ALSO the transport topic the message publishes/subscribes on,
+ * so there is no separate kind->event lookup to keep in sync — `eventType` is just a field.
+ */
+export const EVENT_TYPE = Object.freeze({
+  STREAM: "stream", // ext -> phone: assistant tokens, tool activity, logs, activity, user echo
   PROMPT: "prompt", // phone -> ext: user prompt
   APPROVAL: "approval", // ext -> phone: native permission request
   DECISION: "decision", // phone -> ext: user's choice for an approval
   ELICITATION: "elicitation", // ext -> phone: ask_user form request + its completion (dismiss)
   ELICITATION_RESPONSE: "elicitation_response", // phone -> ext: the user's answer to a form
-  CONTROL: "control", // both: lifecycle, heartbeat, mode
+  CONTROL: "control", // both: lifecycle, heartbeat, mode, history, state
+  PAIR: "pair", // both (plaintext, pre-key): the ECDH handshake (hello/ack)
 });
 
-/** Inner message kinds. */
-export const KIND = Object.freeze({
-  // stream (ext -> phone)
-  ASSISTANT_MESSAGE: "assistant.message",
-  ASSISTANT_DELTA: "assistant.delta",
-  TOOL_START: "tool.start",
-  TOOL_COMPLETE: "tool.complete",
-  LOG: "log",
-  // turn-level activity (ext -> phone): true while the agent is generating/acting
-  // (a turn is in flight — text, reasoning, or a tool), false when its loop goes idle.
-  // Drives the phone's Stop control so it tracks the whole abortable turn, not just tools.
-  ACTIVITY: "stream.activity",
-  // a user prompt typed at the laptop terminal, echoed to the phone so its local
-  // transcript isn't missing the user side of terminal-driven turns. `origin`
-  // distinguishes the source device ('phone' for this device, 'terminal' for the laptop).
-  USER_MESSAGE: "stream.user_message",
-  // prompt (phone -> ext)
-  PROMPT: "prompt",
-  // approval (ext -> phone) / decision (phone -> ext)
-  APPROVAL_REQUEST: "approval.request",
-  APPROVAL_DECISION: "approval.decision",
-  // elicitation / ask_user (ext -> phone request + completion, phone -> ext response).
-  // Mirrors approval, but the payload is a JSON-Schema form the agent wants filled in.
-  ELICITATION_REQUEST: "elicitation.request",
-  ELICITATION_RESPONSE: "elicitation.response",
-  // ext -> phone: an elicitation was resolved (by this phone, the terminal, or another
-  // device) — the phone must dismiss any open form for this requestId.
-  ELICITATION_COMPLETE: "elicitation.complete",
-  // control (both)
-  CHANNEL_UP: "control.channel_up",
-  SESSION_META: "control.session_meta",
-  CHANNEL_DOWN: "control.channel_down",
-  HEARTBEAT: "control.heartbeat",
-  MODE: "control.mode",
-  // interrupt (phone -> ext): stop/cancel the in-flight generation or tool run.
-  INTERRUPT: "control.interrupt",
-  // history backfill (phone <-> ext): the phone pulls older turns it never saw
-  // (first join, or scrollback) from the CLI session store.
-  HISTORY_REQUEST: "control.history_request",
-  HISTORY: "control.history",
-  // state snapshot (phone <-> ext): on (re)connect / refresh / resume the phone asks the ext
-  // for the CURRENT session state (busy/mode + pending approval & ask_user prompts) so a fresh
-  // or mid-turn join shows the truth immediately instead of waiting for the next live event.
-  STATE_REQUEST: "control.state_request",
-  STATE_SNAPSHOT: "control.state_snapshot",
+/**
+ * Fine-grained subtype, scoped UNDER its eventType (so the same subtype string may appear under
+ * different types, e.g. `request` under both APPROVAL and ELICITATION). A message is uniquely
+ * identified by the (eventType, eventSubtype) pair.
+ */
+export const SUBTYPE = Object.freeze({
+  STREAM: Object.freeze({
+    ASSISTANT_MESSAGE: "assistant_message",
+    ASSISTANT_DELTA: "assistant_delta",
+    TOOL_START: "tool_start",
+    TOOL_COMPLETE: "tool_complete",
+    LOG: "log",
+    // turn-level activity: true while the agent is generating/acting, false when idle.
+    ACTIVITY: "activity",
+    // a user prompt typed at the laptop terminal, echoed to the phone (origin distinguishes source).
+    USER_MESSAGE: "user_message",
+  }),
+  PROMPT: Object.freeze({ PROMPT: "prompt" }),
+  APPROVAL: Object.freeze({ REQUEST: "request" }),
+  DECISION: Object.freeze({ APPROVAL_DECISION: "approval_decision" }),
+  ELICITATION: Object.freeze({ REQUEST: "request", COMPLETE: "complete" }),
+  ELICITATION_RESPONSE: Object.freeze({ RESPONSE: "response" }),
+  CONTROL: Object.freeze({
+    CHANNEL_UP: "channel_up",
+    SESSION_META: "session_meta",
+    CHANNEL_DOWN: "channel_down",
+    HEARTBEAT: "heartbeat",
+    MODE: "mode",
+    INTERRUPT: "interrupt",
+    HISTORY_REQUEST: "history_request",
+    HISTORY: "history",
+    STATE_REQUEST: "state_request",
+    STATE_SNAPSHOT: "state_snapshot",
+  }),
+  PAIR: Object.freeze({ HELLO: "hello", ACK: "ack" }),
 });
 
 /** Session modes the phone can request. (Applied best-effort by the extension; see spike.) */
@@ -71,236 +72,138 @@ export const MODES = Object.freeze(["interactive", "plan", "autopilot"]);
 
 const now = () => Date.now();
 
+/**
+ * Build the type-agnostic part of an envelope. Identity (channelId/sessionId/senderId/senderName)
+ * is stamped later by SecureChannel on send, so callers never pass it.
+ */
+const envelope = (eventType, eventSubtype, msg = {}) => ({ eventType, eventSubtype, msg, ts: now() });
+
 // ---- factories (ext -> phone : stream) -------------------------------------
-export const assistantMessage = (content, messageId) => ({
-  kind: KIND.ASSISTANT_MESSAGE,
-  content,
-  messageId,
-  ts: now(),
-});
-export const assistantDelta = (content, messageId) => ({
-  kind: KIND.ASSISTANT_DELTA,
-  content,
-  messageId,
-  ts: now(),
-});
-export const toolStart = (toolCallId, toolName, args) => ({
-  kind: KIND.TOOL_START,
-  toolCallId,
-  toolName,
-  args,
-  ts: now(),
-});
-export const toolComplete = (toolCallId, toolName, success, resultPreview) => ({
-  kind: KIND.TOOL_COMPLETE,
-  toolCallId,
-  toolName,
-  success,
-  resultPreview,
-  ts: now(),
-});
-export const logLine = (level, message) => ({
-  kind: KIND.LOG,
-  level,
-  message,
-  ts: now(),
-});
+export const assistantMessage = (content, messageId) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.ASSISTANT_MESSAGE, { content, messageId });
+export const assistantDelta = (content, messageId) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.ASSISTANT_DELTA, { content, messageId });
+export const toolStart = (toolCallId, toolName, args) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.TOOL_START, { toolCallId, toolName, args });
+export const toolComplete = (toolCallId, toolName, success, resultPreview) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.TOOL_COMPLETE, {
+    toolCallId,
+    toolName,
+    success,
+    resultPreview,
+  });
+export const logLine = (level, message) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.LOG, { level, message });
 /**
- * Turn-level activity (ext -> phone). `busy` is true when the agent starts a turn
- * (assistant message_start / first delta / tool start) and false when its processing
- * loop goes idle (SDK `assistant.idle`). The phone shows Stop while busy, matching the
- * turn-abort the interrupt actually performs.
+ * Turn-level activity (ext -> phone). `busy` is true when the agent starts a turn and false when
+ * its processing loop goes idle. Drives the phone's Stop control for the whole abortable turn.
  */
-export const activity = (busy) => ({
-  kind: KIND.ACTIVITY,
-  busy: Boolean(busy),
-  ts: now(),
-});
+export const activity = (busy) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.ACTIVITY, { busy: Boolean(busy) });
 /**
- * A user prompt echoed from the laptop to the phone. `origin` records which device
- * typed it ('phone' = this device, already shown optimistically; 'terminal' = the
- * laptop). `id` is a stable identifier (the SDK event id) so the phone can dedup.
+ * A user prompt echoed from the laptop to the phone. `origin` records which device typed it
+ * ('phone' = this device; 'terminal' = the laptop). `id` is a stable id (the SDK event id) for dedup.
  */
-export const userMessage = (text, origin = "terminal", id) => ({
-  kind: KIND.USER_MESSAGE,
-  text,
-  origin,
-  id,
-  ts: now(),
-});
+export const userMessage = (text, origin = "terminal", id) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.USER_MESSAGE, { text, origin, id });
 
 // ---- factories (phone -> ext : prompt) -------------------------------------
 /**
- * A phone-typed prompt relayed to the laptop session. `attachments` (optional) carries
- * inline images the user picked in the composer: each is `{ data (base64, no `data:` URL
- * prefix), mimeType, name }`. The extension maps them to Copilot SDK blob attachments.
- * Images are downscaled on the phone so the encrypted payload stays under the transport cap.
+ * A phone-typed prompt relayed to the laptop session. `attachments` (optional) carries inline
+ * images the user picked: each is `{ data (base64, no `data:` prefix), mimeType, name }`.
  */
-export const prompt = (text, attachments = null) => ({
-  kind: KIND.PROMPT,
-  text,
-  ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
-  ts: now(),
-});
+export const prompt = (text, attachments = null) =>
+  envelope(EVENT_TYPE.PROMPT, SUBTYPE.PROMPT.PROMPT, {
+    text,
+    ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+  });
 
 // ---- factories (approval / decision) ---------------------------------------
 /**
- * Approval request mirrors the NATIVE Copilot permission prompt. `options` is the
- * verbatim set of choices the terminal would show (e.g. allow-once / allow-always / deny);
- * the phone simply echoes back the chosen option id in the decision.
+ * Approval request mirrors the NATIVE Copilot permission prompt. `options` is the verbatim set of
+ * choices the terminal would show; the phone echoes back the chosen option id in the decision.
  */
-export const approvalRequest = (requestId, toolName, toolArgs, options) => ({
-  kind: KIND.APPROVAL_REQUEST,
-  requestId,
-  toolName,
-  toolArgs,
-  options,
-  ts: now(),
-});
-export const approvalDecision = (requestId, optionId, raw) => ({
-  kind: KIND.APPROVAL_DECISION,
-  requestId,
-  optionId,
-  raw, // optional: the full native PermissionRequestResult, if the phone reconstructs it
-  ts: now(),
-});
+export const approvalRequest = (requestId, toolName, toolArgs, options) =>
+  envelope(EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.REQUEST, {
+    requestId,
+    toolName,
+    toolArgs,
+    options,
+  });
+export const approvalDecision = (requestId, optionId, raw) =>
+  envelope(EVENT_TYPE.DECISION, SUBTYPE.DECISION.APPROVAL_DECISION, { requestId, optionId, raw });
 
 // ---- factories (elicitation / ask_user) ------------------------------------
 /**
- * Elicitation request mirrors the CLI's `ask_user` / elicitation prompt (ext -> phone).
- * `mode` is "form" (structured input, the common case) or "url" (open a browser).
- * `requestedSchema` is the JSON Schema ({ type:"object", properties, required }) the phone
- * renders as a form. `toolCallId` correlates the prompt with the tool call shown remotely.
+ * Elicitation request mirrors the CLI's `ask_user` prompt (ext -> phone). `mode` is "form" or "url".
+ * `requestedSchema` is the JSON Schema the phone renders as a form.
  */
-export const elicitationRequest = (requestId, message, mode, requestedSchema, toolCallId, url) => ({
-  kind: KIND.ELICITATION_REQUEST,
-  requestId,
-  message,
-  mode: mode ?? "form",
-  requestedSchema,
-  toolCallId,
-  url,
-  ts: now(),
-});
+export const elicitationRequest = (requestId, message, mode, requestedSchema, toolCallId, url) =>
+  envelope(EVENT_TYPE.ELICITATION, SUBTYPE.ELICITATION.REQUEST, {
+    requestId,
+    message,
+    mode: mode ?? "form",
+    requestedSchema,
+    toolCallId,
+    url,
+  });
 /**
- * Phone -> ext answer to an elicitation. `action` is "accept" (submitted the form),
- * "decline" (explicitly refused) or "cancel" (dismissed). `content` carries the submitted
- * field values (keyed by schema field name) and is only meaningful when action === "accept".
+ * Phone -> ext answer to an elicitation. `action` is "accept"/"decline"/"cancel". `content` (only
+ * meaningful for "accept") carries the submitted field values; never shipped when the user backs out.
  */
-export const elicitationResponse = (requestId, action, content) => ({
-  kind: KIND.ELICITATION_RESPONSE,
-  requestId,
-  action,
-  // Never ship half-entered field values off the phone when the user backs out.
-  content: action === "accept" ? content : undefined,
-  ts: now(),
-});
-/**
- * Ext -> phone notice that an elicitation was resolved (here, at the terminal, or on another
- * device). The phone dismisses any open form for `requestId`. `action` echoes how it was
- * resolved when known, purely for display.
- */
-export const elicitationComplete = (requestId, action) => ({
-  kind: KIND.ELICITATION_COMPLETE,
-  requestId,
-  action,
-  ts: now(),
-});
+export const elicitationResponse = (requestId, action, content) =>
+  envelope(EVENT_TYPE.ELICITATION_RESPONSE, SUBTYPE.ELICITATION_RESPONSE.RESPONSE, {
+    requestId,
+    action,
+    content: action === "accept" ? content : undefined,
+  });
+/** Ext -> phone notice that an elicitation was resolved elsewhere; dismiss any open form for it. */
+export const elicitationComplete = (requestId, action) =>
+  envelope(EVENT_TYPE.ELICITATION, SUBTYPE.ELICITATION.COMPLETE, { requestId, action });
 
 // ---- factories (control) ---------------------------------------------------
-export const channelUp = (channelId, sessionId, cwd, title) => ({
-  kind: KIND.CHANNEL_UP,
-  channelId,
-  sessionId,
-  cwd,
-  title, // CLI chat summary ("title"); may be empty until the CLI derives one
-  ts: now(),
-});
 /**
- * Lightweight, post-start metadata refresh (ext -> phone). The CLI keeps refining the
- * chat title (summary) as the conversation grows, so the extension re-sends just the
- * latest title (and cwd, if it changed) without the lifecycle semantics of channel_up.
+ * Ext -> phone: the channel is live. channelId/sessionId now travel on the ENVELOPE (stamped by the
+ * channel), so this only carries the session's cwd + CLI chat title (summary).
  */
-export const sessionMeta = (title, cwd) => ({
-  kind: KIND.SESSION_META,
-  title,
-  cwd,
-  ts: now(),
-});
-export const channelDown = (reason) => ({
-  kind: KIND.CHANNEL_DOWN,
-  reason,
-  ts: now(),
-});
+export const channelUp = (cwd, title) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CHANNEL_UP, { cwd, title });
+/** Lightweight, post-start metadata refresh (ext -> phone): the latest CLI title (and cwd). */
+export const sessionMeta = (title, cwd) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_META, { title, cwd });
+export const channelDown = (reason) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CHANNEL_DOWN, { reason });
 /**
- * Ext -> phone liveness beat. `latestTurnIndex` is the highest committed turn_index in the CLI
- * store at beat time (or null when unknown), so a connected phone keeps a FRESH forward cursor
- * for post-away catch-up without waiting for a full state snapshot. `busy` is the authoritative
- * turn-in-flight flag re-asserted every beat, so a dropped `assistant.idle` self-corrects within
- * one heartbeat instead of leaving the Stop control stuck; null means "unknown, don't touch".
+ * Ext -> phone liveness beat. `latestTurnIndex` is the highest committed turn_index (a fresh forward
+ * cursor), or null when unknown. `busy` re-asserts the turn-in-flight flag each beat; null = unknown.
  */
-export const heartbeat = (latestTurnIndex = null, busy = null) => ({
-  kind: KIND.HEARTBEAT,
-  latestTurnIndex,
-  busy,
-  ts: now(),
-});
-export const modeChange = (mode) => ({ kind: KIND.MODE, mode, ts: now() });
-/**
- * Phone -> ext request to stop the current turn. The extension calls the SDK's
- * interrupt/cancel path; safe to send even when nothing is running (best-effort).
- */
-export const interrupt = () => ({ kind: KIND.INTERRUPT, ts: now() });
+export const heartbeat = (latestTurnIndex = null, busy = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.HEARTBEAT, { latestTurnIndex, busy });
+export const modeChange = (mode) => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODE, { mode });
+/** Phone -> ext request to stop the current turn (best-effort; safe when nothing is running). */
+export const interrupt = () => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.INTERRUPT, {});
 
 // ---- factories (history backfill) ------------------------------------------
 /**
- * Phone -> ext request for a page of turns. Three directions share this one kind:
- *  - latest page  → both `before` and `since` null/undefined (fresh join / never-seen session).
- *  - backward     → `before` is a turn_index cursor (exclusive): return turns OLDER than it
- *                   ("load earlier" scrollback).
- *  - forward      → `since` is a turn_index cursor (exclusive): return turns NEWER than it,
- *                   ascending (post-away catch-up). `before` and `since` are mutually exclusive.
- * `limit` is a hint — the extension clamps it to a safe max so each encrypted broadcast stays small.
+ * Phone -> ext request for a page of turns. `before` = backward cursor (older, scrollback);
+ * `since` = forward cursor (newer, catch-up); both null = latest page. Mutually exclusive.
  */
-export const historyRequest = (before = null, limit, since = null) => ({
-  kind: KIND.HISTORY_REQUEST,
-  before,
-  since,
-  limit,
-  ts: now(),
-});
+export const historyRequest = (before = null, limit, since = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.HISTORY_REQUEST, { before, since, limit });
 /**
- * Ext -> phone page of history. `items` are HistoryItem[] in ascending turn order.
- * `nextCursor` is the turn_index to continue the SAME direction (next `before` for backward,
- * next `since` for forward), or null when nothing more remains; `hasMore` mirrors that.
- * `since` echoes the request's forward cursor: when non-null the page is a FORWARD catch-up
- * (append missed turns to the transcript tail); when null it's a latest/backward page (scrollback).
+ * Ext -> phone page of history. `items` ascending; `nextCursor`/`hasMore` continue the SAME
+ * direction; `since` echoes the request's forward cursor (non-null => forward catch-up page).
  */
-export const history = (items, nextCursor = null, hasMore = false, since = null) => ({
-  kind: KIND.HISTORY,
-  items,
-  nextCursor,
-  hasMore,
-  since,
-  ts: now(),
-});
+export const history = (items, nextCursor = null, hasMore = false, since = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.HISTORY, { items, nextCursor, hasMore, since });
 
 // ---- factories (state snapshot) --------------------------------------------
+/** Phone -> ext: request the current session state on (re)connect / refresh / resume. */
+export const stateRequest = () => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.STATE_REQUEST, {});
 /**
- * Phone -> ext: request the current session state on (re)connect / refresh / resume. The ext
- * replies with a stateSnapshot so a phone that joins fresh, reconnects, or lands MID-TURN shows
- * the truth immediately (working vs ready, current mode, and any pending prompts) instead of
- * waiting for the next live event.
- */
-export const stateRequest = () => ({ kind: KIND.STATE_REQUEST, ts: now() });
-/**
- * Ext -> phone snapshot of the live session state, answering a stateRequest:
- *  - `busy`      — a turn is in flight (from the SDK activity RPC / isProcessing).
- *  - `abortable` — that in-flight work can be stopped (drives the Stop control at connect time).
- *  - `mode`      — the session's current mode, or null when unknown.
- *  - `latestTurnIndex` — highest committed turn_index in the store (the phone's forward cursor).
- *  - `approvals` / `elicitations` — currently PENDING prompts to (re)render, each already in
- *    approvalRequest / elicitationRequest shape so the phone reuses its normal renderers.
+ * Ext -> phone snapshot of the live session state. `approvals`/`elicitations` are the still-pending
+ * prompt PAYLOADS (flat, same shape as an approvalRequest/elicitationRequest `msg`) so the phone
+ * reuses its normal renderers.
  */
 export const stateSnapshot = ({
   busy = false,
@@ -309,61 +212,25 @@ export const stateSnapshot = ({
   latestTurnIndex = null,
   approvals = [],
   elicitations = [],
-} = {}) => ({
-  kind: KIND.STATE_SNAPSHOT,
-  busy: Boolean(busy),
-  abortable: Boolean(abortable),
-  mode,
-  latestTurnIndex,
-  approvals,
-  elicitations,
-  ts: now(),
-});
+} = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.STATE_SNAPSHOT, {
+    busy: Boolean(busy),
+    abortable: Boolean(abortable),
+    mode,
+    latestTurnIndex,
+    approvals,
+    elicitations,
+  });
 
-/** Map an inner message kind to the logical event it should be published on. */
-export function eventForKind(kind) {
-  switch (kind) {
-    case KIND.ASSISTANT_MESSAGE:
-    case KIND.ASSISTANT_DELTA:
-    case KIND.TOOL_START:
-    case KIND.TOOL_COMPLETE:
-    case KIND.LOG:
-    case KIND.ACTIVITY:
-    case KIND.USER_MESSAGE:
-      return EVENTS.STREAM;
-    case KIND.PROMPT:
-      return EVENTS.PROMPT;
-    case KIND.APPROVAL_REQUEST:
-      return EVENTS.APPROVAL;
-    case KIND.APPROVAL_DECISION:
-      return EVENTS.DECISION;
-    case KIND.ELICITATION_REQUEST:
-    case KIND.ELICITATION_COMPLETE:
-      return EVENTS.ELICITATION;
-    case KIND.ELICITATION_RESPONSE:
-      return EVENTS.ELICITATION_RESPONSE;
-    case KIND.CHANNEL_UP:
-    case KIND.SESSION_META:
-    case KIND.CHANNEL_DOWN:
-    case KIND.HEARTBEAT:
-    case KIND.MODE:
-    case KIND.INTERRUPT:
-    case KIND.HISTORY_REQUEST:
-    case KIND.HISTORY:
-    case KIND.STATE_REQUEST:
-    case KIND.STATE_SNAPSHOT:
-      return EVENTS.CONTROL;
-    default:
-      throw new Error(`helm/messages: unknown kind "${kind}"`);
-  }
-}
-
-/** Minimal structural validation (kept dependency-free; mobile may layer zod on top). */
-export function isValidInner(msg) {
+/** Minimal structural validation of a decrypted envelope (kept dependency-free). */
+export function isValidEnvelope(env) {
   return (
-    msg != null &&
-    typeof msg === "object" &&
-    typeof msg.kind === "string" &&
-    typeof msg.ts === "number"
+    env != null &&
+    typeof env === "object" &&
+    typeof env.eventType === "string" &&
+    typeof env.eventSubtype === "string" &&
+    typeof env.ts === "number" &&
+    env.msg != null &&
+    typeof env.msg === "object"
   );
 }

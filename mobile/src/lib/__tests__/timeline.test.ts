@@ -1,4 +1,4 @@
-import type { BaseMessage, InnerMessage, PromptAttachment } from '@aasis21/helm-shared';
+import type { EnvelopeBase, EventEnvelope, PromptAttachment } from '@aasis21/helm-shared';
 import {
   appendNotice,
   appendUser,
@@ -16,9 +16,9 @@ import {
 } from '@/lib/timeline';
 import * as B from '@/test/helpers/builders';
 
-const at = <T extends BaseMessage>(msg: T, ts: number): T => B.stamp(msg, { ts });
+const at = <T extends EnvelopeBase>(msg: T, ts: number): T => B.stamp(msg, { ts });
 
-function reduceAll(state: TimelineState, messages: InnerMessage[]): TimelineState {
+function reduceAll(state: TimelineState, messages: EventEnvelope[]): TimelineState {
   return messages.reduce((next, msg) => reduceTimeline(next, msg), state);
 }
 
@@ -155,13 +155,13 @@ describe('timeline reducer', () => {
       let state = reduceTimeline(emptyTimeline(), approval);
       state = { ...state, approvalErrors: { a1: 'old' } };
       state = reduceTimeline(state, approval);
-      expect(state.approvals).toEqual([approval]);
+      expect(state.approvals).toEqual([approval.msg]);
       expect(state.approvalErrors).toEqual({});
 
       state = reduceTimeline(state, elicitation);
       state = { ...state, elicitationErrors: { e1: 'old' } };
       state = reduceTimeline(state, elicitation);
-      expect(state.elicitations).toEqual([elicitation]);
+      expect(state.elicitations).toEqual([elicitation.msg]);
       expect(state.elicitationErrors).toEqual({});
 
       state = reduceTimeline(state, at(B.elicitationComplete('e1'), 62));
@@ -169,7 +169,7 @@ describe('timeline reducer', () => {
 
       const approval2 = at(B.approvalRequest('a2', 'edit', {}, []), 63);
       const elicitation2 = at(B.elicitationRequest('e2', 'More', 'form', { type: 'object', properties: {} }), 64);
-      state = reduceTimeline(state, at(B.stateSnapshot({ busy: true, mode: 'plan', latestTurnIndex: 9, approvals: [approval, approval2], elicitations: [elicitation2] }), 65));
+      state = reduceTimeline(state, at(B.stateSnapshot({ busy: true, mode: 'plan', latestTurnIndex: 9, approvals: [approval.msg, approval2.msg], elicitations: [elicitation2.msg] }), 65));
       expect(state).toMatchObject({ busy: true, mode: 'plan', latestTurnIndex: 9, lastHeartbeat: 3_000, sessionEnded: false });
       expect(state.approvals.map((a) => a.requestId)).toEqual(['a1', 'a2']);
       expect(state.elicitations.map((e) => e.requestId)).toEqual(['e2']);
@@ -205,7 +205,7 @@ describe('timeline reducer', () => {
     state = markHistoryLoading(state, false);
     expect(state.historyLoading).toBe(false);
 
-    const approval = at(B.approvalRequest('a1', 'tool', {}, []), 72);
+    const approval = B.approvalRequest('a1', 'tool', {}, []).msg;
     state = restoreApproval(state, approval, 'send failed');
     state = restoreApproval(state, approval, 'still failed');
     expect(state.approvals).toEqual([approval]);
@@ -214,7 +214,7 @@ describe('timeline reducer', () => {
     expect(state.approvals).toEqual([]);
     expect(state.approvalErrors).toEqual({});
 
-    const elicitation = at(B.elicitationRequest('e1', 'question', 'form', { type: 'object', properties: {} }), 73);
+    const elicitation = B.elicitationRequest('e1', 'question', 'form', { type: 'object', properties: {} }).msg;
     state = restoreElicitation(state, elicitation, 'send failed');
     state = restoreElicitation(state, elicitation, 'still failed');
     expect(state.elicitations).toEqual([elicitation]);
@@ -285,6 +285,6 @@ describe('timeline reducer', () => {
       B.historyRequest(),
       B.stateRequest(),
     ];
-    for (const msg of ignoredKinds) expect(reduceTimeline(input, at(msg, 92) as InnerMessage)).toBe(input);
+    for (const msg of ignoredKinds) expect(reduceTimeline(input, at(msg, 92) as EventEnvelope)).toBe(input);
   });
 });

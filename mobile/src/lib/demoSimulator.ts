@@ -1,5 +1,6 @@
 import {
-  EVENTS,
+  EVENT_TYPE,
+  SUBTYPE,
   SecureChannel,
   _resetLocalBus,
   activity,
@@ -53,7 +54,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   const extension = new SecureChannel({
     transport: laptopTransport,
     key: laptopKey,
-    identity: { deviceId: 'demo-laptop', sessionId: 'demo-session' },
+    identity: { channelId, sessionId: 'demo-session', senderId: 'copilot', senderName: 'Copilot' },
   });
   await extension.connect();
 
@@ -65,23 +66,23 @@ export async function startDemoSession(): Promise<DemoSession> {
   };
 
   const unsubs = [
-    extension.onEvent(EVENTS.PROMPT, (message) => {
+    extension.onEvent(EVENT_TYPE.PROMPT, (message) => {
       const prompt = message as PromptMessage;
-      void extension.send(logLine('info', `Prompt injected from phone: "${prompt.text}"`));
-      void extension.send(assistantMessage(`Queued your instruction: ${prompt.text}`, 'demo-ack'));
+      void extension.send(logLine('info', `Prompt injected from phone: "${prompt.msg.text}"`));
+      void extension.send(assistantMessage(`Queued your instruction: ${prompt.msg.text}`, 'demo-ack'));
     }),
-    extension.onEvent(EVENTS.DECISION, (message) => {
+    extension.onEvent(EVENT_TYPE.DECISION, (message) => {
       const decision = message as ApprovalDecision;
-      void extension.send(logLine('info', `Permission ${decision.requestId}: ${decision.optionId}`));
-      void extension.send(toolComplete('tool-1', 'powershell', decision.optionId !== 'deny', 'native decision relayed'));
+      void extension.send(logLine('info', `Permission ${decision.msg.requestId}: ${decision.msg.optionId}`));
+      void extension.send(toolComplete('tool-1', 'powershell', decision.msg.optionId !== 'deny', 'native decision relayed'));
     }),
-    extension.onEvent(EVENTS.ELICITATION_RESPONSE, (message) => {
+    extension.onEvent(EVENT_TYPE.ELICITATION_RESPONSE, (message) => {
       // The phone answered the ask_user form: dismiss it everywhere, then have the "agent"
       // react so the demo shows the round-trip (this is what respondToElicitation does live).
       const reply = message as ElicitationResponse;
-      void extension.send(elicitationComplete(reply.requestId, reply.action));
-      if (reply.action === 'accept') {
-        const target = String(reply.content?.environment ?? 'staging');
+      void extension.send(elicitationComplete(reply.msg.requestId, reply.msg.action));
+      if (reply.msg.action === 'accept') {
+        const target = String(reply.msg.content?.environment ?? 'staging');
         void extension.send(logLine('info', `ask_user answered: deploy → ${target}`));
         void extension.send(activity(true));
         void extension.send(
@@ -89,17 +90,17 @@ export async function startDemoSession(): Promise<DemoSession> {
         );
         window.setTimeout(() => void extension.send(activity(false)), 900);
       } else {
-        void extension.send(logLine('warning', `ask_user ${reply.action}ed — holding off on the deploy.`));
+        void extension.send(logLine('warning', `ask_user ${reply.msg.action}ed — holding off on the deploy.`));
       }
     }),
-    extension.onEvent(EVENTS.CONTROL, (message) => {
-      const control = message as ModeChange;
-      if (control.kind === 'control.mode') {
-        void extension.send(modeChange(control.mode));
-        void extension.send(logLine('info', `Session mode changed to ${control.mode}`));
+    extension.onEvent(EVENT_TYPE.CONTROL, (message) => {
+      if (message.eventSubtype === SUBTYPE.CONTROL.MODE) {
+        const control = message as ModeChange;
+        void extension.send(modeChange(control.msg.mode));
+        void extension.send(logLine('info', `Session mode changed to ${control.msg.mode}`));
         return;
       }
-      if ((message as { kind?: string }).kind === 'control.interrupt') {
+      if (message.eventSubtype === SUBTYPE.CONTROL.INTERRUPT) {
         // Make the phone's Stop button visibly take effect: end the turn (busy=false)
         // and any running tool, then ack. busy=false hides Stop even mid text-stream.
         void extension.send(activity(false));
@@ -114,7 +115,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   ];
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
-  push(100, () => extension.send(channelUp(channelId, 'demo-session', 'C:\\Users\\akash\\helm')));
+  push(100, () => extension.send(channelUp('C:\\Users\\akash\\helm', 'Demo session')));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>

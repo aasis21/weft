@@ -23,6 +23,7 @@ function session(
     timeline: opts.timeline ?? emptyTimeline(),
     unread: opts.unread,
     lastEventAt: opts.lastEventAt,
+    events: opts.events ?? [],
     error: opts.error,
   };
 }

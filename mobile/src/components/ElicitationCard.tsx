@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { ElicitationRequest } from '@aasis21/helm-shared';
+import type { ElicitationRequestMsg } from '@aasis21/helm-shared';
 
 type FieldValue = string | number | boolean | string[];
 
@@ -17,7 +17,7 @@ type Field =
   | { name: string; title: string; description?: string; required: boolean; control: 'multiselect'; options: Option[]; minItems?: number; maxItems?: number; default: string[] };
 
 interface ElicitationCardProps {
-  req: ElicitationRequest;
+  req: ElicitationRequestMsg;
   error?: string;
   onSubmit(content: Record<string, FieldValue>): void;
   onDecline(): void;
@@ -104,7 +104,7 @@ function parseField(name: string, raw: unknown, required: boolean): Field {
   };
 }
 
-function useFields(req: ElicitationRequest): Field[] {
+function useFields(req: ElicitationRequestMsg): Field[] {
   return useMemo(() => {
     const props = asRecord(req.requestedSchema?.properties);
     const required = new Set(req.requestedSchema?.required ?? []);

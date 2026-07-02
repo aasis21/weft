@@ -7,19 +7,18 @@
 //
 // setup.ts installs `helmClientMock` as the module mock; `registry` is shared with makeManager so a
 // test can grab the client the manager just created and `emit()` messages into it.
-import { eventForKind } from '@aasis21/helm-shared';
-import type { InnerMessage, LogicalEvent, SecureChannel } from '@aasis21/helm-shared';
+import type { EventEnvelope, SecureChannel } from '@aasis21/helm-shared';
 import type { StoredPairing } from '@/lib/storage';
 
-type MessageHandler = (message: InnerMessage, event: LogicalEvent) => void;
+type MessageHandler = (message: EventEnvelope, event: string) => void;
 type StatusHandler = (status: 'connected' | 'disconnected') => void;
 
 export class FakeHelmClient {
   readonly channelId: string;
   /** Not used by SessionManager; a typed stub so the shape satisfies HelmClient. */
   readonly channel: SecureChannel = {} as SecureChannel;
-  /** Every InnerMessage the manager pushed outbound, in order. */
-  readonly sent: InnerMessage[] = [];
+  /** Every EventEnvelope the manager pushed outbound, in order. */
+  readonly sent: EventEnvelope[] = [];
   closed = false;
   status: 'connected' | 'disconnected' = 'connected';
 
@@ -30,7 +29,7 @@ export class FakeHelmClient {
     this.channelId = channelId;
   }
 
-  send = async (message: InnerMessage): Promise<void> => {
+  send = async (message: EventEnvelope): Promise<void> => {
     this.sent.push(message);
   };
 
@@ -53,8 +52,8 @@ export class FakeHelmClient {
   // --- test-facing controls ----------------------------------------------------------------------
 
   /** Deliver an inbound message to the manager exactly as the relay would. */
-  emit(message: InnerMessage, event?: LogicalEvent): void {
-    const ev = event ?? eventForKind(message.kind);
+  emit(message: EventEnvelope, event?: string): void {
+    const ev = event ?? message.eventType;
     for (const handler of [...this.messageHandlers]) handler(message, ev);
   }
 
@@ -65,13 +64,19 @@ export class FakeHelmClient {
   }
 
   /** The last outbound message, or undefined. */
-  get lastSent(): InnerMessage | undefined {
+  get lastSent(): EventEnvelope | undefined {
     return this.sent[this.sent.length - 1];
   }
 
-  /** All outbound messages of a given kind. */
-  sentOfKind<T extends InnerMessage['kind']>(kind: T): Extract<InnerMessage, { kind: T }>[] {
-    return this.sent.filter((m) => m.kind === kind) as Extract<InnerMessage, { kind: T }>[];
+  /**
+   * The flat `msg` payloads of every outbound envelope whose composite `${eventType}.${eventSubtype}`
+   * matches `kind` (e.g. `'prompt.prompt'`, `'decision.approval_decision'`, `'control.state_request'`).
+   * Returns payloads (not envelopes) so assertions stay on the flat message body.
+   */
+  sentOfKind(kind: string): Record<string, unknown>[] {
+    return this.sent
+      .filter((m) => `${m.eventType}.${m.eventSubtype}` === kind)
+      .map((m) => m.msg as Record<string, unknown>);
   }
 
   /** Reset the recorded outbound log (e.g. before asserting a reconnect's fresh sends). */
@@ -145,5 +150,8 @@ export const helmClientMock = {
   },
   async createClientFromMaterial(opts: { channelId: string }): Promise<FakeHelmClient> {
     return registry.create(opts.channelId);
+  },
+  getSenderName(): string {
+    return 'WebApp';
   },
 };

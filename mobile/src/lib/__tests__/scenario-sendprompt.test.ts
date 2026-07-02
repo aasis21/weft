@@ -27,12 +27,12 @@ describe('scenario: send prompt', () => {
     await h!.manager.sendPrompt('c1', 'hello');
     const hello = h!.active()!.timeline.items.find((item) => item.kind === 'user' && item.text === 'hello');
     expect(hello).toMatchObject({ kind: 'user', origin: 'phone', text: 'hello' });
-    expect(client.sentOfKind('prompt')).toHaveLength(1);
-    expect(client.sentOfKind('prompt')[0]).toMatchObject({ text: 'hello' });
+    expect(client.sentOfKind('prompt.prompt')).toHaveLength(1);
+    expect(client.sentOfKind('prompt.prompt')[0]).toMatchObject({ text: 'hello' });
 
     const attachments = [{ data: 'AAA', mimeType: 'image/png', name: 'a.png' }];
     await h!.manager.sendPrompt('c1', 'with image', attachments);
-    expect(client.sentOfKind('prompt').at(-1)).toMatchObject({ text: 'with image', attachments });
+    expect(client.sentOfKind('prompt.prompt').at(-1)).toMatchObject({ text: 'with image', attachments });
 
     const originalSend = client.send;
     client.send = vi.fn().mockRejectedValue(new Error('offline'));
@@ -46,8 +46,8 @@ describe('scenario: send prompt', () => {
     const retried = h!.active()!.timeline.items.find((item) => item.kind === 'user' && item.id === failed!.id);
     expect(retried).toMatchObject({ kind: 'user', text: 'will fail' });
     expect(retried).not.toHaveProperty('failed');
-    expect(client.sentOfKind('prompt')).toHaveLength(1);
-    expect(client.sentOfKind('prompt')[0]).toMatchObject({ text: 'will fail' });
+    expect(client.sentOfKind('prompt.prompt')).toHaveLength(1);
+    expect(client.sentOfKind('prompt.prompt')[0]).toMatchObject({ text: 'will fail' });
 
     await vi.advanceTimersByTimeAsync(800);
     await h!.flush();

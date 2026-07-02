@@ -15,6 +15,7 @@ interface StatusBarProps {
   onReconnect(): void;
   onRemove(): void;
   onGoHome(): void;
+  onOpenDebug(): void;
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -37,6 +38,7 @@ export function StatusBar({
   onReconnect,
   onRemove,
   onGoHome,
+  onOpenDebug,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -90,6 +92,16 @@ export function StatusBar({
         title="Home"
       >
         ⌂
+      </button>
+
+      <button
+        className="icon-btn debug-btn"
+        type="button"
+        onClick={onOpenDebug}
+        aria-label="Debug events"
+        title="Debug events"
+      >
+        <span className="debug-glyph" aria-hidden="true">{'{ }'}</span>
       </button>
 
       <div className="bar-menu-wrap" ref={menuRef}>

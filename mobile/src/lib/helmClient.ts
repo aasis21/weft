@@ -1,15 +1,16 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import {
-  EVENTS,
+  EVENT_TYPE,
   SecureChannel,
   createLocalTransport,
   createSupabaseTransport,
   generateKeyPair,
-  isValidInner,
+  isValidEnvelope,
   parsePairingPayload,
   sayHello,
 } from '@aasis21/helm-shared';
-import type { InnerMessage, LogicalEvent, Transport } from '@aasis21/helm-shared';
+import type { EventEnvelope, EventType, Transport } from '@aasis21/helm-shared';
 import type { StoredPairing } from './storage';
 
 /** A connect that never reaches SUBSCRIBED (a wedged/suspended shared socket) would otherwise hang
@@ -37,20 +38,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 export interface HelmClient {
   channelId: string;
   channel: SecureChannel;
-  send(message: InnerMessage): Promise<void>;
-  subscribe(handler: (message: InnerMessage, event: LogicalEvent) => void): () => void;
+  send(message: EventEnvelope): Promise<void>;
+  subscribe(handler: (message: EventEnvelope, event: EventType) => void): () => void;
   /** Observe live socket state (drop/rejoin) after connect; no-op on transports that can't detect it. */
   onStatus(handler: (status: 'connected' | 'disconnected') => void): () => void;
   close(): Promise<void>;
 }
 
-const ALL_EVENTS: LogicalEvent[] = [
-  EVENTS.STREAM,
-  EVENTS.PROMPT,
-  EVENTS.APPROVAL,
-  EVENTS.DECISION,
-  EVENTS.ELICITATION,
-  EVENTS.CONTROL,
+const ALL_EVENTS: EventType[] = [
+  EVENT_TYPE.STREAM,
+  EVENT_TYPE.PROMPT,
+  EVENT_TYPE.APPROVAL,
+  EVENT_TYPE.DECISION,
+  EVENT_TYPE.ELICITATION,
+  EVENT_TYPE.CONTROL,
 ];
 
 /**
@@ -71,6 +72,8 @@ export async function pairSession(
     keyPair: phoneKeys,
     peerPublicKeyB64: publicKeyB64,
     deviceId,
+    senderName: getSenderName(),
+    channelId,
     waitForAck: true,
     timeoutMs: 20_000,
   });
@@ -108,6 +111,8 @@ export async function connectSession(
           keyPair: { privateKey, publicKeyB64: pairing.publicKeyB64 },
           peerPublicKeyB64: pairing.peerPublicKeyB64,
           deviceId: pairing.deviceId,
+          senderName: getSenderName(),
+          channelId: pairing.channelId,
           waitForAck: false,
         });
         return createClientFromMaterial({
@@ -132,16 +137,15 @@ export async function createClientFromMaterial(opts: {
   channelId: string;
   key: CryptoKey;
   deviceId?: string;
-  userId?: string;
   transport?: Transport;
 }): Promise<HelmClient> {
   const channel = new SecureChannel({
     transport: opts.transport ?? createTransport(opts.channelId),
     key: opts.key,
     identity: {
-      userId: opts.userId ?? 'phone',
-      deviceId: opts.deviceId ?? getStableDeviceId(),
-      sessionId: opts.channelId,
+      channelId: opts.channelId,
+      senderId: opts.deviceId ?? getStableDeviceId(),
+      senderName: getSenderName(),
     },
   });
   await channel.connect();
@@ -191,7 +195,7 @@ function wrapChannel(channelId: string, channel: SecureChannel): HelmClient {
     subscribe(handler) {
       const unsubs = ALL_EVENTS.map((event) =>
         channel.onEvent(event, (message) => {
-          if (isValidInner(message)) handler(message, event);
+          if (isValidEnvelope(message)) handler(message, event);
         }),
       );
       return () => {
@@ -203,6 +207,16 @@ function wrapChannel(channelId: string, channel: SecureChannel): HelmClient {
     },
     close: () => channel.close(),
   };
+}
+
+/** The phone's display label on the wire: "App" in the installed Capacitor app, "WebApp" in a
+ *  browser. Falls back to "WebApp" if the platform probe throws (e.g. plugin unavailable). */
+export function getSenderName(): string {
+  try {
+    return Capacitor.isNativePlatform() ? 'App' : 'WebApp';
+  } catch {
+    return 'WebApp';
+  }
 }
 
 function getStableDeviceId(): string {

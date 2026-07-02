@@ -40,7 +40,7 @@ describe('scenario: elicitations', () => {
 
     await h!.manager.sendElicitation('c1', 'e1', 'accept', { name: 'bob' });
     expect(h!.active()!.timeline.elicitations.map((e) => e.requestId)).toEqual(['e2']);
-    expect(client.sentOfKind('elicitation.response')[0]).toMatchObject({
+    expect(client.sentOfKind('elicitation_response.response')[0]).toMatchObject({
       requestId: 'e1',
       action: 'accept',
       content: { name: 'bob' },
@@ -51,7 +51,7 @@ describe('scenario: elicitations', () => {
     await h!.flush();
     await h!.manager.sendElicitation('c1', 'e3', 'decline');
     await h!.manager.sendElicitation('c1', 'e4', 'cancel');
-    expect(client.sentOfKind('elicitation.response')).toEqual(
+    expect(client.sentOfKind('elicitation_response.response')).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ requestId: 'e3', action: 'decline' }),
         expect.objectContaining({ requestId: 'e4', action: 'cancel' }),

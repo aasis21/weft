@@ -3,12 +3,14 @@
 // These are thin re-exports of the REAL @aasis21/helm-shared factories, so every message a test
 // pushes tracks the live protocol schema (rename a field in shared and these tests break, exactly as
 // intended). On top of the factories we add:
-//   - `stamp()` to attach identity fields (sessionId/deviceId/userId/origin) that SecureChannel would
-//     normally inject on the wire, and to pin `ts` for deterministic ordering.
+//   - `stamp()` to attach the identity fields (channelId/sessionId/senderId/senderName) that
+//     SecureChannel would normally inject on the wire, and to pin `ts` for deterministic ordering.
+//   - a `channelUp(channelId, sessionId, cwd?, title?)` wrapper that stamps the channel identity the
+//     way the real channel would, so tests can assert reconcile-by-sessionId without a live channel.
 //   - `historyItem()` / `historyPage()` conveniences for the backfill/catch-up scenarios.
 export {
-  KIND,
-  EVENTS,
+  EVENT_TYPE,
+  SUBTYPE,
   MODES,
   mergeHistory,
   assistantMessage,
@@ -24,7 +26,6 @@ export {
   elicitationRequest,
   elicitationResponse,
   elicitationComplete,
-  channelUp,
   sessionMeta,
   channelDown,
   heartbeat,
@@ -34,25 +35,33 @@ export {
   history,
   stateRequest,
   stateSnapshot,
-  eventForKind,
-  isValidInner,
+  isValidEnvelope,
 } from '@aasis21/helm-shared';
 
-import { history } from '@aasis21/helm-shared';
-import type { BaseMessage, History, HistoryItem } from '@aasis21/helm-shared';
+import { channelUp as realChannelUp, history } from '@aasis21/helm-shared';
+import type { ChannelUp, EnvelopeBase, History, HistoryItem } from '@aasis21/helm-shared';
 
-/** Identity/ordering fields a test may want to pin on an inbound message. */
+/** Identity/ordering fields a test may want to pin on an inbound envelope (as the wire would carry). */
 export interface StampFields {
+  channelId?: string;
   sessionId?: string;
-  deviceId?: string;
-  userId?: string;
-  origin?: 'phone' | 'terminal';
+  senderId?: string;
+  senderName?: string;
   ts?: number;
 }
 
-/** Return a copy of `msg` with the given identity/ordering fields set (as the wire would carry). */
-export function stamp<T extends BaseMessage>(msg: T, fields: StampFields): T {
-  return { ...msg, ...fields };
+/** Return a copy of `envelope` with the given identity/ordering fields set (as the wire would carry). */
+export function stamp<T extends EnvelopeBase>(envelope: T, fields: StampFields): T {
+  return { ...envelope, ...fields };
+}
+
+/**
+ * Build a `channel_up` envelope with the channel identity stamped on, the way SecureChannel would
+ * on a real send. Keeps the old (channelId, sessionId, cwd, title) call shape so scenarios can assert
+ * reconcile-by-sessionId (which reads the envelope-level sessionId) without standing up a live channel.
+ */
+export function channelUp(channelId: string, sessionId?: string, cwd?: string, title?: string): ChannelUp {
+  return stamp(realChannelUp(cwd, title), { channelId, sessionId });
 }
 
 /** Build a single backfill HistoryItem. */
