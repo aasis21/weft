@@ -310,6 +310,7 @@
   flex-direction: column;
   align-items: stretch;
 }
+.row.tool { padding: 0; }
 .row .meta {
   display: flex;
   align-items: center;
@@ -427,9 +428,9 @@
 .tool-card {
   width: 100%;
   max-width: 100%;
-  margin: 2px 0;
+  margin: 1px 0;
   border: 1px solid var(--bg-rule);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--bg-elev);
   overflow: hidden;
 }
@@ -437,9 +438,10 @@
 .tc-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
-  padding: 7px 10px;
+  min-height: 30px;
+  padding: 4px 9px;
   border: 0;
   background: transparent;
   color: var(--fg);
@@ -463,6 +465,9 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.tc-args.is-path { display: flex; align-items: baseline; }
+.tc-dir { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg-faint); }
+.tc-base { flex: 0 0 auto; color: var(--fg); font-weight: 600; }
 .tc-time { flex: 0 0 auto; color: var(--fg-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tc-chevron { flex: 0 0 auto; color: var(--fg-faint); font-size: 10px; }
 .tc-detail {
@@ -1149,7 +1154,6 @@
 .helm-session .send-btn,
 .helm-session .stop-btn,
 .helm-session .drawer-add,
-.helm-session .tc-head,
 .helm-session .mode-menu-item {
   min-width: 44px;
   min-height: 44px;
@@ -1580,6 +1584,7 @@
 .helm-session .debug-list::-webkit-scrollbar { width: 8px; }
 .helm-session .debug-list::-webkit-scrollbar-thumb { background: var(--bg-rule); border-radius: 8px; }
 .helm-session .debug-row {
+  flex: none;
   border: 1px solid var(--bg-rule);
   border-radius: 8px;
   background: var(--bg-elev);
