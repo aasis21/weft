@@ -5,27 +5,27 @@ import { LandingScreen } from './components/LandingScreen';
 import { JoinSessionScreen } from './components/JoinSessionScreen';
 import { SessionScreen } from './components/SessionScreen';
 import { isNativeRuntime } from './lib/usePairing';
-import { sessionManager } from './lib/sessionManager';
+import { sessionRuntime } from './session/runtime/instance';
 
 export default function App(): JSX.Element {
-  const snapshot = useSyncExternalStore(sessionManager.subscribe, sessionManager.getSnapshot);
+  const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const [adding, setAdding] = useState(false);
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void sessionManager.init();
+    void sessionRuntime.init();
   }, []);
 
   const handlePair = useCallback(async (raw: string): Promise<void> => {
-    await sessionManager.addByQr(raw);
+    await sessionRuntime.addByQr(raw);
     setAdding(false);
     setShowLanding(false);
   }, []);
 
   const handleDemo = useCallback(async (): Promise<void> => {
-    await sessionManager.addDemo();
+    await sessionRuntime.addDemo();
     setAdding(false);
     setShowLanding(false);
   }, []);
@@ -113,23 +113,23 @@ export default function App(): JSX.Element {
       active={active}
       sessions={snapshot.sessions}
       activeId={active.meta.channelId}
-      onPrompt={(text, attachments) => void sessionManager.sendPrompt(active.meta.channelId, text, attachments)}
-      onApprove={(requestId, optionId) => void sessionManager.sendApproval(active.meta.channelId, requestId, optionId)}
+      onPrompt={(text, attachments) => void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments)}
+      onApprove={(requestId, optionId) => void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)}
       onElicitationRespond={(requestId, action, content) =>
-        void sessionManager.sendElicitation(active.meta.channelId, requestId, action, content)
+        void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
       }
-      onInterrupt={() => void sessionManager.sendInterrupt(active.meta.channelId)}
-      onModeChange={(mode: SessionMode) => void sessionManager.sendMode(active.meta.channelId, mode)}
-      onRetry={(itemId) => void sessionManager.retryPrompt(active.meta.channelId, itemId)}
-      onSelectSession={(id) => sessionManager.setActive(id)}
+      onInterrupt={() => void sessionRuntime.sendInterrupt(active.meta.channelId)}
+      onModeChange={(mode: SessionMode) => void sessionRuntime.sendMode(active.meta.channelId, mode)}
+      onRetry={(itemId) => void sessionRuntime.retryPrompt(active.meta.channelId, itemId)}
+      onSelectSession={(id) => sessionRuntime.setActive(id)}
       onAddSession={() => {
         setAddManual(false);
         setAdding(true);
       }}
-      onRemoveSession={(id) => void sessionManager.remove(id)}
-      onReconnect={(id) => void sessionManager.reconnect(id)}
+      onRemoveSession={(id) => void sessionRuntime.remove(id)}
+      onReconnect={(id) => void sessionRuntime.reconnect(id)}
       onGoHome={() => setShowLanding(true)}
-      onLoadEarlier={() => void sessionManager.loadEarlierHistory(active.meta.channelId)}
+      onLoadEarlier={() => void sessionRuntime.loadEarlierHistory(active.meta.channelId)}
     />
   );
 }

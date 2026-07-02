@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import { sessionManager, type SessionStatus } from '../lib/sessionManager';
+import { sessionRuntime } from '../session/runtime/instance';
+import type { SessionStatus } from '../session/model';
 
 interface StatusBarProps {
   title: string;
@@ -42,7 +43,7 @@ export function StatusBar({
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const snapshot = useSyncExternalStore(sessionManager.subscribe, sessionManager.getSnapshot);
+  const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const unreadCount = snapshot.sessions.filter((session) => session.unread && session.meta.channelId !== snapshot.activeId).length;
   // While the agent is working the header reads "Working…" with a live pulse, so a connected but idle
   // session ("Live") is visibly distinct from one that's actively churning a turn.
