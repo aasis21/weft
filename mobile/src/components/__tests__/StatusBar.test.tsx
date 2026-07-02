@@ -89,4 +89,13 @@ describe('StatusBar', () => {
     await user.click(within(menu).getByRole('menuitem', { name: '✕ Leave this session' }));
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
+
+  it('opens the debug panel from the { } header button', async () => {
+    const user = userEvent.setup();
+    const onOpenDebug = vi.fn();
+    renderStatusBar({ onOpenDebug });
+
+    await user.click(screen.getByRole('button', { name: 'Debug events' }));
+    expect(onOpenDebug).toHaveBeenCalledTimes(1);
+  });
 });
