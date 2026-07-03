@@ -71,4 +71,20 @@ describe('scanNativeQr', () => {
 
     await rejection;
   });
+
+  it('rejects without scanning when camera permission is denied', async () => {
+    scannerMock.isSupported.mockResolvedValue({ supported: true });
+    scannerMock.requestPermissions.mockResolvedValue({ camera: 'denied' });
+
+    await expect(scanNativeQr()).rejects.toThrow(/Camera permission is required/);
+    expect(scannerMock.scan).not.toHaveBeenCalled();
+  });
+
+  it('scans when camera permission is granted', async () => {
+    scannerMock.isSupported.mockResolvedValue({ supported: true });
+    scannerMock.requestPermissions.mockResolvedValue({ camera: 'granted' });
+    scannerMock.scan.mockResolvedValue({ barcodes: [{ rawValue: 'payload' }] });
+
+    await expect(scanNativeQr()).resolves.toBe('payload');
+  });
 });

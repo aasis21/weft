@@ -68,6 +68,24 @@ describe('sessionsSlice', () => {
     expect(state.entities.new?.transcript.items).toMatchObject([{ id: 'a1', text: 'kept transcript' }]);
   });
 
+  it('does not inherit a stale error onto a live keeper when merging same-sessionId cards (#185)', () => {
+    const oldSession = makeSession('old', { channelId: 'old-channel', sessionId: 'sess-shared', addedAt: 10, scannedAt: 10 });
+    oldSession.connection.status = 'error';
+    oldSession.connection.error = 'Couldn’t reach your session — the terminal may be closed. Reconnect to try again.';
+
+    const newSession = makeSession('new', { channelId: 'new-channel', addedAt: 20, scannedAt: 20 });
+    newSession.connection.status = 'live';
+
+    let state = sessionsReducer(undefined, sessionAdded(oldSession));
+    state = sessionsReducer(state, sessionAdded(newSession));
+    state = sessionsReducer(state, sessionActivated('new'));
+    state = sessionsReducer(state, sessionReconciled({ id: 'new', sessionId: 'sess-shared' }));
+
+    expect(state.ids).toEqual(['new']);
+    expect(state.entities.new?.connection.status).toBe('live');
+    expect(state.entities.new?.connection.error).toBeUndefined();
+  });
+
   it('marks a session renamed via titleSet and preserves the user name across a same-sessionId merge (#37)', () => {
     // Rename the OLD card, then reconcile a freshly-scanned channel onto it: the user's chosen name
     // must survive the merge instead of reverting to the CLI title.

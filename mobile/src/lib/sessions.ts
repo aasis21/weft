@@ -64,8 +64,21 @@ async function read(): Promise<StoredSession[]> {
 
 async function writeStore(store: SessionsStore): Promise<void> {
   const value = JSON.stringify(store);
-  await Preferences.set({ key: SESSIONS_KEY, value });
-  globalThis.localStorage?.setItem(SESSIONS_KEY, value);
+  // Mirror to localStorage FIRST and never let a Preferences backend failure skip it. Previously this
+  // did `await Preferences.set(...)` with no guard, so if the Preferences plugin threw (web/private
+  // mode, quota, missing web impl) the mirror below was never reached and the joined channel IDs were
+  // silently lost across a refresh (#186). Both stores are attempted; the read path already prefers
+  // whichever has data.
+  try {
+    globalThis.localStorage?.setItem(SESSIONS_KEY, value);
+  } catch {
+    // localStorage can be unavailable/blocked (private mode) — Preferences below is then the store.
+  }
+  try {
+    await Preferences.set({ key: SESSIONS_KEY, value });
+  } catch {
+    // Native/web Preferences backend unavailable — the localStorage mirror above already holds it.
+  }
 }
 
 async function write(list: StoredSession[]): Promise<void> {

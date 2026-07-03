@@ -54,6 +54,20 @@ describe('sessions storage', () => {
     expect(await loadSessions()).toEqual([]);
   });
 
+  it('still persists channel IDs to the localStorage mirror when the Preferences backend throws (#186)', async () => {
+    const { Preferences } = await import('@capacitor/preferences');
+    const setSpy = vi.spyOn(Preferences, 'set').mockRejectedValue(new Error('no Preferences backend'));
+    try {
+      await upsertSession(session('ch-web', { sessionId: 'sw' }));
+      // The write must not throw, and the joined channel must survive because the localStorage mirror
+      // was written even though Preferences.set rejected.
+      expect(localStorage.getItem('helm.sessions.v1')).toContain('ch-web');
+      expect(await loadSessions()).toEqual([session('ch-web', { sessionId: 'sw' })]);
+    } finally {
+      setSpy.mockRestore();
+    }
+  });
+
   it('persists last active id as top-level session-list metadata', async () => {
     await upsertSession(session('ch1'));
     await setLastActiveSessionId('ch1');

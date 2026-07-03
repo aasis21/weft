@@ -112,7 +112,13 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
   keep.connection.mode = drop.connection.mode ?? keep.connection.mode;
   keep.connection.ended = keep.connection.ended && drop.connection.ended;
   keep.connection.endedReason = keep.connection.endedReason ?? drop.connection.endedReason;
-  keep.connection.error = keep.connection.error ?? drop.connection.error;
+  // Only carry an error forward if the merged session actually lands in a failed/ended state. A live
+  // (or connecting/idle) keeper must never inherit the dead channel's stale "couldn't reach" error —
+  // that produced a green "Live" header sitting above an offline banner (#185).
+  keep.connection.error =
+    keep.connection.status === 'error' || keep.connection.status === 'ended'
+      ? (keep.connection.error ?? drop.connection.error)
+      : undefined;
   keep.requests.approvals = mergeByRequestId(keep.requests.approvals, drop.requests.approvals);
   keep.requests.elicitations = mergeByRequestId(keep.requests.elicitations, drop.requests.elicitations);
   keep.requests.approvalErrors = { ...drop.requests.approvalErrors, ...keep.requests.approvalErrors };

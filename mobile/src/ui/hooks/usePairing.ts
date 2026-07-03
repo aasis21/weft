@@ -4,9 +4,12 @@ import { describeError } from '@/lib/debugSettings';
 
 interface ScannerApi {
   isSupported?: () => Promise<{ supported: boolean }>;
-  requestPermissions?: () => Promise<unknown>;
+  requestPermissions?: () => Promise<{ camera: string }>;
   scan: () => Promise<{ barcodes: Array<{ rawValue?: string; displayValue?: string }> }>;
 }
+
+const CAMERA_PERMISSION_DENIED_MESSAGE =
+  'Camera permission is required to scan a QR code — enable it in Settings and try again.';
 
 const SCAN_TIMEOUT_MS = 60_000;
 const SCAN_TIMEOUT_MESSAGE = 'QR scan timed out. Try again.';
@@ -48,7 +51,10 @@ export async function scanNativeQr(): Promise<string> {
   if (support && !support.supported) {
     throw new Error('Barcode scanning is not supported on this device.');
   }
-  await scanner.requestPermissions?.();
+  const permission = await scanner.requestPermissions?.();
+  if (permission && permission.camera !== 'granted' && permission.camera !== 'limited') {
+    throw new Error(CAMERA_PERMISSION_DENIED_MESSAGE);
+  }
   const result = await withTimeout(scanner.scan(), SCAN_TIMEOUT_MS, SCAN_TIMEOUT_MESSAGE);
   const raw = result.barcodes[0]?.rawValue ?? result.barcodes[0]?.displayValue;
   if (!raw) throw new Error('No QR payload detected.');
