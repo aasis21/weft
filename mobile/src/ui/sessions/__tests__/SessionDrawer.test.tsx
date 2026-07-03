@@ -198,4 +198,29 @@ describe('SessionDrawer', () => {
     await user.click(screen.getByRole('button', { name: '⌂ About Helm' }));
     expect(onGoHome).toHaveBeenCalledTimes(1);
   });
+
+  it('renames a session inline and commits the new title on Enter (#37)', async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <SessionDrawer
+        sessions={[session('a', 'Alpha', 1)]}
+        activeId="a"
+        onSelect={onSelect}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onRename={onRename}
+        onGoHome={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Rename session' }));
+    const input = screen.getByRole('textbox', { name: 'Rename session' });
+    await user.clear(input);
+    await user.type(input, 'Deploy Box{Enter}');
+
+    expect(onRename).toHaveBeenCalledWith('a', 'Deploy Box');
+  });
 });

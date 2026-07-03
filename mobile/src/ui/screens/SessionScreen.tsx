@@ -8,6 +8,7 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+import { getStableDeviceId } from '@/lib/helmClient';
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -61,6 +62,11 @@ function truncate(value: string, max = 96): string {
 
 function approvalSummary(toolName: string, args: { line: string } | null): string {
   return truncate(args ? `${toolName}: ${args.line}` : toolName);
+}
+
+function isRecommendedOption(option: unknown): boolean {
+  const rec = readRecord(option);
+  return rec.recommended === true || rec.isRecommended === true || rec.recommendedAction === true;
 }
 
 function vibrate(pattern: VibratePattern): void {
@@ -146,6 +152,7 @@ interface SessionScreenProps {
   onSelectSession(channelId: string): void;
   onAddSession(): void;
   onRemoveSession(channelId: string): void;
+  onRenameSession(channelId: string, title: string): void;
   onReconnect(channelId: string): void;
   onGoHome(): void;
   onLoadEarlier(): void;
@@ -164,6 +171,7 @@ export function SessionScreen({
   onSelectSession,
   onAddSession,
   onRemoveSession,
+  onRenameSession,
   onReconnect,
   onGoHome,
   onLoadEarlier,
@@ -360,7 +368,22 @@ export function SessionScreen({
       />
 
       {debugOpen ? (
-        <DebugPanel events={active.events} title={meta.title} onClose={() => setDebugOpen(false)} />
+        <DebugPanel
+          events={active.events}
+          title={meta.title}
+          detail={{
+            sessionId: meta.sessionId,
+            channelId: meta.channelId,
+            channelHistory: meta.channelHistory,
+            senderId: getStableDeviceId(),
+            addedAt: meta.addedAt,
+            lastHeartbeat: active.timeline.lastHeartbeat ?? null,
+            lastEventAt: active.lastEventAt ?? null,
+            status: active.status,
+            mode: active.timeline.mode,
+          }}
+          onClose={() => setDebugOpen(false)}
+        />
       ) : null}
 
       <main className="thread-scroll">
@@ -499,10 +522,13 @@ export function SessionScreen({
 
                  <div className="approval-actions">
                    {req.options.map((opt) => {
-                     const isDeny = /deny|reject|cancel|\bno\b/i.test(opt.id);
+                     const recommended = isRecommendedOption(opt);
+                     const isDeny = /deny|reject|cancel|suggest_changes|\bno\b/i.test(opt.id);
                      const isSecondary = !isDeny && /always|session|all/i.test(opt.id);
                      const variant = isDeny ? 'deny' : isSecondary ? 'allow secondary' : 'allow';
-                     const decisionLabel = `${isDeny ? 'Deny' : 'Approve'} ${summary}`;
+                     const decisionLabel = `${opt.label}: ${summary}${
+                       recommended ? ' (recommended)' : ''
+                     }`;
                      return (
                        <button
                          key={opt.id}
@@ -515,6 +541,7 @@ export function SessionScreen({
                        >
                          <span className="approval-btn-icon" aria-hidden="true">{isDeny ? '✕' : '✓'}</span>
                          {opt.label}
+                         {recommended ? <span className="approval-recommended">Recommended</span> : null}
                        </button>
                      );
                    })}
@@ -567,6 +594,7 @@ export function SessionScreen({
             onAddSession();
           }}
           onRemove={requestRemove}
+          onRename={onRenameSession}
           onGoHome={() => {
             setDrawerOpen(false);
             onGoHome();

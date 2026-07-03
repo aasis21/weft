@@ -6,6 +6,7 @@ import type {
   DebugEvent,
   ElicitationRequestMsg,
   NoticeItem,
+  ChannelHistoryEntry,
   Session,
   SessionStatus,
   UserItem,
@@ -50,14 +51,46 @@ function isUnreadActivity(message: EventEnvelope): boolean {
 }
 
 function mergeSessions(keep: Session, drop: Session, channelId: string): void {
+  // Archive the transport channels this durable session has rotated through, instead of discarding
+  // the superseded channelId outright (#154). Carry both cards' prior history, then record the
+  // dropped card's channel as ended (it's being folded in). De-dupe by channelId; never list the
+  // surviving current channel as history.
+  const archived = new Map<string, ChannelHistoryEntry>();
+  for (const entry of [...(keep.meta.channelHistory ?? []), ...(drop.meta.channelHistory ?? [])]) {
+    archived.set(entry.channelId, { ...entry, ...archived.get(entry.channelId) });
+  }
+  if (drop.meta.channelId && drop.meta.channelId !== channelId && !archived.has(drop.meta.channelId)) {
+    archived.set(drop.meta.channelId, {
+      channelId: drop.meta.channelId,
+      startedAt: drop.meta.addedAt,
+      endedAt: drop.lastEventAt ?? drop.meta.addedAt,
+    });
+  }
+  if (keep.meta.channelId && keep.meta.channelId !== channelId && !archived.has(keep.meta.channelId)) {
+    archived.set(keep.meta.channelId, {
+      channelId: keep.meta.channelId,
+      startedAt: keep.meta.addedAt,
+      endedAt: keep.lastEventAt ?? keep.meta.addedAt,
+    });
+  }
+  archived.delete(channelId);
+  const channelHistory = [...archived.values()].sort((a, b) => a.startedAt - b.startedAt);
+
   keep.meta = {
     ...keep.meta,
     addedAt: Math.min(keep.meta.addedAt, drop.meta.addedAt),
     channelId,
+    channelHistory: channelHistory.length > 0 ? channelHistory : undefined,
     sessionId: keep.meta.sessionId ?? drop.meta.sessionId,
     scannedAt: Math.max(keep.meta.scannedAt ?? 0, drop.meta.scannedAt ?? 0) || keep.meta.scannedAt || drop.meta.scannedAt,
   };
   if (!keep.meta.title && drop.meta.title) keep.meta.title = drop.meta.title;
+  // Preserve a user-chosen name across a resume/reconcile merge: if the dropped card was renamed but
+  // the keeper wasn't, adopt the user's title so a channel rotation never reverts the rename (#37).
+  if (drop.meta.renamed && !keep.meta.renamed) {
+    keep.meta.title = drop.meta.title;
+    keep.meta.renamed = true;
+  }
   if (!keep.meta.cwd && drop.meta.cwd) keep.meta.cwd = drop.meta.cwd;
   if (keep.transcript.items.length === 0 && keep.history.items.length === 0) {
     keep.transcript = { items: drop.transcript.items };
@@ -244,9 +277,12 @@ const sessionsSlice = createSlice({
       const session = state.entities[action.payload.id];
       if (session) session.lastEventAt = action.payload.ts;
     },
-    titleSet(state, action: PayloadAction<{ id: string; title: string }>) {
+    titleSet(state, action: PayloadAction<{ id: string; title: string; renamed?: boolean }>) {
       const session = state.entities[action.payload.id];
-      if (session) session.meta.title = action.payload.title;
+      if (session) {
+        session.meta.title = action.payload.title;
+        if (action.payload.renamed !== undefined) session.meta.renamed = action.payload.renamed;
+      }
     },
     cwdSet(state, action: PayloadAction<{ id: string; cwd: string | null }>) {
       const session = state.entities[action.payload.id];

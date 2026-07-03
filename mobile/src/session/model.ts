@@ -63,10 +63,23 @@ export interface DebugEvent {
   msg: unknown;
 }
 
+export interface ChannelHistoryEntry {
+  channelId: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
 export interface SessionMeta {
   channelId: string;
   sessionId?: string;
   title: string;
+  /** True once the user has renamed this session on the phone. When set, the CLI-reported title no
+   *  longer overrides the user's chosen name (persisted, so it survives reload + resume). */
+  renamed?: boolean;
+  /** Transport channels this durable session has rotated through (a `copilot --resume` mints a new
+   *  channelId). The current transport is `channelId`; superseded ones are archived here so the debug
+   *  Dev-detail tab can show "this session reconnected N times" (#154). */
+  channelHistory?: ChannelHistoryEntry[];
   cwd: string | null;
   kind: 'live' | 'demo';
   addedAt: number;

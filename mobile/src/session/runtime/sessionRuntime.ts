@@ -3,19 +3,18 @@ import {
   SUBTYPE,
   approvalDecision,
   elicitationResponse,
-  historyRequest,
   recentTurnsRequest,
   interrupt,
   modeChange,
   prompt,
   stateRequest,
-  HISTORY_PAGE_DEFAULT,
   RECENT_TURNS_DEFAULT,
 } from '@aasis21/helm-shared';
 import type { EventEnvelope, PromptAttachment, SessionMode, StateSnapshotMsg } from '@aasis21/helm-shared';
 import { connectSession, pairSession, getSenderName } from '@/lib/helmClient';
 import type { HelmClient } from '@/lib/helmClient';
 import { loadSessions, patchSession, removeSession, upsertSession } from '@/lib/sessions';
+import { creativeName } from '@/lib/sessionNames';
 import type { StoredSession } from '@/lib/sessions';
 import {
   allowTranscriptWrites,
@@ -65,6 +64,7 @@ import {
   sessionRemoved,
   settlingSet,
   statusSet,
+  titleSet,
   unreadSet,
   userPromptAppended,
 } from '@/session/sessionsSlice';
@@ -92,7 +92,7 @@ function basename(path: string | null): string | null {
 }
 
 function titleFor(channelId: string, cwd: string | null, stored: string | null): string {
-  return stored || basename(cwd) || `Session ${channelId.slice(0, 6)}`;
+  return stored || basename(cwd) || creativeName(channelId);
 }
 
 function isUnreadActivity(message: EventEnvelope): boolean {
@@ -272,7 +272,12 @@ export class SessionRuntime {
     const meta: SessionMeta = {
       channelId,
       sessionId: stored.sessionId ?? undefined,
-      title: titleFor(channelId, cwd, timeline.title ?? stored.title),
+      // A renamed session pins the user's stored title; otherwise prefer the freshest CLI title from
+      // the restored transcript, falling back to the stored title / cwd / creative name.
+      title: stored.renamed
+        ? stored.title || titleFor(channelId, cwd, null)
+        : titleFor(channelId, cwd, timeline.title ?? stored.title),
+      renamed: stored.renamed ?? false,
       cwd,
       kind: 'live',
       addedAt: stored.addedAt,
@@ -716,6 +721,24 @@ export class SessionRuntime {
   }
 
   // --- session controls ----------------------------------------------------------------------------
+  /** Rename a session to a user-chosen title (#37). Persists both the title and a `renamed` flag so
+   *  the CLI-reported title never overrides it after a reload/resume. A blank name clears the rename
+   *  and reverts to the CLI/cwd/creative-name default on the next update. */
+  renameSession(channelId: string, rawTitle: string): void {
+    const session = this.session(channelId);
+    if (!session) return;
+    const ctrl = this.controllers.get(channelId);
+    const title = rawTitle.trim();
+    if (!title) {
+      const fallback = titleFor(channelId, session.meta.cwd, null);
+      this.store.dispatch(titleSet({ id: channelId, title: fallback, renamed: false }));
+      if (!ctrl?.ephemeral) void patchSession(channelId, { title: null, renamed: false });
+      return;
+    }
+    this.store.dispatch(titleSet({ id: channelId, title, renamed: true }));
+    if (!ctrl?.ephemeral) void patchSession(channelId, { title, renamed: true });
+  }
+
   setActive(channelId: string): void {
     const session = this.session(channelId);
     if (!session) return;
@@ -827,24 +850,6 @@ export class SessionRuntime {
 
   private async deliverPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
     await this.send(channelId, prompt(text, attachments));
-  }
-
-  async loadEarlierHistory(channelId: string): Promise<void> {
-    const ctrl = this.controllers.get(channelId);
-    const session = this.session(channelId);
-    if (!ctrl || !session || ctrl.ephemeral) return;
-    if (session.history.loading || !session.history.hasMore) return;
-    const cursor = session.history.cursor;
-    this.store.dispatch(historyLoadingSet({ id: channelId, loading: true }));
-    // Fail-safe: a dead host that never replies must not spin the "Load earlier" spinner forever
-    // (#100). Mirrors syncHistory; the CONTROL.HISTORY reply clears this timer.
-    this.armHistoryTimeout(channelId);
-    try {
-      await this.send(channelId, historyRequest(cursor, HISTORY_PAGE_DEFAULT));
-    } catch {
-      this.clearHistoryTimeout(channelId);
-      this.store.dispatch(historyLoadingSet({ id: channelId, loading: false }));
-    }
   }
 
   async sendApproval(channelId: string, requestId: string, optionId: string): Promise<void> {

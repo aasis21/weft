@@ -130,12 +130,13 @@ export default function App(): JSX.Element {
         setAdding(true);
       }}
       onRemoveSession={(id) => void sessionRuntime.remove(id)}
+      onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
       onGoHome={() => {
         setError(null);
         setShowLanding(true);
       }}
-      onLoadEarlier={() => void sessionRuntime.loadEarlierHistory(active.meta.channelId)}
+      onLoadEarlier={() => {}}
     />
   );
 }

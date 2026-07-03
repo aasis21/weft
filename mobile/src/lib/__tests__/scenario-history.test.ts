@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
 
-describe('scenario: history', () => {
+describe('scenario: deprecated paginated history', () => {
   let h: ReturnType<typeof makeManager> | undefined;
 
   beforeEach(() => {
@@ -16,76 +16,25 @@ describe('scenario: history', () => {
     vi.useRealTimers();
   });
 
-  it('renders the latest page as scrollback with an earlier cursor', async () => {
+  it('requests only recent-turns on connect and never sends a paginated history request', async () => {
     const { client } = await h!.pair('c1');
     client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
     await h!.flush();
 
+    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(1);
+    expect(client.sentOfKind('control.history_request')).toHaveLength(0);
+
     client.emit(
       B.historyPage(
-        [B.historyItem(1, 'user', 'hi', 100), B.historyItem(2, 'assistant', 'yo', 200)],
+        [B.historyItem(1, 'user', 'legacy', 100), B.historyItem(2, 'assistant', 'page', 200)],
         { nextCursor: 0, hasMore: true },
       ),
     );
     await h!.flush();
-
-    const timeline = h!.active()!.timeline;
-    expect(timeline.history.map((item) => item.text)).toEqual(['hi', 'yo']);
-    expect(timeline.historyHasMore).toBe(true);
-    expect(timeline.historyCursor).toBe(0);
-    expect(timeline.latestTurnIndex).toBe(2);
-    expect(timeline.historyLoading).toBe(false);
-  });
-
-  it('loads an earlier page and prepends it before existing history', async () => {
-    const { client } = await h!.pair('c1');
-    client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
-    client.emit(
-      B.historyPage(
-        [B.historyItem(3, 'user', 'later', 300), B.historyItem(4, 'assistant', 'now', 400)],
-        { nextCursor: 2, hasMore: true },
-      ),
-    );
-    await h!.flush();
-
-    await h!.manager.loadEarlierHistory('c1');
-    await h!.flush();
-
-    const requests = client.sentOfKind('control.history_request');
-    expect(requests).toHaveLength(1);
-    expect(requests[0].before).toBe(2);
-    expect(requests[0].since).toBeNull();
-
-    client.emit(B.historyPage([B.historyItem(1, 'user', 'older', 100), B.historyItem(2, 'assistant', 'then', 200)], { nextCursor: 0, hasMore: false }));
-    await h!.flush();
-
-    const timeline = h!.active()!.timeline;
-    expect(timeline.history.map((item) => item.text)).toEqual(['older', 'then', 'later', 'now']);
-    expect(timeline.historyCursor).toBe(0);
-    expect(timeline.historyHasMore).toBe(false);
-    expect(timeline.historyLoading).toBe(false);
-  });
-
-  it('clears the Load-earlier spinner if the host never replies (#100)', async () => {
-    const { client } = await h!.pair('c1');
-    client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
-    client.emit(
-      B.historyPage(
-        [B.historyItem(3, 'user', 'later', 300), B.historyItem(4, 'assistant', 'now', 400)],
-        { nextCursor: 2, hasMore: true },
-      ),
-    );
-    await h!.flush();
-
-    await h!.manager.loadEarlierHistory('c1');
-    await h!.flush();
-    expect(h!.active()!.timeline.historyLoading).toBe(true);
-    expect(client.sentOfKind('control.history_request')).toHaveLength(1);
-
-    // No CONTROL.HISTORY reply arrives; the 8s fail-safe must release the spinner so a future pull
-    // isn't blocked by the historyLoading guard.
     await vi.advanceTimersByTimeAsync(8_000);
     await h!.flush();
+
+    expect(client.sentOfKind('control.history_request')).toHaveLength(0);
     expect(h!.active()!.timeline.historyLoading).toBe(false);
   });
 });

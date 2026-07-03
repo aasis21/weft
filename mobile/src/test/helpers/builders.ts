@@ -32,7 +32,6 @@ export {
   heartbeat,
   modeChange,
   interrupt,
-  historyRequest,
   history,
   recentTurnsRequest,
   recentTurns,

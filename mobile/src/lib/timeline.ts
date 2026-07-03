@@ -98,8 +98,8 @@ export interface TimelineState {
   /** True while a history page request is in flight (drives the "Loading…" affordance). */
   historyLoading: boolean;
   /** FORWARD cursor: the highest committed turn_index this phone has seen (via heartbeat, state
-   *  snapshot, or any history page). Persisted so a refresh/resume can ask the extension for only
-   *  the turns that landed while it was away (`historyRequest({ since })`). Null until first known. */
+   *  snapshot, or any tolerated legacy history page). Persisted as durable session metadata; current
+   *  reconnect backfill comes from the capped recent-turns buffer. Null until first known. */
   latestTurnIndex: number | null;
 }
 
@@ -241,8 +241,8 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
     case EVENT_TYPE.CONTROL:
       switch (message.eventSubtype) {
         case SUBTYPE.CONTROL.HISTORY:
-          // Backward scrollback only ("Load earlier"): merge into `history[]` ABOVE the transcript.
-          // Forward catch-up now flows through the recent-turns snapshot, so pages carry no `since`.
+          // Tolerate legacy history pages without initiating pagination; current backfill flows
+          // through the recent-turns snapshot.
           return mergeHistoryPage(state, message.msg);
         case SUBTYPE.CONTROL.RECENT_TURNS:
           return applyRecentTurns(state, message.msg);

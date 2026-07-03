@@ -209,7 +209,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         case SUBTYPE.CONTROL.CHANNEL_UP:
           if (message.sessionId && message.sessionId !== 'unknown-session') session.meta.sessionId = message.sessionId;
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
-          session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
+          if (!session.meta.renamed)
+            session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
           session.connection.lastHeartbeat = message.ts;
           session.connection.ended = false;
           session.connection.endedReason = undefined;
@@ -218,7 +219,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           return;
         case SUBTYPE.CONTROL.SESSION_META:
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
-          session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
+          if (!session.meta.renamed)
+            session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
           return;
         case SUBTYPE.CONTROL.CHANNEL_DOWN: {
           const reason = message.msg.reason ?? 'Session ended.';

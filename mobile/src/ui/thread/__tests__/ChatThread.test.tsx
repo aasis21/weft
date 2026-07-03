@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ChatThread } from '@/ui/thread/ChatThread';
 import type { TimelineItem } from '@/lib/timeline';
-import * as B from '@/test/helpers/builders';
 
 const now = Date.UTC(2026, 6, 1, 12, 0);
 
@@ -26,20 +25,21 @@ describe('ChatThread', () => {
     expect(container.querySelector('.avatar.copilot')).toBeInTheDocument();
   });
 
-  it('renders backfilled history above an Earlier divider', () => {
-    render(
+  it('ignores deprecated paginated history props', () => {
+    const { container } = render(
       <ChatThread
         items={[{ kind: 'assistant', id: 'live', text: 'live answer', ts: now + 3 }]}
         history={[
-          B.historyItem(1, 'user', 'old question', now),
-          B.historyItem(1, 'assistant', 'old answer', now + 1),
+          { turnIndex: 1, role: 'user', text: 'old question', ts: now },
+          { turnIndex: 1, role: 'assistant', text: 'old answer', ts: now + 1 },
         ]}
       />,
     );
 
-    expect(screen.getByText('old question').closest('.row')).toHaveClass('history', 'user');
-    expect(screen.getByText('old answer').closest('.row')).toHaveClass('history', 'assistant');
-    expect(screen.getByRole('separator')).toHaveTextContent('Earlier in this session');
+    expect(screen.queryByText('old question')).not.toBeInTheDocument();
+    expect(screen.queryByText('old answer')).not.toBeInTheDocument();
+    expect(container.querySelector('.history-divider')).not.toBeInTheDocument();
+    expect(container.querySelector('.thread-load-earlier')).not.toBeInTheDocument();
     expect(screen.getByText('live answer')).toBeInTheDocument();
   });
 

@@ -63,6 +63,10 @@ function makeSession(status: 'live' | 'connecting' | 'idle' | 'ended' = 'live') 
 
 function renderScreen(status: 'live' | 'connecting' | 'idle' | 'ended') {
   const active = makeSession(status);
+  return renderActive(active);
+}
+
+function renderActive(active: ReturnType<typeof makeSession>, overrides: Partial<Parameters<typeof SessionScreen>[0]> = {}) {
   return render(
     <SessionScreen
       active={active as never}
@@ -77,9 +81,11 @@ function renderScreen(status: 'live' | 'connecting' | 'idle' | 'ended') {
       onSelectSession={vi.fn()}
       onAddSession={vi.fn()}
       onRemoveSession={vi.fn()}
+      onRenameSession={vi.fn()}
       onReconnect={vi.fn()}
       onGoHome={vi.fn()}
       onLoadEarlier={vi.fn()}
+      {...overrides}
     />,
   );
 }
@@ -98,5 +104,30 @@ describe('SessionScreen composer liveness', () => {
     renderScreen('live');
     expect(composerProps.latest).toMatchObject({ disabled: false });
     expect(composerProps.latest?.disabledReason).toBeUndefined();
+  });
+});
+
+describe('SessionScreen approvals', () => {
+  it('renders all three plan-exit approval options and marks the recommended choice', () => {
+    const active = makeSession('live');
+    active.timeline.approvals = [
+      {
+        requestId: 'plan-1',
+        toolName: 'Exit Plan Mode',
+        toolArgs: { summary: 'Plan ready for review' },
+        options: [
+          { id: 'exit_only', label: 'Exit plan mode' },
+          { id: 'autopilot', label: 'Accept plan and build', recommended: true },
+          { id: 'suggest_changes', label: 'Suggest changes' },
+        ],
+      },
+    ];
+
+    renderActive(active);
+
+    expect(screen.getByRole('button', { name: /^Exit plan mode:/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Accept plan and build:/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Suggest changes:/i })).toBeInTheDocument();
+    expect(screen.getByText('Recommended')).toBeInTheDocument();
   });
 });

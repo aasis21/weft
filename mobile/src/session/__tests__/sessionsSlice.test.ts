@@ -10,6 +10,7 @@ import sessionsReducer, {
   sessionAdded,
   sessionReconciled,
   statusSet,
+  titleSet,
 } from '../sessionsSlice';
 import { routeEnvelope } from '../routeEnvelope';
 import { selectManagerSnapshot } from '../selectors';
@@ -65,6 +66,72 @@ describe('sessionsSlice', () => {
     expect(state.entities.new?.meta).toMatchObject({ channelId: 'new-channel', sessionId: 'sess-shared', addedAt: 10, scannedAt: 20 });
     expect(state.entities.new?.unread).toBe(true);
     expect(state.entities.new?.transcript.items).toMatchObject([{ id: 'a1', text: 'kept transcript' }]);
+  });
+
+  it('marks a session renamed via titleSet and preserves the user name across a same-sessionId merge (#37)', () => {
+    // Rename the OLD card, then reconcile a freshly-scanned channel onto it: the user's chosen name
+    // must survive the merge instead of reverting to the CLI title.
+    const oldSession = makeSession('old', {
+      channelId: 'old-channel',
+      sessionId: 'sess-shared',
+      title: 'Old title',
+      addedAt: 10,
+      scannedAt: 10,
+    });
+    const newSession = makeSession('new', {
+      channelId: 'new-channel',
+      title: 'New title',
+      addedAt: 20,
+      scannedAt: 20,
+    });
+
+    let state = sessionsReducer(undefined, sessionAdded(oldSession));
+    state = sessionsReducer(state, titleSet({ id: 'old', title: 'My Deploy Box', renamed: true }));
+    expect(state.entities.old?.meta.title).toBe('My Deploy Box');
+    expect(state.entities.old?.meta.renamed).toBe(true);
+
+    state = sessionsReducer(state, sessionAdded(newSession));
+    state = sessionsReducer(state, sessionActivated('new'));
+    state = sessionsReducer(state, sessionReconciled({ id: 'new', sessionId: 'sess-shared' }));
+
+    expect(state.ids).toEqual(['new']);
+    expect(state.entities.new?.meta.title).toBe('My Deploy Box');
+    expect(state.entities.new?.meta.renamed).toBe(true);
+  });
+
+  it('clears the renamed flag when titleSet passes renamed:false', () => {
+    let state = sessionsReducer(undefined, sessionAdded(makeSession('s1')));
+    state = sessionsReducer(state, titleSet({ id: 's1', title: 'Custom', renamed: true }));
+    expect(state.entities.s1?.meta.renamed).toBe(true);
+    state = sessionsReducer(state, titleSet({ id: 's1', title: 'Session s1', renamed: false }));
+    expect(state.entities.s1?.meta.renamed).toBe(false);
+  });
+
+  it('archives the superseded channelId into channelHistory instead of discarding it (#154)', () => {
+    const oldSession = makeSession('old', {
+      channelId: 'old-channel',
+      sessionId: 'sess-shared',
+      title: 'Old title',
+      addedAt: 10,
+      scannedAt: 10,
+    });
+    const newSession = makeSession('new', {
+      channelId: 'new-channel',
+      title: 'New title',
+      addedAt: 20,
+      scannedAt: 20,
+    });
+
+    let state = sessionsReducer(undefined, sessionAdded(oldSession));
+    state = sessionsReducer(state, sessionAdded(newSession));
+    state = sessionsReducer(state, sessionActivated('new'));
+    state = sessionsReducer(state, sessionReconciled({ id: 'new', sessionId: 'sess-shared' }));
+
+    const meta = state.entities.new?.meta;
+    expect(meta?.channelId).toBe('new-channel');
+    expect(meta?.channelHistory?.map((c) => c.channelId)).toContain('old-channel');
+    // The current channel must never appear in its own history.
+    expect(meta?.channelHistory?.map((c) => c.channelId)).not.toContain('new-channel');
   });
 
   it('projects the current ManagerSnapshot shape using channel ids at the facade boundary', () => {

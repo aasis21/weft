@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   JSX,
   KeyboardEvent as ReactKeyboardEvent,
@@ -15,7 +15,7 @@ import '@/ui/styles/thread-extras.css';
 
 interface ChatThreadProps {
   items: TimelineItem[];
-  /** Backfilled pre-join turns rendered above the live items, separated by a divider. */
+  /** Deprecated paginated history store retained for compatibility with SessionScreen props. */
   history?: HistoryItem[];
   /** True while the bound session is live, so we show a caret / working row. */
   streaming?: boolean;
@@ -29,7 +29,7 @@ interface ChatThreadProps {
   offline?: boolean;
   /** Label for the offline banner. */
   offlineLabel?: string;
-  /** Loads the previous page of pre-join history (pull-to-refresh / "Load earlier"). */
+  /** Deprecated history-pagination hook retained as an optional compatibility prop. */
   onLoadEarlier?: () => void;
   /** True when an older history page can still be fetched. */
   historyHasMore?: boolean;
@@ -113,7 +113,7 @@ interface MenuState {
   y: number;
 }
 
-export function ChatThread({ items, history = [], streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, onLoadEarlier, historyHasMore = false, historyLoading = false, initialLoading: initialLoadingProp }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -129,10 +129,6 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedToolRuns, setCollapsedToolRuns] = useState<Record<string, boolean>>({});
   const [liveText, setLiveText] = useState('');
-  const [pulling, setPulling] = useState(false);
-  const loadAnchorRef = useRef<number | null>(null);
-  const pullStartRef = useRef<number | null>(null);
-  const armedRef = useRef(false);
   const prevItemsLenRef = useRef(items.length);
 
   const last = items[items.length - 1];
@@ -142,7 +138,7 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   // historyLoading). Gating on `streaming` used to leave an empty live session stuck on the
   // skeleton forever; now once the pull settles empty we fall through to the welcome. Prefer the
   // parent's liveness-driven flag when supplied; the local heuristic is the standalone fallback.
-  const initialLoading = initialLoadingProp ?? (items.length === 0 && history.length === 0 && historyLoading);
+  const initialLoading = initialLoadingProp ?? (items.length === 0 && historyLoading);
   const renderUnits = useMemo<RenderUnit[]>(() => {
     const units: RenderUnit[] = [];
     let index = 0;
@@ -252,65 +248,6 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
     return () => scroller.removeEventListener('scroll', update);
   }, [cancelLongPress]);
 
-  const getScroller = useCallback(
-    (): HTMLElement | null => (rootRef.current?.closest('.thread-scroll') as HTMLElement | null) ?? null,
-    [],
-  );
-
-  const triggerLoadEarlier = useCallback((): void => {
-    if (!onLoadEarlier || !historyHasMore || historyLoading) return;
-    loadAnchorRef.current = getScroller()?.scrollHeight ?? null;
-    onLoadEarlier();
-  }, [onLoadEarlier, historyHasMore, historyLoading, getScroller]);
-
-  // Keep the reader parked on the same message when an older page is prepended.
-  useLayoutEffect(() => {
-    const scroller = getScroller();
-    if (scroller && loadAnchorRef.current !== null) {
-      const delta = scroller.scrollHeight - loadAnchorRef.current;
-      if (delta > 0) scroller.scrollTop += delta;
-      loadAnchorRef.current = null;
-    }
-  }, [history.length, getScroller]);
-
-  useEffect(() => {
-    if (!historyLoading) loadAnchorRef.current = null;
-  }, [historyLoading]);
-
-  // Pull down at the top of the thread to load the previous history page.
-  useEffect(() => {
-    const scroller = getScroller();
-    if (!scroller || !onLoadEarlier) return undefined;
-    const onStart = (event: TouchEvent): void => {
-      const touch = event.touches[0];
-      pullStartRef.current =
-        touch && scroller.scrollTop <= 0 && historyHasMore && !historyLoading ? touch.clientY : null;
-    };
-    const onMove = (event: TouchEvent): void => {
-      const touch = event.touches[0];
-      if (pullStartRef.current === null || !touch) return;
-      const armed = touch.clientY - pullStartRef.current > 64 && scroller.scrollTop <= 0;
-      armedRef.current = armed;
-      setPulling(armed);
-    };
-    const onEnd = (): void => {
-      if (pullStartRef.current !== null && armedRef.current) triggerLoadEarlier();
-      pullStartRef.current = null;
-      armedRef.current = false;
-      setPulling(false);
-    };
-    scroller.addEventListener('touchstart', onStart, { passive: true });
-    scroller.addEventListener('touchmove', onMove, { passive: true });
-    scroller.addEventListener('touchend', onEnd);
-    scroller.addEventListener('touchcancel', onEnd);
-    return () => {
-      scroller.removeEventListener('touchstart', onStart);
-      scroller.removeEventListener('touchmove', onMove);
-      scroller.removeEventListener('touchend', onEnd);
-      scroller.removeEventListener('touchcancel', onEnd);
-    };
-  }, [getScroller, onLoadEarlier, historyHasMore, historyLoading, triggerLoadEarlier]);
-
   // Auto-scroll only when genuinely new content arrives (never on a Live/Quiet
   // heartbeat flip), and only if the reader is pinned to the bottom or just sent.
   useEffect(() => {
@@ -395,7 +332,7 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
         </div>
       ) : null}
 
-      {items.length === 0 && history.length === 0 && !initialLoading ? (
+      {items.length === 0 && !initialLoading ? (
         <div className="thread-empty-rich">
           <span className="empty-icon">
             <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -411,73 +348,6 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
             <span className="empty-suggest">Explain this repo</span>
             <span className="empty-suggest">Run the tests</span>
             <span className="empty-suggest">Fix the failing build</span>
-          </div>
-        </div>
-      ) : null}
-
-      {historyHasMore && onLoadEarlier ? (
-        <div className="thread-load-earlier-row">
-          <button
-            type="button"
-            className="thread-load-earlier"
-            onClick={triggerLoadEarlier}
-            disabled={historyLoading}
-          >
-            {historyLoading
-              ? 'Loading earlier messages…'
-              : pulling
-                ? 'Release to load earlier'
-                : 'Load earlier messages'}
-          </button>
-        </div>
-      ) : null}
-
-      {history.length > 0 ? (
-        <div className="history-block">
-          {history.map((h) => {
-            if (h.role === 'user') {
-              return (
-                <div key={`h-${h.turnIndex}-user`} className="row user history">
-                  <div
-                    className="bubble user-bubble"
-                    tabIndex={0}
-                    onContextMenu={(event) => handleContextMenu(event, `h-${h.turnIndex}-user`, h.text)}
-                    onKeyDown={(event) => handleBubbleKeyDown(event, `h-${h.turnIndex}-user`, h.text)}
-                    onTouchStart={(event) => handleTouchStart(event, `h-${h.turnIndex}-user`, h.text)}
-                    onTouchEnd={cancelLongPress}
-                    onTouchMove={cancelLongPress}
-                    onTouchCancel={cancelLongPress}
-                  >
-                    {h.text}
-                  </div>
-                  <span className="ts user-ts">{formatTime(h.ts)}</span>
-                </div>
-              );
-            }
-            return (
-              <div key={`h-${h.turnIndex}-assistant`} className="row assistant history turn-start">
-                <div className="meta">
-                  <span className="avatar copilot">{COPILOT_AVATAR}</span>
-                  <span className="role">Copilot</span>
-                  <span className="ts">{formatTime(h.ts)}</span>
-                </div>
-                <div
-                  className="bubble assistant-bubble"
-                  tabIndex={0}
-                  onContextMenu={(event) => handleContextMenu(event, `h-${h.turnIndex}-assistant`, h.text)}
-                  onKeyDown={(event) => handleBubbleKeyDown(event, `h-${h.turnIndex}-assistant`, h.text)}
-                  onTouchStart={(event) => handleTouchStart(event, `h-${h.turnIndex}-assistant`, h.text)}
-                  onTouchEnd={cancelLongPress}
-                  onTouchMove={cancelLongPress}
-                  onTouchCancel={cancelLongPress}
-                >
-                  <Markdown text={h.text} />
-                </div>
-              </div>
-            );
-          })}
-          <div className="history-divider" role="separator">
-            <span>Earlier in this session</span>
           </div>
         </div>
       ) : null}

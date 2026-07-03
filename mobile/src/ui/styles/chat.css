@@ -383,24 +383,6 @@
 /* backfilled pre-join history: muted, with a labelled divider before live items */
 .history-block { display: flex; flex-direction: column; }
 .row.history { opacity: 0.7; }
-.history-divider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 14px 2px 8px;
-  color: var(--fg-faint);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.history-divider::before,
-.history-divider::after {
-  content: '';
-  flex: 1 1 auto;
-  border-top: 1px dashed var(--bg-rule);
-}
-
 /* streaming caret + thinking row */
 .caret {
   display: inline-block;
@@ -1155,6 +1137,20 @@
   font-weight: 600;
 }
 .session-row .row-x { width: 30px; height: 30px; font-size: 13px; }
+.session-row .row-rename { width: 30px; height: 30px; font-size: 13px; opacity: 0.55; }
+.session-row .row-rename:hover,
+.session-row .row-rename:focus-visible { opacity: 1; }
+.session-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent, #4c8dff);
+  border-radius: 6px;
+}
 .tag {
   flex: 0 0 auto;
   padding: 1px 6px;
@@ -1645,6 +1641,40 @@
   text-overflow: ellipsis;
 }
 .helm-session .debug-empty { color: var(--fg-dim); font-size: 13px; padding: 20px 4px; }
+.helm-session .debug-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+.helm-session .debug-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+}
+.helm-session .debug-tab.active { color: var(--fg); background: var(--bg-elev, rgba(255, 255, 255, 0.06)); }
+.helm-session .debug-detail {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 10px 2px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  align-content: start;
+  font-size: 12.5px;
+}
+.helm-session .debug-detail dt { color: var(--fg-dim); font-weight: 600; }
+.helm-session .debug-detail dd { margin: 0; color: var(--fg); word-break: break-all; }
+.helm-session .debug-detail dd.mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .helm-session .debug-list {
   flex: 1;
   min-height: 0;

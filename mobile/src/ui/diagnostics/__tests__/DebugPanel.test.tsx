@@ -96,4 +96,41 @@ describe('DebugPanel', () => {
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('shows a Dev detail tab with session identity + channel history when detail is provided (#154)', async () => {
+    const user = userEvent.setup();
+    render(
+      <DebugPanel
+        events={[]}
+        title="t"
+        onClose={vi.fn()}
+        detail={{
+          sessionId: 'sess-123',
+          channelId: 'chan-current',
+          channelHistory: [
+            { channelId: 'chan-old-1', startedAt: 1 },
+            { channelId: 'chan-old-2', startedAt: 2 },
+          ],
+          senderId: 'phone-abc',
+          addedAt: 1_700_000_000_000,
+          lastHeartbeat: 1_700_000_100_000,
+          lastEventAt: 1_700_000_090_000,
+          status: 'live',
+          mode: 'default',
+        }}
+      />,
+    );
+
+    // Tabs render; switching to Dev detail shows identity facts.
+    await user.click(screen.getByRole('tab', { name: 'Dev detail' }));
+    expect(screen.getByText('sess-123')).toBeInTheDocument();
+    expect(screen.getByText('chan-current')).toBeInTheDocument();
+    expect(screen.getByText('chan-old-1, chan-old-2')).toBeInTheDocument();
+    expect(screen.getByText('phone-abc')).toBeInTheDocument();
+  });
+
+  it('does not render tabs when no detail is provided (event log only)', () => {
+    render(<DebugPanel events={[]} title="t" onClose={vi.fn()} />);
+    expect(screen.queryByRole('tab', { name: 'Dev detail' })).not.toBeInTheDocument();
+  });
 });

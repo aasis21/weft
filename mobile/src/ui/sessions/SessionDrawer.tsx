@@ -7,6 +7,7 @@ interface SessionDrawerProps {
   onSelect(channelId: string): void;
   onAddSession(): void;
   onRemove(channelId: string): void;
+  onRename?(channelId: string, title: string): void;
   onGoHome(): void;
   onClose(): void;
 }
@@ -46,6 +47,7 @@ export function SessionDrawer({
   onSelect,
   onAddSession,
   onRemove,
+  onRename,
   onGoHome,
   onClose,
 }: SessionDrawerProps): JSX.Element {
@@ -53,7 +55,19 @@ export function SessionDrawer({
   const triggerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   const [query, setQuery] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
   onCloseRef.current = onClose;
+
+  const beginRename = (id: string, current: string): void => {
+    setEditingId(id);
+    setDraft(current);
+  };
+  const commitRename = (id: string): void => {
+    onRename?.(id, draft);
+    setEditingId(null);
+  };
+  const cancelRename = (): void => setEditingId(null);
 
   const filteredSessions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -192,9 +206,29 @@ export function SessionDrawer({
                   />
                   <span className="session-info">
                     <span className="session-title">
-                      {session.meta.title}
-                      {session.meta.kind === 'demo' ? <span className="tag demo">demo</span> : null}
-                      {pending > 0 ? <span className="tag alert">{pending} approval</span> : null}
+                      {editingId === id ? (
+                        <input
+                          className="session-rename-input"
+                          type="text"
+                          value={draft}
+                          autoFocus
+                          aria-label="Rename session"
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') commitRename(id);
+                            if (e.key === 'Escape') cancelRename();
+                          }}
+                          onBlur={() => commitRename(id)}
+                        />
+                      ) : (
+                        <>
+                          {session.meta.title}
+                          {session.meta.kind === 'demo' ? <span className="tag demo">demo</span> : null}
+                          {pending > 0 ? <span className="tag alert">{pending} approval</span> : null}
+                        </>
+                      )}
                     </span>
                     <span className="session-sub">
                       {turnCount(session)} msg
@@ -205,6 +239,20 @@ export function SessionDrawer({
                       {session.meta.cwd ? ` · ${session.meta.cwd.split(/[\\/]/).pop()}` : ''}
                     </span>
                   </span>
+                  {session.meta.kind !== 'demo' && editingId !== id ? (
+                    <button
+                      className="icon-btn row-rename"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        beginRename(id, session.meta.title);
+                      }}
+                      title="Rename session"
+                      aria-label="Rename session"
+                    >
+                      ✎
+                    </button>
+                  ) : null}
                   <button
                     className="icon-btn row-x"
                     type="button"

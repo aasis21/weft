@@ -2,9 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { DebugEvent } from '@/lib/eventLog';
 
+export interface DebugDetail {
+  sessionId?: string;
+  channelId: string;
+  channelHistory?: { channelId: string; startedAt: number; endedAt?: number }[];
+  senderId: string;
+  addedAt: number;
+  lastHeartbeat: number | null;
+  lastEventAt: number | null;
+  status: string;
+  mode?: string;
+}
+
 interface DebugPanelProps {
   events: DebugEvent[];
   title: string;
+  detail?: DebugDetail;
   onClose(): void;
 }
 
@@ -24,13 +37,17 @@ function fmtTime(ts: number): string {
   }
 }
 
-/**
- * Per-session debug overlay: the raw wire event chain, newest-first. Each row shows direction
- * (↓ received from the laptop / ↑ sent from this phone), the eventType.eventSubtype, the sender
- * label, and a timestamp; tap a row to expand its (compacted) payload. The list is persisted per
- * session, so it survives reloads and reconnects.
- */
-export function DebugPanel({ events, title, onClose }: DebugPanelProps): JSX.Element {
+function fmtStamp(ts: number | null | undefined): string {
+  if (!ts) return '—';
+  try {
+    return new Date(ts).toLocaleString(undefined, { hour12: false });
+  } catch {
+    return String(ts);
+  }
+}
+
+export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps): JSX.Element {
+  const [tab, setTab] = useState<'log' | 'detail'>('log');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const ordered = useMemo(() => [...events].reverse(), [events]);
   const toggle = (id: string): void => setExpanded((m) => ({ ...m, [id]: !m[id] }));
@@ -99,7 +116,7 @@ export function DebugPanel({ events, title, onClose }: DebugPanelProps): JSX.Ele
       <div className="debug-panel">
         <header className="debug-head">
           <div className="debug-head-text">
-            <span className="debug-title">Event log</span>
+            <span className="debug-title">Debug</span>
             <span className="debug-sub">
               {title} · {events.length} event{events.length === 1 ? '' : 's'}
             </span>
@@ -116,7 +133,56 @@ export function DebugPanel({ events, title, onClose }: DebugPanelProps): JSX.Ele
           </button>
         </header>
 
-        {ordered.length === 0 ? (
+        {detail ? (
+          <div className="debug-tabs" role="tablist" aria-label="Debug views">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'log'}
+              className={`debug-tab ${tab === 'log' ? 'active' : ''}`}
+              onClick={() => setTab('log')}
+            >
+              Event log
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'detail'}
+              className={`debug-tab ${tab === 'detail' ? 'active' : ''}`}
+              onClick={() => setTab('detail')}
+            >
+              Dev detail
+            </button>
+          </div>
+        ) : null}
+
+        {detail && tab === 'detail' ? (
+          <dl className="debug-detail" aria-label="Session detail">
+            <dt>Session id</dt>
+            <dd className="mono">{detail.sessionId ?? '— (not yet reported)'}</dd>
+            <dt>Latest channel id</dt>
+            <dd className="mono">{detail.channelId}</dd>
+            <dt>Previous channels</dt>
+            <dd className="mono">
+              {detail.channelHistory && detail.channelHistory.length > 0
+                ? detail.channelHistory.map((c) => c.channelId).join(', ')
+                : '— (none)'}
+            </dd>
+            <dt>Sender (device) id</dt>
+            <dd className="mono">{detail.senderId}</dd>
+            <dt>Status / mode</dt>
+            <dd>
+              {detail.status}
+              {detail.mode ? ` · ${detail.mode}` : ''}
+            </dd>
+            <dt>Started</dt>
+            <dd>{fmtStamp(detail.addedAt)}</dd>
+            <dt>Latest heartbeat</dt>
+            <dd>{fmtStamp(detail.lastHeartbeat)}</dd>
+            <dt>Latest event</dt>
+            <dd>{fmtStamp(detail.lastEventAt)}</dd>
+          </dl>
+        ) : ordered.length === 0 ? (
           <p className="debug-empty">No events captured yet.</p>
         ) : (
           <ol className="debug-list">

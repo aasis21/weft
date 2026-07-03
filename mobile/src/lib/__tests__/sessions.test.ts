@@ -59,6 +59,34 @@ describe('sessions storage', () => {
     expect(loaded[0]).toMatchObject({ sessionId: 'same', lastSeenAt: 20 });
   });
 
+  it('prefers the freshly re-scanned channel (newer savedAt) even if its open time is older (#130)', async () => {
+    // Simulate a crash between a `copilot --resume` re-scan and channel_up: the OLD dead channel was
+    // opened more recently (higher lastSeenAt), but the NEW channel was scanned later (higher
+    // pairing.savedAt). The newer scan must win, not the newer open.
+    const stale = {
+      pairing: pairing('stale-ch', 100),
+      title: 'Session',
+      cwd: null,
+      addedAt: 100,
+      lastSeenAt: 500, // opened most recently
+      sessionId: 'dur',
+    } satisfies StoredSession;
+    const rescanned = {
+      pairing: pairing('fresh-ch', 900), // scanned later
+      title: 'Session',
+      cwd: null,
+      addedAt: 900,
+      lastSeenAt: 200,
+      sessionId: 'dur',
+    } satisfies StoredSession;
+    await upsertSession(stale);
+    await upsertSession(rescanned);
+
+    const loaded = await loadSessions();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].pairing.channelId).toBe('fresh-ch');
+  });
+
   it('does not collapse missing, null, or unknown-session session ids', async () => {
     await upsertSession(session('none-a', { sessionId: undefined }));
     await upsertSession(session('none-b', { sessionId: undefined }));

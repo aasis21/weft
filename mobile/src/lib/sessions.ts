@@ -21,6 +21,9 @@ export interface StoredSession {
   unread?: boolean;
   /** Number of unread host turns/events, persisted so a reload keeps the "N new" count. */
   unreadCount?: number;
+  /** True once the user renamed this session on the phone; keeps the CLI title from overriding the
+   *  user's chosen name after reload/resume (#37). */
+  renamed?: boolean;
 }
 
 async function read(): Promise<StoredSession[]> {
@@ -41,8 +44,27 @@ async function write(list: StoredSession[]): Promise<void> {
   globalThis.localStorage?.setItem(SESSIONS_KEY, value);
 }
 
+/** Rank used to pick the winner among stored entries sharing a sessionId, compared lexicographically:
+ *  most-recent scan (`pairing.savedAt`, bumped on every re-pair) first, then real host activity
+ *  (`lastEventAt`), then the last *open* time (`lastSeenAt`). Preferring scan time means a crash
+ *  between a `copilot --resume` re-scan and `channel_up` keeps the freshly-scanned channel, not the
+ *  old dead one that merely happened to be opened more recently (#130); the lower tiers still break
+ *  ties when two entries were scanned at the same instant. */
+function dedupeRank(s: StoredSession): [number, number, number] {
+  return [s.pairing?.savedAt ?? 0, s.lastEventAt ?? 0, s.lastSeenAt ?? 0];
+}
+
+function rankNewer(a: StoredSession, b: StoredSession): boolean {
+  const ra = dedupeRank(a);
+  const rb = dedupeRank(b);
+  for (let i = 0; i < ra.length; i++) {
+    if (ra[i] !== rb[i]) return ra[i] > rb[i];
+  }
+  return false;
+}
+
 /** Collapse stored entries that share a real sessionId (e.g. a session re-paired under a new
- *  channelId before the live reconcile removed the old one). Keeps the most-recently-seen channel,
+ *  channelId before the live reconcile removed the old one). Keeps the most-recently-active channel,
  *  preserving list order. */
 function dedupeBySessionId(list: StoredSession[]): StoredSession[] {
   const seen = new Map<string, StoredSession>();
@@ -57,7 +79,7 @@ function dedupeBySessionId(list: StoredSession[]): StoredSession[] {
     if (!prior) {
       seen.set(sid, s);
       out.push(s);
-    } else if ((s.lastSeenAt ?? 0) > (prior.lastSeenAt ?? 0)) {
+    } else if (rankNewer(s, prior)) {
       seen.set(sid, s);
       const idx = out.indexOf(prior);
       if (idx >= 0) out[idx] = s;
@@ -100,7 +122,7 @@ export async function upsertSession(session: StoredSession): Promise<void> {
 export async function patchSession(
   channelId: string,
   patch: Partial<
-    Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId' | 'lastEventAt' | 'unread' | 'unreadCount'>
+    Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId' | 'lastEventAt' | 'unread' | 'unreadCount' | 'renamed'>
   >,
 ): Promise<void> {
   const list = await read();

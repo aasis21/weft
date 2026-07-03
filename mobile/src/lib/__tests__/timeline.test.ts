@@ -370,7 +370,6 @@ describe('timeline reducer', () => {
       B.approvalDecision('a1', 'allow'),
       B.elicitationResponse('e1', 'accept', { value: 'x' }),
       B.interrupt(),
-      B.historyRequest(),
       B.stateRequest(),
     ];
     for (const msg of ignoredKinds) expect(reduceTimeline(input, at(msg, 92) as EventEnvelope)).toBe(input);

@@ -225,7 +225,7 @@ export function getSenderName(): string {
   }
 }
 
-function getStableDeviceId(): string {
+export function getStableDeviceId(): string {
   const key = 'helm.deviceId.v1';
   const existing = globalThis.localStorage?.getItem(key);
   if (existing) return existing;
