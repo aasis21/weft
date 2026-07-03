@@ -60,9 +60,21 @@ const SLASH_COMMANDS: SlashCommand[] = [
 ];
 
 const DRAFT_KEY_PREFIX = 'helm.draft.v1.';
+const ATTACHMENTS_KEY_PREFIX = 'helm.draft-attachments.v1.';
+const SEND_AFTER_STOP_SUPPRESS_MS = 500;
 
 function draftKey(sessionId: string): string {
   return `${DRAFT_KEY_PREFIX}${sessionId}`;
+}
+
+function attachmentsKey(sessionId: string): string {
+  return `${ATTACHMENTS_KEY_PREFIX}${sessionId}`;
+}
+
+function isPromptAttachment(value: unknown): value is PromptAttachment {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<PromptAttachment>;
+  return typeof item.data === 'string' && typeof item.mimeType === 'string' && typeof item.name === 'string';
 }
 
 function loadDraft(sessionId: string): string {
@@ -83,6 +95,33 @@ function saveDraft(sessionId: string, value: string): void {
   } catch {
     // localStorage can be unavailable in private or embedded contexts.
   }
+}
+
+function loadAttachments(sessionId: string): PromptAttachment[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(attachmentsKey(sessionId));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isPromptAttachment).slice(0, MAX_ATTACHMENTS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAttachments(sessionId: string, value: PromptAttachment[]): void {
+  try {
+    if (value.length) {
+      globalThis.localStorage?.setItem(attachmentsKey(sessionId), JSON.stringify(value.slice(0, MAX_ATTACHMENTS)));
+    } else {
+      globalThis.localStorage?.removeItem(attachmentsKey(sessionId));
+    }
+  } catch {
+    // localStorage can be unavailable or full; keep the in-memory draft usable.
+  }
+}
+
+function nowMs(): number {
+  return globalThis.performance?.now?.() ?? Date.now();
 }
 
 function basename(path: string | null): string | null {
@@ -117,15 +156,25 @@ export function Composer({
   const modeButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const speechCommittedRef = useRef('');
+  const sessionIdRef = useRef(sessionId);
+  const attachmentGenerationRef = useRef(0);
+  const actionPointerStartedBusyRef = useRef(false);
+  const suppressSendUntilRef = useRef(0);
   const speech = useSpeechInput();
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  sessionIdRef.current = sessionId;
 
-  const onTextChange = (value: string): void => {
+  const applyTextChange = (targetSessionId: string, value: string): void => {
+    if (sessionIdRef.current !== targetSessionId) return;
     setText(value);
     setSlashDismissed(false);
-    saveDraft(sessionId, value);
+    saveDraft(targetSessionId, value);
+  };
+
+  const onTextChange = (value: string): void => {
+    applyTextChange(sessionId, value);
   };
 
   useEffect(() => {
@@ -136,8 +185,12 @@ export function Composer({
   }, [text]);
 
   useEffect(() => {
+    attachmentGenerationRef.current += 1;
+    speech.stop();
+    speechCommittedRef.current = '';
     setText(loadDraft(sessionId));
-    setAttachments([]);
+    setAttachments(loadAttachments(sessionId));
+    setAttaching(false);
     setAttachError(null);
   }, [sessionId]);
 
@@ -171,6 +224,7 @@ export function Composer({
   }, [commandQuery]);
 
   const send = async (): Promise<void> => {
+    if (nowMs() < suppressSendUntilRef.current) return;
     const trimmed = text.trim();
     const outgoing = attachments;
     if ((!trimmed && outgoing.length === 0) || disabled || busy || attaching) return;
@@ -180,6 +234,7 @@ export function Composer({
     setAttachError(null);
     setSlashDismissed(false);
     saveDraft(sessionId, '');
+    saveAttachments(sessionId, []);
     await onPrompt(trimmed, outgoing.length ? outgoing : undefined);
   };
 
@@ -193,6 +248,8 @@ export function Composer({
     const files = Array.from(input.files ?? []);
     input.value = ''; // let the user re-pick the same file after removing it
     if (!files.length) return;
+    const pickedSessionId = sessionId;
+    const generation = attachmentGenerationRef.current;
     const room = MAX_ATTACHMENTS - attachments.length;
     if (room <= 0) {
       setAttachError(`Up to ${MAX_ATTACHMENTS} images per message.`);
@@ -210,14 +267,25 @@ export function Composer({
         failed += 1;
       }
     }
-    if (next.length) setAttachments((prev) => [...prev, ...next]);
+    if (generation !== attachmentGenerationRef.current || sessionIdRef.current !== pickedSessionId) return;
+    if (next.length) {
+      setAttachments((prev) => {
+        const updated = [...prev, ...next].slice(0, MAX_ATTACHMENTS);
+        saveAttachments(pickedSessionId, updated);
+        return updated;
+      });
+    }
     if (failed) setAttachError(`Couldn't attach ${failed} image${failed > 1 ? 's' : ''}.`);
     else if (files.length > room) setAttachError(`Only ${room} more image${room > 1 ? 's' : ''} fit.`);
     setAttaching(false);
   };
 
   const removeAttachment = (index: number): void => {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setAttachments((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      saveAttachments(sessionId, updated);
+      return updated;
+    });
     setAttachError(null);
   };
 
@@ -261,15 +329,41 @@ export function Composer({
   const toggleSpeech = (): void => {
     if (speech.listening) {
       speech.stop();
+      speechCommittedRef.current = '';
       return;
     }
+    const speechSessionId = sessionId;
     speechCommittedRef.current = text;
     speech.start((spokenText, isFinal) => {
+      if (sessionIdRef.current !== speechSessionId) return;
       const committed = speechCommittedRef.current;
       const next = committed ? `${committed} ${spokenText}` : spokenText;
       if (isFinal) speechCommittedRef.current = next;
-      onTextChange(next);
+      applyTextChange(speechSessionId, next);
     });
+  };
+
+  const suppressSendAfterStopTap = (): void => {
+    suppressSendUntilRef.current = Math.max(suppressSendUntilRef.current, nowMs() + SEND_AFTER_STOP_SUPPRESS_MS);
+  };
+
+  const onActionPointerDown = (): void => {
+    actionPointerStartedBusyRef.current = busy;
+    if (busy) suppressSendAfterStopTap();
+  };
+
+  const onActionClick = (): void => {
+    if (actionPointerStartedBusyRef.current) {
+      actionPointerStartedBusyRef.current = false;
+      if (busy) onInterrupt();
+      return;
+    }
+    if (busy) {
+      suppressSendAfterStopTap();
+      onInterrupt();
+      return;
+    }
+    void send();
   };
 
   const focusMenuItem = (direction: 1 | -1): void => {
@@ -442,30 +536,23 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            {busy ? (
-              <button
-                className="stop-btn"
-                type="button"
-                onClick={onInterrupt}
-                aria-label="Stop generating"
-                title="Stop generating"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <button
+              className={busy ? 'stop-btn' : 'send-btn'}
+              type="button"
+              onPointerDown={onActionPointerDown}
+              onClick={onActionClick}
+              disabled={!busy && (disabled || attaching || (!text.trim() && attachments.length === 0))}
+              aria-label={busy ? 'Stop generating' : 'Send'}
+              title={busy ? 'Stop generating' : undefined}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                {busy ? (
                   <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                className="send-btn"
-                type="submit"
-                disabled={disabled || attaching || (!text.trim() && attachments.length === 0)}
-                aria-label="Send"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                ) : (
                   <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
-                </svg>
-              </button>
-            )}
+                )}
+              </svg>
+            </button>
           </div>
         </div>
       </div>

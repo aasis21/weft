@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ChatThread } from '@/ui/thread/ChatThread';
@@ -94,5 +94,88 @@ describe('ChatThread', () => {
     expect(img).toHaveClass('msg-attachment');
     expect(img).toHaveAttribute('src', 'data:image/jpeg;base64,aW1n');
     expect(screen.queryByText('screenshot.jpg')).not.toBeInTheDocument();
+  });
+
+  it('does not show the working row for a failed latest send', () => {
+    render(
+      <ChatThread
+        streaming
+        busy
+        items={[{ kind: 'user', id: 'u-failed', text: 'send me', ts: now, failed: true }]}
+      />,
+    );
+
+    expect(screen.getByText('Not delivered')).toBeInTheDocument();
+    expect(screen.queryByText('working…')).not.toBeInTheDocument();
+  });
+
+  it('does not render empty assistant rows between tool cards', () => {
+    const items: TimelineItem[] = [
+      {
+        kind: 'tool',
+        id: 'tool-1',
+        name: 'powershell',
+        args: { command: 'npm test' },
+        status: 'success',
+        startedAt: now,
+        finishedAt: now + 1,
+        ts: now,
+      },
+      { kind: 'assistant', id: 'empty-assistant', text: '  \n', ts: now + 1 },
+      {
+        kind: 'tool',
+        id: 'tool-2',
+        name: 'view',
+        args: { path: 'src/app.tsx' },
+        status: 'success',
+        startedAt: now + 2,
+        finishedAt: now + 3,
+        ts: now + 2,
+      },
+    ];
+    const { container } = render(<ChatThread items={items} />);
+
+    expect(container.querySelectorAll('.row.tool')).toHaveLength(2);
+    expect(container.querySelector('.row.assistant')).not.toBeInTheDocument();
+  });
+
+  it('marks a user row that directly follows a rendered tool card', () => {
+    const items: TimelineItem[] = [
+      {
+        kind: 'tool',
+        id: 'tool-1',
+        name: 'powershell',
+        args: { command: 'npm test' },
+        status: 'success',
+        startedAt: now,
+        finishedAt: now + 1,
+        ts: now,
+      },
+      { kind: 'assistant', id: 'empty-assistant', text: '', ts: now + 1 },
+      { kind: 'user', id: 'u-next', text: 'next prompt', ts: now + 2 },
+    ];
+
+    render(<ChatThread items={items} />);
+
+    expect(screen.getByText('next prompt').closest('.row')).toHaveClass('user', 'after-tool');
+  });
+
+  it('renders the jump-to-latest control as an icon-only button', () => {
+    const { container } = render(
+      <div className="thread-scroll">
+        <ChatThread items={[{ kind: 'assistant', id: 'a1', text: 'reply', ts: now }]} />
+      </div>,
+    );
+    const scroller = container.querySelector('.thread-scroll') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
+
+    fireEvent.scroll(scroller);
+
+    const button = screen.getByRole('button', { name: 'Scroll to latest' });
+    expect(button).toHaveTextContent('');
+    expect(button.querySelector('svg')).toBeInTheDocument();
+    expect(button.querySelector('span')).not.toBeInTheDocument();
   });
 });

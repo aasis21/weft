@@ -65,8 +65,14 @@ async function makeDetector(): Promise<DetectFrame> {
 export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrScannerProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const onResultRef = useRef(onResult);
+  const resultDeliveredRef = useRef(false);
   const [status, setStatus] = useState('Requesting camera…');
   const [fatal, setFatal] = useState(false);
+
+  useEffect(() => {
+    onResultRef.current = onResult;
+  }, [onResult]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -115,7 +121,10 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
           const raw = await detect(video, canvas);
           if (raw) {
             stopped = true;
-            onResult(raw);
+            if (!resultDeliveredRef.current) {
+              resultDeliveredRef.current = true;
+              onResultRef.current(raw);
+            }
             return;
           }
         } catch {
@@ -131,7 +140,7 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
       cancelAnimationFrame(frame);
       stream?.getTracks().forEach((track) => track.stop());
     };
-  }, [onResult]);
+  }, []);
 
   return (
     <div

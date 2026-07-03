@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { WebQrScanner } from '@/ui/pairing/WebQrScanner';
 import { isNativeRuntime, scanNativeQr, usePairing } from '@/ui/hooks/usePairing';
@@ -59,29 +59,38 @@ export function JoinSessionScreen({
     void setDebugModeEnabled(next);
   };
 
-  const pair = (raw: string): Promise<void> =>
-    run(async () => {
-      try {
-        await onPair(raw);
-      } catch (err) {
-        setScanNonce((n) => n + 1);
-        throw err;
-      }
-    });
+  const pair = useCallback(
+    (raw: string): Promise<void> =>
+      run(async () => {
+        try {
+          await onPair(raw);
+        } catch (err) {
+          setScanNonce((n) => n + 1);
+          throw err;
+        }
+      }),
+    [onPair, run],
+  );
 
-  const nativeScan = (): Promise<void> =>
-    run(async () => {
-      const raw = await scanNativeQr();
-      await onPair(raw);
-    });
+  const nativeScan = useCallback(
+    (): Promise<void> =>
+      run(async () => {
+        const raw = await scanNativeQr();
+        await onPair(raw);
+      }),
+    [onPair, run],
+  );
+
+  const handleScannerResult = useCallback((raw: string): void => {
+    void pair(raw);
+  }, [pair]);
 
   // On native there is no in-page camera, so open the ML Kit sheet once on mount.
   useEffect(() => {
     if (!native || autoScanned.current) return;
     autoScanned.current = true;
     void nativeScan();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [native, nativeScan]);
 
   const backLabel = hasSessions ? 'Back to sessions' : 'Back';
 
@@ -114,7 +123,7 @@ export function JoinSessionScreen({
           <WebQrScanner
             key={scanNonce}
             variant="inline"
-            onResult={(raw) => void pair(raw)}
+            onResult={handleScannerResult}
             onCancel={() => undefined}
           />
         )}

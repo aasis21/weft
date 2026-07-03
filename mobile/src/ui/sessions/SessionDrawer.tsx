@@ -24,10 +24,8 @@ function fmtRelative(ts: number | null): string {
 
 function lastActivity(session: SessionView): number | null {
   const items = session.timeline.items;
-  const lastTs = items.length > 0 ? items[items.length - 1].ts : null;
-  return (
-    Math.max(lastTs ?? 0, session.timeline.lastHeartbeat ?? 0, session.lastEventAt ?? 0) || null
-  );
+  const lastRealItem = items.findLast((item) => item.kind === 'user' || item.kind === 'assistant' || item.kind === 'tool');
+  return Math.max(lastRealItem?.ts ?? 0, session.lastEventAt ?? 0) || null;
 }
 
 function turnCount(session: SessionView): number {

@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { emptyTimeline, type TimelineState } from '@/lib/timeline';
 import type { SessionView } from '@/session/view';
@@ -29,6 +29,10 @@ function session(
 }
 
 describe('SessionDrawer', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('renders sessions newest-first using activity, highlights the active row, and shows badges', () => {
     const olderTimeline: TimelineState = {
       ...emptyTimeline(),
@@ -57,6 +61,36 @@ describe('SessionDrawer', () => {
     ]);
     expect(within(rows[1]).getByText('Needs approval').closest('.session-row')).toHaveClass('current');
     expect(within(rows[1]).getByText('1 approval')).toHaveClass('tag', 'alert');
+  });
+
+  it('renders last active from real activity and ignores heartbeat-only pings', () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const activeTimeline: TimelineState = {
+      ...emptyTimeline(),
+      items: [{ kind: 'user', id: 'u1', text: 'hello', ts: 700_000 }],
+      lastHeartbeat: 999_000,
+    };
+    const heartbeatOnlyTimeline: TimelineState = {
+      ...emptyTimeline(),
+      lastHeartbeat: 999_000,
+    };
+
+    render(
+      <SessionDrawer
+        sessions={[
+          session('active', 'Active', 2_000, { timeline: activeTimeline, cwd: '' }),
+          session('heartbeat', 'Heartbeat Only', 1_000, { timeline: heartbeatOnlyTimeline, cwd: '' }),
+        ]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Active').closest('.session-row')?.textContent).toContain('· 5m');
+    expect(screen.getByText('Heartbeat Only').closest('.session-row')?.textContent).not.toContain('· now');
   });
 
   it('selects a session row and removes via the row leave button without selecting', async () => {

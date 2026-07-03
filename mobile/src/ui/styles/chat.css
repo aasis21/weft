@@ -271,6 +271,7 @@
 
 /* user — right aligned, chip stacked beneath the bubble */
 .row.user { display: flex; flex-direction: column; align-items: flex-end; }
+.row.user.after-tool { margin-top: -2px; }
 .user-bubble {
   max-width: 84%;
   padding: 9px 13px;
@@ -1193,10 +1194,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 0;
   min-width: 44px;
+  width: 44px;
   min-height: 44px;
-  padding: 0 12px;
+  height: 44px;
+  padding: 0;
   border: 1px solid var(--bg-rule);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
@@ -1206,6 +1209,12 @@
   opacity: 0.96;
   transform: translateY(0) scale(1);
   transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.helm-session .scroll-latest-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
 .helm-session .scroll-latest:hover,

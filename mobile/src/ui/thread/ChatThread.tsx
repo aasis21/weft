@@ -85,6 +85,18 @@ function isAssistantSide(item: TimelineItem | undefined): boolean {
   return !!item && (item.kind === 'assistant' || item.kind === 'tool');
 }
 
+function isEmptyAssistant(item: TimelineItem | undefined): boolean {
+  return item?.kind === 'assistant' && item.text.trim().length === 0;
+}
+
+function previousRenderableItem(items: TimelineItem[], index: number): TimelineItem | undefined {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (!isEmptyAssistant(item)) return item;
+  }
+  return undefined;
+}
+
 function formatTime(ts: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(ts);
 }
@@ -357,7 +369,8 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   // assistant bubble. That old heuristic lit up "working…" on every idle join, since backfilled
   // history renders in `history[]` and leaves `items` empty. An assistant bubble is streaming its
   // own caret, so we suppress the row there.
-  const showThinking = streaming && last?.kind !== 'assistant' && (busy || last?.kind === 'user');
+  const latestSendFailed = last?.kind === 'user' && last.failed === true;
+  const showThinking = streaming && !latestSendFailed && last?.kind !== 'assistant' && (busy || last?.kind === 'user');
 
   return (
     <div className="chat-thread" ref={rootRef}>
@@ -510,8 +523,9 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
         if (item.kind === 'user') {
           const hasText = item.text.trim().length > 0;
           const images = item.attachments ?? [];
+          const followsTool = previousRenderableItem(items, idx)?.kind === 'tool';
           return (
-            <div key={item.id} className="row user">
+            <div key={item.id} className={`row user${followsTool ? ' after-tool' : ''}`}>
               {images.length > 0 ? (
                 <div className="msg-attachments">
                   {images.map((att, i) => (
@@ -590,6 +604,7 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
         }
 
         const caret = streaming && isLast;
+        if (item.text.trim().length === 0 && !caret) return null;
         return (
           <div key={item.id} className={`row assistant${turnStart ? ' turn-start' : ''}`}>
             {header}
@@ -628,9 +643,19 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
       ) : null}
 
       {!isPinned ? (
-        <button type="button" className="scroll-latest" aria-label="Scroll to latest" onClick={scrollToLatest}>
-          {hasNewWhileUnpinned ? <span>New</span> : null}
-          <span>Latest</span>
+        <button
+          type="button"
+          className="scroll-latest"
+          aria-label="Scroll to latest"
+          data-has-new={hasNewWhileUnpinned ? 'true' : undefined}
+          onClick={scrollToLatest}
+        >
+          <svg className="scroll-latest-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              fill="currentColor"
+              d="M12 17.5a1 1 0 0 1-.7-.29l-6-6a1 1 0 1 1 1.4-1.42L11 14.09V4a1 1 0 1 1 2 0v10.09l4.3-4.3a1 1 0 0 1 1.4 1.42l-6 6a1 1 0 0 1-.7.29zM5 20a1 1 0 1 1 0-2h14a1 1 0 1 1 0 2H5z"
+            />
+          </svg>
         </button>
       ) : null}
 

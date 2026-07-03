@@ -280,24 +280,39 @@ export function SessionScreen({
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return undefined;
-    // Address-bar show/hide on scroll nudges visualViewport's height/offsetTop by a few
-    // px even when no keyboard is open, which produced a false-positive inset and made
-    // the composer jitter up/down while scrolling. Real soft keyboards are always well
-    // over this threshold, so ignore anything below it and pin the composer down.
-    const KEYBOARD_INSET_THRESHOLD = 120;
+    // Address-bar show/hide on scroll can resize visualViewport without a keyboard.
+    // Only lift the fixed shell while a text-entry control is focused, so browser
+    // chrome animation never moves the composer.
+    const MIN_KEYBOARD_INSET = 160;
+    const isTextEntryFocused = (): boolean => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement)) return false;
+      if (active.isContentEditable) return true;
+      const tag = active.tagName.toLowerCase();
+      if (tag === 'textarea') return true;
+      if (tag !== 'input') return false;
+      return !['button', 'checkbox', 'file', 'hidden', 'radio', 'range', 'reset', 'submit'].includes(
+        (active as HTMLInputElement).type,
+      );
+    };
     const apply = (): void => {
       const el = rootRef.current;
       if (!el) return;
       const raw = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      const inset = raw >= KEYBOARD_INSET_THRESHOLD ? raw : 0;
+      const keyboardThreshold = Math.max(MIN_KEYBOARD_INSET, Math.round(window.innerHeight * 0.18));
+      const inset = isTextEntryFocused() && raw >= keyboardThreshold ? raw : 0;
       el.style.setProperty('--helm-kb', `${inset}px`);
     };
     apply();
     vv.addEventListener('resize', apply);
     vv.addEventListener('scroll', apply);
+    window.addEventListener('focusin', apply);
+    window.addEventListener('focusout', apply);
     return () => {
       vv.removeEventListener('resize', apply);
       vv.removeEventListener('scroll', apply);
+      window.removeEventListener('focusin', apply);
+      window.removeEventListener('focusout', apply);
     };
   }, []);
 

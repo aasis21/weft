@@ -15,6 +15,14 @@ const { fileToAttachment } = vi.hoisted(() => ({
   fileToAttachment: vi.fn<(file: File) => Promise<PromptAttachment>>(),
 }));
 
+const speechState = vi.hoisted(() => ({
+  supported: false,
+  listening: false,
+  error: null as string | null,
+  start: vi.fn<(onText: (text: string, isFinal: boolean) => void) => void>(),
+  stop: vi.fn<() => void>(),
+}));
+
 vi.mock('@/lib/imageAttachments', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/imageAttachments')>();
   return {
@@ -22,6 +30,18 @@ vi.mock('@/lib/imageAttachments', async (importOriginal) => {
     fileToAttachment,
   };
 });
+
+vi.mock('@/ui/hooks/useSpeechInput', () => ({
+  useSpeechInput: () => speechState,
+}));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
   const defaults: ComponentProps<typeof Composer> = {
@@ -43,7 +63,11 @@ function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
 describe('Composer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     fileToAttachment.mockResolvedValue(mockAttachment);
+    speechState.supported = false;
+    speechState.listening = false;
+    speechState.error = null;
   });
 
   it('renders the textbox above the action row controls', () => {
@@ -114,5 +138,79 @@ describe('Composer', () => {
 
     await user.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(onPrompt).toHaveBeenCalledWith('', [mockAttachment]));
+    expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toBeNull();
+  });
+
+  it('does not attach an image picked in a previous session after switching sessions', async () => {
+    const pending = deferred<PromptAttachment>();
+    fileToAttachment.mockReturnValueOnce(pending.promise);
+    const rendered = renderComposer();
+    const input = rendered.container.querySelector<HTMLInputElement>('input[type="file"].composer-file-input');
+    const file = new File(['fake'], 'picked.png', { type: 'image/png' });
+
+    fireEvent.change(input!, { target: { files: [file] } });
+    rendered.rerender(<Composer {...rendered.props} sessionId="session-b" />);
+    pending.resolve(mockAttachment);
+    await pending.promise;
+    await Promise.resolve();
+
+    expect(screen.queryByRole('img', { name: 'picked.jpg' })).not.toBeInTheDocument();
+    expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toBeNull();
+    expect(localStorage.getItem('helm.draft-attachments.v1.session-b')).toBeNull();
+  });
+
+  it('restores attached images per session', async () => {
+    const rendered = renderComposer();
+    const input = rendered.container.querySelector<HTMLInputElement>('input[type="file"].composer-file-input');
+    const file = new File(['fake'], 'picked.png', { type: 'image/png' });
+
+    fireEvent.change(input!, { target: { files: [file] } });
+    expect(await screen.findByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
+    expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toContain('picked.jpg');
+
+    rendered.rerender(<Composer {...rendered.props} sessionId="session-b" />);
+    expect(screen.queryByRole('img', { name: 'picked.jpg' })).not.toBeInTheDocument();
+
+    rendered.rerender(<Composer {...rendered.props} sessionId="session-a" />);
+    expect(screen.getByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
+  });
+
+  it('stops and ignores speech input when the session changes', async () => {
+    const user = userEvent.setup();
+    let onSpeech: ((text: string, isFinal: boolean) => void) | undefined;
+    speechState.supported = true;
+    speechState.start.mockImplementation((callback) => {
+      onSpeech = callback;
+      speechState.listening = true;
+    });
+    const rendered = renderComposer();
+
+    await user.click(screen.getByRole('button', { name: 'Start voice input' }));
+    expect(speechState.start).toHaveBeenCalledTimes(1);
+    speechState.stop.mockClear();
+
+    rendered.rerender(<Composer {...rendered.props} sessionId="session-b" />);
+    expect(speechState.stop).toHaveBeenCalledTimes(1);
+    onSpeech?.('wrong session words', true);
+
+    expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toHaveValue('');
+    expect(localStorage.getItem('helm.draft.v1.session-a')).toBeNull();
+    expect(localStorage.getItem('helm.draft.v1.session-b')).toBeNull();
+  });
+
+  it('does not send a draft when a stop tap finishes after busy clears', async () => {
+    const user = userEvent.setup();
+    const onPrompt = vi.fn();
+    const onInterrupt = vi.fn();
+    const rendered = renderComposer({ busy: true, onPrompt, onInterrupt });
+    const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+    await user.type(textbox, 'keep this draft');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Stop generating' }));
+    rendered.rerender(<Composer {...rendered.props} busy={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('keep this draft');
   });
 });

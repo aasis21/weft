@@ -115,7 +115,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   ];
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
-  push(100, () => extension.send(channelUp('C:\\Users\\akash\\helm', 'Demo session')));
+  push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session')));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>

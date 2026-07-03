@@ -339,13 +339,12 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
             <span className="elicit-step-count">
               Question {clampedStep + 1} of {fields.length}
             </span>
-            <div className="elicit-dots" role="tablist" aria-label="Questions">
+            <div className="elicit-dots" role="group" aria-label="Question progress">
               {fields.map((f, i) => (
                 <button
                   key={f.name}
                   type="button"
-                  role="tab"
-                  aria-selected={i === clampedStep}
+                  aria-current={i === clampedStep ? 'step' : undefined}
                   aria-label={`Question ${i + 1}: ${f.title}`}
                   className={`elicit-dot${i === clampedStep ? ' on' : ''}${
                     hasValue(f, values[f.name]) ? ' done' : ''
@@ -358,9 +357,9 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
 
           <div className="elicit-viewport" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
             <div className="elicit-track" style={{ transform: `translateX(-${clampedStep * 100}%)` }}>
-              {fields.map((f) => (
-                <div key={f.name} className="elicit-slide" aria-hidden={fields[clampedStep]?.name !== f.name}>
-                  {renderField(f)}
+              {fields.map((f, i) => (
+                <div key={f.name} className="elicit-slide" aria-hidden={i !== clampedStep}>
+                  {i === clampedStep ? renderField(f) : null}
                 </div>
               ))}
             </div>
@@ -398,6 +397,12 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
       ) : null}
 
       <div className="elicit-actions">
+        {isUrlMode ? (
+          <button type="button" className="elicit-btn submit" onClick={() => onSubmit({})} disabled={disabled}>
+            <span className="elicit-btn-icon" aria-hidden="true">✓</span>
+            Accept
+          </button>
+        ) : null}
         {!isUrlMode && !isWizard ? (
           <button type="button" className="elicit-btn submit" onClick={submit} disabled={disabled}>
             <span className="elicit-btn-icon" aria-hidden="true">✓</span>

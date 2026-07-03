@@ -314,6 +314,8 @@ export class SessionRuntime {
   private beginHostConfirm(channelId: string, client: HelmClient): void {
     const ctrl = this.controllers.get(channelId);
     if (!ctrl || ctrl.ephemeral || ctrl.client !== client) return;
+    const session = this.session(channelId);
+    if (!session || session.connection.status === 'ended') return;
     this.store.dispatch(statusSet({ id: channelId, status: 'connecting', error: undefined }));
     ctrl.connectingSince = this.clock();
     this.clearSettle(channelId);
@@ -572,6 +574,8 @@ export class SessionRuntime {
   private touchWarm(channelId: string): void {
     const ctrl = this.controllers.get(channelId);
     if (!ctrl || ctrl.ephemeral) return;
+    const session = this.session(channelId);
+    if (!session || session.connection.status === 'ended') return;
     const i = this.warmLru.indexOf(channelId);
     if (i >= 0) this.warmLru.splice(i, 1);
     this.warmLru.push(channelId);
@@ -673,7 +677,7 @@ export class SessionRuntime {
     const meta: SessionMeta = {
       channelId,
       title: 'Demo session',
-      cwd: 'C:\\Users\\akash\\helm',
+      cwd: '/home/user/my-project',
       kind: 'demo',
       addedAt: this.clock(),
     };
@@ -890,9 +894,18 @@ export class SessionRuntime {
     // authoritative and overrides this if the turn is genuinely still in flight.
     this.store.dispatch(interruptRequested({ id: channelId, ts: this.clock() }));
     try {
-      if (this.registry.get(channelId)) await this.send(channelId, interrupt());
-    } catch {
-      // A failed interrupt send must never crash the UI; the user can retry.
+      await this.send(channelId, interrupt());
+    } catch (err) {
+      const latest = this.session(channelId);
+      if (latest) {
+        this.store.dispatch(
+          statusSet({
+            id: channelId,
+            status: latest.connection.status,
+            error: errMessage(err, 'Couldn’t send Stop — tap to retry.'),
+          }),
+        );
+      }
     }
   }
 
