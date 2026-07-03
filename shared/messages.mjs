@@ -280,11 +280,16 @@ export const projectListRequest = () =>
 /**
  * Listener -> phone: the machine's registered projects + the listener's display name. `projects`
  * is `[{ name, path, isDefault }]` (path is informational for the phone; selection is by name).
+ * `deviceId` (optional) is a STABLE, NON-SECRET id the listener persists across `helm-cli start`
+ * restarts (see extension/src/deviceIdentity.mjs) so the phone can recognize "same laptop" even
+ * though its ephemeral pairing `channelId`/keypair are freshly minted every run (by design, for
+ * forward secrecy — see docs/pairing.md). Never derived from or tied to any cryptographic key.
  */
-export const projectList = (projects, deviceName) =>
+export const projectList = (projects, deviceName, deviceId) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.PROJECT_LIST, {
     projects: Array.isArray(projects) ? projects : [],
     deviceName: deviceName ?? null,
+    deviceId: deviceId ?? null,
   });
 /**
  * Phone -> listener: spawn a new Copilot session. `requestId` correlates the reply; `projectName`

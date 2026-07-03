@@ -178,7 +178,29 @@ const sessionsSlice = createSlice({
         device.projectsLoading = false;
         device.connected = true;
         device.error = undefined;
+        device.lastSeenAt = Date.now();
         if (action.payload.deviceName) device.name = action.payload.deviceName;
+      }
+    },
+    // Folds a stale duplicate device (same physical laptop, an OLDER ephemeral channelId from a
+    // prior `helm-cli start` run) into the surviving `channelId` entry. See devices.ts
+    // reconcileDeviceId — this reducer mirrors that persisted merge into redux state.
+    deviceReconciled(
+      state,
+      action: PayloadAction<{
+        channelId: string;
+        removedChannelIds: string[];
+        merged: Partial<ListenerDeviceState>;
+      }>,
+    ) {
+      const { channelId, removedChannelIds, merged } = action.payload;
+      if (removedChannelIds.length > 0) {
+        state.devices = state.devices.filter((d) => !removedChannelIds.includes(d.channelId));
+      }
+      const device = state.devices.find((d) => d.channelId === channelId);
+      if (device) Object.assign(device, merged);
+      if (state.devices.length > 0 && !state.devices.some((d) => d.isDefault)) {
+        state.devices[0].isDefault = true;
       }
     },
     deviceErrorSet(state, action: PayloadAction<{ channelId: string; error?: string; connected?: boolean }>) {
@@ -186,6 +208,7 @@ const sessionsSlice = createSlice({
       if (device) {
         device.error = action.payload.error;
         if (action.payload.connected !== undefined) device.connected = action.payload.connected;
+        if (action.payload.connected) device.lastSeenAt = Date.now();
         if (action.payload.error) device.projectsLoading = false;
       }
     },
@@ -380,6 +403,7 @@ export const {
   deviceDefaultSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceReconciled,
   deviceErrorSet,
   deviceLastProjectSet,
   sessionAdded,

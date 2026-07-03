@@ -1623,6 +1623,52 @@
   color: var(--error);
 }
 
+.helm-session .device-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+
+.helm-session .device-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  flex: none;
+}
+
+.helm-session .device-status-online .device-status-dot {
+  background: #3fe0ce;
+  box-shadow: 0 0 0 3px rgba(63, 224, 206, 0.18);
+}
+
+.helm-session .device-status-online {
+  color: #2fae9f;
+}
+
+.helm-session .device-status-loading .device-status-dot {
+  background: #e0b23f;
+  animation: device-status-pulse 1.2s ease-in-out infinite;
+}
+
+.helm-session .device-status-offline .device-status-dot {
+  background: var(--fg-dim);
+  opacity: 0.5;
+}
+
+.helm-session .device-status-seen {
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+@keyframes device-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 
 /* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */
 @media (min-width: 768px) {

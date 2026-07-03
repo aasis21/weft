@@ -19,6 +19,24 @@ function deviceLabel(device: ListenerDeviceState): string {
   return device.name || `Listener ${device.channelId.slice(0, 8)}`;
 }
 
+function deviceStatus(device: ListenerDeviceState): { label: string; tone: 'online' | 'offline' | 'loading' } {
+  if (device.projectsLoading) return { label: 'Connecting…', tone: 'loading' };
+  if (device.connected) return { label: 'Online', tone: 'online' };
+  return { label: 'Offline', tone: 'offline' };
+}
+
+function formatLastSeen(ts?: number): string | null {
+  if (!ts) return null;
+  const diffMs = Date.now() - ts;
+  if (diffMs < 45_000) return 'just now';
+  const minutes = Math.round(diffMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
 export function StartSessionScreen({
   hasSessions,
   devices,
@@ -38,7 +56,13 @@ export function StartSessionScreen({
   const [error, setError] = useState<string | null>(null);
 
   const sortedDevices = useMemo(
-    () => [...devices].sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || b.savedAt - a.savedAt),
+    () =>
+      [...devices].sort(
+        (a, b) =>
+          Number(b.connected) - Number(a.connected) ||
+          Number(b.isDefault) - Number(a.isDefault) ||
+          (b.lastSeenAt ?? b.savedAt) - (a.lastSeenAt ?? a.savedAt),
+      ),
     [devices],
   );
   const selected = sortedDevices.find((d) => d.channelId === selectedId) ?? sortedDevices[0] ?? null;
@@ -97,13 +121,27 @@ export function StartSessionScreen({
             <label className="session-field">
               <span>Listener device</span>
               <select value={selected?.channelId ?? ''} onChange={(e) => setSelectedId(e.target.value)}>
-                {sortedDevices.map((device) => (
-                  <option key={device.channelId} value={device.channelId}>
-                    {deviceLabel(device)}{device.isDefault ? ' (default)' : ''}
-                  </option>
-                ))}
+                {sortedDevices.map((device) => {
+                  const status = deviceStatus(device);
+                  return (
+                    <option key={device.channelId} value={device.channelId}>
+                      {status.tone === 'online' ? '🟢' : status.tone === 'loading' ? '🟡' : '⚪️'} {deviceLabel(device)}
+                      {device.isDefault ? ' (default)' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </label>
+
+            {selected ? (
+              <div className={`device-status device-status-${deviceStatus(selected).tone}`}>
+                <span className="device-status-dot" aria-hidden="true" />
+                <span>{deviceStatus(selected).label}</span>
+                {formatLastSeen(selected.lastSeenAt) ? (
+                  <span className="device-status-seen">· last seen {formatLastSeen(selected.lastSeenAt)}</span>
+                ) : null}
+              </div>
+            ) : null}
 
             {selected ? (
               <div className="device-actions">

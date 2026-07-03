@@ -19,6 +19,7 @@ import {
 import { createTransport } from "./transportFactory.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
+import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
@@ -27,6 +28,7 @@ export function createListener({
   transport = null,
   keyPair = null,
   channelId = null,
+  deviceId = null,
   spawnFn,
   projectsApi = projectsStore,
   log = console,
@@ -34,6 +36,9 @@ export function createListener({
   let listenerTransport = transport;
   let listenerKeyPair = keyPair;
   let listenerChannelId = channelId;
+  // Stable, non-secret device id (persisted across restarts) — see deviceIdentity.mjs. Independent
+  // of listenerChannelId/listenerKeyPair, which stay ephemeral per run for forward secrecy.
+  const listenerDeviceId = deviceId ?? getOrCreateDeviceId();
   let pairingPayload = null;
   let pairingStop = null;
   let controlUnsub = null;
@@ -125,7 +130,7 @@ export function createListener({
       path: p.path,
       isDefault: p.isDefault === true || p.default === true,
     }));
-    await channel.send(projectList(projects, hostname()));
+    await channel.send(projectList(projects, hostname(), listenerDeviceId));
   }
 
   async function handleControl(envelope) {
@@ -194,6 +199,9 @@ export function createListener({
     stop,
     get channelId() {
       return listenerChannelId;
+    },
+    get deviceId() {
+      return listenerDeviceId;
     },
     get pairingPayload() {
       return pairingPayload;

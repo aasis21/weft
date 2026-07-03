@@ -40,6 +40,7 @@ import {
 import {
   loadDevices,
   patchDevice,
+  reconcileDeviceId,
   removeDevice,
   setDefaultDevice as persistDefaultDevice,
   upsertDevice,
@@ -82,6 +83,7 @@ import {
   deviceLastProjectSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceReconciled,
   deviceRemoved,
   devicesHydrated,
   deviceUpserted,
@@ -981,6 +983,19 @@ export class SessionRuntime {
     void this.refreshProjects(channelId);
   }
 
+  private async reconcileDevice(channelId: string, deviceId: string): Promise<void> {
+    try {
+      const { removedChannelIds, merged } = await reconcileDeviceId(channelId, deviceId);
+      this.store.dispatch(deviceReconciled({ channelId, removedChannelIds, merged }));
+      for (const dead of removedChannelIds) {
+        this.listenerController(dead)?.dispose();
+        this.listenerControllers.delete(dead);
+      }
+    } catch {
+      // Best-effort: a failed reconcile just means a stale duplicate lingers until the next one.
+    }
+  }
+
   private onListenerMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
@@ -988,6 +1003,10 @@ export class SessionRuntime {
       const msg = message.msg as ProjectListMsg;
       this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
+      // The listener's deviceId is stable across `helm-cli start` restarts even though this
+      // channelId is a fresh ephemeral pairing channel (forward secrecy). Fold any stale entry
+      // for the same physical laptop into this one instead of leaving a dead duplicate around.
+      if (msg.deviceId) void this.reconcileDevice(channelId, msg.deviceId);
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {

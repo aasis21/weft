@@ -67,9 +67,11 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
 
 function buildLaunch({ terminal, cwd, copilotArgs }) {
   if (terminal === "windows-terminal") {
+    // `copilot` resolves to copilot.cmd/.ps1 on Windows, not a .exe. wt.exe hands the command
+    // straight to CreateProcess (no PATHEXT resolution), so it must be routed through cmd.exe.
     return {
       command: "wt.exe",
-      args: ["new-tab", "--startingDirectory", cwd, "copilot", ...copilotArgs],
+      args: ["new-tab", "--startingDirectory", cwd, "cmd.exe", "/k", "copilot", ...copilotArgs],
     };
   }
   if (terminal === "macos-terminal") {

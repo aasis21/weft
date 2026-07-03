@@ -52,6 +52,7 @@ async function pairedHarness({ projects, spawnFn, log } = {}) {
     transport: listenerTransport,
     keyPair: listenerKeys,
     channelId,
+    deviceId: "test-device",
     projectsApi,
     spawnFn,
     log,
@@ -92,6 +93,7 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   const list = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
   assert.deepEqual(list.msg.projects, [{ name: "app", path: projectDir, isDefault: true }]);
   assert.ok(list.msg.deviceName);
+  assert.equal(list.msg.deviceId, "test-device");
   await listener.stop();
 });
 

@@ -274,6 +274,8 @@ export interface ProjectListMsg {
   projects: ListenerProject[];
   /** The listener machine's display name, or null. */
   deviceName: string | null;
+  /** Stable, non-secret device id persisted across `helm-cli start` restarts, or null. */
+  deviceId?: string | null;
 }
 export interface SpawnSessionMsg {
   requestId: string;
@@ -451,7 +453,8 @@ export function isValidEnvelope(env: unknown): env is EventEnvelope;
 export function projectListRequest(): ProjectListRequest;
 export function projectList(
   projects: ListenerProject[],
-  deviceName?: string | null
+  deviceName?: string | null,
+  deviceId?: string | null
 ): ProjectListMessage;
 export function spawnSession(
   requestId: string,
