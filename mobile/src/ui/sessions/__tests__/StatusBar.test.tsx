@@ -1,8 +1,21 @@
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+
+const mockEmptySnapshot = { ready: true, activeId: null as string | null, sessions: [] as unknown[], devices: [] as unknown[] };
+let mockSnapshot: typeof mockEmptySnapshot = mockEmptySnapshot;
+vi.mock('@/session/runtime/instance', () => ({
+  sessionRuntime: {
+    subscribe: () => () => {},
+    getSnapshot: () => mockSnapshot,
+  },
+}));
+
+afterEach(() => {
+  mockSnapshot = mockEmptySnapshot;
+});
 
 function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) {
   const defaults: ComponentProps<typeof StatusBar> = {
@@ -58,6 +71,21 @@ describe('StatusBar', () => {
     expect(screen.getByText('Quiet').closest('.status-line')).toHaveClass('idle');
   });
 
+  it('never shows "Live" while the active session carries a connection error — shows Offline instead (#185)', () => {
+    mockSnapshot = {
+      ready: true,
+      activeId: 'ch-err',
+      sessions: [{ meta: { channelId: 'ch-err' }, status: 'live', error: 'Couldn’t reach your session — the terminal may be closed.', cold: false }],
+      devices: [],
+    };
+    renderStatusBar({ status: 'live', busy: true });
+
+    expect(screen.queryByText('Live')).not.toBeInTheDocument();
+    expect(screen.queryByText('Working…')).not.toBeInTheDocument();
+    const statusLine = screen.getByText('Offline').closest('.status-line');
+    expect(statusLine).toHaveClass('error');
+  });
+
   it('opens the drawer, home button, menu actions, reconnect, and direct leave callback', async () => {
     const user = userEvent.setup();
     const onOpenDrawer = vi.fn();
@@ -93,6 +121,21 @@ describe('StatusBar', () => {
     // The ambiguous rollup badge was removed (#161); the drawer conveys unread per-session instead.
     expect(container.querySelector('.session-count')).not.toBeInTheDocument();
     expect(container.querySelector('.unread-badge')).not.toBeInTheDocument();
+  });
+
+  it('swaps the hamburger for a static Helm mark when the sidebar is already docked (#183)', async () => {
+    const user = userEvent.setup();
+    const onOpenDrawer = vi.fn();
+    const onGoHome = vi.fn();
+    renderStatusBar({ desktopDocked: true, onOpenDrawer, onGoHome });
+
+    expect(screen.queryByRole('button', { name: 'Open sessions' })).not.toBeInTheDocument();
+    const helmMark = screen.getByRole('button', { name: 'About Helm' });
+    expect(helmMark).toBeInTheDocument();
+
+    await user.click(helmMark);
+    expect(onGoHome).toHaveBeenCalledTimes(1);
+    expect(onOpenDrawer).not.toHaveBeenCalled();
   });
 
   it('exposes a visible New session button that calls onAddSession', async () => {

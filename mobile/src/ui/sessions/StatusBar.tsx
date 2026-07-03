@@ -18,6 +18,10 @@ interface StatusBarProps {
   onGoHome(): void;
   onOpenDebug(): void;
   onOpenSettings?(): void;
+  /** Desktop (#183): the session list is already docked and always visible, so the
+   *  hamburger that opens it would be redundant (and confusing — nothing "opens").
+   *  Show a static Helm mark instead, linking to About Helm like a typical app logo. */
+  desktopDocked?: boolean;
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -43,19 +47,25 @@ export function StatusBar({
   onGoHome,
   onOpenDebug,
   onOpenSettings,
+  desktopDocked = false,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const unreadCount = snapshot.sessions.filter((session) => session.unread && session.meta.channelId !== snapshot.activeId).length;
-  // While the agent is working the header reads "Working…" with a live pulse, so a connected but idle
-  // session ("Live") is visibly distinct from one that's actively churning a turn.
-  const working = busy && status === 'live';
+  const activeSession = snapshot.sessions.find((session) => session.meta.channelId === snapshot.activeId);
   // A cold (warm-pool-evicted) session has no live socket, so surface it as "Offline" rather than the
   // warm-idle "Quiet" — otherwise the header contradicts the thread's "waiting to reconnect" banner (#127).
-  const activeCold = snapshot.sessions.find((session) => session.meta.channelId === snapshot.activeId)?.cold ?? false;
-  const showCold = activeCold && status === 'idle' && !working;
+  const activeCold = activeSession?.cold ?? false;
+  // Hard invariant: the header must never read "Live"/"Quiet" while a reachability error banner is
+  // shown. If the active session carries a connection error, force the "Offline" header regardless of
+  // the raw status, so the pill can't contradict the banner below it (#185).
+  const errored = !!activeSession?.error && status !== 'ended';
+  // While the agent is working the header reads "Working…" with a live pulse, so a connected but idle
+  // session ("Live") is visibly distinct from one that's actively churning a turn.
+  const working = busy && status === 'live' && !errored;
+  const showCold = (activeCold && status === 'idle' && !working) || errored;
   const lineClass = working ? 'busy' : showCold ? 'error' : status;
   const statusLabel = working ? 'Working…' : showCold ? 'Offline' : STATUS_LABEL[status];
 
@@ -101,18 +111,30 @@ export function StatusBar({
 
   return (
     <header className="status-bar">
-      <button
-        className="icon-btn drawer-btn"
-        type="button"
-        onClick={onOpenDrawer}
-        aria-label={unreadCount > 0 ? `Open sessions, ${unreadCount} unread` : 'Open sessions'}
-      >
-        <span className="hamburger" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
-      </button>
+      {desktopDocked ? (
+        <button
+          className="icon-btn helm-mark-btn"
+          type="button"
+          onClick={onGoHome}
+          title="About Helm"
+          aria-label="About Helm"
+        >
+          <span className="helm-mark" aria-hidden="true">⎈</span>
+        </button>
+      ) : (
+        <button
+          className="icon-btn drawer-btn"
+          type="button"
+          onClick={onOpenDrawer}
+          aria-label={unreadCount > 0 ? `Open sessions, ${unreadCount} unread` : 'Open sessions'}
+        >
+          <span className="hamburger" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+      )}
 
       <div className="status-id">
         <span className="status-title" title={cwd ?? undefined}>{title}</span>

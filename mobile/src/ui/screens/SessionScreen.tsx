@@ -473,6 +473,7 @@ export function SessionScreen({
         onGoHome={onGoHome}
         onOpenDebug={() => setDebugOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        desktopDocked={isDesktopWide}
       />
 
       {debugOpen ? (

@@ -208,6 +208,10 @@
   border-radius: 2px;
   background: currentColor;
 }
+.helm-mark-btn .helm-mark {
+  font-size: 19px;
+  line-height: 1;
+}
 .session-count {
   position: absolute;
   top: 3px;
