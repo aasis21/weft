@@ -178,6 +178,8 @@ export function SessionScreen({
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const approvalStackRef = useRef<HTMLDivElement | null>(null);
   const prevApprovalCount = useRef(0);
+  const elicitationStackRef = useRef<HTMLDivElement | null>(null);
+  const prevElicitationCount = useRef(0);
   const { timeline, status, meta } = active;
   const ended = status === 'ended';
   // A turn is in flight whenever the agent reports it's busy (text/reasoning/tool) —
@@ -186,6 +188,10 @@ export function SessionScreen({
   const agentBusy =
     status === 'live' &&
     (timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
+  // Approval/elicitation decisions can only reach the laptop while it's on the line. Off-live, disable
+  // the controls so a decision isn't fired into a dead socket and silently lost (it would optimistically
+  // dismiss, hang, then restore); the offline banner already explains the state (#90).
+  const responsive = status === 'live';
   const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || status === 'idle');
   const offline = status === 'connecting' || status === 'idle';
   const offlineLabel = status === 'connecting' ? 'Connecting to your session…' : 'Session idle — waiting to reconnect.';
@@ -231,6 +237,16 @@ export function SessionScreen({
     }
     prevApprovalCount.current = count;
   }, [timeline.approvals.length]);
+
+  // Mirror the approval focus behavior for ask_user prompts so a newly arrived elicitation pulls
+  // screen-reader/keyboard focus to the form instead of it being missed below the fold (#107).
+  useEffect(() => {
+    const count = timeline.elicitations.length;
+    if (count > prevElicitationCount.current && count > 0) {
+      elicitationStackRef.current?.focus();
+    }
+    prevElicitationCount.current = count;
+  }, [timeline.elicitations.length]);
 
   useEffect(() => {
     if (timeline.approvals.length === 0) {
@@ -469,6 +485,7 @@ export function SessionScreen({
                          className={`approval-btn ${variant}`}
                          aria-label={decisionLabel}
                          title={decisionLabel}
+                         disabled={!responsive}
                          onClick={() => approveRequest(req.requestId, opt.id, isDeny)}
                        >
                          <span className="approval-btn-icon" aria-hidden="true">{isDeny ? '✕' : '✓'}</span>
@@ -483,16 +500,21 @@ export function SessionScreen({
           </div>
         ) : null}
 
-        {timeline.elicitations.map((req) => (
-          <ElicitationCard
-            key={req.requestId}
-            req={req}
-            error={timeline.elicitationErrors[req.requestId]}
-            onSubmit={(content) => onElicitationRespond(req.requestId, 'accept', content)}
-            onDecline={() => onElicitationRespond(req.requestId, 'decline')}
-            onCancel={() => onElicitationRespond(req.requestId, 'cancel')}
-          />
-        ))}
+        {timeline.elicitations.length > 0 ? (
+          <div className="elicit-stack" ref={elicitationStackRef} tabIndex={-1}>
+            {timeline.elicitations.map((req) => (
+              <ElicitationCard
+                key={req.requestId}
+                req={req}
+                error={timeline.elicitationErrors[req.requestId]}
+                disabled={!responsive}
+                onSubmit={(content) => onElicitationRespond(req.requestId, 'accept', content)}
+                onDecline={() => onElicitationRespond(req.requestId, 'decline')}
+                onCancel={() => onElicitationRespond(req.requestId, 'cancel')}
+              />
+            ))}
+          </div>
+        ) : null}
 
         <Composer
           sessionId={activeId}

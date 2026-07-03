@@ -52,19 +52,38 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | undefined {
   return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
 }
 
+function speechErrorMessage(code: string): string {
+  switch (code) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Microphone access blocked — allow it in your browser settings.';
+    case 'no-speech':
+      return "Didn't catch that — try speaking again.";
+    case 'audio-capture':
+      return 'No microphone found.';
+    case 'network':
+      return 'Network error during voice input.';
+    default:
+      return "Voice input isn't available right now.";
+  }
+}
+
 export function useSpeechInput(): {
   supported: boolean;
   listening: boolean;
+  error: string | null;
   start: (onText: (text: string, isFinal: boolean) => void) => void;
   stop: () => void;
 } {
   const [listening, setListening] = useState(false);
   const [supported] = useState(() => getSpeechRecognition() !== undefined);
+  const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   const start = useCallback((onText: (text: string, isFinal: boolean) => void): void => {
     const Ctor = getSpeechRecognition();
     if (!Ctor || recognitionRef.current) return;
+    setError(null);
     const recognition = new Ctor();
     recognition.lang = navigator.language;
     recognition.interimResults = true;
@@ -75,7 +94,9 @@ export function useSpeechInput(): {
       if (last) onText(last[0].transcript, last.isFinal);
     };
     recognition.onerror = (event) => {
-      if (event.error !== 'aborted') console.warn('voice error', event.error);
+      if (event.error === 'aborted') return;
+      console.warn('voice error', event.error);
+      setError(speechErrorMessage(event.error));
     };
     recognition.onend = () => {
       setListening(false);
@@ -97,5 +118,5 @@ export function useSpeechInput(): {
     recognitionRef.current = null;
   }, []);
 
-  return { supported, listening, start, stop };
+  return { supported, listening, error, start, stop };
 }

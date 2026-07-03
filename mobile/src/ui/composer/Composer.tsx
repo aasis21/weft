@@ -173,7 +173,7 @@ export function Composer({
   const send = async (): Promise<void> => {
     const trimmed = text.trim();
     const outgoing = attachments;
-    if ((!trimmed && outgoing.length === 0) || disabled || busy) return;
+    if ((!trimmed && outgoing.length === 0) || disabled || busy || attaching) return;
     if (speech.listening) speech.stop();
     setText('');
     setAttachments([]);
@@ -361,6 +361,7 @@ export function Composer({
         ) : null}
 
         {attachError ? <div className="composer-attach-error" role="status">{attachError}</div> : null}
+        {speech.error ? <div className="composer-attach-error" role="status">{speech.error}</div> : null}
 
         <textarea
           ref={areaRef}
@@ -457,7 +458,7 @@ export function Composer({
               <button
                 className="send-btn"
                 type="submit"
-                disabled={disabled || (!text.trim() && attachments.length === 0)}
+                disabled={disabled || attaching || (!text.trim() && attachments.length === 0)}
                 aria-label="Send"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

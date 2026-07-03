@@ -124,6 +124,21 @@ export function restoreApproval(session: Session, req: ApprovalRequestMsg, messa
   session.requests.approvalErrors = { ...session.requests.approvalErrors, [req.requestId]: message };
 }
 
+/**
+ * Optimistic local reaction to the user tapping Stop (#77): drop the busy flag and settle any tool
+ * still shown as "running" so the Stop affordance releases immediately even if the host is slow or
+ * dead. A later authoritative ACTIVITY/HEARTBEAT(busy) or TOOL_COMPLETE overrides this.
+ */
+export function markInterrupted(session: Session, ts: number): void {
+  session.connection.busy = false;
+  for (const item of session.transcript.items) {
+    if (item.kind === 'tool' && item.status === 'running') {
+      item.status = 'error';
+      item.finishedAt = ts;
+    }
+  }
+}
+
 export function applyEnvelope(session: Session, message: EventEnvelope): void {
   if (!(message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN)) {
     session.connection.status = 'live';
@@ -371,20 +386,19 @@ function highestTurnIndex(items: HistoryItem[]): number | null {
 }
 
 function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number): void {
-  session.connection.busy = Boolean(snap.busy);
+  // Only honor an explicit boolean (mirrors HEARTBEAT); a null/absent busy must never clear a live
+  // turn mid-flight (#99).
+  if (typeof snap.busy === 'boolean') session.connection.busy = snap.busy;
   session.connection.mode = snap.mode ?? session.connection.mode;
-  session.requests.approvals = mergePendingById(session.requests.approvals, snap.approvals ?? []);
-  session.requests.elicitations = mergePendingById(session.requests.elicitations, snap.elicitations ?? []);
+  // The snapshot is the extension's authoritative pending set (re-requested fresh on each attach),
+  // so REPLACE rather than add-only merge — otherwise an approval the CLI auto-denied, or that timed
+  // out during a socket gap, lingers forever as a zombie banner (#78). Decisions currently in flight
+  // are stripped upstream (sessionRuntime.filterInFlight) so a just-answered card can't reappear (#79).
+  session.requests.approvals = snap.approvals ?? [];
+  session.requests.elicitations = snap.elicitations ?? [];
   session.connection.lastHeartbeat = ts;
   session.connection.ended = false;
   session.history.latestTurnIndex = maxCursor(session.history.latestTurnIndex, snap.latestTurnIndex);
-}
-
-function mergePendingById<T extends { requestId: string }>(existing: T[], incoming: T[]): T[] {
-  if (!incoming || incoming.length === 0) return existing;
-  const seen = new Set(existing.map((p) => p.requestId));
-  const additions = incoming.filter((p) => p && p.requestId && !seen.has(p.requestId));
-  return additions.length ? [...existing, ...additions] : existing;
 }
 
 export interface PersistedSession {

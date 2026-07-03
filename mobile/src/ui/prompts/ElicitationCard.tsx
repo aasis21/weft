@@ -19,6 +19,7 @@ type Field =
 interface ElicitationCardProps {
   req: ElicitationRequestMsg;
   error?: string;
+  disabled?: boolean;
   onSubmit(content: Record<string, FieldValue>): void;
   onDecline(): void;
   onCancel(): void;
@@ -146,7 +147,7 @@ const HTML_INPUT_TYPE: Record<string, string> = {
  * string -> text honoring `format`), validates required fields, and reports the answer as
  * accept (with content), decline, or cancel — mirroring the terminal's ask_user choices.
  */
-export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: ElicitationCardProps): JSX.Element {
+export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecline, onCancel }: ElicitationCardProps): JSX.Element {
   const fields = useFields(req);
   const [values, setValues] = useState<Record<string, FieldValue>>(() => initialValues(fields));
   const [touched, setTouched] = useState(false);
@@ -375,7 +376,7 @@ export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: E
               ← Back
             </button>
             {atLast ? (
-              <button type="button" className="elicit-btn submit" onClick={submit}>
+              <button type="button" className="elicit-btn submit" onClick={submit} disabled={disabled}>
                 <span className="elicit-btn-icon" aria-hidden="true">✓</span>
                 Submit
               </button>
@@ -398,15 +399,15 @@ export function ElicitationCard({ req, error, onSubmit, onDecline, onCancel }: E
 
       <div className="elicit-actions">
         {!isUrlMode && !isWizard ? (
-          <button type="button" className="elicit-btn submit" onClick={submit}>
+          <button type="button" className="elicit-btn submit" onClick={submit} disabled={disabled}>
             <span className="elicit-btn-icon" aria-hidden="true">✓</span>
             Submit
           </button>
         ) : null}
-        <button type="button" className="elicit-btn decline" onClick={onDecline}>
+        <button type="button" className="elicit-btn decline" onClick={onDecline} disabled={disabled}>
           Decline
         </button>
-        <button type="button" className="elicit-btn cancel" onClick={onCancel}>
+        <button type="button" className="elicit-btn cancel" onClick={onCancel} disabled={disabled}>
           Cancel
         </button>
       </div>

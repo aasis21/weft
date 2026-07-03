@@ -42,4 +42,23 @@ describe('scenario: interrupt and mode', () => {
       ]),
     );
   });
+
+  it('optimistically clears busy and errors a running tool on Stop, without waiting for the host echo (#77)', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    client.emit(B.activity(true));
+    client.emit(B.toolStart('t1', 'write_file', { path: 'a.ts' }));
+    await h!.flush();
+    expect(h!.active()!.timeline.busy).toBe(true);
+    client.clearSent();
+
+    // Dead/slow host: the interrupt send never lands, but Stop must still free the UI immediately.
+    client.send = vi.fn().mockRejectedValue(new Error('offline'));
+    await h!.manager.sendInterrupt('c1');
+
+    const timeline = h!.active()!.timeline;
+    expect(timeline.busy).toBe(false);
+    const tool = timeline.items.find((i) => i.kind === 'tool' && i.id === 't1');
+    expect(tool).toMatchObject({ kind: 'tool', status: 'error' });
+  });
 });

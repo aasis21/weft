@@ -121,6 +121,7 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   const loadAnchorRef = useRef<number | null>(null);
   const pullStartRef = useRef<number | null>(null);
   const armedRef = useRef(false);
+  const prevItemsLenRef = useRef(items.length);
 
   const last = items[items.length - 1];
   const lastText = last && 'text' in last ? last.text : last?.kind;
@@ -303,9 +304,15 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   useEffect(() => {
     if (!pinnedRef.current && !lastIsUser) {
       setHasNewWhileUnpinned(true);
+      prevItemsLenRef.current = items.length;
       return;
     }
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    // A brand-new item (or the user's own send) scrolls smoothly; streaming deltas that only grow
+    // the current message scroll instantly, so rapid tokens don't stack competing smooth animations
+    // into visible jitter (#106).
+    const isNewItem = items.length !== prevItemsLenRef.current;
+    prevItemsLenRef.current = items.length;
+    endRef.current?.scrollIntoView({ behavior: isNewItem || lastIsUser ? 'smooth' : 'auto', block: 'end' });
   }, [items.length, lastText, lastIsUser]);
 
   useEffect(() => {

@@ -16,6 +16,7 @@ import {
   appendUser,
   dismissApproval,
   dismissElicitation,
+  markInterrupted,
   mergeHistoryPage,
   restoreApproval,
   restoreElicitation,
@@ -167,6 +168,10 @@ const sessionsSlice = createSlice({
       const session = state.entities[action.payload.id];
       if (session) session.connection.busy = action.payload.busy;
     },
+    interruptRequested(state, action: PayloadAction<{ id: string; ts: number }>) {
+      const session = state.entities[action.payload.id];
+      if (session) markInterrupted(session, action.payload.ts);
+    },
     statusSet(state, action: PayloadAction<{ id: string; status: SessionStatus; error?: string }>) {
       const session = state.entities[action.payload.id];
       if (session) {
@@ -250,6 +255,7 @@ export const {
   elicitationRestored,
   modeSet,
   busySet,
+  interruptRequested,
   statusSet,
   endedSet,
   historyLoadingSet,

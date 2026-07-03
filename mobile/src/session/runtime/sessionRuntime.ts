@@ -12,7 +12,7 @@ import {
   HISTORY_PAGE_DEFAULT,
   RECENT_TURNS_DEFAULT,
 } from '@aasis21/helm-shared';
-import type { EventEnvelope, PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import type { EventEnvelope, PromptAttachment, SessionMode, StateSnapshotMsg } from '@aasis21/helm-shared';
 import { connectSession, pairSession, getSenderName } from '@/lib/helmClient';
 import type { HelmClient } from '@/lib/helmClient';
 import { loadSessions, patchSession, removeSession, upsertSession } from '@/lib/sessions';
@@ -45,6 +45,7 @@ import {
   envelopeReceived,
   heartbeatSet,
   historyLoadingSet,
+  interruptRequested,
   lastEventAtSet,
   metaScannedAtSet,
   modeSet,
@@ -137,6 +138,10 @@ export class SessionRuntime {
   private initStarted = false;
   private eventSeq = 0;
   private resumeCleanups: Array<() => void> = [];
+  // requestIds of approvals/elicitations whose decision send is in flight. Guards a double-tap from
+  // dispatching twice (#88) and lets onMessage strip an already-answered card from a racing state
+  // snapshot before the send settles (#79).
+  private readonly inFlightDecisions = new Set<string>();
 
   constructor(store?: AppStore) {
     this.store = store ?? makeStore();
@@ -438,6 +443,32 @@ export class SessionRuntime {
   }
 
   // --- inbound -------------------------------------------------------------------------------------
+  /**
+   * Strip approvals/elicitations the user has already answered (decision send still in flight) from
+   * an authoritative STATE_SNAPSHOT, so a snapshot the extension emitted before it observed our
+   * decision can't resurrect a dismissed card (#79). Non-snapshot envelopes pass through untouched.
+   */
+  private filterInFlight(message: EventEnvelope): EventEnvelope {
+    if (
+      this.inFlightDecisions.size === 0 ||
+      message.eventType !== EVENT_TYPE.CONTROL ||
+      message.eventSubtype !== SUBTYPE.CONTROL.STATE_SNAPSHOT
+    ) {
+      return message;
+    }
+    const snap = message.msg as StateSnapshotMsg;
+    return {
+      ...message,
+      msg: {
+        ...snap,
+        approvals: (snap.approvals ?? []).filter((a) => !this.inFlightDecisions.has(a.requestId)),
+        elicitations: (snap.elicitations ?? []).filter(
+          (e) => !this.inFlightDecisions.has(e.requestId),
+        ),
+      },
+    };
+  }
+
   private onMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
     const ctrl = this.controllers.get(channelId);
     const before = this.session(channelId);
@@ -452,14 +483,17 @@ export class SessionRuntime {
     const prevTitle = before.meta.title;
 
     this.recordEvent(channelId, 'in', message);
-    this.store.dispatch(envelopeReceived({ id: channelId, envelope: message }));
+    this.store.dispatch(envelopeReceived({ id: channelId, envelope: this.filterInFlight(message) }));
 
     if (isUnreadActivity(message)) this.markActivity(channelId);
 
     const isControl = message.eventType === EVENT_TYPE.CONTROL;
     const sub = message.eventSubtype;
 
-    if (isControl && sub === SUBTYPE.CONTROL.HISTORY) this.clearSettle(channelId);
+    if (isControl && sub === SUBTYPE.CONTROL.HISTORY) {
+      this.clearHistoryTimeout(channelId);
+      this.clearSettle(channelId);
+    }
     if (isControl && sub === SUBTYPE.CONTROL.RECENT_TURNS) {
       this.clearHistoryTimeout(channelId);
       this.clearSettle(channelId);
@@ -733,12 +767,17 @@ export class SessionRuntime {
     const ts = this.clock();
     const item = makeUserItem(`user-${ts}-${Math.random().toString(36).slice(2, 7)}`, text, ts, attachments);
     this.store.dispatch(userPromptAppended({ id: channelId, item }));
+    // Flip the composer to its "Copilot working" / Stop state immediately instead of waiting for the
+    // host's ACTIVITY(true) echo, so a sent prompt gives instant feedback (#85). The host's own
+    // ACTIVITY(false) at end-of-turn (or the send-failure branch below) clears it.
+    this.store.dispatch(busySet({ id: channelId, busy: true }));
     this.schedulePersist(channelId);
     this.markActivity(channelId);
     try {
       await this.deliverPrompt(channelId, text, attachments);
     } catch {
       if (!this.session(channelId)) return;
+      this.store.dispatch(busySet({ id: channelId, busy: false }));
       this.store.dispatch(promptFailed({ id: channelId, itemId: item.id, failed: true }));
       this.schedulePersist(channelId);
     }
@@ -771,9 +810,13 @@ export class SessionRuntime {
     if (session.history.loading || !session.history.hasMore) return;
     const cursor = session.history.cursor;
     this.store.dispatch(historyLoadingSet({ id: channelId, loading: true }));
+    // Fail-safe: a dead host that never replies must not spin the "Load earlier" spinner forever
+    // (#100). Mirrors syncHistory; the CONTROL.HISTORY reply clears this timer.
+    this.armHistoryTimeout(channelId);
     try {
       await this.send(channelId, historyRequest(cursor, HISTORY_PAGE_DEFAULT));
     } catch {
+      this.clearHistoryTimeout(channelId);
       this.store.dispatch(historyLoadingSet({ id: channelId, loading: false }));
     }
   }
@@ -781,21 +824,29 @@ export class SessionRuntime {
   async sendApproval(channelId: string, requestId: string, optionId: string): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
+    // Ignore a second tap while the first decision is still sending (#88); tracking the requestId
+    // also lets a racing state snapshot drop the already-dismissed card (#79).
+    if (this.inFlightDecisions.has(requestId)) return;
     const pending = session.requests.approvals.find((a) => a.requestId === requestId);
-    await this.store.dispatch(
-      optimistic({
-        apply: approvalDismissed({ id: channelId, requestId }),
-        send: () => this.send(channelId, approvalDecision(requestId, optionId)),
-        rollback: (err) =>
-          pending
-            ? approvalRestored({
-                id: channelId,
-                req: pending,
-                error: errMessage(err, 'Could not send your decision — tap again to retry.'),
-              })
-            : undefined,
-      }),
-    );
+    this.inFlightDecisions.add(requestId);
+    try {
+      await this.store.dispatch(
+        optimistic({
+          apply: approvalDismissed({ id: channelId, requestId }),
+          send: () => this.send(channelId, approvalDecision(requestId, optionId)),
+          rollback: (err) =>
+            pending
+              ? approvalRestored({
+                  id: channelId,
+                  req: pending,
+                  error: errMessage(err, 'Could not send your decision — tap again to retry.'),
+                })
+              : undefined,
+        }),
+      );
+    } finally {
+      this.inFlightDecisions.delete(requestId);
+    }
   }
 
   async sendElicitation(
@@ -806,26 +857,38 @@ export class SessionRuntime {
   ): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
+    // Ignore a second submit while the first answer is still sending (#88); tracking the requestId
+    // also lets a racing state snapshot drop the already-dismissed card (#79).
+    if (this.inFlightDecisions.has(requestId)) return;
     const pending = session.requests.elicitations.find((e) => e.requestId === requestId);
-    await this.store.dispatch(
-      optimistic({
-        apply: elicitationDismissed({ id: channelId, requestId }),
-        send: () => this.send(channelId, elicitationResponse(requestId, action, content)),
-        rollback: (err) =>
-          pending
-            ? elicitationRestored({
-                id: channelId,
-                req: pending,
-                error: errMessage(err, 'Could not send your answer — try again.'),
-              })
-            : undefined,
-      }),
-    );
+    this.inFlightDecisions.add(requestId);
+    try {
+      await this.store.dispatch(
+        optimistic({
+          apply: elicitationDismissed({ id: channelId, requestId }),
+          send: () => this.send(channelId, elicitationResponse(requestId, action, content)),
+          rollback: (err) =>
+            pending
+              ? elicitationRestored({
+                  id: channelId,
+                  req: pending,
+                  error: errMessage(err, 'Could not send your answer — try again.'),
+                })
+              : undefined,
+        }),
+      );
+    } finally {
+      this.inFlightDecisions.delete(requestId);
+    }
   }
 
   async sendInterrupt(channelId: string): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
+    // Release the Stop affordance immediately and settle any still-"running" tool so the button
+    // can't wedge on a slow/dead host (#77). The host's own ACTIVITY(false)/TOOL_COMPLETE remains
+    // authoritative and overrides this if the turn is genuinely still in flight.
+    this.store.dispatch(interruptRequested({ id: channelId, ts: this.clock() }));
     try {
       if (this.registry.get(channelId)) await this.send(channelId, interrupt());
     } catch {

@@ -54,4 +54,18 @@ describe('scenario: send prompt', () => {
     const transcript = await loadTranscript('c1');
     expect(transcript?.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'user', text: 'hello' })]));
   });
+
+  it('flips busy on immediately so the composer shows Stop before the host echoes activity, and rolls back on a failed send (#85)', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    await h!.flush();
+    expect(h!.active()!.timeline.busy).toBe(false);
+
+    await h!.manager.sendPrompt('c1', 'do a thing');
+    expect(h!.active()!.timeline.busy).toBe(true);
+
+    client.send = vi.fn().mockRejectedValue(new Error('offline'));
+    await h!.manager.sendPrompt('c1', 'will fail');
+    expect(h!.active()!.timeline.busy).toBe(false);
+  });
 });

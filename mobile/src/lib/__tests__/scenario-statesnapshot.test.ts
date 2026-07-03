@@ -49,4 +49,33 @@ describe('scenario: state snapshot', () => {
     expect(timeline.elicitations).toHaveLength(1);
     expect(timeline.elicitations[0].requestId).toBe('e1');
   });
+
+  it('treats each snapshot as authoritative — a later snapshot retracts an approval it omits (#78)', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+
+    client.emit(
+      B.approvalRequest('r1', 'write_file', {}, [
+        { id: 'allow', label: 'Allow' },
+        { id: 'deny', label: 'Deny' },
+      ]),
+    );
+    await h!.flush();
+    expect(h!.active()!.timeline.approvals.map((a) => a.requestId)).toEqual(['r1']);
+
+    // The CLI auto-denied r1 while the socket was gone; the reconnect snapshot no longer lists it,
+    // so the now-stale banner must be retracted rather than linger forever as a zombie.
+    client.emit(
+      B.stateSnapshot({
+        busy: false,
+        abortable: false,
+        mode: 'interactive',
+        latestTurnIndex: 0,
+        approvals: [],
+        elicitations: [],
+      }),
+    );
+    await h!.flush();
+    expect(h!.active()!.timeline.approvals).toHaveLength(0);
+  });
 });

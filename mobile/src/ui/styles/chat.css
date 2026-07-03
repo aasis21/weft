@@ -88,7 +88,6 @@
 .helm-session .tc-head:focus-visible,
 .helm-session .pill:focus-visible,
 .helm-session .mode-menu-item:focus-visible,
-.helm-session .composer textarea:focus-visible,
 .helm-session .send-btn:focus-visible,
 .helm-session .stop-btn:focus-visible,
 .helm-session details > summary:focus-visible,
@@ -741,6 +740,13 @@
 }
 .approval-stack::-webkit-scrollbar { width: 7px; }
 .approval-stack::-webkit-scrollbar-thumb { background: var(--bg-rule); border-radius: 8px; }
+
+.elicit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  outline: none;
+}
 
 .approval-banner {
   display: flex;
