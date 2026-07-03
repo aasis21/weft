@@ -69,6 +69,16 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.active()?.meta.title).toBe('Phone launch');
     expect(h!.active()?.status).toBe('connecting');
     expect(registry.get('spawned-1')?.sentOfKind('control.state_request')).toHaveLength(1);
+    expect(h!.active()?.meta.spawnedFromDeviceId).toBe('listener-1');
+    expect(h!.active()?.meta.spawnedFromDeviceName).toBe('Akash Laptop');
+
+    // The device event log records the outbound project-list-request + spawn-session and the inbound
+    // project-list + spawn-pairing, but never the (noisy, liveness-only) DEVICE_HEARTBEAT.
+    const deviceEvents = h!.snapshot().devices[0]!.events;
+    expect(deviceEvents.some((e) => e.eventSubtype === 'project_list_request')).toBe(true);
+    expect(deviceEvents.some((e) => e.eventSubtype === 'spawn_session')).toBe(true);
+    expect(deviceEvents.some((e) => e.eventSubtype === 'spawn_pairing')).toBe(true);
+    expect(deviceEvents.some((e) => e.eventSubtype === 'device_heartbeat')).toBe(false);
 
     const failedTempId = await h!.manager.spawnSession('listener-1', {
       projectName: 'cortex',

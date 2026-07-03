@@ -80,6 +80,7 @@ import {
   debugAppended,
   deviceDefaultSet,
   deviceErrorSet,
+  deviceEventAppended,
   deviceLastProjectSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
@@ -141,6 +142,8 @@ interface PendingSpawn {
   requestId: string;
   tempId: string;
   deviceId: string;
+  spawnedFromDeviceId: string;
+  spawnedFromDeviceName?: string;
   projectName: string;
   name?: string;
   timer: ReturnType<typeof setTimeout>;
@@ -277,6 +280,7 @@ export class SessionRuntime {
           projects: [],
           projectsLoading: false,
           connected: false,
+          events: [],
         })),
       ),
     );
@@ -371,6 +375,8 @@ export class SessionRuntime {
       kind: 'live',
       addedAt: stored.addedAt,
       scannedAt: stored.pairing.savedAt ?? stored.addedAt,
+      spawnedFromDeviceId: stored.spawnedFromDeviceId,
+      spawnedFromDeviceName: stored.spawnedFromDeviceName,
     };
     const session = emptySession(channelId, meta);
     session.unread = stored.unread ?? false;
@@ -732,7 +738,15 @@ export class SessionRuntime {
   private async openPairedSession(
     client: HelmClient,
     pairing: StoredPairing,
-    opts: { title?: string | null; cwd?: string | null; activate?: boolean; scannedAt?: number; renamed?: boolean } = {},
+    opts: {
+      title?: string | null;
+      cwd?: string | null;
+      activate?: boolean;
+      scannedAt?: number;
+      renamed?: boolean;
+      spawnedFromDeviceId?: string;
+      spawnedFromDeviceName?: string;
+    } = {},
   ): Promise<string> {
     const channelId = pairing.channelId;
     allowTranscriptWrites(channelId);
@@ -749,6 +763,8 @@ export class SessionRuntime {
         cwd: prior?.cwd ?? null,
         addedAt: prior?.addedAt ?? existing.meta.addedAt,
         lastSeenAt: this.clock(),
+        spawnedFromDeviceId: prior?.spawnedFromDeviceId ?? existing.meta.spawnedFromDeviceId,
+        spawnedFromDeviceName: prior?.spawnedFromDeviceName ?? existing.meta.spawnedFromDeviceName,
       });
       const ctrl = this.ensureController(channelId);
       try {
@@ -772,6 +788,8 @@ export class SessionRuntime {
       addedAt: now,
       lastSeenAt: now,
       renamed: opts.renamed,
+      spawnedFromDeviceId: opts.spawnedFromDeviceId,
+      spawnedFromDeviceName: opts.spawnedFromDeviceName,
     });
     const meta: SessionMeta = {
       channelId,
@@ -781,6 +799,8 @@ export class SessionRuntime {
       kind: 'live',
       addedAt: now,
       scannedAt: opts.scannedAt ?? pairing.savedAt ?? now,
+      spawnedFromDeviceId: opts.spawnedFromDeviceId,
+      spawnedFromDeviceName: opts.spawnedFromDeviceName,
     };
     const session = emptySession(channelId, meta);
     session.connection.status = 'connecting';
@@ -855,6 +875,7 @@ export class SessionRuntime {
         projects: prior?.projects ?? [],
         projectsLoading: true,
         connected: true,
+        events: prior?.events ?? [],
       }),
     );
     this.attachListener(pairing.channelId, client);
@@ -887,7 +908,9 @@ export class SessionRuntime {
     if (!ctrl?.client) return;
     this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
     try {
-      await ctrl.client.send(projectListRequest());
+      const message = projectListRequest();
+      this.recordDeviceEvent(channelId, 'out', message);
+      await ctrl.client.send(message);
     } catch (err) {
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not request projects.'), connected: false }),
@@ -907,6 +930,8 @@ export class SessionRuntime {
       cwd: null,
       kind: 'spawning',
       addedAt: this.clock(),
+      spawnedFromDeviceId: device.deviceId ?? channelId,
+      spawnedFromDeviceName: device.name,
     };
     const session = emptySession(tempId, meta);
     session.connection.status = 'initializing';
@@ -923,6 +948,8 @@ export class SessionRuntime {
       requestId,
       tempId,
       deviceId: channelId,
+      spawnedFromDeviceId: device.deviceId ?? channelId,
+      spawnedFromDeviceName: device.name,
       projectName: opts.projectName,
       name: opts.name?.trim() || undefined,
       timer: setTimeout(() => {
@@ -935,7 +962,9 @@ export class SessionRuntime {
       await this.connectDevice(channelId);
       const ctrl = this.listenerController(channelId);
       if (!ctrl?.client) throw new Error('Listener device is not connected.');
-      await ctrl.client.send(spawnSessionMessage(requestId, opts.projectName, opts.mode, opts.name?.trim() || null));
+      const message = spawnSessionMessage(requestId, opts.projectName, opts.mode, opts.name?.trim() || null);
+      this.recordDeviceEvent(channelId, 'out', message);
+      await ctrl.client.send(message);
       this.store.dispatch(deviceLastProjectSet({ channelId, projectName: opts.projectName }));
       void patchDevice(channelId, { lastProjectName: opts.projectName });
     } catch (err) {
@@ -948,7 +977,9 @@ export class SessionRuntime {
   async forgetDevice(channelId: string): Promise<void> {
     const ctrl = this.listenerController(channelId);
     if (ctrl?.client) {
-      await ctrl.client.send(forgetDeviceMessage()).catch(() => {});
+      const message = forgetDeviceMessage();
+      this.recordDeviceEvent(channelId, 'out', message);
+      await ctrl.client.send(message).catch(() => {});
     }
     ctrl?.dispose();
     this.listenerControllers.delete(channelId);
@@ -1002,6 +1033,7 @@ export class SessionRuntime {
   private onListenerMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
+    this.recordDeviceEvent(channelId, 'in', message);
     if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT) {
       // Proactive liveness beat (independent of PROJECT_LIST request/reply): just refresh
       // lastSeenAt/connected so an idle device doesn't go stale in the UI between polls.
@@ -1038,7 +1070,13 @@ export class SessionRuntime {
       const { client, pairing } = await pairSession(payload);
       const title = msg.name || pending.name || msg.projectName || pending.projectName;
       const oldActive = this.activeId();
-      await this.openPairedSession(client, pairing, { title, activate: true, renamed: Boolean(msg.name || pending.name) });
+      await this.openPairedSession(client, pairing, {
+        title,
+        activate: true,
+        renamed: Boolean(msg.name || pending.name),
+        spawnedFromDeviceId: pending.spawnedFromDeviceId,
+        spawnedFromDeviceName: pending.spawnedFromDeviceName,
+      });
       this.store.dispatch(sessionRemoved(pending.tempId));
       if (oldActive === pending.tempId) this.store.dispatch(sessionActivated(pairing.channelId));
     } catch (err) {
@@ -1342,6 +1380,20 @@ export class SessionRuntime {
     const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
     this.store.dispatch(debugAppended({ id: channelId, event }));
     this.scheduleEventPersist(channelId);
+  }
+
+  /** Mirrors recordEvent() but for the DEVICE (listener) channel — same shape, its own (unpersisted,
+   *  smaller) ring buffer, and excludes DEVICE_HEARTBEAT for the identical noise reason. */
+  private recordDeviceEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
+    if (
+      message.eventType === EVENT_TYPE.CONTROL &&
+      message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT
+    ) {
+      return;
+    }
+    const fallback = dir === 'out' ? getSenderName() : (this.device(channelId)?.name ?? 'Listener');
+    const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
+    this.store.dispatch(deviceEventAppended({ channelId, event }));
   }
 
   private schedulePersist(channelId: string): void {

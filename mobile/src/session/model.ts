@@ -86,6 +86,13 @@ export interface SessionMeta {
   kind: 'live' | 'demo' | 'spawning';
   addedAt: number;
   scannedAt?: number;
+  /** Stable, non-secret `deviceId` (see extension/src/deviceIdentity.mjs) of the listener that
+   *  spawned this session via "Start session", if any — lets the Device details screen list every
+   *  session launched from a given laptop even across `helm-cli start` restarts. Undefined for
+   *  sessions joined by scanning a session QR directly. */
+  spawnedFromDeviceId?: string;
+  /** Display name of the spawning device at spawn time (falls back label if it's since renamed). */
+  spawnedFromDeviceName?: string;
 }
 
 export interface ListenerDeviceState extends RegisteredDevice {
@@ -93,6 +100,11 @@ export interface ListenerDeviceState extends RegisteredDevice {
   projectsLoading: boolean;
   connected: boolean;
   error?: string;
+  /** Raw wire events exchanged over the DEVICE (listener) channel — project list request/reply,
+   *  spawn request/pairing/result, forget — oldest-first (DebugPanel renders them newest-first).
+   *  Excludes DEVICE_HEARTBEAT (liveness is already surfaced via `connected`/`lastSeenAt`). Not
+   *  persisted across app restarts; the channel itself is re-established on reconnect. */
+  events: DebugEvent[];
 }
 
 export interface SessionConnection {

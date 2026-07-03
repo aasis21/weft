@@ -9,6 +9,7 @@ interface DevicesScreenProps {
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
+  onOpenDetails(channelId: string): void;
   onScanListener(): void;
   onCancel(): void;
 }
@@ -27,6 +28,7 @@ export function DevicesScreen({
   onSetDefault,
   onForget,
   onStartOnDevice,
+  onOpenDetails,
   onScanListener,
   onCancel,
 }: DevicesScreenProps): JSX.Element {
@@ -94,6 +96,9 @@ export function DevicesScreen({
                         Make default
                       </button>
                     ) : null}
+                    <button type="button" className="session-link-btn" onClick={() => onOpenDetails(device.channelId)}>
+                      Details
+                    </button>
                     <button type="button" className="session-link-btn danger" onClick={() => void onForget(device.channelId)}>
                       Forget
                     </button>

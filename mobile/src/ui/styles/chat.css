@@ -1739,6 +1739,30 @@
   width: auto;
 }
 
+.helm-session .device-sessions h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.helm-session .device-session-row {
+  padding: 0;
+}
+
+.helm-session .device-session-open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 14px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
 
 /* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */
 @media (min-width: 768px) {

@@ -26,6 +26,7 @@ import {
 } from './reducers/applyEnvelope';
 
 const EVENT_LOG_CAP = 200;
+const DEVICE_EVENT_LOG_CAP = 100;
 
 export const sessionsAdapter = createEntityAdapter<Session>();
 
@@ -146,6 +147,7 @@ const sessionsSlice = createSlice({
         projects: incoming.projects ?? existing?.projects ?? [],
         projectsLoading: incoming.projectsLoading ?? existing?.projectsLoading ?? false,
         connected: incoming.connected ?? existing?.connected ?? false,
+        events: incoming.events ?? existing?.events ?? [],
       };
       state.devices = [
         ...state.devices.filter((d) => d.channelId !== incoming.channelId),
@@ -215,6 +217,12 @@ const sessionsSlice = createSlice({
     deviceLastProjectSet(state, action: PayloadAction<{ channelId: string; projectName: string }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) device.lastProjectName = action.payload.projectName;
+    },
+    // Raw wire events over the device (listener) channel — mirrors `debugAppended` for sessions but
+    // scoped to ListenerDeviceState.events and its own (smaller) cap, since these aren't persisted.
+    deviceEventAppended(state, action: PayloadAction<{ channelId: string; event: DebugEvent }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.events = [...device.events, action.payload.event].slice(-DEVICE_EVENT_LOG_CAP);
     },
     sessionAdded: sessionsAdapter.addOne,
     sessionRemoved(state, action: PayloadAction<string>) {
@@ -406,6 +414,7 @@ export const {
   deviceReconciled,
   deviceErrorSet,
   deviceLastProjectSet,
+  deviceEventAppended,
   sessionAdded,
   sessionRemoved,
   sessionActivated,

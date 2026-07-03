@@ -5,6 +5,7 @@ import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
 import { StartSessionScreen } from '@/ui/screens/StartSessionScreen';
 import { DevicesScreen } from '@/ui/screens/DevicesScreen';
+import { DeviceDetailsScreen } from '@/ui/screens/DeviceDetailsScreen';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { sessionRuntime } from '@/session/runtime/instance';
@@ -15,6 +16,7 @@ export default function App(): JSX.Element {
   const [starting, setStarting] = useState(false);
   const [startDeviceId, setStartDeviceId] = useState<string | undefined>(undefined);
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +37,7 @@ export default function App(): JSX.Element {
     setAddManual(manual);
     setStarting(false);
     setDevicesOpen(false);
+    setDeviceDetailsChannelId(undefined);
     setAdding(true);
   }, []);
 
@@ -42,6 +45,7 @@ export default function App(): JSX.Element {
     setError(null);
     setAdding(false);
     setDevicesOpen(false);
+    setDeviceDetailsChannelId(undefined);
     setStartDeviceId(channelId);
     setStarting(true);
   }, []);
@@ -50,7 +54,16 @@ export default function App(): JSX.Element {
     setError(null);
     setAdding(false);
     setStarting(false);
+    setDeviceDetailsChannelId(undefined);
     setDevicesOpen(true);
+  }, []);
+
+  const openDeviceDetails = useCallback((channelId: string): void => {
+    setError(null);
+    setAdding(false);
+    setStarting(false);
+    setDevicesOpen(false);
+    setDeviceDetailsChannelId(channelId);
   }, []);
 
   const handleVoiceModeChange = useCallback((channelId: string, active: boolean): void => {
@@ -141,6 +154,7 @@ export default function App(): JSX.Element {
         onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
         onForget={(id) => sessionRuntime.forgetDevice(id)}
         onStartOnDevice={(id) => openStart(id)}
+        onOpenDetails={(id) => openDeviceDetails(id)}
         onScanListener={() => openJoin(false)}
         onCancel={() => {
           setDevicesOpen(false);
@@ -148,6 +162,33 @@ export default function App(): JSX.Element {
         }}
       />
     );
+  }
+
+  // Single-device drill-down: live status, event log, and every session ever spawned from this
+  // device (matched by its stable deviceId, so it survives helm-cli restarts).
+  if (deviceDetailsChannelId) {
+    const device = snapshot.devices.find((d) => d.channelId === deviceDetailsChannelId);
+    if (device) {
+      return (
+        <DeviceDetailsScreen
+          device={device}
+          sessions={snapshot.sessions}
+          onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
+          onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
+          onForget={async (id) => {
+            await sessionRuntime.forgetDevice(id);
+            setDeviceDetailsChannelId(undefined);
+          }}
+          onStartOnDevice={(id) => openStart(id)}
+          onOpenSession={(id) => {
+            sessionRuntime.setActive(id);
+            setDeviceDetailsChannelId(undefined);
+          }}
+          onBack={() => setDeviceDetailsChannelId(undefined)}
+        />
+      );
+    }
+    // Device vanished (forgotten elsewhere) — fall through to the normal screen below.
   }
 
   if (starting) {

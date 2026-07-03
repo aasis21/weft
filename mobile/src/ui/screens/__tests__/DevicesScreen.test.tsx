@@ -30,6 +30,7 @@ describe('DevicesScreen', () => {
         onSetDefault={vi.fn()}
         onForget={vi.fn()}
         onStartOnDevice={vi.fn()}
+        onOpenDetails={vi.fn()}
         onScanListener={onScanListener}
         onCancel={vi.fn()}
       />,
@@ -52,6 +53,7 @@ describe('DevicesScreen', () => {
         onSetDefault={onSetDefault}
         onForget={onForget}
         onStartOnDevice={onStartOnDevice}
+        onOpenDetails={vi.fn()}
         onScanListener={vi.fn()}
         onCancel={vi.fn()}
       />,
@@ -80,6 +82,7 @@ describe('DevicesScreen', () => {
         onSetDefault={onSetDefault}
         onForget={vi.fn()}
         onStartOnDevice={vi.fn()}
+        onOpenDetails={vi.fn()}
         onScanListener={vi.fn()}
         onCancel={vi.fn()}
       />,

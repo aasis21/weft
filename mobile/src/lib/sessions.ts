@@ -29,6 +29,11 @@ export interface StoredSession {
   /** True once the user renamed this session on the phone; keeps the CLI title from overriding the
    *  user's chosen name after reload/resume (#37). */
   renamed?: boolean;
+  /** Stable listener `deviceId` that spawned this session (see SessionMeta.spawnedFromDeviceId),
+   *  persisted so the Device details screen survives reload. */
+  spawnedFromDeviceId?: string;
+  /** Display name of the spawning device at spawn time. */
+  spawnedFromDeviceName?: string;
 }
 
 function isStoredSession(value: unknown): value is StoredSession {
@@ -173,7 +178,19 @@ export async function upsertSession(session: StoredSession): Promise<void> {
 export async function patchSession(
   channelId: string,
   patch: Partial<
-    Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId' | 'lastEventAt' | 'unread' | 'unreadCount' | 'renamed'>
+    Pick<
+      StoredSession,
+      | 'title'
+      | 'cwd'
+      | 'lastSeenAt'
+      | 'sessionId'
+      | 'lastEventAt'
+      | 'unread'
+      | 'unreadCount'
+      | 'renamed'
+      | 'spawnedFromDeviceId'
+      | 'spawnedFromDeviceName'
+    >
   >,
 ): Promise<void> {
   const list = await read();
