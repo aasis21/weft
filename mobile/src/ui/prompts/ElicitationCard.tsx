@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { ElicitationRequestMsg } from '@aasis21/helm-shared';
 
@@ -119,6 +119,40 @@ function initialValues(fields: Field[]): Record<string, FieldValue> {
   return out;
 }
 
+function storageKey(requestId: string): string {
+  return `helm.elicitation.${requestId}`;
+}
+
+function readDraft(requestId: string): { values?: Record<string, FieldValue>; step?: number } | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    const raw = sessionStorage.getItem(storageKey(requestId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(requestId: string, values: Record<string, FieldValue>, step: number): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.setItem(storageKey(requestId), JSON.stringify({ values, step }));
+  } catch {
+    // Storage can be unavailable in private/SSR-like environments.
+  }
+}
+
+function clearDraft(requestId: string): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.removeItem(storageKey(requestId));
+  } catch {
+    // Ignore storage failures; the answer still needs to proceed.
+  }
+}
+
 /** A required field is "missing" until answered; a boolean is always answered (false is valid). */
 function fieldMissing(f: Field, v: FieldValue | undefined): boolean {
   if (!f.required) return false;
@@ -149,10 +183,17 @@ const HTML_INPUT_TYPE: Record<string, string> = {
  */
 export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecline, onCancel }: ElicitationCardProps): JSX.Element {
   const fields = useFields(req);
-  const [values, setValues] = useState<Record<string, FieldValue>>(() => initialValues(fields));
+  const [values, setValues] = useState<Record<string, FieldValue>>(() => ({
+    ...initialValues(fields),
+    ...(readDraft(req.requestId)?.values ?? {}),
+  }));
   const [touched, setTouched] = useState(false);
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => readDraft(req.requestId)?.step ?? 0);
   const swipeStartX = useRef<number | null>(null);
+
+  useEffect(() => {
+    writeDraft(req.requestId, values, step);
+  }, [req.requestId, values, step]);
 
   const setValue = (name: string, value: FieldValue): void =>
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -222,7 +263,18 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
         content[f.name] = String(v);
       }
     }
+    clearDraft(req.requestId);
     onSubmit(content);
+  };
+
+  const decline = (): void => {
+    clearDraft(req.requestId);
+    onDecline();
+  };
+
+  const cancel = (): void => {
+    clearDraft(req.requestId);
+    onCancel();
   };
 
   const renderField = (f: Field): JSX.Element => {
@@ -399,7 +451,10 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
 
       <div className="elicit-actions">
         {isUrlMode ? (
-          <button type="button" className="elicit-btn submit" onClick={() => onSubmit({})} disabled={disabled}>
+          <button type="button" className="elicit-btn submit" onClick={() => {
+            clearDraft(req.requestId);
+            onSubmit({});
+          }} disabled={disabled}>
             <span className="elicit-btn-icon" aria-hidden="true">✓</span>
             Accept
           </button>
@@ -410,10 +465,10 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
             Submit
           </button>
         ) : null}
-        <button type="button" className="elicit-btn decline" onClick={onDecline} disabled={disabled}>
+        <button type="button" className="elicit-btn decline" onClick={decline} disabled={disabled}>
           Decline
         </button>
-        <button type="button" className="elicit-btn cancel" onClick={onCancel} disabled={disabled}>
+        <button type="button" className="elicit-btn cancel" onClick={cancel} disabled={disabled}>
           Cancel
         </button>
       </div>

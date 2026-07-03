@@ -47,8 +47,12 @@ export function StatusBar({
   // While the agent is working the header reads "Working…" with a live pulse, so a connected but idle
   // session ("Live") is visibly distinct from one that's actively churning a turn.
   const working = busy && status === 'live';
-  const lineClass = working ? 'busy' : status;
-  const statusLabel = working ? 'Working…' : STATUS_LABEL[status];
+  // A cold (warm-pool-evicted) session has no live socket, so surface it as "Offline" rather than the
+  // warm-idle "Quiet" — otherwise the header contradicts the thread's "waiting to reconnect" banner (#127).
+  const activeCold = snapshot.sessions.find((session) => session.meta.channelId === snapshot.activeId)?.cold ?? false;
+  const showCold = activeCold && status === 'idle' && !working;
+  const lineClass = working ? 'busy' : showCold ? 'error' : status;
+  const statusLabel = working ? 'Working…' : showCold ? 'Offline' : STATUS_LABEL[status];
 
   useEffect(() => {
     if (!menuOpen) return undefined;

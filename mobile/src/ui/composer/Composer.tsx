@@ -10,6 +10,7 @@ import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/ima
 interface ComposerProps {
   sessionId: string;
   disabled: boolean;
+  disabledReason?: 'ended' | 'offline';
   busy: boolean;
   mode: SessionMode;
   cwd: string | null;
@@ -140,6 +141,7 @@ function slashQuery(value: string): string | null {
 export function Composer({
   sessionId,
   disabled,
+  disabledReason,
   busy,
   mode,
   cwd,
@@ -163,6 +165,10 @@ export function Composer({
   const sessionIdRef = useRef(sessionId);
   const attachmentGenerationRef = useRef(0);
   const actionPointerStartedBusyRef = useRef(false);
+  const disabledPlaceholder =
+    disabledReason === 'offline'
+      ? 'Reconnecting… — hold on'
+      : 'Session ended — re-pair to continue.';
   const suppressSendUntilRef = useRef(0);
   const speech = useSpeechInput();
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
@@ -512,7 +518,7 @@ export function Composer({
           spellCheck={false}
           onKeyDown={onKeyDown}
           onChange={(event) => onTextChange(event.target.value)}
-          placeholder={disabled ? 'Session ended — re-pair to continue.' : 'Message your Copilot session…'}
+          placeholder={disabled ? disabledPlaceholder : 'Message your Copilot session…'}
         />
 
         <div className="composer-controls">

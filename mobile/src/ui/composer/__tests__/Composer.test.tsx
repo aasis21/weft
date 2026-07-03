@@ -81,6 +81,26 @@ describe('Composer', () => {
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
   });
 
+  it('shows distinct disabled placeholder copy for ended and reconnecting sessions', () => {
+    const { rerender, props } = renderComposer({ disabled: true, disabledReason: 'ended' });
+    expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toHaveAttribute(
+      'placeholder',
+      'Session ended — re-pair to continue.',
+    );
+
+    rerender(<Composer {...props} disabled disabledReason="offline" />);
+    expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toHaveAttribute(
+      'placeholder',
+      'Reconnecting… — hold on',
+    );
+
+    rerender(<Composer {...props} disabled={false} disabledReason={undefined} />);
+    expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toHaveAttribute(
+      'placeholder',
+      'Message your Copilot session…',
+    );
+  });
+
   it('sends typed text from the button and Ctrl+Enter, but not empty text or plain Enter', async () => {
     const user = userEvent.setup();
     const onPrompt = vi.fn();

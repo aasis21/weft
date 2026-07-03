@@ -61,7 +61,11 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
   if (!keep.meta.cwd && drop.meta.cwd) keep.meta.cwd = drop.meta.cwd;
   if (keep.transcript.items.length === 0 && keep.history.items.length === 0) {
     keep.transcript = { items: drop.transcript.items };
-    keep.history = { ...keep.history, ...drop.history, loading: keep.history.loading || drop.history.loading };
+    // Seeding the keeper with the stale card's content must also clear historyLoading: otherwise the
+    // keeper keeps a `loading:true` left over from its own attach-time syncHistory, and because it is
+    // now seeded (non-empty) a later syncHistory won't re-arm the fail-safe — the skeleton sticks
+    // after a `copilot --resume` reconciliation (#132).
+    keep.history = { ...keep.history, ...drop.history, loading: false };
   }
   keep.unread = keep.unread || drop.unread;
   keep.unreadCount = (keep.unreadCount ?? 0) + (drop.unreadCount ?? 0);
@@ -194,7 +198,14 @@ const sessionsSlice = createSlice({
       if (session) {
         session.connection.status = action.payload.status;
         session.connection.error = action.payload.error;
+        if (action.payload.status === 'live' || action.payload.status === 'connecting') {
+          session.connection.cold = false;
+        }
       }
+    },
+    coldSet(state, action: PayloadAction<{ id: string; on: boolean }>) {
+      const session = state.entities[action.payload.id];
+      if (session) session.connection.cold = action.payload.on;
     },
     endedSet(state, action: PayloadAction<{ id: string; reason?: string }>) {
       const session = state.entities[action.payload.id];
@@ -278,6 +289,7 @@ export const {
   busySet,
   interruptRequested,
   statusSet,
+  coldSet,
   endedSet,
   historyLoadingSet,
   reconnectingSet,

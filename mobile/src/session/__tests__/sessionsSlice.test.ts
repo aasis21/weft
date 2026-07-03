@@ -3,11 +3,13 @@ import * as B from '@/test/helpers/builders';
 import { emptySession, type Session, type SessionMeta } from '../model';
 import sessionsReducer, {
   approvalDismissed,
+  coldSet,
   envelopeReceived,
   readySet,
   sessionActivated,
   sessionAdded,
   sessionReconciled,
+  statusSet,
 } from '../sessionsSlice';
 import { routeEnvelope } from '../routeEnvelope';
 import { selectManagerSnapshot } from '../selectors';
@@ -116,6 +118,44 @@ describe('sessionsSlice', () => {
     state = sessionsReducer(state, sessionAdded(dup));
     state = sessionsReducer(state, sessionReconciled({ id: 'dup', sessionId: 'sess-x' }));
     expect(state.entities.dup?.unreadCount).toBe(4);
+  });
+
+  it('clears the cold flag when a session goes connecting/live and sets it via coldSet', () => {
+    let state = sessionsReducer(undefined, sessionAdded(makeSession('s1')));
+    state = sessionsReducer(state, coldSet({ id: 's1', on: true }));
+    expect(state.entities.s1?.connection.cold).toBe(true);
+
+    // Reconnecting a cold session clears the cold flag.
+    state = sessionsReducer(state, statusSet({ id: 's1', status: 'connecting' }));
+    expect(state.entities.s1?.connection.cold).toBe(false);
+
+    // Going cold again, then live, also clears it.
+    state = sessionsReducer(state, coldSet({ id: 's1', on: true }));
+    state = sessionsReducer(state, statusSet({ id: 's1', status: 'live' }));
+    expect(state.entities.s1?.connection.cold).toBe(false);
+
+    // But a plain idle transition leaves an existing cold flag untouched.
+    state = sessionsReducer(state, coldSet({ id: 's1', on: true }));
+    state = sessionsReducer(state, statusSet({ id: 's1', status: 'idle' }));
+    expect(state.entities.s1?.connection.cold).toBe(true);
+  });
+
+  it('clears historyLoading when seeding a keeper timeline from a stale duplicate on merge (#132)', () => {
+    const keeper = makeSession('keeper', { channelId: 'keeper-ch', sessionId: 'sess-shared' });
+    keeper.history.loading = true; // left over from its own attach-time syncHistory
+
+    const stale = makeSession('stale', { channelId: 'stale-ch', sessionId: 'sess-shared' });
+    stale.transcript.items.push({ kind: 'assistant', id: 'a1', text: 'seeded', ts: 5 });
+    stale.history.items.push({ role: 'assistant', text: 'seeded', ts: 5, turnIndex: 1 } as never);
+    stale.history.loading = true;
+
+    let state = sessionsReducer(undefined, sessionAdded(keeper));
+    state = sessionsReducer(state, sessionAdded(stale));
+    state = sessionsReducer(state, sessionReconciled({ id: 'keeper', sessionId: 'sess-shared' }));
+
+    expect(state.ids).toEqual(['keeper']);
+    expect(state.entities.keeper?.transcript.items).toMatchObject([{ id: 'a1', text: 'seeded' }]);
+    expect(state.entities.keeper?.history.loading).toBe(false);
   });
 });
 

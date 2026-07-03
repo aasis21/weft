@@ -100,9 +100,13 @@ export function createPermissionRelay({
     const toolName = inferToolName(request);
     const toolArgs = inferToolArgs(request);
     const options = inferOptions(request);
+    const expiresAt = Date.now() + approvalTimeoutMs;
     // Keep the exact payload we sent so a late-joining phone can have it replayed verbatim
     // in a state snapshot (same requestId → its decision still resolves this pending entry).
-    const payload = approvalRequest(requestId, toolName, toolArgs, options);
+    const payload = approvalRequest(requestId, toolName, toolArgs, options, {
+      timeoutMs: approvalTimeoutMs,
+      expiresAt,
+    });
 
     await channel.send(payload);
 

@@ -21,6 +21,9 @@ export interface SessionView {
   /** True during the brief, bounded post-Live grace while the first history page is still arriving —
    *  the UI shows the connecting skeleton instead of flashing the empty-welcome. */
   settling?: boolean;
+  /** True when the session was evicted from the warm pool (no live socket) — the header shows
+   *  "Offline" and reconnect is offered, instead of the warm-idle "Quiet". */
+  cold?: boolean;
   /** Raw wire events exchanged with the laptop (both directions), oldest-first — the debug panel
    *  renders them newest-first. Persisted per session and restored on reload. */
   events: DebugEvent[];

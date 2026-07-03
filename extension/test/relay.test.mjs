@@ -587,6 +587,25 @@ test("a permission timeout fails closed with the native reject kind", async () =
   }
 });
 
+test("approval requests carry the relay's real auto-deny deadline", async () => {
+  const channel = makeFakeChannel();
+  const approvalTimeoutMs = 12_345;
+  const relay = createPermissionRelay({ channel, approvalTimeoutMs });
+  try {
+    const before = Date.now();
+    void relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
+    await flush();
+    const after = Date.now();
+    const req = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
+    assert.ok(req, "expected an approval request to be sent to the phone");
+    assert.equal(req.msg.timeoutMs, approvalTimeoutMs);
+    assert.ok(req.msg.expiresAt >= before + approvalTimeoutMs);
+    assert.ok(req.msg.expiresAt <= after + approvalTimeoutMs);
+  } finally {
+    relay.close();
+  }
+});
+
 test("a phone decision echoes an approval_complete so other devices dismiss the banner", async () => {
   const channel = makeFakeChannel();
   const relay = createPermissionRelay({ channel });

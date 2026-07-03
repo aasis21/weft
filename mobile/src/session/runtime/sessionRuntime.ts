@@ -44,6 +44,7 @@ import {
   approvalDismissed,
   approvalRestored,
   busySet,
+  coldSet,
   debugAppended,
   elicitationDismissed,
   elicitationRestored,
@@ -76,6 +77,7 @@ const IDLE_AFTER_MS = 20_000;
 const OFFLINE_AFTER_MS = 30_000;
 const HOST_CONFIRM_MS = 30_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
+const RESUME_DEBOUNCE_MS = 500;
 const MAX_WARM_SESSIONS = 10;
 const META_PERSIST_THROTTLE_MS = 1_500;
 const PERSIST_THROTTLE_MS = 800;
@@ -144,6 +146,7 @@ export class SessionRuntime {
   private initStarted = false;
   private eventSeq = 0;
   private resumeCleanups: Array<() => void> = [];
+  private lastResumeAt = 0;
   // requestIds of approvals/elicitations whose decision send is in flight. Guards a double-tap from
   // dispatching twice (#88) and lets onMessage strip an already-answered card from a racing state
   // snapshot before the send settles (#79).
@@ -413,6 +416,7 @@ export class SessionRuntime {
     if (session.connection.status === 'error') {
       this.beginHostConfirm(channelId, client);
       this.requestState(channelId);
+      this.syncHistory(channelId, client);
     }
   }
 
@@ -616,6 +620,7 @@ export class SessionRuntime {
     this.registry.dispose(channelId);
     if (session.connection.status !== 'ended') {
       this.store.dispatch(statusSet({ id: channelId, status: 'idle', error: undefined }));
+      this.store.dispatch(coldSet({ id: channelId, on: true }));
     }
     if (session.connection.busy) this.store.dispatch(busySet({ id: channelId, busy: false }));
   }
@@ -1060,10 +1065,19 @@ export class SessionRuntime {
   private handleResume = (): void => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const now = this.clock();
+    // Foregrounding fires visibilitychange AND Capacitor appStateChange (and sometimes `online`)
+    // back-to-back; a short leading-edge debounce collapses the overlapping triggers into one pass
+    // so each warm session issues at most one state+history sync (#75).
+    if (now - this.lastResumeAt < RESUME_DEBOUNCE_MS) return;
+    this.lastResumeAt = now;
     for (const channelId of [...this.warmLru]) {
       const ctrl = this.controllers.get(channelId);
       const session = this.session(channelId);
       if (!ctrl || !session || ctrl.ephemeral) continue;
+      // A session still inside its 30s confirmation window (just created a client) must not be torn
+      // down and reconnected — that closes the fresh client, drops a pending host reply, and resets
+      // the clock (#125). Let the confirm gate / watchdog resolve it.
+      if (session.connection.status === 'connecting') continue;
       const beat = session.connection.lastHeartbeat;
       const stale = beat != null && now - beat > IDLE_AFTER_MS;
       const revive = !ctrl.client || session.connection.status === 'error' || stale;

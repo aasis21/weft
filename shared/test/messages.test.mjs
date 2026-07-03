@@ -122,12 +122,18 @@ test("prompt carries text and only includes attachments when present", () => {
 
 test("approvalRequest mirrors the native prompt under msg", () => {
   const opts = [{ id: "allow", label: "Allow" }];
-  const m = approvalRequest("req-1", "shell", { cmd: "ls" }, opts);
+  const m = approvalRequest("req-1", "shell", { cmd: "ls" }, opts, {
+    timeoutMs: 120_000,
+    expiresAt: 1_900_000_000_000,
+  });
   assertEnvelope(m, EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.REQUEST);
   assert.equal(m.msg.requestId, "req-1");
   assert.equal(m.msg.toolName, "shell");
   assert.deepEqual(m.msg.toolArgs, { cmd: "ls" });
   assert.deepEqual(m.msg.options, opts);
+  assert.equal(m.msg.timeoutMs, 120_000);
+  assert.equal(m.msg.expiresAt, 1_900_000_000_000);
+  assert.equal(isValidEnvelope(approvalRequest("req-2", "shell", {}, opts)), true);
 });
 
 test("approvalDecision echoes the chosen option", () => {

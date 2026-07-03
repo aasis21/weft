@@ -81,6 +81,10 @@ export interface SessionConnection {
   pendingMode?: SessionMode;
   reconnecting: boolean;
   settling: boolean;
+  /** True once the session was evicted from the warm pool (subscription/socket dropped) and has no
+   *  live client. Distinguishes cold-idle ("Offline — tap to connect") from warm-idle ("Quiet",
+   *  socket still open) so the header and reconnect affordance stop contradicting each other. */
+  cold: boolean;
   lastHeartbeat: number | null;
   ended: boolean;
   endedReason?: string;
@@ -135,6 +139,7 @@ export function emptySession(id: string, meta: SessionMeta): Session {
       mode: DEFAULT_MODE,
       reconnecting: false,
       settling: false,
+      cold: false,
       lastHeartbeat: null,
       ended: false,
     },

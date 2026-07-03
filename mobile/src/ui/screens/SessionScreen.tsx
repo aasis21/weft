@@ -192,9 +192,20 @@ export function SessionScreen({
   // the controls so a decision isn't fired into a dead socket and silently lost (it would optimistically
   // dismiss, hang, then restore); the offline banner already explains the state (#90).
   const responsive = status === 'live';
-  const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || status === 'idle');
+  const cold = active.cold === true;
+  // Manual "Reconnect" must not be offered for warm-idle (socket still open, just missed a heartbeat):
+  // tapping it needlessly closes a live client and redoes the ECDH handshake, dropping in-flight output
+  // (#126). Offer it only for cold-idle (evicted, no socket), error, or ended.
+  const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || (status === 'idle' && cold));
   const offline = status === 'connecting' || status === 'idle';
-  const offlineLabel = status === 'connecting' ? 'Connecting to your session…' : 'Session idle — waiting to reconnect.';
+  // Cold-idle (no socket) and warm-idle (socket alive) must read differently so the banner stops
+  // contradicting the header's "Quiet"/"Offline" (#127).
+  const offlineLabel =
+    status === 'connecting'
+      ? 'Connecting to your session…'
+      : cold
+        ? 'Session offline — tap Reconnect to resume.'
+        : 'Session quiet — reconnecting automatically…';
   // The initial connecting-skeleton is owned by LIVENESS (+ a bounded grace), not by whether a history
   // reply has landed: a dead host never replies, so coupling the loader to the reply spins it forever.
   // Show it only while the thread is genuinely empty AND we're connecting or in the brief post-Live
@@ -432,7 +443,7 @@ export function SessionScreen({
               const countdownText =
                 remainingMs != null
                   ? remainingMs > 0
-                    ? `${formatDuration(remainingMs)} remaining`
+                    ? `Auto-denies in ${formatDuration(remainingMs)}`
                     : 'Approval timed out'
                   : `Waiting ${formatDuration(elapsedMs)}`;
               const countdownWidth =
@@ -532,7 +543,8 @@ export function SessionScreen({
 
         <Composer
           sessionId={activeId}
-          disabled={ended}
+          disabled={ended || offline}
+          disabledReason={ended ? 'ended' : offline ? 'offline' : undefined}
           busy={agentBusy}
           mode={timeline.mode}
           cwd={meta.cwd}

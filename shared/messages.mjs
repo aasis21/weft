@@ -127,12 +127,18 @@ export const prompt = (text, attachments = null) =>
  * Approval request mirrors the NATIVE Copilot permission prompt. `options` is the verbatim set of
  * choices the terminal would show; the phone echoes back the chosen option id in the decision.
  */
-export const approvalRequest = (requestId, toolName, toolArgs, options) =>
+export const approvalRequest = (requestId, toolName, toolArgs, options, deadline = {}) =>
   envelope(EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.REQUEST, {
     requestId,
     toolName,
     toolArgs,
     options,
+    ...(deadline && typeof deadline === "object" && "timeoutMs" in deadline
+      ? { timeoutMs: deadline.timeoutMs }
+      : {}),
+    ...(deadline && typeof deadline === "object" && "expiresAt" in deadline
+      ? { expiresAt: deadline.expiresAt }
+      : {}),
   });
 export const approvalDecision = (requestId, optionId, raw) =>
   envelope(EVENT_TYPE.DECISION, SUBTYPE.DECISION.APPROVAL_DECISION, { requestId, optionId, raw });
