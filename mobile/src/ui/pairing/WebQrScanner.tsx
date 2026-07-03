@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 interface WebQrScannerProps {
   onResult(raw: string): void;
   onCancel(): void;
+  onPasteCode?: () => void;
   /** `overlay` (default) is a full-screen modal; `inline` embeds the live scanner in a page. */
   variant?: 'overlay' | 'inline';
 }
@@ -31,7 +32,7 @@ async function makeDetector(): Promise<DetectFrame> {
   if (Ctor) {
     try {
       const formats = (await Ctor.getSupportedFormats?.()) ?? [];
-      if (formats.length === 0 || formats.includes('qr_code')) {
+      if (formats.includes('qr_code')) {
         const detector = new Ctor({ formats: ['qr_code'] });
         return async (video) => {
           const codes = await detector.detect(video);
@@ -62,7 +63,12 @@ async function makeDetector(): Promise<DetectFrame> {
  * Decodes entirely on-device — frames never leave the page. Calls `onResult` with the raw
  * payload string (same shape the native scanner and paste box produce) on the first hit.
  */
-export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrScannerProps): JSX.Element {
+export function WebQrScanner({
+  onResult,
+  onCancel,
+  onPasteCode,
+  variant = 'overlay',
+}: WebQrScannerProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onResultRef = useRef(onResult);
@@ -71,6 +77,7 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
   const [status, setStatus] = useState('Requesting camera…');
   const [fatal, setFatal] = useState(false);
   const [needsPlayGesture, setNeedsPlayGesture] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     onResultRef.current = onResult;
@@ -80,13 +87,28 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
     retryPlayRef.current?.();
   }, []);
 
+  const retryCamera = useCallback((): void => {
+    resultDeliveredRef.current = false;
+    setFatal(false);
+    setStatus('Requesting camera…');
+    setNeedsPlayGesture(false);
+    setAttempt((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     let stream: MediaStream | null = null;
     let frame = 0;
     let stopped = false;
     let scanningStarted = false;
 
+    const stopStream = (): void => {
+      stream?.getTracks().forEach((track) => track.stop());
+      stream = null;
+    };
+
     const fail = (message: string): void => {
+      stopped = true;
+      stopStream();
       setStatus(message);
       setFatal(true);
       setNeedsPlayGesture(false);
@@ -130,7 +152,11 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
               stopped = true;
               if (!resultDeliveredRef.current) {
                 resultDeliveredRef.current = true;
-                onResultRef.current(raw);
+                try {
+                  onResultRef.current(raw);
+                } finally {
+                  stopStream();
+                }
               }
               return;
             }
@@ -169,9 +195,9 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
       stopped = true;
       retryPlayRef.current = null;
       cancelAnimationFrame(frame);
-      stream?.getTracks().forEach((track) => track.stop());
+      stopStream();
     };
-  }, []);
+  }, [attempt]);
 
   return (
     <div
@@ -190,6 +216,18 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
         <button className="secondary-action scanner-enable" type="button" onClick={retryPlay}>
           Tap to enable camera
         </button>
+      ) : null}
+      {fatal && variant === 'inline' ? (
+        <div className="scanner-actions">
+          <button className="secondary-action" type="button" onClick={retryCamera}>
+            Retry camera
+          </button>
+          {onPasteCode ? (
+            <button className="link-btn" type="button" onClick={onPasteCode}>
+              Paste code instead
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {variant === 'overlay' ? (
         <button className="secondary-action scanner-cancel" type="button" onClick={onCancel}>

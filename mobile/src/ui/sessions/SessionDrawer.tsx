@@ -170,6 +170,7 @@ export function SessionDrawer({
               const id = session.meta.channelId;
               const isActive = id === activeId;
               const pending = session.timeline.approvals.length;
+              const activity = lastActivity(session);
               return (
                 <div
                   key={id}
@@ -197,7 +198,7 @@ export function SessionDrawer({
                     </span>
                     <span className="session-sub">
                       {turnCount(session)} msg
-                      {lastActivity(session) ? ` · ${fmtRelative(lastActivity(session))}` : ''}
+                      {activity ? ` · ${fmtRelative(activity)}` : ''}
                       {session.meta.cwd ? ` · ${session.meta.cwd.split(/[\\/]/).pop()}` : ''}
                     </span>
                   </span>

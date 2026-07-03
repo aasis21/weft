@@ -19,6 +19,7 @@ interface SpeechRecognitionResultList {
 
 interface SpeechRecognitionEvent {
   readonly results: SpeechRecognitionResultList;
+  readonly resultIndex?: number;
 }
 
 interface SpeechRecognitionErrorEvent {
@@ -80,40 +81,71 @@ export function useSpeechInput(): {
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const recognitionGenerationRef = useRef(0);
+  const explicitStopRef = useRef(true);
+  const fatalErrorRef = useRef(false);
 
   const start = useCallback((onText: (text: string, isFinal: boolean) => void): void => {
     const Ctor = getSpeechRecognition();
     if (!Ctor || recognitionRef.current) return;
     const generation = recognitionGenerationRef.current + 1;
     recognitionGenerationRef.current = generation;
+    explicitStopRef.current = false;
+    fatalErrorRef.current = false;
     setError(null);
-    const recognition = new Ctor();
-    recognition.lang = navigator.language;
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event) => {
-      if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
-      const last = event.results[event.results.length - 1];
-      if (last) onText(last[0].transcript, last.isFinal);
+
+    const startRecognition = (): void => {
+      if (recognitionGenerationRef.current !== generation || explicitStopRef.current || fatalErrorRef.current) return;
+      const recognition = new Ctor();
+      let finalTranscript = '';
+      recognition.lang = navigator.language;
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      recognition.maxAlternatives = 1;
+      recognition.onresult = (event) => {
+        if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
+        let interimTranscript = '';
+        for (let index = event.resultIndex ?? 0; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          const transcript = result?.[0]?.transcript ?? '';
+          if (result?.isFinal) finalTranscript += transcript;
+          else interimTranscript += transcript;
+        }
+        const transcript = `${finalTranscript}${interimTranscript}`;
+        if (transcript) onText(transcript, interimTranscript.length === 0);
+      };
+      recognition.onerror = (event) => {
+        if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
+        if (event.error === 'aborted') return;
+        console.warn('voice error', event.error);
+        setError(speechErrorMessage(event.error));
+        if (
+          event.error === 'not-allowed' ||
+          event.error === 'service-not-allowed' ||
+          event.error === 'audio-capture' ||
+          event.error === 'network'
+        ) {
+          fatalErrorRef.current = true;
+        }
+      };
+      recognition.onend = () => {
+        if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
+        recognitionRef.current = null;
+        if (explicitStopRef.current || fatalErrorRef.current) {
+          setListening(false);
+          return;
+        }
+        startRecognition();
+      };
+      recognitionRef.current = recognition;
+      setListening(true);
+      recognition.start();
     };
-    recognition.onerror = (event) => {
-      if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
-      if (event.error === 'aborted') return;
-      console.warn('voice error', event.error);
-      setError(speechErrorMessage(event.error));
-    };
-    recognition.onend = () => {
-      if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
-      setListening(false);
-      recognitionRef.current = null;
-    };
-    recognitionRef.current = recognition;
-    setListening(true);
-    recognition.start();
+
+    startRecognition();
   }, []);
 
   const stop = useCallback((): void => {
+    explicitStopRef.current = true;
     recognitionGenerationRef.current += 1;
     recognitionRef.current?.stop();
     recognitionRef.current = null;
@@ -121,6 +153,7 @@ export function useSpeechInput(): {
   }, []);
 
   useEffect(() => () => {
+    explicitStopRef.current = true;
     recognitionGenerationRef.current += 1;
     recognitionRef.current?.stop();
     recognitionRef.current = null;

@@ -42,7 +42,10 @@ export type {
 export const MAX_ITEMS = 240;
 export const MAX_HISTORY = 500;
 const RECENT_OVERLAP_SCAN = 120;
-const RECENT_DEDUPE_PREFIX = 256;
+// #119: near-full text so two distinct long prompts that merely share an opening boilerplate/prefix
+// aren't collapsed into one. Exact optimistic-echo dedup is handled by id above; this content key is
+// only a secondary guard, so a generous window is safe.
+const RECENT_DEDUPE_PREFIX = 4096;
 const DEFAULT_MODE = MODES[0] as Session['connection']['mode'];
 
 function cap(items: TimelineItem[]): TimelineItem[] {
@@ -391,14 +394,64 @@ function applyRecentTurns(session: Session, message: RecentTurnsMsg): void {
     return;
   }
 
-  const newTurns = additions.filter((a) => a.kind === 'user').length;
-  const prefix = session.transcript.items.length > 0 && newTurns > 0 ? [recentDivider(newTurns, additions[0].ts)] : [];
-  session.transcript.items = cap([...session.transcript.items, ...prefix, ...additions]);
+  // #151: never rely on the extension sending pre-sorted data — enforce chronological order among
+  // the additions (user before assistant within an equal timestamp).
+  additions.sort((a, b) => a.ts - b.ts || itemRank(a) - itemRank(b));
+
+  // #135: keep at most ONE "new while you were away" marker in the thread — drop any dividers left
+  // by previous reconnects instead of accumulating a fresh one on every flaky-connection catch-up.
+  let base = session.transcript.items;
+  if (base.some(isRecentDivider)) {
+    base = base.filter((i) => !isRecentDivider(i));
+  }
+
+  const hasPriorContent = base.some((i) => i.kind === 'user' || i.kind === 'assistant' || i.kind === 'tool');
+  const newestExistingTs = base.reduce(
+    (max, i) => (i.kind === 'notice' ? max : Math.max(max, i.ts)),
+    Number.NEGATIVE_INFINITY,
+  );
+  // The common catch-up case: the backfilled turns are newer than everything already shown, so a
+  // plain append is correct (and byte-for-byte the historical behavior).
+  const appendCase = !hasPriorContent || additions[0].ts >= newestExistingTs;
+
+  if (appendCase) {
+    // #117: show a divider for ANY new content on an existing thread, including an assistant-only
+    // backfill (a missing reply landing under an already-shown user message), not just new user turns.
+    const userTurns = additions.filter((a) => a.kind === 'user').length;
+    const prefix = hasPriorContent ? [recentDivider(userTurns, additions)] : [];
+    session.transcript.items = cap([...base, ...prefix, ...additions]);
+  } else {
+    // #93: joining/reconnecting mid-turn — live fragments already sit in the thread but are
+    // chronologically NEWER than this backfilled history. Merge by timestamp so the older history
+    // lands above the in-progress turn instead of after it. No "new while away" divider here: this
+    // is prior context, not activity that happened while the user was away.
+    session.transcript.items = cap(
+      [...base, ...additions].sort((a, b) => a.ts - b.ts || itemRank(a) - itemRank(b)),
+    );
+  }
   session.history.loading = false;
 }
 
-function recentDivider(turnCount: number, ts: number): NoticeItem {
-  return { kind: 'notice', id: `recent-${ts}-${turnCount}`, level: 'info', text: `${turnCount} new while you were away`, ts };
+function itemRank(item: TimelineItem): number {
+  // Stable secondary sort key for equal timestamps: user turn, then assistant, then tool/notice.
+  if (item.kind === 'user') return 0;
+  if (item.kind === 'assistant') return 1;
+  return 2;
+}
+
+function isRecentDivider(item: TimelineItem): boolean {
+  return item.kind === 'notice' && item.id.startsWith('recent-');
+}
+
+function recentDivider(userTurns: number, additions: TimelineItem[]): NoticeItem {
+  const ts = additions[0].ts;
+  const text =
+    userTurns > 0
+      ? `${userTurns} new while you were away`
+      : additions.length === 1
+        ? '1 new reply'
+        : `${additions.length} new replies`;
+  return { kind: 'notice', id: `recent-${ts}-${userTurns}-${additions.length}`, level: 'info', text, ts };
 }
 
 export function mergeHistoryPage(session: Session, message: HistoryMsg): void {

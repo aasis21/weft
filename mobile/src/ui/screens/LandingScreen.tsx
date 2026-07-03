@@ -94,6 +94,8 @@ function detectOs(): OsTab {
 function InstallCommand(): JSX.Element {
   const [os, setOs] = useState<OsTab>(detectOs());
   const [copied, setCopied] = useState(false);
+  const panelId = 'install-command-panel';
+  const activeTabId = `install-tab-${os}`;
 
   const copy = async (): Promise<void> => {
     try {
@@ -111,9 +113,11 @@ function InstallCommand(): JSX.Element {
         {(Object.keys(INSTALL) as OsTab[]).map((key) => (
           <button
             key={key}
+            id={`install-tab-${key}`}
             type="button"
             role="tab"
             aria-selected={os === key}
+            aria-controls={panelId}
             className={`install-tab${os === key ? ' active' : ''}`}
             onClick={() => setOs(key)}
           >
@@ -121,7 +125,7 @@ function InstallCommand(): JSX.Element {
           </button>
         ))}
       </div>
-      <div className="install-row">
+      <div id={panelId} className="install-row" role="tabpanel" aria-labelledby={activeTabId}>
         <code className="install-code">{INSTALL[os].cmd}</code>
         <button type="button" className="copy-btn" onClick={() => void copy()}>
           {copied ? 'Copied!' : 'Copy'}

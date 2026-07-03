@@ -86,7 +86,13 @@ export async function pairSession(
     deviceId,
     savedAt: Date.now(),
   };
-  const client = await createClientFromMaterial({ channelId, key, deviceId, transport });
+  let client: HelmClient;
+  try {
+    client = await createClientFromMaterial({ channelId, key, deviceId, transport });
+  } catch (err) {
+    void transport.close().catch(() => {});
+    throw err;
+  }
   return { client, pairing };
 }
 

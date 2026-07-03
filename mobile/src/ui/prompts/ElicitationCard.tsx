@@ -228,9 +228,10 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
   const renderField = (f: Field): JSX.Element => {
     const showError = touched && f.required && missing.includes(f.name);
     const fieldId = `elicit-${req.requestId}-${f.name}`;
+    const labelId = `${fieldId}-label`;
     return (
       <div className={`elicit-field${showError ? ' invalid' : ''}`}>
-        <label className="elicit-label" htmlFor={fieldId}>
+        <label className="elicit-label" id={labelId} htmlFor={f.control === 'multiselect' ? undefined : fieldId}>
           {f.title}
           {f.required ? <span className="elicit-req" aria-hidden="true"> *</span> : null}
         </label>
@@ -293,7 +294,7 @@ export function ElicitationCard({ req, error, disabled = false, onSubmit, onDecl
         ) : null}
 
         {f.control === 'multiselect' ? (
-          <div className="elicit-checks" role="group" aria-labelledby={fieldId}>
+          <div className="elicit-checks" role="group" aria-labelledby={labelId}>
             {f.options.map((opt) => {
               const selected = Array.isArray(values[f.name]) && (values[f.name] as string[]).includes(opt.value);
               return (

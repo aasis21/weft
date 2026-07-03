@@ -149,12 +149,16 @@ export function Composer({
 }: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachWrapRef = useRef<HTMLDivElement | null>(null);
+  const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const modeWrapRef = useRef<HTMLDivElement | null>(null);
   const modeButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const speechCommittedRef = useRef('');
   const sessionIdRef = useRef(sessionId);
   const attachmentGenerationRef = useRef(0);
@@ -162,8 +166,9 @@ export function Composer({
   const suppressSendUntilRef = useRef(0);
   const speech = useSpeechInput();
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
-  const [attaching, setAttaching] = useState(false);
+  const [attachingCount, setAttachingCount] = useState(0);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const attaching = attachingCount > 0;
   sessionIdRef.current = sessionId;
 
   const applyTextChange = (targetSessionId: string, value: string): void => {
@@ -190,7 +195,8 @@ export function Composer({
     speechCommittedRef.current = '';
     setText(loadDraft(sessionId));
     setAttachments(loadAttachments(sessionId));
-    setAttaching(false);
+    setAttachingCount(0);
+    setAttachMenuOpen(false);
     setAttachError(null);
   }, [sessionId]);
 
@@ -212,6 +218,25 @@ export function Composer({
       document.removeEventListener('keydown', onDocKeyDown);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!attachMenuOpen) return undefined;
+    const onDocMouseDown = (event: MouseEvent): void => {
+      if (attachWrapRef.current && !attachWrapRef.current.contains(event.target as Node)) setAttachMenuOpen(false);
+    };
+    const onDocKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setAttachMenuOpen(false);
+        attachButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onDocKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onDocKeyDown);
+    };
+  }, [attachMenuOpen]);
 
   const commandQuery = slashQuery(text);
   const slashOptions = commandQuery === null
@@ -240,7 +265,14 @@ export function Composer({
 
   const openFilePicker = (): void => {
     setAttachError(null);
+    setAttachMenuOpen(false);
     fileInputRef.current?.click();
+  };
+
+  const openCameraPicker = (): void => {
+    setAttachError(null);
+    setAttachMenuOpen(false);
+    cameraInputRef.current?.click();
   };
 
   const onFilesPicked = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -255,29 +287,32 @@ export function Composer({
       setAttachError(`Up to ${MAX_ATTACHMENTS} images per message.`);
       return;
     }
-    setAttaching(true);
+    setAttachingCount((count) => count + 1);
     setAttachError(null);
-    const picked = files.slice(0, room);
-    const next: PromptAttachment[] = [];
-    let failed = 0;
-    for (const file of picked) {
-      try {
-        next.push(await fileToAttachment(file));
-      } catch {
-        failed += 1;
+    try {
+      const picked = files.slice(0, room);
+      const next: PromptAttachment[] = [];
+      let failed = 0;
+      for (const file of picked) {
+        try {
+          next.push(await fileToAttachment(file));
+        } catch {
+          failed += 1;
+        }
       }
+      if (generation !== attachmentGenerationRef.current || sessionIdRef.current !== pickedSessionId) return;
+      if (next.length) {
+        setAttachments((prev) => {
+          const updated = [...prev, ...next].slice(0, MAX_ATTACHMENTS);
+          saveAttachments(pickedSessionId, updated);
+          return updated;
+        });
+      }
+      if (failed) setAttachError(`Couldn't attach ${failed} image${failed > 1 ? 's' : ''}.`);
+      else if (files.length > room) setAttachError(`Only ${room} more image${room > 1 ? 's' : ''} fit.`);
+    } finally {
+      setAttachingCount((count) => Math.max(0, count - 1));
     }
-    if (generation !== attachmentGenerationRef.current || sessionIdRef.current !== pickedSessionId) return;
-    if (next.length) {
-      setAttachments((prev) => {
-        const updated = [...prev, ...next].slice(0, MAX_ATTACHMENTS);
-        saveAttachments(pickedSessionId, updated);
-        return updated;
-      });
-    }
-    if (failed) setAttachError(`Couldn't attach ${failed} image${failed > 1 ? 's' : ''}.`);
-    else if (files.length > room) setAttachError(`Only ${room} more image${room > 1 ? 's' : ''} fit.`);
-    setAttaching(false);
   };
 
   const removeAttachment = (index: number): void => {
@@ -428,8 +463,18 @@ export function Composer({
           tabIndex={-1}
           aria-hidden="true"
         />
+        <input
+          ref={cameraInputRef}
+          type="file"
+          className="composer-file-input"
+          accept="image/*"
+          capture="environment"
+          onChange={(event) => void onFilesPicked(event)}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
 
-        {attachments.length > 0 ? (
+        {attachments.length > 0 || attaching ? (
           <div className="composer-attachments" aria-label="Attached images">
             {attachments.map((attachment, index) => (
               <div className="attachment-thumb" key={`${attachment.name}-${index}`}>
@@ -472,18 +517,35 @@ export function Composer({
 
         <div className="composer-controls">
           <div className="composer-controls-left">
-            <button
-              type="button"
-              className="attach-btn"
-              onClick={openFilePicker}
-              disabled={disabled || attaching || attachments.length >= MAX_ATTACHMENTS}
-              aria-label="Attach image"
-              title={attachments.length >= MAX_ATTACHMENTS ? `Up to ${MAX_ATTACHMENTS} images` : 'Attach image'}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path fill="currentColor" d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z" />
-              </svg>
-            </button>
+            <div className="mode-wrap" ref={attachWrapRef}>
+              <button
+                ref={attachButtonRef}
+                type="button"
+                className="attach-btn"
+                onClick={() => setAttachMenuOpen((v) => !v)}
+                disabled={disabled || attaching || attachments.length >= MAX_ATTACHMENTS}
+                aria-label="Attach image"
+                aria-haspopup="menu"
+                aria-expanded={attachMenuOpen}
+                title={attachments.length >= MAX_ATTACHMENTS ? `Up to ${MAX_ATTACHMENTS} images` : 'Attach image'}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path fill="currentColor" d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z" />
+                </svg>
+              </button>
+              {attachMenuOpen ? (
+                <div className="mode-menu" role="menu" aria-label="Attach image options">
+                  <button type="button" role="menuitem" className="mode-menu-item" onClick={openCameraPicker}>
+                    <span className="mode-check">📷</span>
+                    Take Photo
+                  </button>
+                  <button type="button" role="menuitem" className="mode-menu-item" onClick={openFilePicker}>
+                    <span className="mode-check">🖼️</span>
+                    Choose from Library
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <div className="mode-wrap" ref={modeWrapRef}>
               <button
                 ref={modeButtonRef}

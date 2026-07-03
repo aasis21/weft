@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
@@ -141,6 +141,53 @@ describe('Composer', () => {
     expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toBeNull();
   });
 
+  it('keeps the attachment spinner visible until concurrent picks finish', async () => {
+    const first = deferred<PromptAttachment>();
+    const second = deferred<PromptAttachment>();
+    fileToAttachment.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    localStorage.setItem('helm.draft-attachments.v1.session-a', JSON.stringify([mockAttachment]));
+    const { container } = renderComposer();
+    const input = container.querySelector<HTMLInputElement>('input[type="file"].composer-file-input');
+
+    fireEvent.change(input!, { target: { files: [new File(['one'], 'one.png', { type: 'image/png' })] } });
+    await waitFor(() => expect(container.querySelector('.attachment-loading')).toBeInTheDocument());
+    fireEvent.change(input!, { target: { files: [new File(['two'], 'two.png', { type: 'image/png' })] } });
+
+    await act(async () => {
+      first.resolve({ ...mockAttachment, name: 'one.jpg' });
+      await first.promise;
+    });
+    await waitFor(() => expect(screen.getByRole('img', { name: 'one.jpg' })).toBeInTheDocument());
+    expect(container.querySelector('.attachment-loading')).toBeInTheDocument();
+
+    await act(async () => {
+      second.resolve({ ...mockAttachment, name: 'two.jpg' });
+      await second.promise;
+    });
+    await waitFor(() => expect(container.querySelector('.attachment-loading')).not.toBeInTheDocument());
+    expect(screen.getByRole('img', { name: 'two.jpg' })).toBeInTheDocument();
+  });
+
+  it('offers camera capture separately from choosing from the library', async () => {
+    const user = userEvent.setup();
+    const { container } = renderComposer();
+
+    await user.click(screen.getByRole('button', { name: 'Attach image' }));
+    expect(screen.getByRole('menuitem', { name: /Take Photo/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Choose from Library/ })).toBeInTheDocument();
+
+    const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="file"].composer-file-input'));
+    const libraryInput = inputs.find((input) => input.multiple);
+    const cameraInput = inputs.find((input) => input.getAttribute('capture') === 'environment');
+    expect(libraryInput).toHaveAttribute('accept');
+    expect(cameraInput).toHaveAttribute('accept', 'image/*');
+    expect(cameraInput?.multiple).toBe(false);
+
+    fireEvent.change(cameraInput!, { target: { files: [new File(['photo'], 'photo.jpg', { type: 'image/jpeg' })] } });
+    expect(fileToAttachment).toHaveBeenCalledWith(expect.objectContaining({ name: 'photo.jpg' }));
+    expect(await screen.findByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
+  });
+
   it('does not attach an image picked in a previous session after switching sessions', async () => {
     const pending = deferred<PromptAttachment>();
     fileToAttachment.mockReturnValueOnce(pending.promise);
@@ -196,6 +243,27 @@ describe('Composer', () => {
     expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toHaveValue('');
     expect(localStorage.getItem('helm.draft.v1.session-a')).toBeNull();
     expect(localStorage.getItem('helm.draft.v1.session-b')).toBeNull();
+  });
+
+  it('appends fresh speech phrases without duplicating committed text', async () => {
+    const user = userEvent.setup();
+    let onSpeech: ((text: string, isFinal: boolean) => void) | undefined;
+    speechState.supported = true;
+    speechState.start.mockImplementation((callback) => {
+      onSpeech = callback;
+      speechState.listening = true;
+    });
+    renderComposer();
+    const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+    await user.type(textbox, 'draft');
+    await user.click(screen.getByRole('button', { name: 'Start voice input' }));
+    act(() => onSpeech?.('hello', true));
+    expect(textbox).toHaveValue('draft hello');
+    act(() => onSpeech?.('world', false));
+    expect(textbox).toHaveValue('draft hello world');
+    act(() => onSpeech?.('world', true));
+    expect(textbox).toHaveValue('draft hello world');
   });
 
   it('does not send a draft when a stop tap finishes after busy clears', async () => {

@@ -557,7 +557,10 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
                   {item.text}
                 </div>
               ) : null}
-              <span className="ts user-ts">{formatTime(item.ts)}</span>
+              <div className="user-meta">
+                <span className="ts user-ts">{formatTime(item.ts)}</span>
+                <DeviceChip origin={item.origin} />
+              </div>
               {item.failed ? (
                 <div
                   className="notice warning"
@@ -577,7 +580,6 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
                   ) : null}
                 </div>
               ) : null}
-              <DeviceChip origin={item.origin} />
             </div>
           );
         }

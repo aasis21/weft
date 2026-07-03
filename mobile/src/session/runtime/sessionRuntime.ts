@@ -955,6 +955,15 @@ export class SessionRuntime {
   }
 
   private recordEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
+    // Heartbeats fire ~every 2.5s and would evict the substantive event chain (prompts, approvals,
+    // tool_start/complete, elicitations) from the bounded ring within minutes (#67). Liveness is
+    // already surfaced via connection.lastHeartbeat, so keep them out of the persisted debug log.
+    if (
+      message.eventType === EVENT_TYPE.CONTROL &&
+      message.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT
+    ) {
+      return;
+    }
     const fallback = dir === 'out' ? getSenderName() : 'Copilot';
     const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
     this.store.dispatch(debugAppended({ id: channelId, event }));

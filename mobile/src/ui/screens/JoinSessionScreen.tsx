@@ -60,15 +60,18 @@ export function JoinSessionScreen({
   };
 
   const pair = useCallback(
-    (raw: string): Promise<void> =>
-      run(async () => {
+    async (raw: string): Promise<void> => {
+      let failed = false;
+      await run(async () => {
         try {
           await onPair(raw);
         } catch (err) {
-          setScanNonce((n) => n + 1);
+          failed = true;
           throw err;
         }
-      }),
+      });
+      if (failed) setScanNonce((n) => n + 1);
+    },
     [onPair, run],
   );
 
@@ -125,6 +128,7 @@ export function JoinSessionScreen({
             variant="inline"
             onResult={handleScannerResult}
             onCancel={() => undefined}
+            onPasteCode={() => setShowManual(true)}
           />
         )}
       </div>

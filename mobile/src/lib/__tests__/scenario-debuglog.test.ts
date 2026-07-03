@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { heartbeat } from '@aasis21/helm-shared';
 import { loadEventLog } from '@/lib/eventLog';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
@@ -52,6 +53,31 @@ describe('scenario: debug event log', () => {
     const stored = await loadEventLog('c1');
     expect(stored.length).toBe(events.length);
     expect(stored.some((e) => e.eventType === 'prompt' && e.dir === 'out')).toBe(true);
+  });
+
+  it('excludes control.heartbeat from the debug log so real events survive the ring (#67)', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
+    await h!.flush();
+
+    const before = h!.active()!.events.length;
+    // A burst of heartbeats must not add any rows to the debug log.
+    for (let i = 0; i < 20; i += 1) {
+      client.emit(heartbeat(i, false));
+    }
+    await h!.flush();
+    const after = h!.active()!.events;
+    expect(after.length).toBe(before);
+    expect(after.some((e) => e.eventType === 'control' && e.eventSubtype === 'heartbeat')).toBe(
+      false,
+    );
+
+    // A subsequent real event is still recorded.
+    client.emit(B.assistantDelta('still here', 'm9'));
+    await h!.flush();
+    expect(
+      h!.active()!.events.some((e) => e.eventType === 'stream' && e.eventSubtype === 'assistant_delta'),
+    ).toBe(true);
   });
 
   it('does not leak events across sessions', async () => {

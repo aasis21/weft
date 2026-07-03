@@ -10,6 +10,9 @@ interface ScannerApi {
 
 const SCAN_TIMEOUT_MS = 60_000;
 const SCAN_TIMEOUT_MESSAGE = 'QR scan timed out. Try again.';
+const INVALID_PAIRING_CODE_MESSAGE =
+  "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.";
+const NO_ACK_MESSAGE = "Couldn't reach your laptop — make sure the terminal shows the QR and try again.";
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -19,6 +22,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   return Promise.race([promise, timeout]).finally(() => {
     if (timeoutId) clearTimeout(timeoutId);
   });
+}
+
+function pairingErrorMessage(err: unknown): string {
+  if (err instanceof SyntaxError) return INVALID_PAIRING_CODE_MESSAGE;
+  if (err instanceof Error) {
+    if (err.message === 'helm/pairing: invalid pairing payload') return INVALID_PAIRING_CODE_MESSAGE;
+    if (err.message === 'helm/pairing: no ack from laptop') return NO_ACK_MESSAGE;
+    return err.message;
+  }
+  return 'Pairing failed.';
 }
 
 /** True when running inside the native Capacitor shell (vs. the hosted web app). */
@@ -66,7 +79,7 @@ export function usePairing(onError: (message: string | null) => void): {
       try {
         await task();
       } catch (err) {
-        onError(err instanceof Error ? err.message : 'Pairing failed.');
+        onError(pairingErrorMessage(err));
         setErrorDetail(describeError(err));
       } finally {
         busyRef.current = false;
