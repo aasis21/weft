@@ -1176,6 +1176,47 @@
   animation: helm-drawer-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes helm-drawer-in { from { transform: translateX(-100%); } }
+/* ===================== desktop docked sidebar (#183) =====================
+   Wide viewports get a persistent, in-flow sidebar instead of the mobile overlay
+   drawer above: .helm-session switches to a row layout and .drawer gets a `docked`
+   variant that drops the fixed positioning/scrim/slide-in animation. Narrow
+   viewports never receive the `desktop-docked` class, so the mobile layout and the
+   plain `.drawer` overlay rules above are completely unaffected. */
+.helm-session.desktop-docked {
+  flex-direction: row;
+}
+.helm-content-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.drawer.drawer-docked {
+  position: relative;
+  top: auto;
+  left: auto;
+  bottom: auto;
+  z-index: auto;
+  flex: 0 0 auto;
+  width: min(320px, 26vw);
+  height: 100%;
+  box-shadow: none;
+  animation: none;
+}
+.drawer-rail-expand {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 100%;
+  border: none;
+  border-right: 1px solid var(--bg-rule);
+  background: var(--bg-elev);
+  color: var(--fg-faint);
+  cursor: pointer;
+  font-size: 14px;
+}
+.drawer-rail-expand:hover { color: var(--fg); background: var(--bg); }
 .drawer-head { display: flex; align-items: center; gap: 6px; padding: 4px 4px 10px; }
 .drawer-title { flex: 1; color: var(--fg-faint); font-size: 12px; letter-spacing: 0.14em; }
 .drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }

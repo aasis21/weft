@@ -124,6 +124,36 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Open Vox' })).toBeEnabled();
   });
 
+  it('on desktop (mouse + hover input), plain Enter sends and Shift/Ctrl+Enter inserts a newline', async () => {
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(hover: hover) and (pointer: fine)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const user = userEvent.setup();
+      const onPrompt = vi.fn();
+      renderComposer({ onPrompt });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, 'newline please');
+      fireEvent.keyDown(textbox, { key: 'Enter', shiftKey: true });
+      expect(onPrompt).not.toHaveBeenCalled();
+      fireEvent.keyDown(textbox, { key: 'Enter', ctrlKey: true });
+      expect(onPrompt).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(textbox, { key: 'Enter' });
+      expect(onPrompt).toHaveBeenCalledWith('newline please', undefined);
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+
   it('morphs the primary empty action into voice mode and back to send', async () => {
     const user = userEvent.setup();
     const onOpenVoiceMode = vi.fn();

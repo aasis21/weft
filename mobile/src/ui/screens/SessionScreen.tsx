@@ -11,6 +11,7 @@ import { StatusBar } from '@/ui/sessions/StatusBar';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
 import { getStableDeviceId } from '@/lib/helmClient';
+import { useIsWideViewport } from '@/lib/platform';
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -106,6 +107,26 @@ function vibrate(pattern: VibratePattern): void {
 
 function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+/** Persisted across sessions: whether the user collapsed the desktop docked sidebar (#183). */
+const SIDEBAR_COLLAPSED_KEY = 'helm.desktop-sidebar-collapsed';
+
+function loadSidebarCollapsed(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveSidebarCollapsed(value: boolean): void {
+  try {
+    if (value) globalThis.localStorage?.setItem(SIDEBAR_COLLAPSED_KEY, '1');
+    else globalThis.localStorage?.removeItem(SIDEBAR_COLLAPSED_KEY);
+  } catch {
+    // Best-effort; a missing/blocked localStorage just means the preference doesn't persist.
+  }
 }
 
 function toMillis(value: unknown): number | null {
@@ -214,6 +235,18 @@ export function SessionScreen({
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
+  // Desktop (wide viewport): dock the session list as a persistent, collapsible sidebar
+  // instead of the mobile overlay drawer (#183). Narrow viewports are untouched below.
+  const isDesktopWide = useIsWideViewport();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsed);
+  const collapseSidebar = (): void => {
+    setSidebarCollapsed(true);
+    saveSidebarCollapsed(true);
+  };
+  const expandSidebar = (): void => {
+    setSidebarCollapsed(false);
+    saveSidebarCollapsed(false);
+  };
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
@@ -397,7 +430,35 @@ export function SessionScreen({
   }, []);
 
   return (
-    <div className="helm-session" ref={rootRef}>
+    <div className={`helm-session${isDesktopWide ? ' desktop-docked' : ''}`} ref={rootRef}>
+      {isDesktopWide ? (
+        sidebarCollapsed ? (
+          <button
+            type="button"
+            className="drawer-rail-expand"
+            onClick={expandSidebar}
+            title="Show sessions"
+            aria-label="Show sessions"
+          >
+            ⟩
+          </button>
+        ) : (
+          <SessionDrawer
+            docked
+            sessions={sessions}
+            activeId={activeId}
+            onSelect={(id) => onSelectSession(id)}
+            onAddSession={onAddSession}
+            onStartSession={onStartSession}
+            onRemove={requestRemove}
+            onRename={onRenameSession}
+            onGoHome={onGoHome}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onClose={collapseSidebar}
+          />
+        )
+      ) : null}
+      <div className="helm-content-col">
       <StatusBar
         title={meta.title}
         cwd={meta.cwd}
@@ -649,8 +710,9 @@ export function SessionScreen({
           onOpenVoiceMode={() => setVoiceOpen(true)}
         />
       </div>
+      </div>
 
-      {drawerOpen ? (
+      {!isDesktopWide && drawerOpen ? (
         <SessionDrawer
           sessions={sessions}
           activeId={activeId}

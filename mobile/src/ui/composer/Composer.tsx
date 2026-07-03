@@ -6,6 +6,7 @@ import { MODES } from '@aasis21/helm-shared';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
+import { isDesktopInput } from '@/lib/platform';
 
 interface ComposerProps {
   sessionId: string;
@@ -398,6 +399,19 @@ export function Composer({
     }
 
     if (event.key !== 'Enter') return;
+    // Composing an IME candidate (e.g. Japanese/Chinese input) — Enter confirms the
+    // candidate, it must not submit or insert a newline here.
+    if (event.nativeEvent.isComposing) return;
+
+    if (isDesktopInput()) {
+      // Desktop convention (ChatGPT/Claude/Slack): plain Enter sends; Shift/Ctrl/Cmd+Enter
+      // inserts a newline (native textarea behavior, so just let it fall through).
+      if (event.shiftKey || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      void send();
+      return;
+    }
+
     // On mobile the Send button sends; plain Enter inserts a newline.
     // Ctrl/Cmd+Enter is kept as a hardware-keyboard shortcut to send.
     const shouldSend = event.ctrlKey || event.metaKey;

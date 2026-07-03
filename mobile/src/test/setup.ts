@@ -75,16 +75,20 @@ Object.defineProperty(globalThis, 'Notification', {
 });
 
 if (!window.matchMedia) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+  // Plain function, NOT vi.fn() — the suite's `restoreMocks: true` calls
+  // vi.restoreAllMocks() before every test, which wipes a vi.fn()'s
+  // mockImplementation back to a no-op (returns undefined). This stub must
+  // keep working test after test, so it can't be a mock itself.
+  window.matchMedia = ((query: string) => ({
     matches: false,
     media: query,
     onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }));
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
 }
 
 class ResizeObserverStub {

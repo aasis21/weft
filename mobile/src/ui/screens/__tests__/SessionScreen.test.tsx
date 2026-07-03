@@ -148,3 +148,34 @@ describe('SessionScreen approvals', () => {
     expect(screen.queryByText(/toolu_123/)).not.toBeInTheDocument();
   });
 });
+
+describe('SessionScreen desktop docked sidebar (#183)', () => {
+  it('docks the session list inline on wide desktop viewports without needing the drawer opened, and leaves narrow viewports on the overlay-only mobile layout', () => {
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('min-width'),
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const { container, unmount } = renderActive(makeSession('live'));
+      // Wide viewport: docked layout class applied and the session list renders inline —
+      // it must not depend on the mobile `drawerOpen` state (which starts false).
+      expect(container.querySelector('.helm-session.desktop-docked')).toBeInTheDocument();
+      expect(screen.getByTestId('drawer')).toBeInTheDocument();
+      unmount();
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+
+    // Narrow/mobile viewport (default stub: matches always false): no docked class, and the
+    // overlay drawer stays closed until the user opens it — mobile behavior is unchanged.
+    const { container } = renderActive(makeSession('live'));
+    expect(container.querySelector('.helm-session.desktop-docked')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+  });
+});

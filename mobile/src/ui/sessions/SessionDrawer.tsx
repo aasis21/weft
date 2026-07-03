@@ -12,6 +12,10 @@ interface SessionDrawerProps {
   onGoHome(): void;
   onOpenSettings?(): void;
   onClose(): void;
+  /** Desktop: render docked inline in the layout (no scrim, no modal focus-trap/autofocus,
+   *  no slide-in animation) instead of as a mobile overlay. onClose still fires — the
+   *  caller decides what it means (e.g. collapse the rail vs. dismiss the overlay). */
+  docked?: boolean;
 }
 
 function fmtRelative(ts: number | null): string {
@@ -61,6 +65,7 @@ export function SessionDrawer({
   onGoHome,
   onOpenSettings,
   onClose,
+  docked = false,
 }: SessionDrawerProps): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -97,6 +102,10 @@ export function SessionDrawer({
   }, [query, sessions]);
 
   useEffect(() => {
+    // Docked (desktop, always-visible) sidebar is not a modal: it must not steal focus on
+    // every render or trap Tab globally — that would fight the user typing in the composer.
+    if (docked) return undefined;
+
     const drawer = drawerRef.current;
     const activeElement = document.activeElement;
     triggerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
@@ -154,15 +163,14 @@ export function SessionDrawer({
         trigger.focus();
       }
     };
-  }, []);
+  }, [docked]);
 
   return (
     <>
       <aside
         ref={drawerRef}
-        className="drawer"
-        role="dialog"
-        aria-modal="true"
+        className={docked ? 'drawer drawer-docked' : 'drawer'}
+        {...(docked ? {} : { role: 'dialog', 'aria-modal': true })}
         aria-label="Sessions"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
@@ -172,8 +180,8 @@ export function SessionDrawer({
           <button className="icon-btn" type="button" onClick={onAddSession} title="Join another session">
             ＋
           </button>
-          <button className="icon-btn" type="button" onClick={onClose} title="Close">
-            ✕
+          <button className="icon-btn" type="button" onClick={onClose} title={docked ? 'Collapse sidebar' : 'Close'}>
+            {docked ? '⟨' : '✕'}
           </button>
         </div>
 
@@ -299,7 +307,7 @@ export function SessionDrawer({
           </button>
         ) : null}
       </aside>
-      <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />
+      {docked ? null : <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />}
     </>
   );
 }
