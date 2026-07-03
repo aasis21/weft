@@ -186,6 +186,25 @@ describe('Composer', () => {
     expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toBeNull();
   });
 
+  it('attaches an image pasted into the textbox (desktop Ctrl+V) without affecting text paste', async () => {
+    const onPrompt = vi.fn();
+    renderComposer({ onPrompt });
+    const textbox = screen.getByLabelText('Message your Copilot session');
+
+    const file = new File(['fake'], 'pasted.png', { type: 'image/png' });
+    const imageItem = { kind: 'file', type: 'image/png', getAsFile: () => file } as DataTransferItem;
+    fireEvent.paste(textbox, { clipboardData: { items: [imageItem] } });
+
+    expect(fileToAttachment).toHaveBeenCalledWith(file);
+    expect(await screen.findByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
+
+    // Plain text paste (no file items) should not call fileToAttachment again and should not be intercepted.
+    fileToAttachment.mockClear();
+    const textItem = { kind: 'string', type: 'text/plain', getAsFile: () => null } as DataTransferItem;
+    fireEvent.paste(textbox, { clipboardData: { items: [textItem] } });
+    expect(fileToAttachment).not.toHaveBeenCalled();
+  });
+
   it('keeps the attachment spinner visible until concurrent picks finish', async () => {
     const first = deferred<PromptAttachment>();
     const second = deferred<PromptAttachment>();

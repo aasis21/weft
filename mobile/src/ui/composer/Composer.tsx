@@ -1,7 +1,7 @@
 import '@/ui/styles/composer.css';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, JSX, KeyboardEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/helm-shared';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
@@ -300,10 +300,8 @@ export function Composer({
     cameraInputRef.current?.click();
   };
 
-  const onFilesPicked = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
-    const input = event.target;
-    const files = Array.from(input.files ?? []);
-    input.value = ''; // let the user re-pick the same file after removing it
+  /** Shared by the file picker, camera picker, and Ctrl+V paste — all just hand us a `File[]`. */
+  const attachFiles = async (files: File[]): Promise<void> => {
     if (!files.length) return;
     const pickedSessionId = sessionId;
     const generation = attachmentGenerationRef.current;
@@ -338,6 +336,28 @@ export function Composer({
     } finally {
       setAttachingCount((count) => Math.max(0, count - 1));
     }
+  };
+
+  const onFilesPicked = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const input = event.target;
+    const files = Array.from(input.files ?? []);
+    input.value = ''; // let the user re-pick the same file after removing it
+    await attachFiles(files);
+  };
+
+  /** Desktop-only: paste images from the clipboard (Ctrl+V) straight into the composer.
+   * Mobile/touch flows (attach button, camera picker) are untouched — this only adds a
+   * `paste` listener on the textarea and reuses the same `attachFiles` path. Text paste
+   * (no image items) falls through to the browser's default behavior untouched. */
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const items = Array.from(event.clipboardData?.items ?? []);
+    const imageFiles = items
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    if (!imageFiles.length) return;
+    event.preventDefault();
+    void attachFiles(imageFiles);
   };
 
   const removeAttachment = (index: number): void => {
@@ -542,6 +562,7 @@ export function Composer({
           spellCheck={false}
           onKeyDown={onKeyDown}
           onChange={(event) => onTextChange(event.target.value)}
+          onPaste={onPaste}
           placeholder={disabled ? disabledPlaceholder : 'Message your Copilot session…'}
         />
 
