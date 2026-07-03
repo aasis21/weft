@@ -1454,6 +1454,121 @@
   color: var(--accent);
 }
 
+/* ---- Voice Mode orb state colors ---------------------------------------- */
+.helm-session .voice-panel {
+  --voice-orb-color: var(--fg-faint);
+  --voice-orb-glow: color-mix(in srgb, var(--fg-faint) 26%, transparent);
+}
+
+.helm-session .voice-panel[data-state='idle'],
+.helm-session .voice-panel[data-state='ready'] {
+  --voice-orb-color: var(--fg-dim);
+  --voice-orb-glow: color-mix(in srgb, var(--fg-dim) 20%, transparent);
+}
+
+.helm-session .voice-panel[data-state='listening'] {
+  --voice-orb-color: var(--warning);
+  --voice-orb-glow: color-mix(in srgb, var(--warning) 44%, transparent);
+}
+
+.helm-session .voice-panel[data-state='thinking'] {
+  --voice-orb-color: var(--fg);
+  --voice-orb-glow: color-mix(in srgb, var(--fg-dim) 34%, transparent);
+}
+
+.helm-session .voice-panel[data-state='speaking'] {
+  --voice-orb-color: var(--success);
+  --voice-orb-glow: color-mix(in srgb, var(--success) 42%, transparent);
+}
+
+.helm-session .voice-orb {
+  background:
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--voice-orb-color) 38%, var(--bg-elev)), transparent 62%),
+    radial-gradient(circle, color-mix(in srgb, var(--voice-orb-color) 18%, var(--bg-elev)), var(--bg));
+  color: var(--voice-orb-color);
+  box-shadow: 0 24px 70px var(--voice-orb-glow);
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.helm-session .voice-orb-ring {
+  border-color: color-mix(in srgb, var(--voice-orb-color) 48%, transparent);
+  box-shadow: 0 0 42px var(--voice-orb-glow);
+  animation: none;
+}
+
+.helm-session .voice-orb-core {
+  filter: drop-shadow(0 10px 30px var(--voice-orb-glow));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .helm-session .voice-panel[data-state='listening'] .voice-orb-ring {
+    animation: voice-ring 1.15s ease-in-out infinite;
+  }
+
+  .helm-session .voice-panel[data-state='thinking'] .voice-orb-ring {
+    animation: voice-ring 1.8s ease-in-out infinite;
+  }
+
+  .helm-session .voice-panel[data-state='speaking'] .voice-orb-ring {
+    animation: voice-ring 1s ease-in-out infinite;
+  }
+}
+
+.helm-session .start-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  color: var(--fg-dim);
+}
+
+.helm-session .start-form,
+.helm-session .session-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.helm-session .session-field {
+  color: var(--fg-dim);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.helm-session .session-field input[type='text'],
+.helm-session .session-field input:not([type]),
+.helm-session .session-field select {
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+}
+
+.helm-session .mode-field {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 16px;
+}
+
+.helm-session .mode-field label,
+.helm-session .device-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.helm-session .device-actions {
+  flex-wrap: wrap;
+}
+
+.helm-session .session-link-btn.danger {
+  color: var(--error);
+}
+
 
 /* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */
 @media (min-width: 768px) {
@@ -1513,7 +1628,8 @@
   .status-dot,
   .caret,
   .thinking-dots span,
-  .tool-card.running .tc-icon { animation: none; }
+  .tool-card.running .tc-icon,
+  .voice-orb-ring { animation: none; }
 }
 
 /* ---- Concurrent CSS additions: chat controls, tool affordances, drawer status ---- */

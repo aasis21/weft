@@ -67,6 +67,22 @@ export const SUBTYPE = Object.freeze({
     RECENT_TURNS: "recent_turns",
     STATE_REQUEST: "state_request",
     STATE_SNAPSHOT: "state_snapshot",
+    // --- phone-launched sessions (#156): talk to a `helm-cli` listener over its paired channel ---
+    // phone -> listener: give me your registered projects (sent right after pairing).
+    PROJECT_LIST_REQUEST: "project_list_request",
+    // listener -> phone: the machine's registered projects + the listener's display name.
+    PROJECT_LIST: "project_list",
+    // phone -> listener: spawn a new Copilot session for a project with a permission mode.
+    SPAWN_SESSION: "spawn_session",
+    // listener -> phone: the pre-minted pairing payload for a freshly spawned session.
+    SPAWN_PAIRING: "spawn_pairing",
+    // listener -> phone: terminal result of a spawn request (ok / failure reason).
+    SPAWN_RESULT: "spawn_result",
+    // phone -> listener: forget this device (the listener stops / drops the binding).
+    FORGET_DEVICE: "forget_device",
+    // phone -> ext: Voice Mode (#168) is on/off. While on, the extension prepends a directive to
+    // each relayed prompt so the agent authors its reply for SPEECH (concise, no verbatim code).
+    VOICE_MODE: "voice_mode",
   }),
   PAIR: Object.freeze({ HELLO: "hello", ACK: "ack" }),
 });
@@ -256,6 +272,47 @@ export const stateSnapshot = ({
     approvals,
     elicitations,
   });
+
+// ---- factories (phone-launched sessions #156, all ride CONTROL) ------------
+/** Phone -> listener: request the machine's registered projects (sent right after pairing). */
+export const projectListRequest = () =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.PROJECT_LIST_REQUEST, {});
+/**
+ * Listener -> phone: the machine's registered projects + the listener's display name. `projects`
+ * is `[{ name, path, isDefault }]` (path is informational for the phone; selection is by name).
+ */
+export const projectList = (projects, deviceName) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.PROJECT_LIST, {
+    projects: Array.isArray(projects) ? projects : [],
+    deviceName: deviceName ?? null,
+  });
+/**
+ * Phone -> listener: spawn a new Copilot session. `requestId` correlates the reply; `projectName`
+ * selects a registered project; `mode` is "default" | "allow-all"; `name` is the friendly session name.
+ */
+export const spawnSession = (requestId, projectName, mode = "default", name = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_SESSION, { requestId, projectName, mode, name });
+/**
+ * Listener -> phone: the pre-minted pairing payload of a freshly spawned session, so the phone
+ * pairs to it digitally (no QR). `payload` is a buildPairingPayload() result; `name`/`projectName`
+ * let the phone label the Initializing card immediately.
+ */
+export const spawnPairing = (requestId, payload, name, projectName) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_PAIRING, { requestId, payload, name, projectName });
+/** Listener -> phone: terminal result of a spawn request. `ok=false` carries a human `error`. */
+export const spawnResult = (requestId, ok, error = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_RESULT, { requestId, ok: Boolean(ok), error });
+/** Phone -> listener: forget this device; the listener stops (or drops its phone binding). */
+export const forgetDevice = () =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.FORGET_DEVICE, {});
+
+/**
+ * Phone -> ext: Voice Mode is now on/off (#176). While on, the extension prepends a short
+ * spoken-response directive to each relayed phone prompt so the agent replies for LISTENING
+ * (short, conversational, summarize code) instead of dense on-screen text.
+ */
+export const voiceMode = (active) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.VOICE_MODE, { active: Boolean(active) });
 
 /** Minimal structural validation of a decrypted envelope (kept dependency-free). */
 export function isValidEnvelope(env) {

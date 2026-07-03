@@ -20,6 +20,7 @@ export const selectAllSessions = adapterSelectors.selectAll;
 export const selectSessionById = adapterSelectors.selectById;
 export const selectActiveId = (state: MaybeRootState): string | null => selectSessionsState(state).activeId;
 export const selectReady = (state: MaybeRootState): boolean => selectSessionsState(state).ready;
+export const selectDevices = (state: MaybeRootState) => selectSessionsState(state).devices;
 
 export const selectActiveSession = createSelector(
   [selectAllSessions, selectActiveId],
@@ -71,14 +72,15 @@ export function toSessionView(session: Session): SessionView {
     ...(session.connection.cold ? { cold: true } : {}),
     events: session.debug,
     error: session.connection.error,
+    ...(session.connection.spawning ? { spawning: session.connection.spawning } : {}),
   };
 }
 
 export const selectManagerSnapshot = createSelector(
-  [selectReady, selectActiveId, selectAllSessions],
-  (ready, activeId, sessions): ManagerSnapshot => {
+  [selectReady, selectActiveId, selectAllSessions, selectDevices],
+  (ready, activeId, sessions, devices): ManagerSnapshot => {
     const views = sessions.map(toSessionView);
     const active = activeId ? sessions.find((session) => session.id === activeId) : undefined;
-    return { ready, activeId: active?.meta.channelId ?? null, sessions: views };
+    return { ready, activeId: active?.meta.channelId ?? null, sessions: views, devices: [...devices] };
   },
 );

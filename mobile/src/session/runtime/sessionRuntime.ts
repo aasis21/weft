@@ -6,12 +6,28 @@ import {
   recentTurnsRequest,
   interrupt,
   modeChange,
+  PAIR_KIND,
+  parsePairingPayload,
   prompt,
+  projectListRequest,
   stateRequest,
+  spawnSession as spawnSessionMessage,
+  forgetDevice as forgetDeviceMessage,
+  voiceMode,
   RECENT_TURNS_DEFAULT,
 } from '@aasis21/helm-shared';
-import type { EventEnvelope, PromptAttachment, SessionMode, StateSnapshotMsg } from '@aasis21/helm-shared';
-import { connectSession, pairSession, getSenderName } from '@/lib/helmClient';
+import type {
+  EventEnvelope,
+  PairingPayload,
+  ProjectListMsg,
+  PromptAttachment,
+  SessionMode,
+  SpawnMode,
+  SpawnPairingMsg,
+  SpawnResultMsg,
+  StateSnapshotMsg,
+} from '@aasis21/helm-shared';
+import { connectSession, pairSession, pairWithPublicKey, getSenderName } from '@/lib/helmClient';
 import type { HelmClient } from '@/lib/helmClient';
 import {
   loadLastActiveSessionId,
@@ -21,8 +37,17 @@ import {
   setLastActiveSessionId,
   upsertSession,
 } from '@/lib/sessions';
+import {
+  loadDevices,
+  patchDevice,
+  removeDevice,
+  setDefaultDevice as persistDefaultDevice,
+  upsertDevice,
+  type RegisteredDevice,
+} from '@/lib/devices';
 import { creativeName } from '@/lib/sessionNames';
 import type { StoredSession } from '@/lib/sessions';
+import type { StoredPairing } from '@/lib/storage';
 import {
   allowTranscriptWrites,
   clearTranscript,
@@ -45,13 +70,21 @@ import { App } from '@capacitor/app';
 
 import { makeStore, type AppStore, type RuntimeDeps } from '@/app/store';
 import type { TransportRegistry } from '@/services/transport/registry';
-import { emptySession, type Session, type SessionMeta } from '@/session/model';
+import { emptySession, type ListenerDeviceState, type Session, type SessionMeta } from '@/session/model';
 import {
   approvalDismissed,
   approvalRestored,
   busySet,
   coldSet,
   debugAppended,
+  deviceDefaultSet,
+  deviceErrorSet,
+  deviceLastProjectSet,
+  deviceProjectsLoadingSet,
+  deviceProjectsReceived,
+  deviceRemoved,
+  devicesHydrated,
+  deviceUpserted,
   elicitationDismissed,
   elicitationRestored,
   endedSet,
@@ -89,8 +122,24 @@ const MAX_WARM_SESSIONS = 10;
 const META_PERSIST_THROTTLE_MS = 1_500;
 const PERSIST_THROTTLE_MS = 800;
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
+const SPAWN_TIMEOUT_MS = 30_000;
 
 type ManagerSnapshot = ReturnType<typeof selectManagerSnapshot>;
+
+interface SpawnRequestOptions {
+  projectName: string;
+  mode: SpawnMode;
+  name?: string;
+}
+
+interface PendingSpawn {
+  requestId: string;
+  tempId: string;
+  deviceId: string;
+  projectName: string;
+  name?: string;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 function basename(path: string | null): string | null {
   if (!path) return null;
@@ -148,6 +197,8 @@ export class SessionRuntime {
   private readonly registry: TransportRegistry;
   private readonly clock: () => number;
   private readonly controllers = new Map<string, ChannelController>();
+  private readonly listenerControllers = new Map<string, ChannelController>();
+  private readonly pendingSpawns = new Map<string, PendingSpawn>();
   private warmLru: string[] = [];
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private initStarted = false;
@@ -187,6 +238,14 @@ export class SessionRuntime {
     return ctrl;
   }
 
+  private device(channelId: string): ListenerDeviceState | undefined {
+    return this.store.getState().sessions.devices.find((d) => d.channelId === channelId);
+  }
+
+  private listenerController(channelId: string): ChannelController | undefined {
+    return this.listenerControllers.get(channelId);
+  }
+
   // --- lifecycle -----------------------------------------------------------------------------------
   async init(): Promise<void> {
     if (this.initStarted) return;
@@ -196,13 +255,26 @@ export class SessionRuntime {
     this.installResumeTriggers();
 
     let stored: StoredSession[] = [];
+    let devices: RegisteredDevice[] = [];
     let lastActiveId: string | null = null;
     try {
-      [stored, lastActiveId] = await Promise.all([loadSessions(), loadLastActiveSessionId()]);
+      [stored, lastActiveId, devices] = await Promise.all([loadSessions(), loadLastActiveSessionId(), loadDevices()]);
     } catch {
       stored = [];
+      devices = [];
       lastActiveId = null;
     }
+
+    this.store.dispatch(
+      devicesHydrated(
+        devices.map((device) => ({
+          ...device,
+          projects: [],
+          projectsLoading: false,
+          connected: false,
+        })),
+      ),
+    );
 
     const restored = await Promise.all(
       stored.map(async (s) => ({
@@ -652,8 +724,11 @@ export class SessionRuntime {
   }
 
   // --- adding sessions -----------------------------------------------------------------------------
-  async addByQr(raw: string): Promise<string> {
-    const { client, pairing } = await pairSession(raw);
+  private async openPairedSession(
+    client: HelmClient,
+    pairing: StoredPairing,
+    opts: { title?: string | null; cwd?: string | null; activate?: boolean; scannedAt?: number; renamed?: boolean } = {},
+  ): Promise<string> {
     const channelId = pairing.channelId;
     allowTranscriptWrites(channelId);
     const existing = this.session(channelId);
@@ -679,28 +754,49 @@ export class SessionRuntime {
       ctrl.client = null;
       this.registry.dispose(channelId);
       this.store.dispatch(metaScannedAtSet({ id: channelId, ts: pairing.savedAt ?? this.clock() }));
-      this.store.dispatch(sessionActivated(channelId));
+      if (opts.activate !== false) this.store.dispatch(sessionActivated(channelId));
       this.attach(channelId, client);
       return channelId;
     }
 
     const now = this.clock();
-    await upsertSession({ pairing, title: null, cwd: null, addedAt: now, lastSeenAt: now });
+    await upsertSession({
+      pairing,
+      title: opts.title ?? null,
+      cwd: opts.cwd ?? null,
+      addedAt: now,
+      lastSeenAt: now,
+      renamed: opts.renamed,
+    });
     const meta: SessionMeta = {
       channelId,
-      title: titleFor(channelId, null, null),
-      cwd: null,
+      title: titleFor(channelId, opts.cwd ?? null, opts.title ?? null),
+      renamed: opts.renamed ?? false,
+      cwd: opts.cwd ?? null,
       kind: 'live',
       addedAt: now,
-      scannedAt: pairing.savedAt ?? now,
+      scannedAt: opts.scannedAt ?? pairing.savedAt ?? now,
     };
     const session = emptySession(channelId, meta);
     session.connection.status = 'connecting';
     this.store.dispatch(sessionAdded(session));
     this.controllers.set(channelId, new ChannelController(channelId));
-    this.store.dispatch(sessionActivated(channelId));
+    if (opts.activate !== false) this.store.dispatch(sessionActivated(channelId));
     this.attach(channelId, client);
     return channelId;
+  }
+
+  async addByQr(raw: string): Promise<string> {
+    let parsed: ReturnType<typeof parsePairingPayload> | null = null;
+    try {
+      parsed = parsePairingPayload(raw);
+    } catch {
+      // The test harness historically uses plain channel ids as QR strings; pairSession remains the
+      // single authoritative parser on the real path and will surface invalid production payloads.
+    }
+    if (parsed?.kind === PAIR_KIND.LISTENER) return this.registerListenerFromQr(raw);
+    const { client, pairing } = await pairSession(raw);
+    return this.openPairedSession(client, pairing);
   }
 
   async addDemo(): Promise<string> {
@@ -730,6 +826,207 @@ export class SessionRuntime {
     this.store.dispatch(sessionActivated(channelId));
     this.attach(channelId, demo.client);
     return channelId;
+  }
+
+  // --- listener devices / phone-launched sessions -------------------------------------------------
+  async registerListenerFromQr(raw: string): Promise<string> {
+    const parsed = parsePairingPayload(raw);
+    if (parsed.kind !== PAIR_KIND.LISTENER) throw new Error('This QR is not a listener device.');
+    const { client, pairing } = await pairSession(raw);
+    const now = this.clock();
+    const prior = this.device(pairing.channelId);
+    const stored: RegisteredDevice = {
+      channelId: pairing.channelId,
+      pub: pairing.peerPublicKeyB64,
+      name: prior?.name,
+      savedAt: now,
+      isDefault: prior?.isDefault ?? this.store.getState().sessions.devices.length === 0,
+      lastProjectName: prior?.lastProjectName,
+    };
+    await upsertDevice(stored);
+    this.store.dispatch(
+      deviceUpserted({
+        ...stored,
+        projects: prior?.projects ?? [],
+        projectsLoading: true,
+        connected: true,
+      }),
+    );
+    this.attachListener(pairing.channelId, client);
+    return `listener:${pairing.channelId}`;
+  }
+
+  listDevices(): ManagerSnapshot['devices'] {
+    return this.getSnapshot().devices;
+  }
+
+  async connectDevice(channelId: string): Promise<void> {
+    const device = this.device(channelId);
+    if (!device) return;
+    const current = this.listenerController(channelId);
+    if (current?.client) return;
+    this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
+    try {
+      const { client } = await pairWithPublicKey({ channelId, publicKeyB64: device.pub });
+      this.attachListener(channelId, client);
+    } catch (err) {
+      this.store.dispatch(
+        deviceErrorSet({ channelId, error: errMessage(err, 'Could not reach this listener device.'), connected: false }),
+      );
+    }
+  }
+
+  async refreshProjects(channelId: string): Promise<void> {
+    await this.connectDevice(channelId);
+    const ctrl = this.listenerController(channelId);
+    if (!ctrl?.client) return;
+    this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
+    try {
+      await ctrl.client.send(projectListRequest());
+    } catch (err) {
+      this.store.dispatch(
+        deviceErrorSet({ channelId, error: errMessage(err, 'Could not request projects.'), connected: false }),
+      );
+    }
+  }
+
+  async spawnSession(channelId: string, opts: SpawnRequestOptions): Promise<string> {
+    const device = this.device(channelId);
+    if (!device) throw new Error('Choose a registered listener device first.');
+    const requestId = `spawn-${this.clock()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tempId = `initializing-${requestId}`;
+    const displayName = opts.name?.trim() || opts.projectName;
+    const meta: SessionMeta = {
+      channelId: tempId,
+      title: displayName,
+      cwd: null,
+      kind: 'spawning',
+      addedAt: this.clock(),
+    };
+    const session = emptySession(tempId, meta);
+    session.connection.status = 'initializing';
+    session.connection.spawning = {
+      requestId,
+      deviceId: channelId,
+      deviceName: device.name,
+      projectName: opts.projectName,
+    };
+    this.store.dispatch(sessionAdded(session));
+    this.store.dispatch(sessionActivated(tempId));
+
+    const pending: PendingSpawn = {
+      requestId,
+      tempId,
+      deviceId: channelId,
+      projectName: opts.projectName,
+      name: opts.name?.trim() || undefined,
+      timer: setTimeout(() => {
+        this.failSpawn(requestId, 'Timed out waiting for the laptop to start the session.');
+      }, SPAWN_TIMEOUT_MS),
+    };
+    this.pendingSpawns.set(requestId, pending);
+
+    try {
+      await this.connectDevice(channelId);
+      const ctrl = this.listenerController(channelId);
+      if (!ctrl?.client) throw new Error('Listener device is not connected.');
+      await ctrl.client.send(spawnSessionMessage(requestId, opts.projectName, opts.mode, opts.name?.trim() || null));
+      this.store.dispatch(deviceLastProjectSet({ channelId, projectName: opts.projectName }));
+      void patchDevice(channelId, { lastProjectName: opts.projectName });
+    } catch (err) {
+      this.failSpawn(requestId, errMessage(err, 'Could not start the session.'));
+    }
+
+    return tempId;
+  }
+
+  async forgetDevice(channelId: string): Promise<void> {
+    const ctrl = this.listenerController(channelId);
+    if (ctrl?.client) {
+      await ctrl.client.send(forgetDeviceMessage()).catch(() => {});
+    }
+    ctrl?.dispose();
+    this.listenerControllers.delete(channelId);
+    for (const pending of [...this.pendingSpawns.values()]) {
+      if (pending.deviceId === channelId) this.failSpawn(pending.requestId, 'Listener device was forgotten.');
+    }
+    await removeDevice(channelId);
+    this.store.dispatch(deviceRemoved(channelId));
+  }
+
+  async setDefaultDevice(channelId: string): Promise<void> {
+    await persistDefaultDevice(channelId);
+    this.store.dispatch(deviceDefaultSet(channelId));
+  }
+
+  private attachListener(channelId: string, client: HelmClient): void {
+    let ctrl = this.listenerControllers.get(channelId);
+    if (!ctrl) {
+      ctrl = new ChannelController(channelId, { ephemeral: true });
+      this.listenerControllers.set(channelId, ctrl);
+    }
+    const previous = ctrl.client;
+    ctrl.detach();
+    ctrl.client = client;
+    if (previous && previous !== client) void previous.close().catch(() => {});
+    const stopEvents = client.subscribe((message) => this.onListenerMessage(channelId, client, message));
+    const stopStatus = client.onStatus((status) => {
+      this.store.dispatch(deviceErrorSet({ channelId, connected: status === 'connected' }));
+    });
+    ctrl.unsubscribe = () => {
+      stopEvents();
+      stopStatus();
+    };
+    this.store.dispatch(deviceErrorSet({ channelId, error: undefined, connected: true }));
+    void this.refreshProjects(channelId);
+  }
+
+  private onListenerMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
+    const ctrl = this.listenerController(channelId);
+    if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
+    if (message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST) {
+      const msg = message.msg as ProjectListMsg;
+      this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
+      if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
+      void this.handleSpawnPairing(message.msg as SpawnPairingMsg);
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
+      const msg = message.msg as SpawnResultMsg;
+      if (!msg.ok) this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
+    }
+  }
+
+  private async handleSpawnPairing(msg: SpawnPairingMsg): Promise<void> {
+    const pending = this.pendingSpawns.get(msg.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingSpawns.delete(msg.requestId);
+    try {
+      const payload = msg.payload as PairingPayload;
+      const { client, pairing } = await pairSession(payload);
+      const title = msg.name || pending.name || msg.projectName || pending.projectName;
+      const oldActive = this.activeId();
+      await this.openPairedSession(client, pairing, { title, activate: true, renamed: Boolean(msg.name || pending.name) });
+      this.store.dispatch(sessionRemoved(pending.tempId));
+      if (oldActive === pending.tempId) this.store.dispatch(sessionActivated(pairing.channelId));
+    } catch (err) {
+      this.pendingSpawns.set(msg.requestId, { ...pending, timer: setTimeout(() => this.failSpawn(msg.requestId, 'Timed out waiting for the laptop to start the session.'), SPAWN_TIMEOUT_MS) });
+      this.failSpawn(msg.requestId, errMessage(err, 'Received the new session, but could not pair to it.'));
+    }
+  }
+
+  private failSpawn(requestId: string, error: string): void {
+    const pending = this.pendingSpawns.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingSpawns.delete(requestId);
+    const session = this.session(pending.tempId);
+    if (!session) return;
+    this.store.dispatch(statusSet({ id: pending.tempId, status: 'error', error }));
   }
 
   // --- session controls ----------------------------------------------------------------------------
@@ -777,6 +1074,12 @@ export class SessionRuntime {
   async remove(channelId: string): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
+    for (const pending of [...this.pendingSpawns.values()]) {
+      if (pending.tempId === channelId) {
+        clearTimeout(pending.timer);
+        this.pendingSpawns.delete(pending.requestId);
+      }
+    }
     const ctrl = this.controllers.get(channelId);
     const wasActive = this.activeId() === channelId;
     discardTranscriptWrites(channelId);
@@ -975,6 +1278,20 @@ export class SessionRuntime {
     }
   }
 
+  async setVoiceMode(active: boolean, channelId = this.activeId()): Promise<void> {
+    if (!channelId) return;
+    const session = this.session(channelId);
+    const ctrl = this.controllers.get(channelId);
+    if (!session || session.meta.kind !== 'live' || session.connection.status !== 'live' || !ctrl?.client) {
+      return;
+    }
+    try {
+      await this.send(channelId, voiceMode(active));
+    } catch {
+      // Voice mode is an advisory hint for the extension; never block or surface UI errors for it.
+    }
+  }
+
   // --- outbound funnel + persistence ---------------------------------------------------------------
   private async send(channelId: string, message: EventEnvelope): Promise<void> {
     const client = this.registry.get(channelId);
@@ -1148,6 +1465,10 @@ export class SessionRuntime {
     this.resumeCleanups = [];
     for (const ctrl of this.controllers.values()) ctrl.dispose();
     this.controllers.clear();
+    for (const ctrl of this.listenerControllers.values()) ctrl.dispose();
+    this.listenerControllers.clear();
+    for (const pending of this.pendingSpawns.values()) clearTimeout(pending.timer);
+    this.pendingSpawns.clear();
     this.registry.disposeAll();
   }
 }

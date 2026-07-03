@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import type { SessionView } from '@/session/view';
@@ -178,6 +178,8 @@ interface SessionScreenProps {
   onRetry(itemId: string): void;
   onSelectSession(channelId: string): void;
   onAddSession(): void;
+  onStartSession?(): void;
+  onVoiceModeChange?(channelId: string, active: boolean): void;
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
   onReconnect(channelId: string): void;
@@ -197,6 +199,8 @@ export function SessionScreen({
   onRetry,
   onSelectSession,
   onAddSession,
+  onStartSession,
+  onVoiceModeChange,
   onRemoveSession,
   onRenameSession,
   onReconnect,
@@ -233,12 +237,14 @@ export function SessionScreen({
   // Manual "Reconnect" must not be offered for warm-idle (socket still open, just missed a heartbeat):
   // tapping it needlessly closes a live client and redoes the ECDH handshake, dropping in-flight output
   // (#126). Offer it only for cold-idle (evicted, no socket), error, or ended.
-  const canReconnect = meta.kind !== 'demo' && (status === 'ended' || status === 'error' || (status === 'idle' && cold));
-  const offline = status === 'connecting' || status === 'idle';
+  const canReconnect = meta.kind === 'live' && (status === 'ended' || status === 'error' || (status === 'idle' && cold));
+  const offline = status === 'initializing' || status === 'connecting' || status === 'idle';
   // Cold-idle (no socket) and warm-idle (socket alive) must read differently so the banner stops
   // contradicting the header's "Quiet"/"Offline" (#127).
   const offlineLabel =
-    status === 'connecting'
+    status === 'initializing'
+      ? `Starting your session${active.spawning?.deviceName ? ` on ${active.spawning.deviceName}` : ''}…`
+      : status === 'connecting'
       ? 'Connecting to your session…'
       : cold
         ? 'Session offline — tap Reconnect to resume.'
@@ -249,7 +255,7 @@ export function SessionScreen({
   // settle window. The moment we hear the laptop we're ready (the composer is already enabled).
   const threadEmpty = timeline.items.length === 0 && timeline.history.length === 0;
   const initialLoading =
-    threadEmpty && (status === 'connecting' || (status === 'live' && active.settling === true));
+    threadEmpty && (status === 'initializing' || status === 'connecting' || (status === 'live' && active.settling === true));
   const latestAssistant =
     [...timeline.items].reverse().find((item) => item.kind === 'assistant') ?? null;
   const approveRequest = (requestId: string, optionId: string, isDeny: boolean): void => {
@@ -266,6 +272,10 @@ export function SessionScreen({
     onRemoveSession(confirmRemoveId);
     setConfirmRemoveId(null);
   };
+  const handleVoiceModeActive = useCallback(
+    (active: boolean): void => onVoiceModeChange?.(activeId, active),
+    [activeId, onVoiceModeChange],
+  );
 
   useEffect(() => {
     if (!confirmRemoveId) return undefined;
@@ -392,6 +402,7 @@ export function SessionScreen({
         canReconnect={canReconnect}
         onOpenDrawer={() => setDrawerOpen(true)}
         onAddSession={onAddSession}
+        onStartSession={onStartSession}
         onReconnect={() => onReconnect(activeId)}
         onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}
@@ -427,6 +438,7 @@ export function SessionScreen({
           disabled={ended || offline}
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}
+          onActiveChange={handleVoiceModeActive}
           onClose={() => setVoiceOpen(false)}
         />
       ) : null}
@@ -451,7 +463,7 @@ export function SessionScreen({
         {ended ? (
           <div className="ended-banner">
             <span>Session ended{timeline.endedReason ? ` · ${timeline.endedReason}` : ''}.</span>
-            {meta.kind !== 'demo' ? (
+            {canReconnect ? (
               <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
                 ↻ Reconnect
               </button>
@@ -462,9 +474,13 @@ export function SessionScreen({
         {active.error && !ended ? (
           <div className="ended-banner" role="alert">
             <span>{active.error}</span>
-            {meta.kind !== 'demo' ? (
+            {canReconnect ? (
               <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
                 ↻ Reconnect
+              </button>
+            ) : meta.kind === 'spawning' ? (
+              <button type="button" className="reconnect-btn" onClick={() => onRemoveSession(activeId)}>
+                Dismiss
               </button>
             ) : null}
           </div>
@@ -640,6 +656,10 @@ export function SessionScreen({
           onAddSession={() => {
             setDrawerOpen(false);
             onAddSession();
+          }}
+          onStartSession={() => {
+            setDrawerOpen(false);
+            onStartSession?.();
           }}
           onRemove={requestRemove}
           onRename={onRenameSession}

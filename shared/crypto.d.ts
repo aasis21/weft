@@ -15,6 +15,12 @@ export interface EncryptedPayload {
 }
 
 export function generateKeyPair(): Promise<KeyPair>;
+export function exportKeyPair(
+  keyPair: { privateKey: CryptoKey; publicKeyB64: string }
+): Promise<{ publicKeyB64: string; privateKeyJwk: JsonWebKey }>;
+export function importKeyPair(material: {
+  privateKeyJwk: JsonWebKey;
+}): Promise<KeyPair>;
 export function exportPublicKeyB64(publicKey: CryptoKey): Promise<string>;
 export function importPeerPublicKey(b64: string): Promise<CryptoKey>;
 export function deriveSessionKey(

@@ -12,6 +12,7 @@ interface StatusBarProps {
   canReconnect: boolean;
   onOpenDrawer(): void;
   onAddSession(): void;
+  onStartSession?(): void;
   onReconnect(): void;
   onRemove(): void;
   onGoHome(): void;
@@ -20,6 +21,7 @@ interface StatusBarProps {
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
+  initializing: 'Initializing…',
   connecting: 'Connecting…',
   live: 'Live',
   idle: 'Quiet',
@@ -35,6 +37,7 @@ export function StatusBar({
   canReconnect,
   onOpenDrawer,
   onAddSession,
+  onStartSession,
   onReconnect,
   onRemove,
   onGoHome,
@@ -175,6 +178,17 @@ export function StatusBar({
                 }}
               >
                 ＋ Join another session
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="bar-menu-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onStartSession?.();
+                }}
+              >
+                ▻ Start another session
               </button>
               {canReconnect ? (
                 <button

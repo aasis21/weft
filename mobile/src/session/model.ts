@@ -3,12 +3,14 @@ import type {
   ApprovalRequestMsg,
   ElicitationRequestMsg,
   HistoryItem,
+  ListenerProject,
   LogLineMsg,
   PromptAttachment,
   SessionMode,
 } from '@aasis21/helm-shared';
+import type { RegisteredDevice } from '@/lib/devices';
 
-export type SessionStatus = 'connecting' | 'live' | 'idle' | 'ended' | 'error';
+export type SessionStatus = 'initializing' | 'connecting' | 'live' | 'idle' | 'ended' | 'error';
 
 export type ToolStatus = 'running' | 'success' | 'error';
 
@@ -81,9 +83,16 @@ export interface SessionMeta {
    *  Dev-detail tab can show "this session reconnected N times" (#154). */
   channelHistory?: ChannelHistoryEntry[];
   cwd: string | null;
-  kind: 'live' | 'demo';
+  kind: 'live' | 'demo' | 'spawning';
   addedAt: number;
   scannedAt?: number;
+}
+
+export interface ListenerDeviceState extends RegisteredDevice {
+  projects: ListenerProject[];
+  projectsLoading: boolean;
+  connected: boolean;
+  error?: string;
 }
 
 export interface SessionConnection {
@@ -102,6 +111,12 @@ export interface SessionConnection {
   ended: boolean;
   endedReason?: string;
   error?: string;
+  spawning?: {
+    requestId: string;
+    deviceId: string;
+    deviceName?: string;
+    projectName: string;
+  };
 }
 
 export interface SessionHistory {

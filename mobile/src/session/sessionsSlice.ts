@@ -5,6 +5,7 @@ import type {
   ApprovalRequestMsg,
   DebugEvent,
   ElicitationRequestMsg,
+  ListenerDeviceState,
   NoticeItem,
   ChannelHistoryEntry,
   Session,
@@ -31,6 +32,7 @@ export const sessionsAdapter = createEntityAdapter<Session>();
 export const sessionsInitialState = sessionsAdapter.getInitialState({
   activeId: null as string | null,
   ready: false,
+  devices: [] as ListenerDeviceState[],
 });
 
 export type SessionsState = typeof sessionsInitialState;
@@ -126,6 +128,65 @@ const sessionsSlice = createSlice({
   name: 'sessions',
   initialState: sessionsInitialState,
   reducers: {
+    devicesHydrated(state, action: PayloadAction<ListenerDeviceState[]>) {
+      state.devices = action.payload;
+    },
+    deviceUpserted(state, action: PayloadAction<ListenerDeviceState>) {
+      const incoming = action.payload;
+      const existing = state.devices.find((d) => d.channelId === incoming.channelId);
+      const merged: ListenerDeviceState = {
+        ...existing,
+        ...incoming,
+        projects: incoming.projects ?? existing?.projects ?? [],
+        projectsLoading: incoming.projectsLoading ?? existing?.projectsLoading ?? false,
+        connected: incoming.connected ?? existing?.connected ?? false,
+      };
+      state.devices = [
+        ...state.devices.filter((d) => d.channelId !== incoming.channelId),
+        merged,
+      ];
+    },
+    deviceRemoved(state, action: PayloadAction<string>) {
+      state.devices = state.devices.filter((d) => d.channelId !== action.payload);
+      if (state.devices.length > 0 && !state.devices.some((d) => d.isDefault)) {
+        state.devices[0].isDefault = true;
+      }
+    },
+    deviceDefaultSet(state, action: PayloadAction<string>) {
+      for (const device of state.devices) device.isDefault = device.channelId === action.payload;
+    },
+    deviceProjectsLoadingSet(state, action: PayloadAction<{ channelId: string; loading: boolean; error?: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.projectsLoading = action.payload.loading;
+        device.error = action.payload.error;
+      }
+    },
+    deviceProjectsReceived(
+      state,
+      action: PayloadAction<{ channelId: string; projects: ListenerDeviceState['projects']; deviceName?: string | null }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.projects = action.payload.projects;
+        device.projectsLoading = false;
+        device.connected = true;
+        device.error = undefined;
+        if (action.payload.deviceName) device.name = action.payload.deviceName;
+      }
+    },
+    deviceErrorSet(state, action: PayloadAction<{ channelId: string; error?: string; connected?: boolean }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.error = action.payload.error;
+        if (action.payload.connected !== undefined) device.connected = action.payload.connected;
+        if (action.payload.error) device.projectsLoading = false;
+      }
+    },
+    deviceLastProjectSet(state, action: PayloadAction<{ channelId: string; projectName: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.lastProjectName = action.payload.projectName;
+    },
     sessionAdded: sessionsAdapter.addOne,
     sessionRemoved(state, action: PayloadAction<string>) {
       sessionsAdapter.removeOne(state, action.payload);
@@ -307,6 +368,14 @@ const sessionsSlice = createSlice({
 });
 
 export const {
+  devicesHydrated,
+  deviceUpserted,
+  deviceRemoved,
+  deviceDefaultSet,
+  deviceProjectsLoadingSet,
+  deviceProjectsReceived,
+  deviceErrorSet,
+  deviceLastProjectSet,
   sessionAdded,
   sessionRemoved,
   sessionActivated,
@@ -344,5 +413,4 @@ export const {
 export const sessionsSelectors = sessionsAdapter.getSelectors();
 export const sessionsReducer = sessionsSlice.reducer;
 export default sessionsReducer;
-
 

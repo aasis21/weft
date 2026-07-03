@@ -22,6 +22,7 @@ interface VoiceModeOverlayProps {
   disabled: boolean;
   onPrompt(text: string): Promise<void> | void;
   onInterrupt(): void;
+  onActiveChange?(active: boolean): void;
   onClose(): void;
 }
 
@@ -47,6 +48,7 @@ export function VoiceModeOverlay({
   disabled,
   onPrompt,
   onInterrupt,
+  onActiveChange,
   onClose,
 }: VoiceModeOverlayProps): JSX.Element {
   const { supported: inputSupported, start: startSpeechInput, stop: stopSpeechInput } = useSpeechInput();
@@ -130,6 +132,11 @@ export function VoiceModeOverlay({
     }
     startListening();
   };
+
+  useEffect(() => {
+    onActiveChange?.(true);
+    return () => onActiveChange?.(false);
+  }, [onActiveChange]);
 
   useEffect(() => {
     void getVoiceAutoRelisten().then(setAutoRelisten);

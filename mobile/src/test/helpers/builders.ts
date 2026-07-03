@@ -37,6 +37,13 @@ export {
   recentTurns,
   stateRequest,
   stateSnapshot,
+  projectListRequest,
+  projectList,
+  spawnSession,
+  spawnPairing,
+  spawnResult,
+  forgetDevice,
+  voiceMode,
   isValidEnvelope,
 } from '@aasis21/helm-shared';
 

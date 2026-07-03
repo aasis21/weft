@@ -23,6 +23,9 @@ import { EVENT_TYPE, SUBTYPE } from "./messages.mjs";
 
 export const PAIR_VERSION = 1;
 
+/** Pairing payload kinds: a normal mirrored-session QR vs an ephemeral `helm-cli` listener QR. */
+export const PAIR_KIND = Object.freeze({ SESSION: "session", LISTENER: "listener" });
+
 /** Build a standardized plaintext pairing envelope (hello or ack). */
 function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {}) {
   return {
@@ -36,15 +39,22 @@ function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {
   };
 }
 
-/** Build the QR payload shown by the laptop. Carries the laptop PUBLIC key only. */
-export function buildPairingPayload({ channelId, publicKeyB64 }) {
+/**
+ * Build the QR payload shown by the laptop. Carries the laptop PUBLIC key only. `kind` marks
+ * whether this is a normal mirrored session ("session", default) or a `helm-cli` listener
+ * ("listener") the phone should register as a spawn-capable device rather than open as a session.
+ */
+export function buildPairingPayload({ channelId, publicKeyB64, kind = PAIR_KIND.SESSION }) {
   if (!channelId || !publicKeyB64) {
     throw new Error("helm/pairing: channelId and publicKeyB64 are required");
   }
-  return { v: PAIR_VERSION, channelId, pub: publicKeyB64 };
+  const payload = { v: PAIR_VERSION, channelId, pub: publicKeyB64 };
+  // Only stamp non-default kinds so existing session QRs stay byte-identical (back-compat).
+  if (kind && kind !== PAIR_KIND.SESSION) payload.kind = kind;
+  return payload;
 }
 
-/** Parse + validate a scanned QR payload (string or object). */
+/** Parse + validate a scanned QR payload (string or object). `kind` defaults to "session". */
 export function parsePairingPayload(input) {
   const o = typeof input === "string" ? JSON.parse(input) : input;
   if (
@@ -55,7 +65,8 @@ export function parsePairingPayload(input) {
   ) {
     throw new Error("helm/pairing: invalid pairing payload");
   }
-  return { channelId: o.channelId, publicKeyB64: o.pub };
+  const kind = o.kind === PAIR_KIND.LISTENER ? PAIR_KIND.LISTENER : PAIR_KIND.SESSION;
+  return { channelId: o.channelId, publicKeyB64: o.pub, kind };
 }
 
 /** Read a hello envelope's public key + sender, tolerating a missing/foreign message. */

@@ -17,6 +17,7 @@ import {
   historyRequest,
   stateRequest,
   interrupt,
+  voiceMode,
   elicitationResponse,
   approvalDecision,
 } from "@aasis21/helm-shared";
@@ -248,6 +249,28 @@ test("does NOT re-broadcast a phone-relayed prompt's echoed user.message", async
       (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "from my phone"
     );
     assert.equal(echoes.length, 0);
+  });
+});
+
+test("voice mode prefixes relayed prompts with a spoken-response directive, and stops when off", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.PROMPT, prompt("hello there"));
+    await flush();
+    assert.equal(session.prompts.at(-1).prompt, "hello there");
+
+    channel.emit(EVENT_TYPE.CONTROL, voiceMode(true));
+    await flush();
+    channel.emit(EVENT_TYPE.PROMPT, prompt("what changed"));
+    await flush();
+    const spoken = session.prompts.at(-1).prompt;
+    assert.match(spoken, /^\[Voice Mode is on/, "prompt is prefixed while voice mode is on");
+    assert.ok(spoken.endsWith("what changed"), "the user's text is preserved after the directive");
+
+    channel.emit(EVENT_TYPE.CONTROL, voiceMode(false));
+    await flush();
+    channel.emit(EVENT_TYPE.PROMPT, prompt("done now"));
+    await flush();
+    assert.equal(session.prompts.at(-1).prompt, "done now");
   });
 });
 

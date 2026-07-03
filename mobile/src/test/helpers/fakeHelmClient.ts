@@ -7,7 +7,7 @@
 //
 // setup.ts installs `helmClientMock` as the module mock; `registry` is shared with makeManager so a
 // test can grab the client the manager just created and `emit()` messages into it.
-import type { EventEnvelope, SecureChannel } from '@aasis21/helm-shared';
+import type { EventEnvelope, PairingPayload, SecureChannel } from '@aasis21/helm-shared';
 import type { StoredPairing } from '@/lib/storage';
 
 type MessageHandler = (message: EventEnvelope, event: string) => void;
@@ -79,6 +79,13 @@ export class FakeHelmClient {
       .map((m) => m.msg as Record<string, unknown>);
   }
 
+  /** Convenience for #176: active flags sent via control.voice_mode. */
+  voiceModeStates(): boolean[] {
+    return this.sentOfKind('control.voice_mode')
+      .map((msg) => msg.active)
+      .filter((active): active is boolean => typeof active === 'boolean');
+  }
+
   /** Reset the recorded outbound log (e.g. before asserting a reconnect's fresh sends). */
   clearSent(): void {
     this.sent.length = 0;
@@ -128,7 +135,8 @@ export function fakePairing(channelId: string): StoredPairing {
 }
 
 /** The QR string is treated verbatim as the channelId in tests (real code parses a payload). */
-function channelIdFromRaw(raw: string): string {
+function channelIdFromRaw(raw: string | PairingPayload): string {
+  if (typeof raw !== 'string') return raw.channelId;
   try {
     const parsed = JSON.parse(raw) as { channelId?: string };
     if (parsed?.channelId) return parsed.channelId;
@@ -140,10 +148,14 @@ function channelIdFromRaw(raw: string): string {
 
 // --- the module mock installed for `@/lib/helmClient` in setup.ts ---------------------------------
 export const helmClientMock = {
-  async pairSession(raw: string): Promise<{ client: FakeHelmClient; pairing: StoredPairing }> {
+  async pairSession(raw: string | PairingPayload): Promise<{ client: FakeHelmClient; pairing: StoredPairing }> {
     const channelId = channelIdFromRaw(raw);
     const client = registry.create(channelId);
     return { client, pairing: fakePairing(channelId) };
+  },
+  async pairWithPublicKey(opts: { channelId: string; publicKeyB64: string }): Promise<{ client: FakeHelmClient; pairing: StoredPairing }> {
+    const client = registry.create(opts.channelId);
+    return { client, pairing: { ...fakePairing(opts.channelId), peerPublicKeyB64: opts.publicKeyB64 } };
   },
   async connectSession(pairing: StoredPairing): Promise<FakeHelmClient> {
     return registry.create(pairing.channelId);

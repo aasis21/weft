@@ -1,5 +1,5 @@
 import type { TimelineState } from '@/lib/timeline';
-import type { DebugEvent, SessionMeta, SessionStatus } from './model';
+import type { DebugEvent, ListenerDeviceState, SessionMeta, SessionStatus } from './model';
 
 export type { SessionMeta, SessionStatus };
 
@@ -28,6 +28,12 @@ export interface SessionView {
    *  renders them newest-first. Persisted per session and restored on reload. */
   events: DebugEvent[];
   error?: string;
+  spawning?: {
+    requestId: string;
+    deviceId: string;
+    deviceName?: string;
+    projectName: string;
+  };
 }
 
 /** The whole app state the SHELL subscribes to: readiness, the active session, and every card. */
@@ -35,4 +41,5 @@ export interface ManagerSnapshot {
   ready: boolean;
   activeId: string | null;
   sessions: SessionView[];
+  devices: ListenerDeviceState[];
 }

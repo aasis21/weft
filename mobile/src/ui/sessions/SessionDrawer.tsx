@@ -6,6 +6,7 @@ interface SessionDrawerProps {
   activeId: string | null;
   onSelect(channelId: string): void;
   onAddSession(): void;
+  onStartSession?(): void;
   onRemove(channelId: string): void;
   onRename?(channelId: string, title: string): void;
   onGoHome(): void;
@@ -54,6 +55,7 @@ export function SessionDrawer({
   activeId,
   onSelect,
   onAddSession,
+  onStartSession,
   onRemove,
   onRename,
   onGoHome,
@@ -282,6 +284,10 @@ export function SessionDrawer({
 
         <button className="drawer-add" type="button" onClick={onAddSession}>
           ＋ Join another Copilot session
+        </button>
+
+        <button className="drawer-add" type="button" onClick={onStartSession}>
+          ▻ Start another Copilot session
         </button>
 
         <button className="drawer-home" type="button" onClick={onGoHome}>

@@ -154,6 +154,59 @@ export async function generateKeyPair() {
   return { privateKey: pair.privateKey, publicKey: pair.publicKey, publicKeyB64 };
 }
 
+/**
+ * Export an ECDH keypair to a portable, JSON-serializable identity. Used by the `helm-cli`
+ * listener to pre-mint a session's identity and hand it to the spawned Copilot process via a
+ * short-lived 0600 temp file (never on argv/env). The private key is exported as a JWK; keys are
+ * generated extractable, so this is always possible.
+ * @param {{ privateKey: CryptoKey, publicKeyB64: string }} keyPair
+ * @returns {Promise<{ publicKeyB64: string, privateKeyJwk: JsonWebKey }>}
+ */
+export async function exportKeyPair(keyPair) {
+  assertCryptoKey(keyPair?.privateKey, "privateKey", {
+    name: "ECDH",
+    type: "private",
+    namedCurve: "P-256",
+  });
+  if (typeof keyPair.publicKeyB64 !== "string" || keyPair.publicKeyB64.length === 0) {
+    throw cryptoError("keyPair.publicKeyB64 is required to export a keypair.");
+  }
+  try {
+    const privateKeyJwk = await subtle.exportKey("jwk", keyPair.privateKey);
+    return { publicKeyB64: keyPair.publicKeyB64, privateKeyJwk };
+  } catch (err) {
+    throw cryptoError("failed to export keypair.", err);
+  }
+}
+
+/**
+ * Re-import a keypair produced by exportKeyPair. Reconstructs the private key (deriveBits) and the
+ * matching public key + its base64 form, so the spawned extension pairs on the pre-minted identity.
+ * @param {{ privateKeyJwk: JsonWebKey }} material
+ * @returns {Promise<{ privateKey: CryptoKey, publicKey: CryptoKey, publicKeyB64: string }>}
+ */
+export async function importKeyPair({ privateKeyJwk } = {}) {
+  if (!privateKeyJwk || typeof privateKeyJwk !== "object") {
+    throw cryptoError("privateKeyJwk is required to import a keypair.");
+  }
+  let privateKey;
+  try {
+    privateKey = await subtle.importKey("jwk", privateKeyJwk, EC_PARAMS, true, ["deriveBits"]);
+  } catch (err) {
+    throw cryptoError("failed to import private key.", err);
+  }
+  // Derive the public key from the private JWK's public components (drop `d`, clear key_ops/use).
+  const { d: _d, key_ops: _ko, use: _use, ext: _ext, ...publicJwk } = privateKeyJwk;
+  let publicKey;
+  try {
+    publicKey = await subtle.importKey("jwk", { ...publicJwk, key_ops: [] }, EC_PARAMS, true, []);
+  } catch (err) {
+    throw cryptoError("failed to derive public key from keypair.", err);
+  }
+  const publicKeyB64 = await exportPublicKeyB64(publicKey);
+  return { privateKey, publicKey, publicKeyB64 };
+}
+
 /** Export a public CryptoKey to base64 (raw, uncompressed point). */
 export async function exportPublicKeyB64(publicKey) {
   assertCryptoKey(publicKey, "publicKey", { name: "ECDH", type: "public", namedCurve: "P-256" });

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parseEnv } from "node:util";
@@ -11,6 +11,7 @@ import {
   createLocalTransport,
   createSupabaseTransport,
   generateKeyPair,
+  importKeyPair,
   randomChannelId,
   buildPairingPayload,
   listenForPeers,
@@ -64,8 +65,10 @@ function loadLocalEnv() {
 }
 loadLocalEnv();
 
-const laptopKeys = await generateKeyPair();
-const channelId = process.env.HELM_CHANNEL_ID || randomChannelId();
+const handedOffIdentity = await loadIdentityFromFile(process.env.HELM_IDENTITY_FILE);
+const identityFileWasPresent = Boolean(handedOffIdentity);
+const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
+const channelId = handedOffIdentity?.channelId ?? (process.env.HELM_CHANNEL_ID || randomChannelId());
 const pairingPayload = buildPairingPayload({
   channelId,
   publicKeyB64: laptopKeys.publicKeyB64,
@@ -121,15 +124,13 @@ session.on?.("session.shutdown", (event) => {
   void shutdown(reason);
 });
 
-await logPairing(session, JSON.stringify(pairingPayload));
-
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     void shutdown(sig).finally(() => process.exit(0));
   });
 }
 
-void connectRelayWithRetry();
+if (identityFileWasPresent) void connectRelayWithRetry();
 
 // Subscribe the encrypted channel and KEEP listening for phone hellos for the whole session. A
 // transient Supabase subscribe failure (CHANNEL_ERROR) must not permanently kill pairing for a
@@ -323,6 +324,28 @@ async function closeQuietly(transport) {
     await transport?.close?.();
   } catch {
     // best-effort cleanup of a failed transport
+  }
+}
+
+async function loadIdentityFromFile(file) {
+  if (!file) return null;
+  try {
+    const raw = readFileSync(file, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed?.channelId || !parsed.privateKeyJwk) {
+      throw new Error("identity file is missing channelId or privateKeyJwk");
+    }
+    const laptopKeys = await importKeyPair({ privateKeyJwk: parsed.privateKeyJwk });
+    return { channelId: parsed.channelId, laptopKeys };
+  } catch (err) {
+    process.stderr.write(`Helm: could not load handed-off identity; using a fresh pairing: ${err?.message ?? err}\n`);
+    return null;
+  } finally {
+    try {
+      unlinkSync(file);
+    } catch {
+      // best-effort cleanup of the one-shot identity file
+    }
   }
 }
 

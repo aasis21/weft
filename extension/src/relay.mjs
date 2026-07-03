@@ -36,6 +36,14 @@ const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
 // How long a phone-relayed prompt stays "claimable" so the echoed user.message session
 // event it produces is attributed to the phone (and not re-broadcast as a terminal msg).
 const PROMPT_CORRELATION_WINDOW_MS = 30_000;
+// Voice Mode (#176): prefixed to a relayed phone prompt while voice mode is on, so the agent
+// authors its reply for LISTENING (spoken aloud) rather than dense on-screen reading.
+const VOICE_MODE_PROMPT_PREFIX =
+  "[Voice Mode is on — your reply will be read aloud to the user by text-to-speech. " +
+  "Answer in short, natural, conversational sentences. Do not read code, file paths, or long " +
+  "markdown verbatim; instead say briefly what it does in plain language (the full detail still " +
+  "appears on the user's screen). Avoid headings, bullet lists, and literal markdown symbols in " +
+  "your spoken phrasing.]\n\n";
 
 /**
  * Tracks recent phone-originated prompts so that when the matching `user.message`
@@ -420,6 +428,10 @@ export async function attachRelay({
   let stopped = false;
   let consecutiveSendFailures = 0;
   let connectionLostNotified = false;
+  // Voice Mode (#176): while on, each relayed phone prompt is prefixed with a directive telling
+  // the agent its reply will be spoken aloud, so it authors for listening (short, no verbatim code)
+  // instead of dense on-screen text. Toggled by the phone's CONTROL.VOICE_MODE message.
+  let voiceModeActive = false;
   // Correlates phone-relayed prompts with their echoed user.message events so the relay
   // only re-broadcasts prompts that were actually typed at the laptop terminal.
   const promptOrigin = createPromptOriginTracker();
@@ -488,10 +500,14 @@ export async function attachRelay({
     channel.onEvent(EVENT_TYPE.PROMPT, (msg) => {
       if (msg?.eventSubtype !== SUBTYPE.PROMPT.PROMPT || typeof msg.msg?.text !== "string") return;
       const body = msg.msg;
+      // Voice Mode (#176): prepend a spoken-response directive so the agent replies for LISTENING.
+      // The directive is prepended to the text handed to the SDK (and recorded for echo dedup) —
+      // the phone already shows the user's clean text optimistically.
+      const promptText = voiceModeActive ? VOICE_MODE_PROMPT_PREFIX + body.text : body.text;
       // Remember this phone-typed prompt so its echoed user.message session event is
       // attributed to the phone (which already shows it optimistically) and not
       // re-broadcast as a terminal message.
-      promptOrigin.record(body.text);
+      promptOrigin.record(promptText);
       // Map phone-relayed image attachments (base64) to Copilot SDK blob attachments.
       // Defensive: drop anything missing base64 `data` or a `mimeType`. The SDK resizes
       // images itself; the phone already downscales to keep the relay payload small.
@@ -506,8 +522,8 @@ export async function attachRelay({
             }))
         : [];
       const sendOptions = attachments.length
-        ? { prompt: body.text, attachments, mode: "immediate" }
-        : { prompt: body.text, mode: "immediate" };
+        ? { prompt: promptText, attachments, mode: "immediate" }
+        : { prompt: promptText, mode: "immediate" };
       void session
         .send?.(sendOptions)
         ?.catch?.((err) =>
@@ -534,6 +550,14 @@ export async function attachRelay({
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.RECENT_TURNS_REQUEST) {
         void serveRecentTurns(turnBuffer, msg.msg, sendSafe, logger);
+        return;
+      }
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.VOICE_MODE) {
+        voiceModeActive = Boolean(msg.msg?.active);
+        logger(
+          `Helm: voice mode ${voiceModeActive ? "on — replies authored for speech" : "off — normal replies"}.`,
+          { level: "info" },
+        );
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {

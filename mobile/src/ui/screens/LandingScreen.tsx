@@ -11,6 +11,7 @@ interface LandingScreenProps {
   hasSessions?: boolean;
   /** Return to the live session screen. Provided only when hasSessions is true. */
   onOpenSessions?: () => void;
+  onStartSession?: () => void;
 }
 
 type OsTab = 'windows' | 'unix';
@@ -142,6 +143,7 @@ export function LandingScreen({
   onError,
   hasSessions = false,
   onOpenSessions,
+  onStartSession,
 }: LandingScreenProps): JSX.Element {
   const { busy, run } = usePairing(onError);
   const showSessions = hasSessions && !!onOpenSessions;
@@ -182,6 +184,11 @@ export function LandingScreen({
           >
             Scan QR to pair
           </button>
+          {showSessions && onStartSession ? (
+            <button type="button" className="secondary-action" onClick={onStartSession}>
+              Start another session
+            </button>
+          ) : null}
           <button type="button" className="secondary-action" onClick={() => onBeginPair(true)}>
             Paste a code
           </button>

@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: Apache-2.0
+import { spawn as childSpawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { closeSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+export function writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk }) {
+  if (!channelId || !publicKeyB64 || !privateKeyJwk) {
+    throw new Error("Helm spawn: channelId, publicKeyB64, and privateKeyJwk are required");
+  }
+  const file = join(tmpdir(), `helm-identity-${process.pid}-${randomUUID()}.json`);
+  const fd = openSync(file, "wx", 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify({ channelId, publicKeyB64, privateKeyJwk }), "utf8");
+  } finally {
+    closeSync(fd);
+  }
+  return file;
+}
+
+export function detectTerminal(env = process.env, platform = process.platform) {
+  if (platform === "win32" && env.WT_SESSION) return "windows-terminal";
+  if (platform === "darwin" && env.TERM_PROGRAM) return "macos-terminal";
+  if (platform === "linux" && (env.GNOME_TERMINAL_SCREEN || env.GNOME_TERMINAL_SERVICE)) {
+    return "gnome-terminal";
+  }
+  return null;
+}
+
+export function spawnCopilotSession({ project, name, mode = "default", identity, spawnFn = childSpawn } = {}) {
+  const cwd = project?.path;
+  if (!cwd) return { ok: false, error: "Project path is required" };
+  const sessionName = name || "helm-session";
+  let identityFile;
+  try {
+    identityFile = writeIdentityFile(identity);
+    const copilotArgs = ["-n", sessionName];
+    if (mode === "allow-all") copilotArgs.push("--allow-all-tools");
+    const env = {
+      ...process.env,
+      HELM_IDENTITY_FILE: identityFile,
+      HELM_CHANNEL_ID: identity.channelId,
+    };
+    const terminal = detectTerminal();
+    const launch = buildLaunch({ terminal, cwd, copilotArgs });
+    const child = spawnFn(launch.command, launch.args, {
+      cwd,
+      env,
+      detached: true,
+      stdio: "ignore",
+      shell: false,
+    });
+    child?.unref?.();
+    return { ok: true };
+  } catch (err) {
+    if (identityFile) {
+      try {
+        unlinkSync(identityFile);
+      } catch {
+        // best-effort cleanup after a failed spawn.
+      }
+    }
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+function buildLaunch({ terminal, cwd, copilotArgs }) {
+  if (terminal === "windows-terminal") {
+    return {
+      command: "wt.exe",
+      args: ["new-tab", "--startingDirectory", cwd, "copilot", ...copilotArgs],
+    };
+  }
+  if (terminal === "macos-terminal") {
+    const script = [
+      "on run argv",
+      "set workDir to item 1 of argv",
+      "set cmdParts to {}",
+      "repeat with i from 2 to count of argv",
+      "set end of cmdParts to quoted form of (item i of argv)",
+      "end repeat",
+      "set AppleScript's text item delimiters to space",
+      "set cmdText to \"cd \" & quoted form of workDir & \" && \" & (cmdParts as text)",
+      "tell application \"Terminal\" to do script cmdText",
+      "end run",
+    ].join("\n");
+    return { command: "osascript", args: ["-e", script, cwd, "copilot", ...copilotArgs] };
+  }
+  if (terminal === "gnome-terminal") {
+    return { command: "gnome-terminal", args: [`--working-directory=${cwd}`, "--", "copilot", ...copilotArgs] };
+  }
+  return { command: "copilot", args: copilotArgs };
+}

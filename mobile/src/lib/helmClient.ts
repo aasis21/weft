@@ -11,6 +11,7 @@ import {
   sayHello,
 } from '@aasis21/helm-shared';
 import type { EventEnvelope, EventType, Transport } from '@aasis21/helm-shared';
+import type { PairingPayload } from '@aasis21/helm-shared';
 import type { StoredPairing } from './storage';
 
 /** A connect that never reaches SUBSCRIBED (a wedged/suspended shared socket) would otherwise hang
@@ -60,13 +61,22 @@ const ALL_EVENTS: EventType[] = [
  * Does not write to storage itself.
  */
 export async function pairSession(
-  raw: string,
+  raw: string | PairingPayload,
   opts?: { transport?: Transport },
 ): Promise<{ client: HelmClient; pairing: StoredPairing }> {
   const { channelId, publicKeyB64 } = parsePairingPayload(raw);
+  return pairWithPublicKey({ channelId, publicKeyB64, transport: opts?.transport });
+}
+
+export async function pairWithPublicKey(opts: {
+  channelId: string;
+  publicKeyB64: string;
+  transport?: Transport;
+}): Promise<{ client: HelmClient; pairing: StoredPairing }> {
+  const { channelId, publicKeyB64 } = opts;
   const phoneKeys = await generateKeyPair();
   const deviceId = getStableDeviceId();
-  const transport = opts?.transport ?? createTransport(channelId);
+  const transport = opts.transport ?? createTransport(channelId);
   const { key } = await sayHello({
     transport,
     keyPair: phoneKeys,

@@ -17,5 +17,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.12"
+  },
+  "bin": {
+    "helm-cli": "bin/helm-cli.mjs"
   }
 }

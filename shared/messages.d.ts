@@ -1,6 +1,7 @@
 // Type definitions for the Helm standardized event-envelope protocol.
 
 import type { HistoryItem } from "./history";
+import type { PairingPayload } from "./pairing";
 
 /** Top-level event type — also the transport topic the message travels on. */
 export type EventType =
@@ -59,6 +60,13 @@ export const SUBTYPE: {
     readonly RECENT_TURNS: "recent_turns";
     readonly STATE_REQUEST: "state_request";
     readonly STATE_SNAPSHOT: "state_snapshot";
+    readonly PROJECT_LIST_REQUEST: "project_list_request";
+    readonly PROJECT_LIST: "project_list";
+    readonly SPAWN_SESSION: "spawn_session";
+    readonly SPAWN_PAIRING: "spawn_pairing";
+    readonly SPAWN_RESULT: "spawn_result";
+    readonly FORGET_DEVICE: "forget_device";
+    readonly VOICE_MODE: "voice_mode";
   };
   readonly PAIR: { readonly HELLO: "hello"; readonly ACK: "ack" };
 };
@@ -252,6 +260,43 @@ export interface PairAckMsg {
   ok: boolean;
 }
 
+// ---- payload shapes: phone-launched sessions (#156) ------------------------
+export type SpawnMode = "default" | "allow-all";
+/** One registered project a `helm-cli` listener can spawn a session in. */
+export interface ListenerProject {
+  name: string;
+  /** Absolute path (informational for the phone; selection is by `name`). */
+  path: string;
+  isDefault?: boolean;
+}
+export type ProjectListRequestMsg = Record<string, never>;
+export interface ProjectListMsg {
+  projects: ListenerProject[];
+  /** The listener machine's display name, or null. */
+  deviceName: string | null;
+}
+export interface SpawnSessionMsg {
+  requestId: string;
+  projectName: string;
+  mode: SpawnMode;
+  name: string | null;
+}
+export interface SpawnPairingMsg {
+  requestId: string;
+  payload: PairingPayload;
+  name: string | null;
+  projectName: string | null;
+}
+export interface SpawnResultMsg {
+  requestId: string;
+  ok: boolean;
+  error: string | null;
+}
+export type ForgetDeviceMsg = Record<string, never>;
+export interface VoiceModeMsg {
+  active: boolean;
+}
+
 // ---- concrete envelope types (eventType + eventSubtype + typed msg) --------
 export type AssistantMessage = Envelope<"stream", "assistant_message", AssistantMessageMsg>;
 export type AssistantDelta = Envelope<"stream", "assistant_delta", AssistantDeltaMsg>;
@@ -279,6 +324,13 @@ export type RecentTurnsRequest = Envelope<"control", "recent_turns_request", Rec
 export type RecentTurns = Envelope<"control", "recent_turns", RecentTurnsMsg>;
 export type StateRequest = Envelope<"control", "state_request", StateRequestMsg>;
 export type StateSnapshot = Envelope<"control", "state_snapshot", StateSnapshotMsg>;
+export type ProjectListRequest = Envelope<"control", "project_list_request", ProjectListRequestMsg>;
+export type ProjectListMessage = Envelope<"control", "project_list", ProjectListMsg>;
+export type SpawnSessionMessage = Envelope<"control", "spawn_session", SpawnSessionMsg>;
+export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
+export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
+export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
+export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
 export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
 export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
 
@@ -308,7 +360,14 @@ export type EventEnvelope =
   | RecentTurnsRequest
   | RecentTurns
   | StateRequest
-  | StateSnapshot;
+  | StateSnapshot
+  | ProjectListRequest
+  | ProjectListMessage
+  | SpawnSessionMessage
+  | SpawnPairing
+  | SpawnResult
+  | ForgetDevice
+  | VoiceModeMessage;
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
 export function assistantDelta(content: string, messageId?: string): AssistantDelta;
@@ -388,3 +447,28 @@ export function stateSnapshot(snapshot?: {
   elicitations?: ElicitationRequestMsg[];
 }): StateSnapshot;
 export function isValidEnvelope(env: unknown): env is EventEnvelope;
+
+export function projectListRequest(): ProjectListRequest;
+export function projectList(
+  projects: ListenerProject[],
+  deviceName?: string | null
+): ProjectListMessage;
+export function spawnSession(
+  requestId: string,
+  projectName: string,
+  mode?: SpawnMode,
+  name?: string | null
+): SpawnSessionMessage;
+export function spawnPairing(
+  requestId: string,
+  payload: PairingPayload,
+  name?: string | null,
+  projectName?: string | null
+): SpawnPairing;
+export function spawnResult(
+  requestId: string,
+  ok: boolean,
+  error?: string | null
+): SpawnResult;
+export function forgetDevice(): ForgetDevice;
+export function voiceMode(active: boolean): VoiceModeMessage;
