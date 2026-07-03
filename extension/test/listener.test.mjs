@@ -42,7 +42,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
   const { createLocalTransport } = await import("@aasis21/helm-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -53,6 +53,7 @@ async function pairedHarness({ projects, spawnFn, log } = {}) {
     keyPair: listenerKeys,
     channelId,
     deviceId: "test-device",
+    heartbeatMs,
     projectsApi,
     spawnFn,
     log,
@@ -94,6 +95,17 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   assert.deepEqual(list.msg.projects, [{ name: "app", path: projectDir, isDefault: true }]);
   assert.ok(list.msg.deviceName);
   assert.equal(list.msg.deviceId, "test-device");
+  await listener.stop();
+});
+
+test("emits DEVICE_HEARTBEAT on the configured interval, independent of PROJECT_LIST", async () => {
+  const { listener, messages } = await pairedHarness({ projects: [], heartbeatMs: 20 });
+  await waitFor(
+    () => messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT).length >= 2,
+    "at least two device heartbeats",
+  );
+  const beat = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT);
+  assert.equal(beat.msg.deviceId, "test-device");
   await listener.stop();
 });
 

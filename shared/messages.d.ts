@@ -66,6 +66,7 @@ export const SUBTYPE: {
     readonly SPAWN_PAIRING: "spawn_pairing";
     readonly SPAWN_RESULT: "spawn_result";
     readonly FORGET_DEVICE: "forget_device";
+    readonly DEVICE_HEARTBEAT: "device_heartbeat";
     readonly VOICE_MODE: "voice_mode";
   };
   readonly PAIR: { readonly HELLO: "hello"; readonly ACK: "ack" };
@@ -295,6 +296,10 @@ export interface SpawnResultMsg {
   error: string | null;
 }
 export type ForgetDeviceMsg = Record<string, never>;
+/** Liveness beat for the DEVICE channel; deviceId mirrors ProjectListMsg.deviceId. */
+export interface DeviceHeartbeatMsg {
+  deviceId: string | null;
+}
 export interface VoiceModeMsg {
   active: boolean;
 }
@@ -332,6 +337,7 @@ export type SpawnSessionMessage = Envelope<"control", "spawn_session", SpawnSess
 export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
 export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
 export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
+export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHeartbeatMsg>;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
 export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
 export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
@@ -369,6 +375,7 @@ export type EventEnvelope =
   | SpawnPairing
   | SpawnResult
   | ForgetDevice
+  | DeviceHeartbeat
   | VoiceModeMessage;
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
@@ -474,4 +481,5 @@ export function spawnResult(
   error?: string | null
 ): SpawnResult;
 export function forgetDevice(): ForgetDevice;
+export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
 export function voiceMode(active: boolean): VoiceModeMessage;

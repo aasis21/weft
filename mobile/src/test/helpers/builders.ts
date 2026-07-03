@@ -43,6 +43,7 @@ export {
   spawnPairing,
   spawnResult,
   forgetDevice,
+  deviceHeartbeat,
   voiceMode,
   isValidEnvelope,
 } from '@aasis21/helm-shared';

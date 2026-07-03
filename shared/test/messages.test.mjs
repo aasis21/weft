@@ -35,6 +35,7 @@ import {
   elicitationRequest,
   elicitationResponse,
   elicitationComplete,
+  deviceHeartbeat,
   isValidEnvelope,
 } from "../messages.mjs";
 
@@ -182,6 +183,13 @@ test("heartbeat carries latestTurnIndex + busy under msg, defaulting to null", (
   assert.equal(heartbeat().msg.latestTurnIndex, null);
   assert.equal(heartbeat().msg.busy, null);
   assert.equal(heartbeat(3, false).msg.busy, false);
+});
+
+test("deviceHeartbeat carries deviceId under msg, defaulting to null", () => {
+  const beat = deviceHeartbeat("device-123");
+  assertEnvelope(beat, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT);
+  assert.equal(beat.msg.deviceId, "device-123");
+  assert.equal(deviceHeartbeat().msg.deviceId, null);
 });
 
 test("modeChange + interrupt", () => {

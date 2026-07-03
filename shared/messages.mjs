@@ -80,6 +80,10 @@ export const SUBTYPE = Object.freeze({
     SPAWN_RESULT: "spawn_result",
     // phone -> listener: forget this device (the listener stops / drops the binding).
     FORGET_DEVICE: "forget_device",
+    // listener -> phone: proactive liveness beat for the DEVICE (not a session) channel, sent on an
+    // interval independent of PROJECT_LIST request/reply. Lets the phone detect a dead/hung listener
+    // process even though the underlying transport still reports "connected" (see deviceHeartbeat()).
+    DEVICE_HEARTBEAT: "device_heartbeat",
     // phone -> ext: Voice Mode (#168) is on/off. While on, the extension prepends a directive to
     // each relayed prompt so the agent authors its reply for SPEECH (concise, no verbatim code).
     VOICE_MODE: "voice_mode",
@@ -310,6 +314,14 @@ export const spawnResult = (requestId, ok, error = null) =>
 /** Phone -> listener: forget this device; the listener stops (or drops its phone binding). */
 export const forgetDevice = () =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.FORGET_DEVICE, {});
+/**
+ * Listener -> phone: proactive liveness beat for the DEVICE channel (distinct from the per-session
+ * heartbeat()). Sent on an interval whether or not the phone has asked for anything, so a hung or
+ * crashed `helm-cli` process shows as offline even if the underlying transport still reports
+ * "connected". `deviceId` is the same stable, non-secret id carried in projectList().
+ */
+export const deviceHeartbeat = (deviceId = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT, { deviceId: deviceId ?? null });
 
 /**
  * Phone -> ext: Voice Mode is now on/off (#176). While on, the extension prepends a short

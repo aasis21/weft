@@ -118,6 +118,9 @@ import { selectAllSessions, selectManagerSnapshot, toTimelineState } from '@/ses
 const IDLE_AFTER_MS = 20_000;
 const OFFLINE_AFTER_MS = 30_000;
 const HOST_CONFIRM_MS = 30_000;
+// Device (listener) channel heartbeat cadence is 15s (extension/src/listener.mjs); allow ~2.5
+// missed beats before flipping the Online dot to Offline, so one dropped packet doesn't flap it.
+const DEVICE_OFFLINE_AFTER_MS = 40_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
 const RESUME_DEBOUNCE_MS = 500;
 const MAX_WARM_SESSIONS = 10;
@@ -999,6 +1002,12 @@ export class SessionRuntime {
   private onListenerMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
+    if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT) {
+      // Proactive liveness beat (independent of PROJECT_LIST request/reply): just refresh
+      // lastSeenAt/connected so an idle device doesn't go stale in the UI between polls.
+      this.store.dispatch(deviceErrorSet({ channelId, error: undefined, connected: true }));
+      return;
+    }
     if (message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST) {
       const msg = message.msg as ProjectListMsg;
       this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
@@ -1416,6 +1425,15 @@ export class SessionRuntime {
         } else if (status === 'live' && beat && now - beat > IDLE_AFTER_MS) {
           this.store.dispatch(statusSet({ id: session.id, status: 'idle', error: undefined }));
           if (session.connection.busy) this.store.dispatch(busySet({ id: session.id, busy: false }));
+        }
+      }
+      // Device (listener) channels: flip the Online dot to Offline once its heartbeat/lastSeenAt
+      // goes stale, rather than trusting the transport's own connect state alone (a hung/crashed
+      // `helm-cli` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
+      for (const device of this.store.getState().sessions.devices) {
+        if (!device.connected || !device.lastSeenAt) continue;
+        if (now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {
+          this.store.dispatch(deviceErrorSet({ channelId: device.channelId, connected: false }));
         }
       }
     }, 1_000);

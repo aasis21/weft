@@ -8,6 +8,7 @@ import {
   SUBTYPE,
   SecureChannel,
   buildPairingPayload,
+  deviceHeartbeat,
   exportKeyPair,
   generateKeyPair,
   listenForPeers,
@@ -23,12 +24,17 @@ import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
+// Proactive DEVICE_HEARTBEAT cadence: independent of PROJECT_LIST_REQUEST/PROJECT_LIST, so an idle
+// phone (not polling) can still tell the listener process is alive, not just that the transport
+// socket is up.
+const DEVICE_HEARTBEAT_MS = 15_000;
 
 export function createListener({
   transport = null,
   keyPair = null,
   channelId = null,
   deviceId = null,
+  heartbeatMs = DEVICE_HEARTBEAT_MS,
   spawnFn,
   projectsApi = projectsStore,
   log = console,
@@ -46,6 +52,7 @@ export function createListener({
   let channel = null;
   let stopped = false;
   let started = false;
+  let heartbeatTimer = null;
 
   const start = async () => {
     if (started) return api;
@@ -75,6 +82,7 @@ export function createListener({
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    stopHeartbeat();
     try {
       controlUnsub?.();
     } catch {
@@ -96,6 +104,11 @@ export function createListener({
     }
   };
 
+  function stopHeartbeat() {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+
   async function bindPeer({ key, peer }) {
     if (stopped) return;
     if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
@@ -108,6 +121,7 @@ export function createListener({
     } catch {
       // best-effort
     }
+    stopHeartbeat();
     channel = new SecureChannel({
       transport: listenerTransport,
       key,
@@ -121,6 +135,12 @@ export function createListener({
       void handleControl(envelope);
     });
     await sendProjectList();
+    // Proactive liveness beat: unlike PROJECT_LIST (request/reply), this fires on a fixed interval
+    // so the phone can tell the listener process is alive even when it isn't actively polling.
+    heartbeatTimer = setInterval(() => {
+      void channel?.send(deviceHeartbeat(listenerDeviceId))?.catch?.(() => {});
+    }, heartbeatMs);
+    heartbeatTimer.unref?.();
   }
 
   async function sendProjectList() {
