@@ -415,16 +415,12 @@
 }
 
 .voice-you {
-  margin: 0;
-  color: var(--fg-dim);
-  font-size: 0.92rem;
-  font-style: italic;
-  max-width: 100%;
+  display: none;
 }
 
 .voice-transcript {
   width: 100%;
-  max-height: 34vh;
+  max-height: 30vh;
   overflow-y: auto;
   margin: 0;
   padding: 0.75rem 0.9rem;
@@ -437,27 +433,35 @@
   white-space: pre-wrap;
   word-break: break-word;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 0.9rem, #000 calc(100% - 0.25rem), transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 0.9rem, #000 calc(100% - 0.25rem), transparent 100%);
+}
+
+.voice-transcript::-webkit-scrollbar {
+  display: none;
 }
 
 .voice-back-btn {
-  margin-top: 0.4rem;
-  padding: 0.7rem 1.4rem;
+  justify-self: center;
+  margin-top: 0.5rem;
+  padding: 0.6rem 1.6rem;
   border-radius: 999px;
-  border: 1px solid var(--bg-rule);
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  color: var(--fg);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
   min-height: 44px;
-  transition: background 140ms ease, transform 140ms ease;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
 .voice-back-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-color: var(--bg-rule);
 }
 
 .voice-back-btn:active {

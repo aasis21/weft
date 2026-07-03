@@ -167,4 +167,35 @@ describe('VoiceModeOverlay full-message speech (streaming off, default)', () => 
     );
     expect(speechOutput.enqueue).not.toHaveBeenCalled();
   });
+
+  it('speaks the held narration when a tool starts, before showing Working…', async () => {
+    const { rerender } = renderOverlay({ agentBusy: true, toolActive: false, latestAssistant: null });
+    await Promise.resolve();
+    // Narration streams in (not finalized) while the agent is busy — held.
+    rerender(
+      <VoiceModeOverlay
+        latestAssistant={mkAssistant('Let me read the file.', false)}
+        agentBusy
+        toolActive={false}
+        disabled={false}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+    // A tool starts — the narration so far is spoken first.
+    rerender(
+      <VoiceModeOverlay
+        latestAssistant={mkAssistant('Let me read the file.', false)}
+        agentBusy
+        toolActive
+        disabled={false}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(speechOutput.enqueue).toHaveBeenCalledWith('Let me read the file.');
+  });
 });

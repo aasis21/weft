@@ -70,6 +70,7 @@ export function VoiceModeOverlay({
   const committedRef = useRef('');
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const assistantCursorRef = useRef<{ id: string | null; offset: number }>({
     id: latestAssistant?.id ?? null,
     offset: latestAssistant?.text.length ?? 0,
@@ -203,17 +204,22 @@ export function VoiceModeOverlay({
       cursor.offset = 0;
       sawReplyRef.current = false;
     }
-    // Full-message mode (streaming off): hold TTS until the extension finalizes this message
-    // (assistant_message → item.final) or the turn goes idle, so speech is whole sentences instead of
-    // partial deltas. Streaming on: speak each delta as it arrives.
-    if (!speakStreaming && latestAssistant.final !== true && agentBusy) return;
+    // Full-message mode (streaming off): hold TTS while the agent is still *narrating* (busy, no tool
+    // running yet, not finalized) so speech is whole sentences instead of partial deltas. Release —
+    // and speak the narration so far — the moment a tool starts (toolActive), the message finalizes
+    // (assistant_message → item.final), or the turn goes idle. This is what makes Vox voice "I'll read
+    // the file…" BEFORE it flips to Working…, then speak the summary after (#181). Streaming on: speak
+    // each delta as it arrives.
+    const holdForFullMessage =
+      !speakStreaming && latestAssistant.final !== true && agentBusy && !toolActive;
+    if (holdForFullMessage) return;
     if (latestAssistant.text.length <= cursor.offset) return;
     const delta = latestAssistant.text.slice(cursor.offset);
     cursor.offset = latestAssistant.text.length;
     if (!delta.trim()) return;
     sawReplyRef.current = true;
     enqueueSpeech(delta);
-  }, [agentBusy, enqueueSpeech, latestAssistant, speakStreaming]);
+  }, [agentBusy, enqueueSpeech, latestAssistant, speakStreaming, toolActive]);
 
   useEffect(() => {
     if (!agentBusy && sawReplyRef.current) flushSpeech();
@@ -247,6 +253,13 @@ export function VoiceModeOverlay({
     else setState('ready');
   }, [agentBusy, autoRelisten, outputSpeaking, startListening, state]);
 
+  // Keep the transcript pinned to the latest (currently-spoken) line as the reply grows, so a long
+  // reply reveals what Vox is saying now instead of dumping the whole wall of text.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [latestAssistant?.text, state]);
+
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
     if (!outputSupported && (state === 'speaking' || state === 'thinking' || state === 'working')) return 'Speech output unavailable — showing text only.';
@@ -258,7 +271,6 @@ export function VoiceModeOverlay({
 
   const replyText = latestAssistant?.text ?? '';
   const showReply = (state === 'thinking' || state === 'working' || state === 'speaking') && replyText.trim().length > 0;
-  const userSaid = caption.trim();
 
   return (
     <div className="voice-overlay" role="dialog" aria-modal="true" aria-label="Vox voice mode" ref={overlayRef}>
@@ -270,7 +282,7 @@ export function VoiceModeOverlay({
             <span className="voice-brandmark-bar" />
           </span>
           <span className="voice-title">Vox</span>
-          <span className="voice-sub">Hands-free conversation</span>
+          <span className="voice-sub">Hands-free conversation in Helm</span>
         </header>
 
         <button type="button" className="voice-orb" onClick={handleOrb} disabled={disabled && state !== 'speaking'} aria-label={status}>
@@ -283,15 +295,10 @@ export function VoiceModeOverlay({
         <div className="voice-body">
           {state === 'listening' ? (
             <p className="voice-caption" aria-live="polite">{caption || 'Listening…'}</p>
+          ) : showReply ? (
+            <div className="voice-transcript" ref={transcriptRef} aria-live="polite">{replyText}</div>
           ) : (
-            <>
-              {userSaid ? <p className="voice-you">“{userSaid}”</p> : null}
-              {showReply ? (
-                <div className="voice-transcript" aria-live="polite">{replyText}</div>
-              ) : (
-                <p className="voice-caption" aria-live="polite">{'\u00A0'}</p>
-              )}
-            </>
+            <p className="voice-caption" aria-live="polite">{'\u00A0'}</p>
           )}
         </div>
 
@@ -300,7 +307,7 @@ export function VoiceModeOverlay({
         </div>
 
         <button ref={closeButtonRef} type="button" className="voice-back-btn" onClick={onClose}>
-          <span aria-hidden="true">←</span> Back to chat
+          Back to chat
         </button>
       </div>
     </div>
