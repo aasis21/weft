@@ -43,7 +43,9 @@ export function toTimelineState(session: Session): TimelineState {
     elicitations: session.requests.elicitations,
     elicitationErrors: session.requests.elicitationErrors,
     busy: session.connection.busy,
+    busyFrom: session.connection.busyFrom,
     mode: session.connection.mode,
+    pendingMode: session.connection.pendingMode,
     cwd: session.meta.cwd,
     title: session.meta.title || null,
     lastHeartbeat: session.connection.lastHeartbeat,
@@ -78,4 +80,3 @@ export const selectManagerSnapshot = createSelector(
     return { ready, activeId: active?.meta.channelId ?? null, sessions: views };
   },
 );
-

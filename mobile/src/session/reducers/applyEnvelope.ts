@@ -166,6 +166,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           return;
         case SUBTYPE.STREAM.ACTIVITY:
           session.connection.busy = message.msg.busy;
+          session.connection.busyFrom = message.ts;
           return;
         case SUBTYPE.STREAM.USER_MESSAGE:
           appendUserEcho(session, message);
@@ -210,6 +211,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.ended = false;
           session.connection.endedReason = undefined;
           session.connection.busy = false;
+          session.connection.busyFrom = message.ts;
           return;
         case SUBTYPE.CONTROL.SESSION_META:
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
@@ -221,12 +223,16 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.endedReason = reason;
           session.connection.status = 'ended';
           session.connection.busy = false;
+          session.connection.busyFrom = message.ts;
           appendNotice(session, 'warning', reason, message.ts, `end-${message.ts}`);
           return;
         }
         case SUBTYPE.CONTROL.HEARTBEAT: {
           const beat = message.msg;
-          session.connection.busy = typeof beat.busy === 'boolean' ? beat.busy : session.connection.busy;
+          if (typeof beat.busy === 'boolean' && !isStaleBusyHeartbeat(session, message.ts)) {
+            session.connection.busy = beat.busy;
+            session.connection.busyFrom = message.ts;
+          }
           session.connection.lastHeartbeat = message.ts;
           session.connection.ended = false;
           session.history.latestTurnIndex = maxCursor(session.history.latestTurnIndex, beat.latestTurnIndex);
@@ -234,6 +240,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         }
         case SUBTYPE.CONTROL.MODE:
           session.connection.mode = message.msg.mode;
+          delete session.connection.pendingMode;
           return;
         default:
           return;
@@ -317,13 +324,46 @@ function appendUserEcho(session: Session, message: UserMessageEcho): void {
 }
 
 function applyRecentTurns(session: Session, message: RecentTurnsMsg): void {
-  const incoming = message.items ?? [];
+  const incoming = normalizeRecentTurns(message.items ?? []);
   const clearLoading = () => {
     session.history.loading = false;
   };
   if (incoming.length === 0) {
     clearLoading();
     return;
+  }
+
+  function seedTurnKey(id: string, role: 'user' | 'assistant'): string | null {
+    const match = new RegExp(`^seed-(.+)-${role}$`).exec(id);
+    return match?.[1] ?? null;
+  }
+
+  function normalizeRecentTurns(items: RecentTurnsMsg['items']): RecentTurnsMsg['items'] {
+    const seedAssistantTurns = new Set(
+      items
+        .filter((it) => it?.role === 'assistant' && typeof it.text === 'string' && it.text.length > 0)
+        .map((it) => seedTurnKey(it.id, 'assistant'))
+        .filter((key): key is string => Boolean(key)),
+    );
+    const byId = new Map<string, RecentTurnsMsg['items'][number]>();
+    const normalized: RecentTurnsMsg['items'] = [];
+    for (const it of items) {
+      if ((it.role !== 'user' && it.role !== 'assistant') || !it.text) continue;
+      const seedUserTurn = it.role === 'user' ? seedTurnKey(it.id, 'user') : null;
+      if (seedUserTurn && !seedAssistantTurns.has(seedUserTurn)) continue;
+      const existing = byId.get(it.id);
+      if (existing) {
+        if (existing.role === 'assistant' && it.role === 'assistant') {
+          existing.text = `${existing.text}${it.text}`;
+          existing.ts = it.ts;
+        }
+        continue;
+      }
+      const copy = { ...it };
+      byId.set(copy.id, copy);
+      normalized.push(copy);
+    }
+    return normalized;
   }
 
   const dedupeKey = (role: string, text: string) => `${role}\u0000${text.slice(0, RECENT_DEDUPE_PREFIX)}`;
@@ -390,8 +430,16 @@ function highestTurnIndex(items: HistoryItem[]): number | null {
 function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number): void {
   // Only honor an explicit boolean (mirrors HEARTBEAT); a null/absent busy must never clear a live
   // turn mid-flight (#99).
-  if (typeof snap.busy === 'boolean') session.connection.busy = snap.busy;
-  session.connection.mode = snap.mode ?? session.connection.mode;
+  if (typeof snap.busy === 'boolean') {
+    session.connection.busy = snap.busy;
+    session.connection.busyFrom = ts;
+  }
+  if (snap.mode) {
+    if (!session.connection.pendingMode || snap.mode === session.connection.pendingMode) {
+      session.connection.mode = snap.mode;
+      delete session.connection.pendingMode;
+    }
+  }
   // The snapshot is the extension's authoritative pending set (re-requested fresh on each attach),
   // so REPLACE rather than add-only merge — otherwise an approval the CLI auto-denied, or that timed
   // out during a socket gap, lingers forever as a zombie banner (#78). Decisions currently in flight
@@ -401,6 +449,11 @@ function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number
   session.connection.lastHeartbeat = ts;
   session.connection.ended = false;
   session.history.latestTurnIndex = maxCursor(session.history.latestTurnIndex, snap.latestTurnIndex);
+}
+
+function isStaleBusyHeartbeat(session: Session, ts: number): boolean {
+  const busyFrom = session.connection.busyFrom;
+  return Number.isFinite(busyFrom) && ts < (busyFrom as number);
 }
 
 export interface PersistedSession {
@@ -453,6 +506,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
     connection: {
       status: 'idle',
       busy: false,
+      busyFrom: null,
       mode: persisted.connection?.mode ?? DEFAULT_MODE,
       reconnecting: false,
       settling: false,
@@ -463,4 +517,3 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
     debug: Array.isArray(persisted.debug) ? persisted.debug : [],
   };
 }
-

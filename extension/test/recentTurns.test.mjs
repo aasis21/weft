@@ -27,6 +27,21 @@ test("recordAssistant replaces the last entry when the id matches (delta -> fina
   assert.deepEqual(buf.snapshot().at(-1), { role: "assistant", text: "partial and final", ts: 3, id: "a1" });
 });
 
+test("recordAssistant concatenates a distinct same-id segment instead of truncating (#116)", () => {
+  const buf = createRecentTurns();
+  buf.recordUser("q", 1, "u1");
+  buf.recordAssistant("Let me check the file.", 2, "a1");
+  // Same messageId resumes after an interleaved tool with a NON-superset segment → must not be lost.
+  buf.recordAssistant("Done — it looks correct.", 3, "a1");
+  assert.equal(buf.size, 2);
+  assert.deepEqual(buf.snapshot().at(-1), {
+    role: "assistant",
+    text: "Let me check the file.\nDone — it looks correct.",
+    ts: 3,
+    id: "a1",
+  });
+});
+
 test("recordAssistant appends a new bubble when the id differs", () => {
   const buf = createRecentTurns();
   buf.recordUser("q", 1, "u1");

@@ -96,6 +96,13 @@ describe('ChatThread', () => {
     expect(screen.queryByText('screenshot.jpg')).not.toBeInTheDocument();
   });
 
+  it('does not render an empty user bubble when attachments are absent', () => {
+    const { container } = render(<ChatThread items={[{ kind: 'user', id: 'u-empty', text: '', ts: now }]} />);
+
+    expect(container.querySelector('.row.user')).toBeInTheDocument();
+    expect(container.querySelector('.user-bubble')).not.toBeInTheDocument();
+  });
+
   it('does not show the working row for a failed latest send', () => {
     render(
       <ChatThread
@@ -107,6 +114,39 @@ describe('ChatThread', () => {
 
     expect(screen.getByText('Not delivered')).toBeInTheDocument();
     expect(screen.queryByText('working…')).not.toBeInTheDocument();
+  });
+
+  it('shows the working row for a trailing running tool even before busy arrives', () => {
+    render(
+      <ChatThread
+        streaming
+        items={[
+          {
+            kind: 'tool',
+            id: 'tool-running',
+            name: 'powershell',
+            args: { command: 'npm test' },
+            status: 'running',
+            startedAt: now,
+            ts: now,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('working…')).toBeInTheDocument();
+  });
+
+  it('only shows the assistant caret while the agent is busy', () => {
+    const { container, rerender } = render(
+      <ChatThread streaming items={[{ kind: 'assistant', id: 'a1', text: 'reply', ts: now }]} />,
+    );
+
+    expect(container.querySelector('.caret')).not.toBeInTheDocument();
+
+    rerender(<ChatThread streaming busy items={[{ kind: 'assistant', id: 'a1', text: 'reply', ts: now }]} />);
+
+    expect(container.querySelector('.caret')).toBeInTheDocument();
   });
 
   it('does not render empty assistant rows between tool cards', () => {

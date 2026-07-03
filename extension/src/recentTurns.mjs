@@ -77,7 +77,11 @@ export function createRecentTurns({ max = RECENT_TURNS_DEFAULT, now = () => Date
       if (!t) return;
       const last = entries[entries.length - 1];
       if (last && last.role === "assistant" && last.id === String(id)) {
-        last.text = clipText(t);
+        // Same messageId: a final-text retransmission or cumulative delta carries a superset of
+        // what we already have (REPLACE), but a distinct segment resuming after an interleaved
+        // tool does not — concatenate that so multi-part assistant turns aren't truncated (#116).
+        const clipped = clipText(t);
+        last.text = clipped === last.text || clipped.startsWith(last.text) ? clipped : clipText(`${last.text}\n${t}`);
         if (Number.isFinite(ts)) last.ts = ts;
         return;
       }

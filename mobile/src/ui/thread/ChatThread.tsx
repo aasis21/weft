@@ -370,7 +370,9 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
   // history renders in `history[]` and leaves `items` empty. An assistant bubble is streaming its
   // own caret, so we suppress the row there.
   const latestSendFailed = last?.kind === 'user' && last.failed === true;
-  const showThinking = streaming && !latestSendFailed && last?.kind !== 'assistant' && (busy || last?.kind === 'user');
+  const trailingRunningTool = last?.kind === 'tool' && last.status === 'running';
+  const showThinking =
+    streaming && !latestSendFailed && last?.kind !== 'assistant' && (busy || last?.kind === 'user' || trailingRunningTool);
 
   return (
     <div className="chat-thread" ref={rootRef}>
@@ -395,12 +397,14 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
 
       {items.length === 0 && history.length === 0 && !initialLoading ? (
         <div className="thread-empty-rich">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path
-              fill="currentColor"
-              d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zm6 11l.9 2.1L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.9L18 14z"
-            />
-          </svg>
+          <span className="empty-icon">
+            <svg width="24" height="24" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path
+                fill="currentColor"
+                d="M7.998 0C3.958 0 .845 2.212.845 5.5c0 1.06.323 1.94.882 2.648-.13.357-.19.732-.19 1.102 0 1.79 1.293 3.05 3.086 3.05.42 0 .806-.078 1.15-.216.31.55.938 1.05 1.865 1.05h.72c.927 0 1.556-.5 1.865-1.05.344.138.73.216 1.15.216 1.793 0 3.086-1.26 3.086-3.05 0-.37-.06-.745-.19-1.102.56-.708.883-1.588.883-2.648C15.152 2.212 12.04 0 7.998 0Zm-3.5 6.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm7 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"
+              />
+            </svg>
+          </span>
           <h2>Start a secure Copilot thread</h2>
           <p>{emptyHint ?? 'Ask for help with code, commands, or the current repo from this phone.'}</p>
           <div>
@@ -539,7 +543,7 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
                   ))}
                 </div>
               ) : null}
-              {hasText || images.length === 0 ? (
+              {hasText ? (
                 <div
                   className="bubble user-bubble"
                   tabIndex={0}
@@ -603,7 +607,7 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
           );
         }
 
-        const caret = streaming && isLast;
+        const caret = streaming && busy && isLast;
         if (item.text.trim().length === 0 && !caret) return null;
         return (
           <div key={item.id} className={`row assistant${turnStart ? ' turn-start' : ''}`}>

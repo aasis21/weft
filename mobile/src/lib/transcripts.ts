@@ -7,6 +7,7 @@ import type { PersistedTimeline } from './timeline';
 // truth, with a localStorage mirror so a browser refresh (web build) restores too.
 const PREFIX = 'helm.transcript.v1.';
 const VERSION = 1 as const;
+const discarded = new Set<string>();
 
 interface Envelope {
   v: number;
@@ -16,6 +17,27 @@ interface Envelope {
 
 function keyFor(channelId: string): string {
   return `${PREFIX}${channelId}`;
+}
+
+export function allowTranscriptWrites(channelId: string): void {
+  if (channelId) discarded.delete(channelId);
+}
+
+export function discardTranscriptWrites(channelId: string): void {
+  if (channelId) discarded.add(channelId);
+}
+
+async function removeStored(key: string): Promise<void> {
+  try {
+    globalThis.localStorage?.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+  try {
+    await Preferences.remove({ key });
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Restore a channel's persisted transcript, or null if none / unreadable. */
@@ -37,6 +59,7 @@ export async function loadTranscript(channelId: string): Promise<PersistedTimeli
 /** Persist a channel's transcript (Preferences + localStorage mirror). Best-effort. */
 export async function saveTranscript(channelId: string, data: PersistedTimeline): Promise<void> {
   if (!channelId) return;
+  if (discarded.has(channelId)) return;
   const key = keyFor(channelId);
   const value = JSON.stringify({ v: VERSION, savedAt: Date.now(), data } satisfies Envelope);
   try {
@@ -44,25 +67,20 @@ export async function saveTranscript(channelId: string, data: PersistedTimeline)
   } catch {
     /* quota / unavailable — ignore the mirror */
   }
+  if (discarded.has(channelId)) {
+    await removeStored(key);
+    return;
+  }
   try {
     await Preferences.set({ key, value });
   } catch {
     /* ignore: the localStorage mirror still covers a web refresh */
   }
+  if (discarded.has(channelId)) await removeStored(key);
 }
 
 /** Drop a channel's persisted transcript (called when a session is removed). */
 export async function clearTranscript(channelId: string): Promise<void> {
   if (!channelId) return;
-  const key = keyFor(channelId);
-  try {
-    globalThis.localStorage?.removeItem(key);
-  } catch {
-    /* ignore */
-  }
-  try {
-    await Preferences.remove({ key });
-  } catch {
-    /* ignore */
-  }
+  await removeStored(keyFor(channelId));
 }

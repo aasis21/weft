@@ -80,7 +80,9 @@ export interface TimelineState {
    *  by the extension's activity signal (assistant.message_start/idle); never persisted.
    *  Gates the composer's Stop control so it tracks the whole abortable turn, not just tools. */
   busy: boolean;
+  busyFrom: number | null;
   mode: SessionMode;
+  pendingMode?: SessionMode;
   cwd: string | null;
   /** CLI chat summary ("title"); null until the extension reports one. */
   title: string | null;
@@ -119,6 +121,7 @@ export function emptyTimeline(): TimelineState {
     elicitations: [],
     elicitationErrors: {},
     busy: false,
+    busyFrom: null,
     mode: DEFAULT_MODE,
     cwd: null,
     title: null,
@@ -205,7 +208,7 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
         case SUBTYPE.STREAM.LOG:
           return pushNotice(state, message);
         case SUBTYPE.STREAM.ACTIVITY:
-          return { ...state, busy: message.msg.busy };
+          return { ...state, busy: message.msg.busy, busyFrom: message.ts };
         case SUBTYPE.STREAM.USER_MESSAGE:
           return appendUserEcho(state, message);
         default:
@@ -244,7 +247,7 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
         case SUBTYPE.CONTROL.RECENT_TURNS:
           return applyRecentTurns(state, message.msg);
         case SUBTYPE.CONTROL.STATE_SNAPSHOT:
-          return applyStateSnapshot(state, message.msg);
+          return applyStateSnapshot(state, message.msg, message.ts);
         case SUBTYPE.CONTROL.CHANNEL_UP:
           return {
             ...state,
@@ -254,6 +257,7 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
             sessionEnded: false,
             endedReason: undefined,
             busy: false,
+            busyFrom: message.ts,
           };
         case SUBTYPE.CONTROL.SESSION_META:
           return {
@@ -268,6 +272,7 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
             sessionEnded: true,
             endedReason: reason,
             busy: false,
+            busyFrom: message.ts,
             items: cap([
               ...state.items,
               { kind: 'notice', id: `end-${message.ts}`, level: 'warning', text: reason, ts: message.ts },
@@ -278,10 +283,11 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
           const beat = message.msg;
           // Re-assert busy only when the extension actually knows it (boolean); a null/absent value
           // means "unknown" and must not clobber the live busy driven by assistant.message_start/idle.
-          const busy = typeof beat.busy === 'boolean' ? beat.busy : state.busy;
+          const acceptBusy = typeof beat.busy === 'boolean' && !isStaleBusyHeartbeat(state, message.ts);
           return {
             ...state,
-            busy,
+            busy: acceptBusy ? (beat.busy as boolean) : state.busy,
+            busyFrom: acceptBusy ? message.ts : state.busyFrom,
             lastHeartbeat: Date.now(),
             sessionEnded: false,
             // Advance the forward cursor so a later refresh/resume catches up from the right point.
@@ -289,7 +295,7 @@ export function reduceTimeline(state: TimelineState, message: EventEnvelope): Ti
           };
         }
         case SUBTYPE.CONTROL.MODE:
-          return { ...state, mode: message.msg.mode };
+          return { ...state, mode: message.msg.mode, pendingMode: undefined };
         default:
           return state;
       }
@@ -470,7 +476,7 @@ function appendUserEcho(state: TimelineState, message: UserMessageEcho): Timelin
  * the history-loading affordance, so a stuck spinner can't outlive the reply.
  */
 function applyRecentTurns(state: TimelineState, message: RecentTurnsMsg): TimelineState {
-  const incoming = message.items ?? [];
+  const incoming = normalizeRecentTurns(message.items ?? []);
   const clearLoading = (s: TimelineState) => (s.historyLoading ? { ...s, historyLoading: false } : s);
   if (incoming.length === 0) return clearLoading(state);
 
@@ -507,6 +513,39 @@ function applyRecentTurns(state: TimelineState, message: RecentTurnsMsg): Timeli
     items: cap([...state.items, ...prefix, ...additions]),
     historyLoading: false,
   };
+}
+
+function seedTurnKey(id: string, role: 'user' | 'assistant'): string | null {
+  const match = new RegExp(`^seed-(.+)-${role}$`).exec(id);
+  return match?.[1] ?? null;
+}
+
+function normalizeRecentTurns(items: RecentTurnsMsg['items']): RecentTurnsMsg['items'] {
+  const seedAssistantTurns = new Set(
+    items
+      .filter((it) => it?.role === 'assistant' && typeof it.text === 'string' && it.text.length > 0)
+      .map((it) => seedTurnKey(it.id, 'assistant'))
+      .filter((key): key is string => Boolean(key)),
+  );
+  const byId = new Map<string, RecentTurnsMsg['items'][number]>();
+  const normalized: RecentTurnsMsg['items'] = [];
+  for (const it of items) {
+    if ((it.role !== 'user' && it.role !== 'assistant') || !it.text) continue;
+    const seedUserTurn = it.role === 'user' ? seedTurnKey(it.id, 'user') : null;
+    if (seedUserTurn && !seedAssistantTurns.has(seedUserTurn)) continue;
+    const existing = byId.get(it.id);
+    if (existing) {
+      if (existing.role === 'assistant' && it.role === 'assistant') {
+        existing.text = `${existing.text}${it.text}`;
+        existing.ts = it.ts;
+      }
+      continue;
+    }
+    const copy = { ...it };
+    byId.set(copy.id, copy);
+    normalized.push(copy);
+  }
+  return normalized;
 }
 
 /** "N new while you were away" boundary before a batch of caught-up recent turns. */
@@ -562,11 +601,17 @@ function highestTurnIndex(items: HistoryItem[]): number | null {
  * the truth — a live Stop control, the real mode, and any prompt still waiting for an answer —
  * instead of a stale "Ready" with no pending prompts. A snapshot also counts as a heartbeat.
  */
-function applyStateSnapshot(state: TimelineState, snap: StateSnapshotMsg): TimelineState {
+function applyStateSnapshot(state: TimelineState, snap: StateSnapshotMsg, ts: number): TimelineState {
+  const mode =
+    snap.mode && (!state.pendingMode || snap.mode === state.pendingMode)
+      ? snap.mode
+      : state.mode;
   return {
     ...state,
     busy: Boolean(snap.busy),
-    mode: snap.mode ?? state.mode,
+    busyFrom: typeof snap.busy === 'boolean' ? ts : state.busyFrom,
+    mode,
+    pendingMode: snap.mode === state.pendingMode ? undefined : state.pendingMode,
     approvals: mergePendingById(state.approvals, snap.approvals ?? []),
     elicitations: mergePendingById(state.elicitations, snap.elicitations ?? []),
     lastHeartbeat: Date.now(),
@@ -574,6 +619,11 @@ function applyStateSnapshot(state: TimelineState, snap: StateSnapshotMsg): Timel
     // The snapshot reports the store's highest committed turn — seed/advance the forward cursor.
     latestTurnIndex: maxCursor(state.latestTurnIndex, snap.latestTurnIndex),
   };
+}
+
+function isStaleBusyHeartbeat(state: TimelineState, ts: number): boolean {
+  const busyFrom = state.busyFrom;
+  return Number.isFinite(busyFrom) && ts < (busyFrom as number);
 }
 
 /**

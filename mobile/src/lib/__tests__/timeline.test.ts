@@ -115,6 +115,9 @@ describe('timeline reducer', () => {
       expect(state).toMatchObject({ busy: true, latestTurnIndex: 5, lastHeartbeat: 2_000, sessionEnded: false });
       state = reduceTimeline(state, at(B.heartbeat(8, false), 46));
       expect(state).toMatchObject({ busy: false, latestTurnIndex: 8 });
+      state = reduceTimeline(state, at(B.activity(false), 50));
+      state = reduceTimeline(state, at(B.heartbeat(9, true), 49));
+      expect(state.busy).toBe(false);
 
       state = reduceTimeline(state, at(B.modeChange('autopilot'), 47));
       expect(state.mode).toBe('autopilot');
@@ -201,6 +204,28 @@ describe('timeline reducer', () => {
     expect(state.items[0]).toMatchObject({ id: 'live-id', ts: 50 });
   });
 
+  it('drops DB-seeded user-only half turns and accumulates same-id assistant parts in recent turns', () => {
+    let state = reduceTimeline(
+      emptyTimeline(),
+      at(
+        B.recentTurnsSnapshot([
+          B.recentTurnItem('user', 'orphan prompt', 10, 'seed-1-user'),
+          B.recentTurnItem('user', 'complete prompt', 20, 'seed-2-user'),
+          B.recentTurnItem('assistant', 'complete answer', 30, 'seed-2-assistant'),
+          B.recentTurnItem('assistant', 'part one ', 40, 'm1'),
+          B.recentTurnItem('assistant', 'part two', 50, 'm1'),
+        ]),
+        60,
+      ),
+    );
+
+    expect(state.items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'complete prompt',
+      'complete answer',
+      'part one part two',
+    ]);
+  });
+
   it('applies state snapshots and pending approval/elicitation messages', () => {
     vi.useFakeTimers();
     vi.setSystemTime(3_000);
@@ -228,6 +253,14 @@ describe('timeline reducer', () => {
       expect(state).toMatchObject({ busy: true, mode: 'plan', latestTurnIndex: 9, lastHeartbeat: 3_000, sessionEnded: false });
       expect(state.approvals.map((a) => a.requestId)).toEqual(['a1', 'a2']);
       expect(state.elicitations.map((e) => e.requestId)).toEqual(['e2']);
+
+      state = { ...state, mode: 'autopilot', pendingMode: 'autopilot' };
+      state = reduceTimeline(state, at(B.stateSnapshot({ busy: false, mode: 'plan' }), 66));
+      expect(state.mode).toBe('autopilot');
+      expect(state.pendingMode).toBe('autopilot');
+      state = reduceTimeline(state, at(B.stateSnapshot({ busy: false, mode: 'autopilot' }), 67));
+      expect(state.mode).toBe('autopilot');
+      expect(state.pendingMode).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

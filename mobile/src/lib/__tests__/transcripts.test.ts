@@ -1,6 +1,12 @@
 import { Preferences } from '@capacitor/preferences';
 import { reduceTimeline, toPersisted, type PersistedTimeline } from '@/lib/timeline';
-import { clearTranscript, loadTranscript, saveTranscript } from '@/lib/transcripts';
+import {
+  allowTranscriptWrites,
+  clearTranscript,
+  discardTranscriptWrites,
+  loadTranscript,
+  saveTranscript,
+} from '@/lib/transcripts';
 import * as B from '@/test/helpers/builders';
 
 function persisted(): PersistedTimeline {
@@ -16,6 +22,7 @@ function emptyBase() {
     elicitations: [],
     elicitationErrors: {},
     busy: false,
+    busyFrom: null,
     mode: 'interactive' as const,
     cwd: null,
     title: null,
@@ -60,5 +67,16 @@ describe('transcript storage', () => {
 
     await clearTranscript('');
     expect(localStorage.length).toBe(0);
+  });
+
+  it('drops transcript writes after a channel is discarded until it is allowed again', async () => {
+    const data = persisted();
+    discardTranscriptWrites('removed');
+    await saveTranscript('removed', data);
+    expect(await loadTranscript('removed')).toBeNull();
+
+    allowTranscriptWrites('removed');
+    await saveTranscript('removed', data);
+    expect(await loadTranscript('removed')).toEqual(data);
   });
 });

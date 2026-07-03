@@ -68,7 +68,10 @@ export default function App(): JSX.Element {
     return (
       <LandingScreen
         hasSessions
-        onOpenSessions={() => setShowLanding(false)}
+        onOpenSessions={() => {
+          setError(null);
+          setShowLanding(false);
+        }}
         onBeginPair={(manual) => {
           setError(null);
           setAddManual(!!manual);
@@ -128,7 +131,10 @@ export default function App(): JSX.Element {
       }}
       onRemoveSession={(id) => void sessionRuntime.remove(id)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
-      onGoHome={() => setShowLanding(true)}
+      onGoHome={() => {
+        setError(null);
+        setShowLanding(true);
+      }}
       onLoadEarlier={() => void sessionRuntime.loadEarlierHistory(active.meta.channelId)}
     />
   );

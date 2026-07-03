@@ -178,7 +178,11 @@ export function SessionDrawer({
                   tabIndex={0}
                   onClick={() => onSelect(id)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') onSelect(id);
+                    if (e.key === 'Enter') onSelect(id);
+                    if (e.key === ' ' || e.key === 'Spacebar') {
+                      e.preventDefault();
+                      onSelect(id);
+                    }
                   }}
                 >
                   <span

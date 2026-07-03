@@ -79,10 +79,13 @@ export function useSpeechInput(): {
   const [supported] = useState(() => getSpeechRecognition() !== undefined);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionGenerationRef = useRef(0);
 
   const start = useCallback((onText: (text: string, isFinal: boolean) => void): void => {
     const Ctor = getSpeechRecognition();
     if (!Ctor || recognitionRef.current) return;
+    const generation = recognitionGenerationRef.current + 1;
+    recognitionGenerationRef.current = generation;
     setError(null);
     const recognition = new Ctor();
     recognition.lang = navigator.language;
@@ -90,15 +93,18 @@ export function useSpeechInput(): {
     recognition.continuous = true;
     recognition.maxAlternatives = 1;
     recognition.onresult = (event) => {
+      if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
       const last = event.results[event.results.length - 1];
       if (last) onText(last[0].transcript, last.isFinal);
     };
     recognition.onerror = (event) => {
+      if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
       if (event.error === 'aborted') return;
       console.warn('voice error', event.error);
       setError(speechErrorMessage(event.error));
     };
     recognition.onend = () => {
+      if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
       setListening(false);
       recognitionRef.current = null;
     };
@@ -108,12 +114,14 @@ export function useSpeechInput(): {
   }, []);
 
   const stop = useCallback((): void => {
+    recognitionGenerationRef.current += 1;
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setListening(false);
   }, []);
 
   useEffect(() => () => {
+    recognitionGenerationRef.current += 1;
     recognitionRef.current?.stop();
     recognitionRef.current = null;
   }, []);

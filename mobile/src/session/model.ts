@@ -76,7 +76,9 @@ export interface SessionMeta {
 export interface SessionConnection {
   status: SessionStatus;
   busy: boolean;
+  busyFrom: number | null;
   mode: SessionMode;
+  pendingMode?: SessionMode;
   reconnecting: boolean;
   settling: boolean;
   lastHeartbeat: number | null;
@@ -125,6 +127,7 @@ export function emptySession(id: string, meta: SessionMeta): Session {
     connection: {
       status: 'idle',
       busy: false,
+      busyFrom: null,
       mode: DEFAULT_MODE,
       reconnecting: false,
       settling: false,

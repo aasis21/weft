@@ -43,6 +43,24 @@ describe('scenario: interrupt and mode', () => {
     );
   });
 
+  it('keeps an optimistic mode through an older confirm-time state snapshot (#86)', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    await h!.flush();
+
+    await h!.manager.sendMode('c1', 'autopilot');
+    expect(h!.active()!.timeline.mode).toBe('autopilot');
+
+    client.emit(B.stateSnapshot({ busy: false, mode: 'interactive' }));
+    await h!.flush();
+    expect(h!.active()!.timeline.mode).toBe('autopilot');
+
+    client.emit(B.modeChange('autopilot'));
+    client.emit(B.stateSnapshot({ busy: false, mode: 'autopilot' }));
+    await h!.flush();
+    expect(h!.active()!.timeline.mode).toBe('autopilot');
+  });
+
   it('optimistically clears busy and errors a running tool on Stop, without waiting for the host echo (#77)', async () => {
     const { client } = await h!.pair('c1');
     client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));

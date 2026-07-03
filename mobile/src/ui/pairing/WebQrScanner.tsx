@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface WebQrScannerProps {
   onResult(raw: string): void;
@@ -67,21 +67,29 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const onResultRef = useRef(onResult);
   const resultDeliveredRef = useRef(false);
+  const retryPlayRef = useRef<(() => void) | null>(null);
   const [status, setStatus] = useState('Requesting camera…');
   const [fatal, setFatal] = useState(false);
+  const [needsPlayGesture, setNeedsPlayGesture] = useState(false);
 
   useEffect(() => {
     onResultRef.current = onResult;
   }, [onResult]);
 
+  const retryPlay = useCallback((): void => {
+    retryPlayRef.current?.();
+  }, []);
+
   useEffect(() => {
     let stream: MediaStream | null = null;
     let frame = 0;
     let stopped = false;
+    let scanningStarted = false;
 
     const fail = (message: string): void => {
       setStatus(message);
       setFatal(true);
+      setNeedsPlayGesture(false);
     };
 
     void (async () => {
@@ -102,41 +110,64 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
       const canvas = canvasRef.current;
       if (!video || !canvas || stopped) return;
       video.srcObject = stream;
-      try {
-        await video.play();
-      } catch {
-        /* autoplay can reject silently; detection still works once frames flow */
-      }
-      let detect: DetectFrame;
-      try {
-        detect = await makeDetector();
-      } catch {
-        fail('Could not start the QR decoder — use the paste box instead.');
-        return;
-      }
-      setStatus('Point at the laptop QR code');
-      const tick = async (): Promise<void> => {
+
+      const startScanning = async (): Promise<void> => {
+        if (scanningStarted || stopped) return;
+        scanningStarted = true;
+        let detect: DetectFrame;
+        try {
+          detect = await makeDetector();
+        } catch {
+          fail('Could not start the QR decoder — use the paste box instead.');
+          return;
+        }
+        setStatus('Point at the laptop QR code');
+        const tick = async (): Promise<void> => {
+          if (stopped) return;
+          try {
+            const raw = await detect(video, canvas);
+            if (raw) {
+              stopped = true;
+              if (!resultDeliveredRef.current) {
+                resultDeliveredRef.current = true;
+                onResultRef.current(raw);
+              }
+              return;
+            }
+          } catch {
+            /* transient frame error — keep scanning */
+          }
+          frame = requestAnimationFrame(() => void tick());
+        };
+        void tick();
+      };
+
+      const playAndScan = async (fromGesture: boolean): Promise<void> => {
         if (stopped) return;
         try {
-          const raw = await detect(video, canvas);
-          if (raw) {
-            stopped = true;
-            if (!resultDeliveredRef.current) {
-              resultDeliveredRef.current = true;
-              onResultRef.current(raw);
-            }
+          await video.play();
+        } catch {
+          if (!fromGesture) {
+            setStatus('Tap to enable camera preview');
+            setNeedsPlayGesture(true);
             return;
           }
-        } catch {
-          /* transient frame error — keep scanning */
+          fail('Could not start the camera preview — use the paste box instead.');
+          return;
         }
-        frame = requestAnimationFrame(() => void tick());
+        setNeedsPlayGesture(false);
+        await startScanning();
       };
-      void tick();
+
+      retryPlayRef.current = () => {
+        void playAndScan(true);
+      };
+      await playAndScan(false);
     })();
 
     return () => {
       stopped = true;
+      retryPlayRef.current = null;
       cancelAnimationFrame(frame);
       stream?.getTracks().forEach((track) => track.stop());
     };
@@ -155,6 +186,11 @@ export function WebQrScanner({ onResult, onCancel, variant = 'overlay' }: WebQrS
         <span className="scanner-line" />
       </div>
       <p className={`scanner-status${fatal ? ' is-error' : ''}`}>{status}</p>
+      {needsPlayGesture ? (
+        <button className="secondary-action scanner-enable" type="button" onClick={retryPlay}>
+          Tap to enable camera
+        </button>
+      ) : null}
       {variant === 'overlay' ? (
         <button className="secondary-action scanner-cancel" type="button" onClick={onCancel}>
           {fatal ? 'Back' : 'Cancel'}

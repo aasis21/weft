@@ -17,7 +17,13 @@ import { connectSession, pairSession, getSenderName } from '@/lib/helmClient';
 import type { HelmClient } from '@/lib/helmClient';
 import { loadSessions, patchSession, removeSession, upsertSession } from '@/lib/sessions';
 import type { StoredSession } from '@/lib/sessions';
-import { clearTranscript, loadTranscript, saveTranscript } from '@/lib/transcripts';
+import {
+  allowTranscriptWrites,
+  clearTranscript,
+  discardTranscriptWrites,
+  loadTranscript,
+  saveTranscript,
+} from '@/lib/transcripts';
 import { clearEventLog, loadEventLog, saveEventLog, toDebugEvent } from '@/lib/eventLog';
 import { restoreTimeline, toPersisted } from '@/lib/timeline';
 import type { TimelineState } from '@/lib/timeline';
@@ -214,6 +220,7 @@ export class SessionRuntime {
 
     for (const s of stored) {
       const channelId = s.pairing.channelId;
+      allowTranscriptWrites(channelId);
       const timeline = restoreTimeline(persistedById.get(channelId) ?? null);
       const session = this.buildRestoredSession(
         s,
@@ -232,6 +239,9 @@ export class SessionRuntime {
         .filter((s) => warmIds.has(s.pairing.channelId))
         .map(async (s) => {
           const channelId = s.pairing.channelId;
+          const ctrl = this.ensureController(channelId);
+          if (ctrl.reconnecting) return;
+          ctrl.reconnecting = true;
           try {
             const client = await connectSession(s.pairing);
             this.attach(channelId, client);
@@ -239,6 +249,8 @@ export class SessionRuntime {
             this.store.dispatch(
               statusSet({ id: channelId, status: 'error', error: errMessage(err, 'Failed to reconnect.') }),
             );
+          } finally {
+            if (this.controllers.get(channelId) === ctrl) ctrl.reconnecting = false;
           }
         }),
     );
@@ -557,6 +569,7 @@ export class SessionRuntime {
     this.controllers.delete(duplicate.id);
     this.registry.dispose(duplicate.id);
     this.warmLru = this.warmLru.filter((id) => id !== duplicate.id);
+    discardTranscriptWrites(duplicate.id);
     void removeSession(duplicate.id);
     void clearTranscript(duplicate.id);
     void clearEventLog(duplicate.id);
@@ -619,6 +632,7 @@ export class SessionRuntime {
   async addByQr(raw: string): Promise<string> {
     const { client, pairing } = await pairSession(raw);
     const channelId = pairing.channelId;
+    allowTranscriptWrites(channelId);
     const existing = this.session(channelId);
     const existingCtrl = this.controllers.get(channelId);
     if (existing && !existingCtrl?.ephemeral) {
@@ -674,6 +688,7 @@ export class SessionRuntime {
       throw err instanceof Error ? err : new Error('Failed to start demo.');
     }
     const channelId = demo.channelId;
+    allowTranscriptWrites(channelId);
     const meta: SessionMeta = {
       channelId,
       title: 'Demo session',
@@ -717,6 +732,7 @@ export class SessionRuntime {
     if (!session) return;
     const ctrl = this.controllers.get(channelId);
     const wasActive = this.activeId() === channelId;
+    discardTranscriptWrites(channelId);
     if (ctrl) {
       ctrl.dispose();
       this.controllers.delete(channelId);
@@ -774,14 +790,14 @@ export class SessionRuntime {
     // Flip the composer to its "Copilot working" / Stop state immediately instead of waiting for the
     // host's ACTIVITY(true) echo, so a sent prompt gives instant feedback (#85). The host's own
     // ACTIVITY(false) at end-of-turn (or the send-failure branch below) clears it.
-    this.store.dispatch(busySet({ id: channelId, busy: true }));
+    this.store.dispatch(busySet({ id: channelId, busy: true, ts }));
     this.schedulePersist(channelId);
     this.markActivity(channelId);
     try {
       await this.deliverPrompt(channelId, text, attachments);
     } catch {
       if (!this.session(channelId)) return;
-      this.store.dispatch(busySet({ id: channelId, busy: false }));
+      this.store.dispatch(busySet({ id: channelId, busy: false, ts: this.clock() }));
       this.store.dispatch(promptFailed({ id: channelId, itemId: item.id, failed: true }));
       this.schedulePersist(channelId);
     }
@@ -913,7 +929,7 @@ export class SessionRuntime {
     const session = this.session(channelId);
     if (!session) return;
     const prev = session.connection.mode;
-    this.store.dispatch(modeSet({ id: channelId, mode }));
+    this.store.dispatch(modeSet({ id: channelId, mode, pending: true }));
     try {
       await this.send(channelId, modeChange(mode));
     } catch {

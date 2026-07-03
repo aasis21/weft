@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { describeError } from '@/lib/debugSettings';
 
@@ -6,6 +6,19 @@ interface ScannerApi {
   isSupported?: () => Promise<{ supported: boolean }>;
   requestPermissions?: () => Promise<unknown>;
   scan: () => Promise<{ barcodes: Array<{ rawValue?: string; displayValue?: string }> }>;
+}
+
+const SCAN_TIMEOUT_MS = 60_000;
+const SCAN_TIMEOUT_MESSAGE = 'QR scan timed out. Try again.';
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
 }
 
 /** True when running inside the native Capacitor shell (vs. the hosted web app). */
@@ -23,7 +36,7 @@ export async function scanNativeQr(): Promise<string> {
     throw new Error('Barcode scanning is not supported on this device.');
   }
   await scanner.requestPermissions?.();
-  const result = await scanner.scan();
+  const result = await withTimeout(scanner.scan(), SCAN_TIMEOUT_MS, SCAN_TIMEOUT_MESSAGE);
   const raw = result.barcodes[0]?.rawValue ?? result.barcodes[0]?.displayValue;
   if (!raw) throw new Error('No QR payload detected.');
   return raw;
@@ -42,8 +55,11 @@ export function usePairing(onError: (message: string | null) => void): {
 } {
   const [busy, setBusy] = useState(false);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const busyRef = useRef(false);
   const run = useCallback(
     async (task: () => Promise<void>): Promise<void> => {
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       onError(null);
       setErrorDetail(null);
@@ -53,6 +69,7 @@ export function usePairing(onError: (message: string | null) => void): {
         onError(err instanceof Error ? err.message : 'Pairing failed.');
         setErrorDetail(describeError(err));
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },

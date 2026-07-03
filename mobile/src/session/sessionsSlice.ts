@@ -160,13 +160,20 @@ const sessionsSlice = createSlice({
       const session = state.entities[action.payload.id];
       if (session) restoreElicitation(session, action.payload.req, action.payload.error ?? 'send failed');
     },
-    modeSet(state, action: PayloadAction<{ id: string; mode: Session['connection']['mode'] }>) {
+    modeSet(state, action: PayloadAction<{ id: string; mode: Session['connection']['mode']; pending?: boolean }>) {
       const session = state.entities[action.payload.id];
-      if (session) session.connection.mode = action.payload.mode;
+      if (session) {
+        session.connection.mode = action.payload.mode;
+        if (action.payload.pending) session.connection.pendingMode = action.payload.mode;
+        else delete session.connection.pendingMode;
+      }
     },
-    busySet(state, action: PayloadAction<{ id: string; busy: boolean }>) {
+    busySet(state, action: PayloadAction<{ id: string; busy: boolean; ts?: number }>) {
       const session = state.entities[action.payload.id];
-      if (session) session.connection.busy = action.payload.busy;
+      if (session) {
+        session.connection.busy = action.payload.busy;
+        session.connection.busyFrom = action.payload.ts ?? Date.now();
+      }
     },
     interruptRequested(state, action: PayloadAction<{ id: string; ts: number }>) {
       const session = state.entities[action.payload.id];
@@ -275,6 +282,5 @@ export const {
 export const sessionsSelectors = sessionsAdapter.getSelectors();
 export const sessionsReducer = sessionsSlice.reducer;
 export default sessionsReducer;
-
 
 
