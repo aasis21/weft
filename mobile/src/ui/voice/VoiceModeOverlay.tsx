@@ -6,19 +6,21 @@ import { useSpeechOutput } from '@/ui/hooks/useSpeechOutput';
 
 const SILENCE_MS = 3200;
 
-type VoiceState = 'idle' | 'ready' | 'listening' | 'thinking' | 'speaking';
+type VoiceState = 'idle' | 'ready' | 'listening' | 'thinking' | 'working' | 'speaking';
 
 const LABELS: Record<VoiceState, string> = {
   idle: 'Tap the orb to start',
   ready: 'Tap the orb to talk',
   listening: 'Listening — pause to send',
   thinking: 'Thinking…',
+  working: 'Working…',
   speaking: 'Speaking — tap to interrupt',
 };
 
 interface VoiceModeOverlayProps {
   latestAssistant: AssistantItem | null;
   agentBusy: boolean;
+  toolActive?: boolean;
   disabled: boolean;
   onPrompt(text: string): Promise<void> | void;
   onInterrupt(): void;
@@ -45,6 +47,7 @@ function appendSpeechText(committed: string, fresh: string): string {
 export function VoiceModeOverlay({
   latestAssistant,
   agentBusy,
+  toolActive = false,
   disabled,
   onPrompt,
   onInterrupt,
@@ -105,7 +108,7 @@ export function VoiceModeOverlay({
   }, [clearSilence, sendCaptured]);
 
   const startListening = useCallback((): void => {
-    if (disabled || stateRef.current === 'thinking') return;
+    if (disabled) return;
     cancelSpeech();
     clearSilence();
     committedRef.current = '';
@@ -121,6 +124,15 @@ export function VoiceModeOverlay({
 
   const handleOrb = (): void => {
     if (state === 'speaking' || outputSpeaking) {
+      cancelSpeech();
+      onInterrupt();
+      startListening();
+      return;
+    }
+    // Interrupt a turn in flight — reasoning ('thinking') OR a running tool ('working'). Previously
+    // only 'speaking' could be interrupted, so a tap while the agent worked was silently swallowed
+    // by startListening's thinking-guard (#179).
+    if (state === 'thinking' || state === 'working') {
       cancelSpeech();
       onInterrupt();
       startListening();
@@ -164,8 +176,10 @@ export function VoiceModeOverlay({
   }, [cancelSpeech, clearSilence, stopSpeechInput]);
 
   useEffect(() => {
-    if (agentBusy && state !== 'listening' && state !== 'speaking') setState('thinking');
-  }, [agentBusy, state]);
+    if (agentBusy && state !== 'listening' && state !== 'speaking') {
+      setState(toolActive ? 'working' : 'thinking');
+    }
+  }, [agentBusy, state, toolActive]);
 
   useEffect(() => {
     if (!latestAssistant) return;
@@ -188,7 +202,7 @@ export function VoiceModeOverlay({
   }, [agentBusy, flushSpeech]);
 
   useEffect(() => {
-    if (!outputSupported && state === 'thinking' && !agentBusy && sawReplyRef.current) {
+    if (!outputSupported && (state === 'thinking' || state === 'working') && !agentBusy && sawReplyRef.current) {
       sawReplyRef.current = false;
       if (autoRelisten) startListening();
       else setState('ready');
@@ -207,7 +221,7 @@ export function VoiceModeOverlay({
 
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
-    if (!outputSupported && (state === 'speaking' || state === 'thinking')) return 'Speech output unavailable — showing text only.';
+    if (!outputSupported && (state === 'speaking' || state === 'thinking' || state === 'working')) return 'Speech output unavailable — showing text only.';
     return LABELS[state];
   }, [inputSupported, outputSupported, state]);
 
@@ -226,7 +240,7 @@ export function VoiceModeOverlay({
 
         <button type="button" className="voice-orb" onClick={handleOrb} disabled={disabled && state !== 'speaking'} aria-label={status}>
           <span className="voice-orb-ring" aria-hidden="true" />
-          <span className="voice-orb-core" aria-hidden="true">{state === 'listening' ? '●' : state === 'speaking' ? '■' : '🎙'}</span>
+          <span className="voice-orb-core" aria-hidden="true">{state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : state === 'thinking' ? '⋯' : '🎙'}</span>
         </button>
 
         <p className="voice-status" aria-live="polite">{status}</p>

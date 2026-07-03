@@ -229,6 +229,10 @@ export function SessionScreen({
   const agentBusy =
     status === 'live' &&
     (timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
+  // A tool actively running (vs. pure reasoning) drives the voice overlay's "Working…" state so the
+  // orb distinguishes thinking from acting (#177).
+  const toolActive =
+    status === 'live' && timeline.items.some((i) => i.kind === 'tool' && i.status === 'running');
   // Approval/elicitation decisions can only reach the laptop while it's on the line. Off-live, disable
   // the controls so a decision isn't fired into a dead socket and silently lost (it would optimistically
   // dismiss, hang, then restore); the offline banner already explains the state (#90).
@@ -435,6 +439,7 @@ export function SessionScreen({
         <VoiceModeOverlay
           latestAssistant={latestAssistant}
           agentBusy={agentBusy}
+          toolActive={toolActive}
           disabled={ended || offline}
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}

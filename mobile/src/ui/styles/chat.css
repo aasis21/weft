@@ -1476,6 +1476,11 @@
   --voice-orb-glow: color-mix(in srgb, var(--fg-dim) 34%, transparent);
 }
 
+.helm-session .voice-panel[data-state='working'] {
+  --voice-orb-color: var(--accent);
+  --voice-orb-glow: color-mix(in srgb, var(--accent) 44%, transparent);
+}
+
 .helm-session .voice-panel[data-state='speaking'] {
   --voice-orb-color: var(--success);
   --voice-orb-glow: color-mix(in srgb, var(--success) 42%, transparent);
@@ -1507,6 +1512,10 @@
 
   .helm-session .voice-panel[data-state='thinking'] .voice-orb-ring {
     animation: voice-ring 1.8s ease-in-out infinite;
+  }
+
+  .helm-session .voice-panel[data-state='working'] .voice-orb-ring {
+    animation: voice-ring 1.3s ease-in-out infinite;
   }
 
   .helm-session .voice-panel[data-state='speaking'] .voice-orb-ring {
