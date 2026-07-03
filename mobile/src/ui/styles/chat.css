@@ -1669,6 +1669,49 @@
   50% { opacity: 0.35; }
 }
 
+.helm-session .devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.helm-session .device-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 16px;
+  background: var(--bg-elev);
+}
+
+.helm-session .device-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.helm-session .device-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.helm-session .device-card-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+
+.helm-session .device-start-btn {
+  min-height: 38px;
+  padding: 8px 14px;
+  width: auto;
+}
+
 
 /* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */
 @media (min-width: 768px) {

@@ -4,6 +4,7 @@ import type { SessionMode } from '@aasis21/helm-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
 import { StartSessionScreen } from '@/ui/screens/StartSessionScreen';
+import { DevicesScreen } from '@/ui/screens/DevicesScreen';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { sessionRuntime } from '@/session/runtime/instance';
@@ -12,6 +13,8 @@ export default function App(): JSX.Element {
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [startDeviceId, setStartDeviceId] = useState<string | undefined>(undefined);
+  const [devicesOpen, setDevicesOpen] = useState(false);
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,13 +34,23 @@ export default function App(): JSX.Element {
     setError(null);
     setAddManual(manual);
     setStarting(false);
+    setDevicesOpen(false);
     setAdding(true);
   }, []);
 
-  const openStart = useCallback((): void => {
+  const openStart = useCallback((channelId?: string): void => {
     setError(null);
     setAdding(false);
+    setDevicesOpen(false);
+    setStartDeviceId(channelId);
     setStarting(true);
+  }, []);
+
+  const openDevices = useCallback((): void => {
+    setError(null);
+    setAdding(false);
+    setStarting(false);
+    setDevicesOpen(true);
   }, []);
 
   const handleVoiceModeChange = useCallback((channelId: string, active: boolean): void => {
@@ -97,9 +110,30 @@ export default function App(): JSX.Element {
           openJoin(!!manual);
         }}
         onStartDemo={handleDemo}
-        onStartSession={openStart}
+        onStartSession={() => openStart()}
         error={error}
         onError={setError}
+      />
+    );
+  }
+
+  // Full "connected devices" manager: every registered listener, live status, and per-device
+  // actions — distinct from StartSessionScreen (launching ONE session) and JoinSessionScreen
+  // (mirroring an existing session by QR).
+  if (devicesOpen) {
+    return (
+      <DevicesScreen
+        hasSessions={hasSessions}
+        devices={snapshot.devices}
+        onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
+        onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
+        onForget={(id) => sessionRuntime.forgetDevice(id)}
+        onStartOnDevice={(id) => openStart(id)}
+        onScanListener={() => openJoin(false)}
+        onCancel={() => {
+          setDevicesOpen(false);
+          setError(null);
+        }}
       />
     );
   }
@@ -109,18 +143,22 @@ export default function App(): JSX.Element {
       <StartSessionScreen
         hasSessions={hasSessions}
         devices={snapshot.devices}
+        initialChannelId={startDeviceId}
         onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
         onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
         onStart={async (id, opts) => {
           await sessionRuntime.spawnSession(id, opts);
           setStarting(false);
+          setStartDeviceId(undefined);
           setShowLanding(false);
         }}
         onForget={(id) => sessionRuntime.forgetDevice(id)}
         onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
         onScanListener={() => openJoin(false)}
+        onManageDevices={openDevices}
         onCancel={() => {
           setStarting(false);
+          setStartDeviceId(undefined);
           setError(null);
         }}
       />
@@ -144,7 +182,7 @@ export default function App(): JSX.Element {
           openJoin(!!manual);
         }}
         onStartDemo={handleDemo}
-        onStartSession={openStart}
+        onStartSession={() => openStart()}
         error={error}
         onError={setError}
       />
@@ -169,7 +207,8 @@ export default function App(): JSX.Element {
         setAddManual(false);
         setAdding(true);
       }}
-      onStartSession={openStart}
+      onStartSession={() => openStart()}
+      onOpenDevices={openDevices}
       onVoiceModeChange={handleVoiceModeChange}
       onRemoveSession={(id) => void sessionRuntime.remove(id)}
       onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}

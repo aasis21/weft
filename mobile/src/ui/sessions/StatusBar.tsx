@@ -13,6 +13,7 @@ interface StatusBarProps {
   onOpenDrawer(): void;
   onAddSession(): void;
   onStartSession?(): void;
+  onOpenDevices?(): void;
   onReconnect(): void;
   onRemove(): void;
   onGoHome(): void;
@@ -42,6 +43,7 @@ export function StatusBar({
   onOpenDrawer,
   onAddSession,
   onStartSession,
+  onOpenDevices,
   onReconnect,
   onRemove,
   onGoHome,
@@ -212,6 +214,19 @@ export function StatusBar({
               >
                 ▻ Start another session
               </button>
+              {onOpenDevices ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenDevices();
+                  }}
+                >
+                  🖥 Devices
+                </button>
+              ) : null}
               {canReconnect ? (
                 <button
                   type="button"

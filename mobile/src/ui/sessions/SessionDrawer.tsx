@@ -7,6 +7,7 @@ interface SessionDrawerProps {
   onSelect(channelId: string): void;
   onAddSession(): void;
   onStartSession?(): void;
+  onOpenDevices?(): void;
   onRemove(channelId: string): void;
   onRename?(channelId: string, title: string): void;
   onGoHome(): void;
@@ -60,6 +61,7 @@ export function SessionDrawer({
   onSelect,
   onAddSession,
   onStartSession,
+  onOpenDevices,
   onRemove,
   onRename,
   onGoHome,
@@ -297,6 +299,12 @@ export function SessionDrawer({
         <button className="drawer-add" type="button" onClick={onStartSession}>
           ▻ Start another Copilot session
         </button>
+
+        {onOpenDevices ? (
+          <button className="drawer-home" type="button" onClick={onOpenDevices}>
+            🖥 Devices
+          </button>
+        ) : null}
 
         <button className="drawer-home" type="button" onClick={onGoHome}>
           ⌂ About Helm

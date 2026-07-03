@@ -200,6 +200,7 @@ interface SessionScreenProps {
   onSelectSession(channelId: string): void;
   onAddSession(): void;
   onStartSession?(): void;
+  onOpenDevices?(): void;
   onVoiceModeChange?(channelId: string, active: boolean): void;
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
@@ -221,6 +222,7 @@ export function SessionScreen({
   onSelectSession,
   onAddSession,
   onStartSession,
+  onOpenDevices,
   onVoiceModeChange,
   onRemoveSession,
   onRenameSession,
@@ -450,6 +452,7 @@ export function SessionScreen({
             onSelect={(id) => onSelectSession(id)}
             onAddSession={onAddSession}
             onStartSession={onStartSession}
+            onOpenDevices={onOpenDevices}
             onRemove={requestRemove}
             onRename={onRenameSession}
             onGoHome={onGoHome}
@@ -468,6 +471,7 @@ export function SessionScreen({
         onOpenDrawer={() => setDrawerOpen(true)}
         onAddSession={onAddSession}
         onStartSession={onStartSession}
+        onOpenDevices={onOpenDevices}
         onReconnect={() => onReconnect(activeId)}
         onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}
@@ -728,6 +732,10 @@ export function SessionScreen({
           onStartSession={() => {
             setDrawerOpen(false);
             onStartSession?.();
+          }}
+          onOpenDevices={() => {
+            setDrawerOpen(false);
+            onOpenDevices?.();
           }}
           onRemove={requestRemove}
           onRename={onRenameSession}

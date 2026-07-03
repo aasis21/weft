@@ -1,70 +1,47 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { SpawnMode } from '@aasis21/helm-shared';
 import type { ListenerDeviceState } from '@/session/model';
+import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
   devices: ListenerDeviceState[];
+  /** Preselect a device (e.g. arriving from the "Start session" button on a DevicesScreen row)
+   *  instead of defaulting to the top of the sorted list. */
+  initialChannelId?: string;
   onConnectDevice(channelId: string): void;
   onRefreshProjects(channelId: string): void;
   onStart(channelId: string, opts: { projectName: string; mode: SpawnMode; name?: string }): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onSetDefault(channelId: string): Promise<void>;
   onScanListener(): void;
+  /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
+  onManageDevices?(): void;
   onCancel(): void;
-}
-
-function deviceLabel(device: ListenerDeviceState): string {
-  return device.name || `Listener ${device.channelId.slice(0, 8)}`;
-}
-
-function deviceStatus(device: ListenerDeviceState): { label: string; tone: 'online' | 'offline' | 'loading' } {
-  if (device.projectsLoading) return { label: 'Connecting…', tone: 'loading' };
-  if (device.connected) return { label: 'Online', tone: 'online' };
-  return { label: 'Offline', tone: 'offline' };
-}
-
-function formatLastSeen(ts?: number): string | null {
-  if (!ts) return null;
-  const diffMs = Date.now() - ts;
-  if (diffMs < 45_000) return 'just now';
-  const minutes = Math.round(diffMs / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return `${days}d ago`;
 }
 
 export function StartSessionScreen({
   hasSessions,
   devices,
+  initialChannelId,
   onConnectDevice,
   onRefreshProjects,
   onStart,
   onForget,
   onSetDefault,
   onScanListener,
+  onManageDevices,
   onCancel,
 }: StartSessionScreenProps): JSX.Element {
-  const [selectedId, setSelectedId] = useState<string>('');
+  const [selectedId, setSelectedId] = useState<string>(initialChannelId ?? '');
   const [projectName, setProjectName] = useState('');
   const [mode, setMode] = useState<SpawnMode>('default');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sortedDevices = useMemo(
-    () =>
-      [...devices].sort(
-        (a, b) =>
-          Number(b.connected) - Number(a.connected) ||
-          Number(b.isDefault) - Number(a.isDefault) ||
-          (b.lastSeenAt ?? b.savedAt) - (a.lastSeenAt ?? a.savedAt),
-      ),
-    [devices],
-  );
+  const sortedDevices = sortDevices(devices);
   const selected = sortedDevices.find((d) => d.channelId === selectedId) ?? sortedDevices[0] ?? null;
 
   useEffect(() => {
@@ -207,6 +184,11 @@ export function StartSessionScreen({
             <button type="button" className="session-secondary-action" onClick={onScanListener}>
               Scan another listener QR
             </button>
+            {onManageDevices ? (
+              <button type="button" className="session-link-btn" onClick={onManageDevices}>
+                Manage all devices
+              </button>
+            ) : null}
           </section>
         )}
       </div>
