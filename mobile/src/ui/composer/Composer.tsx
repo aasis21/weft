@@ -17,6 +17,7 @@ interface ComposerProps {
   onPrompt(text: string, attachments?: PromptAttachment[]): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
+  onOpenVoiceMode(): void;
 }
 
 /** Max images per message — keeps the encrypted relay payload under the transport cap. */
@@ -25,6 +26,23 @@ const MAX_ATTACHMENTS = 6;
 interface SlashCommand {
   command: string;
   template: string;
+}
+
+function appendSpeechText(committed: string, fresh: string): string {
+  const base = committed.trimEnd();
+  const tail = fresh.trim();
+  if (!tail) return committed;
+  if (!base) return tail;
+  const normalizedBase = base.toLowerCase();
+  const normalizedTail = tail.toLowerCase();
+  const max = Math.min(normalizedBase.length, normalizedTail.length);
+  for (let size = max; size > 0; size -= 1) {
+    if (normalizedBase.endsWith(normalizedTail.slice(0, size))) {
+      const remainder = tail.slice(size).trimStart();
+      return remainder ? `${base} ${remainder}` : base;
+    }
+  }
+  return `${base} ${tail}`;
 }
 
 const MODE_LABEL: Record<string, string> = {
@@ -148,6 +166,7 @@ export function Composer({
   onPrompt,
   onInterrupt,
   onModeChange,
+  onOpenVoiceMode,
 }: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -378,7 +397,7 @@ export function Composer({
     speech.start((spokenText, isFinal) => {
       if (sessionIdRef.current !== speechSessionId) return;
       const committed = speechCommittedRef.current;
-      const next = committed ? `${committed} ${spokenText}` : spokenText;
+      const next = appendSpeechText(committed, spokenText);
       if (isFinal) speechCommittedRef.current = next;
       applyTextChange(speechSessionId, next);
     });
@@ -402,6 +421,10 @@ export function Composer({
     if (busy) {
       suppressSendAfterStopTap();
       onInterrupt();
+      return;
+    }
+    if (emptyPrompt && !disabled && !attaching) {
+      onOpenVoiceMode();
       return;
     }
     void send();
@@ -430,6 +453,7 @@ export function Composer({
   };
 
   const folder = basename(cwd);
+  const emptyPrompt = text.trim() === '' && attachments.length === 0;
 
   return (
     <form
@@ -605,17 +629,19 @@ export function Composer({
               </button>
             ) : null}
             <button
-              className={busy ? 'stop-btn' : 'send-btn'}
+              className={busy ? 'stop-btn' : `send-btn${emptyPrompt ? ' voice-action' : ''}`}
               type="button"
               onPointerDown={onActionPointerDown}
               onClick={onActionClick}
-              disabled={!busy && (disabled || attaching || (!text.trim() && attachments.length === 0))}
-              aria-label={busy ? 'Stop generating' : 'Send'}
-              title={busy ? 'Stop generating' : undefined}
+              disabled={!busy && (disabled || attaching)}
+              aria-label={busy ? 'Stop generating' : emptyPrompt ? 'Open voice mode' : 'Send'}
+              title={busy ? 'Stop generating' : emptyPrompt ? 'Open voice mode' : undefined}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 {busy ? (
                   <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
+                ) : emptyPrompt ? (
+                  <path fill="currentColor" d="M12 14a3 3 0 003-3V6a3 3 0 00-6 0v5a3 3 0 003 3zm5-3a1 1 0 10-2 0 3 3 0 01-6 0 1 1 0 10-2 0 5 5 0 004 4.9V19H8a1 1 0 100 2h8a1 1 0 100-2h-3v-3.1A5 5 0 0017 11z" />
                 ) : (
                   <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
                 )}

@@ -110,7 +110,7 @@ describe('SessionScreen composer liveness', () => {
 describe('SessionScreen approvals', () => {
   it('renders all three plan-exit approval options and marks the recommended choice', () => {
     const active = makeSession('live');
-    active.timeline.approvals = [
+    (active.timeline.approvals as unknown[]) = [
       {
         requestId: 'plan-1',
         toolName: 'Exit Plan Mode',

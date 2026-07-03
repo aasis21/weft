@@ -138,7 +138,14 @@ export function useSpeechInput(): {
       };
       recognitionRef.current = recognition;
       setListening(true);
-      recognition.start();
+      try {
+        recognition.start();
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'InvalidStateError') return;
+        recognitionRef.current = null;
+        setListening(false);
+        throw err;
+      }
     };
 
     startRecognition();

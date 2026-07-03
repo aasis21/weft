@@ -16,6 +16,7 @@ interface StatusBarProps {
   onRemove(): void;
   onGoHome(): void;
   onOpenDebug(): void;
+  onOpenSettings?(): void;
 }
 
 const STATUS_LABEL: Record<SessionStatus, string> = {
@@ -38,6 +39,7 @@ export function StatusBar({
   onRemove,
   onGoHome,
   onOpenDebug,
+  onOpenSettings,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -187,6 +189,17 @@ export function StatusBar({
               </button>
             ) : null}
             <button
+                type="button"
+                role="menuitem"
+                className="bar-menu-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenSettings?.();
+                }}
+              >
+                ⚙ Settings
+              </button>
+              <button
               type="button"
               role="menuitem"
               className="bar-menu-item danger"

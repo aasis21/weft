@@ -9,6 +9,7 @@ interface SessionDrawerProps {
   onRemove(channelId: string): void;
   onRename?(channelId: string, title: string): void;
   onGoHome(): void;
+  onOpenSettings?(): void;
   onClose(): void;
 }
 
@@ -26,8 +27,15 @@ function fmtRelative(ts: number | null): string {
 
 function lastActivity(session: SessionView): number | null {
   const items = session.timeline.items;
-  const lastRealItem = items.findLast((item) => item.kind === 'user' || item.kind === 'assistant' || item.kind === 'tool');
-  return Math.max(lastRealItem?.ts ?? 0, session.lastEventAt ?? 0) || null;
+  let lastRealTs = 0;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item && (item.kind === 'user' || item.kind === 'assistant' || item.kind === 'tool')) {
+      lastRealTs = item.ts;
+      break;
+    }
+  }
+  return Math.max(lastRealTs, session.lastEventAt ?? 0) || null;
 }
 
 function turnCount(session: SessionView): number {
@@ -49,6 +57,7 @@ export function SessionDrawer({
   onRemove,
   onRename,
   onGoHome,
+  onOpenSettings,
   onClose,
 }: SessionDrawerProps): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null);
@@ -113,6 +122,7 @@ export function SessionDrawer({
       const first = focusableElements[0];
       const last = focusableElements[focusableElements.length - 1];
       const active = document.activeElement;
+      if (!first || !last) return;
 
       if (!drawerRef.current.contains(active)) {
         event.preventDefault();
@@ -130,7 +140,7 @@ export function SessionDrawer({
 
     const focusableElements = getFocusableElements();
     if (focusableElements.length > 0) {
-      focusableElements[0].focus();
+      focusableElements[0]?.focus();
     } else {
       drawer?.focus();
     }
@@ -277,6 +287,11 @@ export function SessionDrawer({
         <button className="drawer-home" type="button" onClick={onGoHome}>
           ⌂ About Helm
         </button>
+        {onOpenSettings ? (
+          <button className="drawer-home" type="button" onClick={onOpenSettings}>
+            ⚙ Settings
+          </button>
+        ) : null}
       </aside>
       <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />
     </>

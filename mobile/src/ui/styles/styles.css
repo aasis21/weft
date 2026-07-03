@@ -1,6 +1,6 @@
 :root {
-  color-scheme: dark;
-  color: #eef2f7;
+  color-scheme: light dark;
+  color: var(--ink);
   background: #0a0e14;
   font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --ink: #eef2f7;
@@ -20,6 +20,66 @@
   --display: "Bricolage Grotesque", "Hanken Grotesk", sans-serif;
   --serif: "Instrument Serif", Georgia, serif;
   --mono: "JetBrains Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+
+/* #57: Dark remains the default; system light and explicit light override only color tokens. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  background: #0a0e14;
+  --ink: #eef2f7;
+  --muted: #93a1b3;
+  --faint: #5e6b7e;
+  --panel: rgba(20, 27, 38, 0.64);
+  --panel-strong: rgba(24, 33, 47, 0.92);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --accent: #4d8dff;
+  --accent-bright: #74a6ff;
+  --accent-deep: #2f6fe0;
+  --spark: #ffb27a;
+  --amber: #ffb86b;
+  --danger: #ff6b6b;
+  --cyan: #6fe9ff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    background: #ffffff;
+    --ink: #1f2328;
+    --muted: #57606a;
+    --faint: #6e7781;
+    --panel: rgba(255, 255, 255, 0.78);
+    --panel-strong: rgba(255, 255, 255, 0.94);
+    --line: rgba(31, 35, 40, 0.12);
+    --line-strong: rgba(31, 35, 40, 0.2);
+    --accent: #0969da;
+    --accent-bright: #218bff;
+    --accent-deep: #0550ae;
+    --spark: #bc4c00;
+    --amber: #9a6700;
+    --danger: #cf222e;
+    --cyan: #1b7f9c;
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  background: #ffffff;
+  --ink: #1f2328;
+  --muted: #57606a;
+  --faint: #6e7781;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --line: rgba(31, 35, 40, 0.12);
+  --line-strong: rgba(31, 35, 40, 0.2);
+  --accent: #0969da;
+  --accent-bright: #218bff;
+  --accent-deep: #0550ae;
+  --spark: #bc4c00;
+  --amber: #9a6700;
+  --danger: #cf222e;
+  --cyan: #1b7f9c;
 }
 
 * {
@@ -56,6 +116,56 @@ body::before {
     linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
   background-size: 40px 40px;
   mask-image: radial-gradient(120% 100% at 50% 0%, black, transparent 78%);
+}
+
+
+
+/* #57: Page chrome follows system light unless Agent A pins data-theme='dark'. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) body {
+    background:
+      radial-gradient(900px 540px at 14% -10%, rgba(9, 105, 218, 0.12), transparent 60%),
+      radial-gradient(680px 460px at 94% 2%, rgba(27, 127, 156, 0.08), transparent 55%),
+      radial-gradient(820px 620px at 80% 112%, rgba(188, 76, 0, 0.08), transparent 60%),
+      linear-gradient(180deg, #ffffff 0%, #f6f8fa 54%, #ffffff 100%);
+  }
+
+  :root:not([data-theme='dark']) body::before {
+    opacity: 0.42;
+    background-image:
+      linear-gradient(rgba(31, 35, 40, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(31, 35, 40, 0.06) 1px, transparent 1px);
+  }
+}
+
+:root[data-theme='light'] body {
+  background:
+    radial-gradient(900px 540px at 14% -10%, rgba(9, 105, 218, 0.12), transparent 60%),
+    radial-gradient(680px 460px at 94% 2%, rgba(27, 127, 156, 0.08), transparent 55%),
+    radial-gradient(820px 620px at 80% 112%, rgba(188, 76, 0, 0.08), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #f6f8fa 54%, #ffffff 100%);
+}
+
+:root[data-theme='light'] body::before {
+  opacity: 0.42;
+  background-image:
+    linear-gradient(rgba(31, 35, 40, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 35, 40, 0.06) 1px, transparent 1px);
+}
+
+:root[data-theme='dark'] body {
+  background:
+    radial-gradient(900px 540px at 14% -10%, rgba(77, 141, 255, 0.22), transparent 60%),
+    radial-gradient(680px 460px at 94% 2%, rgba(111, 233, 255, 0.1), transparent 55%),
+    radial-gradient(820px 620px at 80% 112%, rgba(255, 178, 122, 0.1), transparent 60%),
+    linear-gradient(180deg, #0b1019 0%, #0a0e14 42%, #07090f 100%);
+}
+
+:root[data-theme='dark'] body::before {
+  opacity: 0.5;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
 }
 
 body::after {

@@ -25,7 +25,10 @@ class MockSpeechRecognition {
   }
 }
 
-function speechEvent(transcript: string, isFinal: boolean): { results: ArrayLike<MockResult>; resultIndex: number } {
+function speechEvent(
+  transcript: string,
+  isFinal: boolean,
+): { results: ArrayLike<MockResult> & { item(index: number): MockResult }; resultIndex: number } {
   return {
     resultIndex: 0,
     results: {

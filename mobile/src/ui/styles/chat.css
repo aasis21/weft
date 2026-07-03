@@ -38,14 +38,15 @@
   --bg-elev: #161b22;
   --bg-rule: #30363d;
   --fg: #e6edf3;
-  --fg-dim: #8b949e;
-  --fg-faint: #6e7681;
+  --fg-dim: #9aa4b2;
+  --fg-faint: #8b949e;
   --accent: #2f81f7;
   --accent-soft: rgba(47, 129, 247, 0.14);
   --user-bg: rgba(47, 129, 247, 0.16);
   --success: #3fb950;
   --warning: #d29922;
   --error: #f85149;
+  --danger: #ff6b6b;
   --strong: #ffffff;
   --code-bg: #0b0f14;
   --mono: "JetBrains Mono", "Cascadia Code", "Consolas", ui-monospace, monospace;
@@ -64,6 +65,63 @@
   line-height: 1.5;
 }
 .helm-session * { box-sizing: border-box; }
+
+/* #57: Agent A only mutates :root[data-theme]; chat tokens react here. */
+:root[data-theme='dark'] .helm-session {
+  --bg: #0d1117;
+  --bg-elev: #161b22;
+  --bg-rule: #30363d;
+  --fg: #e6edf3;
+  --fg-dim: #9aa4b2;
+  --fg-faint: #8b949e;
+  --accent: #2f81f7;
+  --accent-soft: rgba(47, 129, 247, 0.14);
+  --user-bg: rgba(47, 129, 247, 0.16);
+  --success: #3fb950;
+  --warning: #d29922;
+  --error: #f85149;
+  --danger: #ff6b6b;
+  --strong: #ffffff;
+  --code-bg: #0b0f14;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .helm-session {
+    --bg: #ffffff;
+    --bg-elev: #f6f8fa;
+    --bg-rule: #d0d7de;
+    --fg: #1f2328;
+    --fg-dim: #57606a;
+    --fg-faint: #6e7781;
+    --accent: #0969da;
+    --accent-soft: rgba(9, 105, 218, 0.1);
+    --user-bg: rgba(9, 105, 218, 0.1);
+    --success: #1a7f37;
+    --warning: #9a6700;
+    --error: #cf222e;
+    --danger: #cf222e;
+    --strong: #1f2328;
+    --code-bg: #f6f8fa;
+  }
+}
+
+:root[data-theme='light'] .helm-session {
+  --bg: #ffffff;
+  --bg-elev: #f6f8fa;
+  --bg-rule: #d0d7de;
+  --fg: #1f2328;
+  --fg-dim: #57606a;
+  --fg-faint: #6e7781;
+  --accent: #0969da;
+  --accent-soft: rgba(9, 105, 218, 0.1);
+  --user-bg: rgba(9, 105, 218, 0.1);
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --error: #cf222e;
+  --danger: #cf222e;
+  --strong: #1f2328;
+  --code-bg: #f6f8fa;
+}
 
 /* ---- shared buttons ---- */
 .helm-session .icon-btn {
@@ -1185,6 +1243,55 @@
 }
 .drawer-home:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 
+
+/* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */
+@media (min-width: 768px) {
+  .status-bar,
+  .chat-thread,
+  .composer-dock {
+    max-width: 900px;
+  }
+
+  .status-bar,
+  .composer-dock {
+    padding-inline: 18px;
+  }
+
+  .chat-thread {
+    padding: 18px 18px 24px;
+  }
+
+  .helm-session .scroll-latest {
+    right: max(18px, calc((100vw - 900px) / 2 + 18px));
+  }
+}
+
+@media (min-width: 1100px) {
+  .status-bar,
+  .chat-thread,
+  .composer-dock {
+    max-width: 1040px;
+  }
+
+  .status-bar,
+  .composer-dock {
+    padding-inline: 24px;
+  }
+
+  .chat-thread {
+    padding: 22px 24px 30px;
+  }
+
+  .user-bubble,
+  .msg-attachments {
+    max-width: 72%;
+  }
+
+  .helm-session .scroll-latest {
+    right: max(24px, calc((100vw - 1040px) / 2 + 24px));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .row,
   .bar-menu,
@@ -1199,11 +1306,6 @@
 }
 
 /* ---- Concurrent CSS additions: chat controls, tool affordances, drawer status ---- */
-.helm-session {
-  --fg-dim: #9aa4b2;
-  --fg-faint: #8b949e;
-}
-
 .sr-only {
   position: absolute !important;
   width: 1px !important;

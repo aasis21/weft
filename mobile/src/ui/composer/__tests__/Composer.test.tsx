@@ -53,6 +53,7 @@ function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
     onPrompt: vi.fn(),
     onInterrupt: vi.fn(),
     onModeChange: vi.fn(),
+    onOpenVoiceMode: vi.fn(),
   };
   return {
     ...render(<Composer {...defaults} {...props} />),
@@ -77,7 +78,7 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Attach image' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Interactive' })).toHaveClass('mode-pill');
     expect(screen.getByText('📁 helm')).toHaveClass('cwd-chip');
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open voice mode' })).toBeEnabled();
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
   });
 
@@ -120,7 +121,20 @@ describe('Composer', () => {
     expect(onPrompt).toHaveBeenLastCalledWith('hardware shortcut', undefined);
 
     await user.clear(textbox);
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open voice mode' })).toBeEnabled();
+  });
+
+  it('morphs the primary empty action into voice mode and back to send', async () => {
+    const user = userEvent.setup();
+    const onOpenVoiceMode = vi.fn();
+    renderComposer({ onOpenVoiceMode });
+    const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+    await user.click(screen.getByRole('button', { name: 'Open voice mode' }));
+    expect(onOpenVoiceMode).toHaveBeenCalledTimes(1);
+
+    await user.type(textbox, 'hello');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
   it('shows Stop while busy and does not queue prompts while busy', async () => {

@@ -8,6 +8,8 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+import { SettingsScreen } from '@/ui/settings/SettingsScreen';
+import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
 import { getStableDeviceId } from '@/lib/helmClient';
 
 function pickString(value: unknown): string | null {
@@ -178,6 +180,8 @@ export function SessionScreen({
 }: SessionScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
@@ -221,6 +225,8 @@ export function SessionScreen({
   const threadEmpty = timeline.items.length === 0 && timeline.history.length === 0;
   const initialLoading =
     threadEmpty && (status === 'connecting' || (status === 'live' && active.settling === true));
+  const latestAssistant =
+    [...timeline.items].reverse().find((item) => item.kind === 'assistant') ?? null;
   const approveRequest = (requestId: string, optionId: string, isDeny: boolean): void => {
     vibrate(isDeny ? [8, 40, 8] : 10);
     onApprove(requestId, optionId);
@@ -365,6 +371,7 @@ export function SessionScreen({
         onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}
         onOpenDebug={() => setDebugOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       {debugOpen ? (
@@ -372,9 +379,9 @@ export function SessionScreen({
           events={active.events}
           title={meta.title}
           detail={{
-            sessionId: meta.sessionId,
             channelId: meta.channelId,
-            channelHistory: meta.channelHistory,
+            ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
+            ...(meta.channelHistory ? { channelHistory: meta.channelHistory } : {}),
             senderId: getStableDeviceId(),
             addedAt: meta.addedAt,
             lastHeartbeat: active.timeline.lastHeartbeat ?? null,
@@ -383,6 +390,19 @@ export function SessionScreen({
             mode: active.timeline.mode,
           }}
           onClose={() => setDebugOpen(false)}
+        />
+      ) : null}
+
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} /> : null}
+
+      {voiceOpen ? (
+        <VoiceModeOverlay
+          latestAssistant={latestAssistant}
+          agentBusy={agentBusy}
+          disabled={ended || offline}
+          onPrompt={onPrompt}
+          onInterrupt={onInterrupt}
+          onClose={() => setVoiceOpen(false)}
         />
       ) : null}
 
@@ -558,7 +578,9 @@ export function SessionScreen({
               <ElicitationCard
                 key={req.requestId}
                 req={req}
-                error={timeline.elicitationErrors[req.requestId]}
+                {...(timeline.elicitationErrors[req.requestId]
+                  ? { error: timeline.elicitationErrors[req.requestId] }
+                  : {})}
                 disabled={!responsive}
                 onSubmit={(content) => onElicitationRespond(req.requestId, 'accept', content)}
                 onDecline={() => onElicitationRespond(req.requestId, 'decline')}
@@ -571,13 +593,14 @@ export function SessionScreen({
         <Composer
           sessionId={activeId}
           disabled={ended || offline}
-          disabledReason={ended ? 'ended' : offline ? 'offline' : undefined}
+          {...(ended || offline ? { disabledReason: ended ? 'ended' as const : 'offline' as const } : {})}
           busy={agentBusy}
           mode={timeline.mode}
           cwd={meta.cwd}
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}
           onModeChange={onModeChange}
+          onOpenVoiceMode={() => setVoiceOpen(true)}
         />
       </div>
 
@@ -598,6 +621,10 @@ export function SessionScreen({
           onGoHome={() => {
             setDrawerOpen(false);
             onGoHome();
+          }}
+          onOpenSettings={() => {
+            setDrawerOpen(false);
+            setSettingsOpen(true);
           }}
           onClose={() => setDrawerOpen(false)}
         />
