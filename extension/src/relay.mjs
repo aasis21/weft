@@ -82,6 +82,7 @@ export function createPermissionRelay({
 } = {}) {
   if (!channel) throw new Error("helm relay: channel is required");
   const pending = new Map();
+  let loggedShellApprovalShape = false;
 
   const unsubscribe = channel.onEvent(EVENT_TYPE.DECISION, (msg) => {
     if (msg?.eventSubtype !== SUBTYPE.DECISION.APPROVAL_DECISION) return;
@@ -98,7 +99,14 @@ export function createPermissionRelay({
   async function onPermissionRequest(request, invocation = {}) {
     const requestId = randomUUID();
     const toolName = inferToolName(request);
-    const toolArgs = inferToolArgs(request);
+    if (!loggedShellApprovalShape && isShellToolName(toolName)) {
+      loggedShellApprovalShape = true;
+      logger(`Helm debug: shell approval request shape ${safeJson({ request, invocation })}`, {
+        level: "info",
+        ephemeral: false,
+      });
+    }
+    const toolArgs = inferToolArgs(request, invocation);
     const options = inferOptions(request);
     const expiresAt = Date.now() + approvalTimeoutMs;
     // Keep the exact payload we sent so a late-joining phone can have it replayed verbatim
@@ -415,6 +423,10 @@ export async function attachRelay({
   // Correlates phone-relayed prompts with their echoed user.message events so the relay
   // only re-broadcasts prompts that were actually typed at the laptop terminal.
   const promptOrigin = createPromptOriginTracker();
+  const relayActivity = {
+    idleReaffirmPending: false,
+    activityUnknownLogged: false,
+  };
 
   const sendSafe = async (msg) => {
     try {
@@ -444,7 +456,15 @@ export async function attachRelay({
         readLatestTurnIndex(sessionId),
         readSessionActivity(session),
       ]);
-      await sendSafe(heartbeat(latestTurnIndex, activity ? activity.busy : null));
+      if (!activity && !relayActivity.activityUnknownLogged) {
+        relayActivity.activityUnknownLogged = true;
+        logger("Helm: session activity RPC unavailable; heartbeat busy state is unknown.", {
+          level: "info",
+        });
+      }
+      const busy = relayActivity.idleReaffirmPending ? false : (activity ? activity.busy : null);
+      await sendSafe(heartbeat(latestTurnIndex, busy));
+      relayActivity.idleReaffirmPending = false;
       // The CLI keeps refining the chat title (summary) as the conversation grows; push the
       // latest to the phone whenever it changes so the header tracks the terminal.
       const title = await fetchTitle(session);
@@ -458,7 +478,9 @@ export async function attachRelay({
 
   if (typeof session.on === "function") {
     unsubscribers.push(
-      session.on((event) => void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer)),
+      session.on((event) =>
+        void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity),
+      ),
     );
   }
 
@@ -539,11 +561,12 @@ export async function attachRelay({
   return { stop, onPermissionRequest: approvals.onPermissionRequest };
 }
 
-async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer) {
+async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity) {
   if (!event?.type) return;
   const data = event.data ?? {};
   switch (event.type) {
     case "assistant.message_start":
+      if (relayActivity) relayActivity.idleReaffirmPending = false;
       // A turn is now in flight (text/reasoning) — tell the phone so its Stop control
       // appears for the whole abortable turn, not only while a tool runs.
       await sendSafe(activity(true));
@@ -551,6 +574,7 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
     case "assistant.idle":
       // The agent's processing loop went idle: the turn is over, nothing left to abort.
       await sendSafe(activity(false));
+      if (relayActivity) relayActivity.idleReaffirmPending = true;
       break;
     case "elicitation.requested":
       // The agent asked a question (ask_user). Relay the form so the phone can answer it,
@@ -594,6 +618,7 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       break;
     }
     case "tool.execution_start":
+      if (relayActivity) relayActivity.idleReaffirmPending = false;
       await sendSafe(activity(true));
       await sendSafe(
         toolStart(data.toolCallId ?? event.id, data.toolName ?? data.name ?? "tool", data.arguments),
@@ -796,8 +821,51 @@ function inferToolName(request = {}) {
   );
 }
 
-function inferToolArgs(request = {}) {
-  return request.arguments ?? request.args ?? request.input ?? request;
+function inferToolArgs(request = {}, invocation = {}) {
+  const candidates = [
+    request.arguments,
+    request.args,
+    request.toolInput,
+    request.parameters,
+    request.params,
+    request.input,
+    invocation?.toolInput,
+    invocation?.arguments,
+    invocation?.args,
+    invocation?.parameters,
+    invocation?.params,
+    invocation?.input,
+  ];
+  if (isShellToolName(inferToolName(request))) {
+    for (const candidate of [...candidates, request, invocation]) {
+      const command = findShellCommand(candidate);
+      if (command) return { command };
+    }
+  }
+  for (const candidate of candidates) {
+    if (candidate != null) return candidate;
+  }
+  return request;
+}
+
+function isShellToolName(toolName) {
+  return /(?:^|[_\-\s])(shell|bash|powershell|pwsh|terminal|command)(?:$|[_\-\s])/i.test(String(toolName ?? ""));
+}
+
+function findShellCommand(value, depth = 0, seen = new Set()) {
+  if (value == null || depth > 4) return null;
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value !== "object" || seen.has(value)) return null;
+  seen.add(value);
+  for (const key of ["command", "cmd", "script"]) {
+    const command = value[key];
+    if (typeof command === "string" && command.trim()) return command.trim();
+  }
+  for (const key of ["toolInput", "arguments", "args", "parameters", "params", "input", "request", "invocation"]) {
+    const command = findShellCommand(value[key], depth + 1, seen);
+    if (command) return command;
+  }
+  return null;
 }
 
 function inferOptions(request = {}) {
@@ -894,6 +962,14 @@ function previewToolResult(data = {}) {
     "";
   const text = typeof source === "string" ? source : JSON.stringify(source);
   return text.length > 2_000 ? `${text.slice(0, 2_000)}…` : text;
+}
+
+function safeJson(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
 }
 
 function approvalTimeoutFromEnv() {

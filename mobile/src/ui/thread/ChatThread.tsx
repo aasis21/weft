@@ -430,26 +430,20 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
               <div className="user-meta">
                 <span className="ts user-ts">{formatTime(item.ts)}</span>
                 <DeviceChip origin={item.origin} />
+                {item.failed ? (
+                  <span className="user-failed" role="alert">Not delivered</span>
+                ) : null}
+                {item.failed && onRetry ? (
+                  <button
+                    type="button"
+                    className="reconnect-btn user-retry"
+                    aria-label="Retry sending message"
+                    onClick={() => onRetry(item.id)}
+                  >
+                    Retry
+                  </button>
+                ) : null}
               </div>
-              {item.failed ? (
-                <div
-                  className="notice warning"
-                  role="alert"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end' }}
-                >
-                  <span className="notice-text">Not delivered</span>
-                  {onRetry ? (
-                    <button
-                      type="button"
-                      className="reconnect-btn"
-                      aria-label="Retry sending message"
-                      onClick={() => onRetry(item.id)}
-                    >
-                      Retry
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           );
         }

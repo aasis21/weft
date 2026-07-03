@@ -402,6 +402,21 @@ test("the heartbeat sends busy=null (unknown) when the host exposes no activity 
   }
 });
 
+test("the heartbeat re-affirms idle once after assistant.idle even when activity is unknown", async () => {
+  const channel = makeFakeChannel();
+  const session = makeFakeSession(); // no metadata RPC
+  const relay = await attachRelay({ session, channel, channelId: "chan-1", heartbeatMs: 20 });
+  try {
+    session.emitEvent({ type: "assistant.idle", id: "idle-1", data: {} });
+    await new Promise((r) => setTimeout(r, 35));
+    const beat = channel.sent.find((m) => m.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT);
+    assert.ok(beat, "expected a heartbeat to be emitted");
+    assert.equal(beat.msg.busy, false);
+  } finally {
+    await relay.stop("test", { closeTransport: false });
+  }
+});
+
 test("sendSafe stays quiet for five failures, triggers reconnect once on the sixth, and resets after success", async () => {
   const channel = makeFailingChannel({ failUntil: 6 });
   const session = makeFakeSession();
@@ -667,6 +682,25 @@ test("approval requests carry the relay's real auto-deny deadline", async () => 
     assert.equal(req.msg.timeoutMs, approvalTimeoutMs);
     assert.ok(req.msg.expiresAt >= before + approvalTimeoutMs);
     assert.ok(req.msg.expiresAt <= after + approvalTimeoutMs);
+  } finally {
+    relay.close();
+  }
+});
+
+test("approval requests infer shell commands from nested invocation input before raw request fallback", async () => {
+  const channel = makeFakeChannel();
+  const logs = [];
+  const relay = createPermissionRelay({ channel, logger: (message, options) => logs.push({ message, options }) });
+  try {
+    void relay.onPermissionRequest(
+      { kind: "shell", toolCallId: "toolu_123" },
+      { toolInput: { command: "npm test -w extension" } },
+    );
+    await flush();
+    const req = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
+    assert.ok(req, "expected an approval request to be sent to the phone");
+    assert.deepEqual(req.msg.toolArgs, { command: "npm test -w extension" });
+    assert.equal(logs.filter((entry) => /shell approval request shape/.test(entry.message)).length, 1);
   } finally {
     relay.close();
   }

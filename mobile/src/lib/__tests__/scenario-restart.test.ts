@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@capacitor/app', () => ({
   App: { addListener: vi.fn().mockResolvedValue({ remove: vi.fn() }) },
 }));
-import { loadSessions, upsertSession } from '@/lib/sessions';
+import { loadSessions, setLastActiveSessionId, upsertSession } from '@/lib/sessions';
 import { fakePairing } from '@/test/helpers/fakeHelmClient';
 import { App } from '@capacitor/app';
 import { makeManager } from '@/test/helpers/makeManager';
@@ -94,7 +94,54 @@ describe('scenario: restart', () => {
       cwd: '/new',
     });
   });
-});
 
+  it('restores the last-focused session even when another session has newer activity (#173)', async () => {
+    await h!.init();
+    const a = await h!.pair('focus-a');
+    const b = await h!.pair('activity-b');
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:01Z'));
+    h!.manager.setActive(a.channelId);
+    await h!.flush();
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:02Z'));
+    b.client.emit(B.assistantDelta('newer inactive activity', 'm1'));
+    await h!.flush();
+    await vi.advanceTimersByTimeAsync(1500);
+    await h!.flush();
+
+    h2 = makeManager();
+    await h2.init();
+    await h2.flush();
+
+    expect(h2.snapshot().activeId).toBe(a.channelId);
+  });
+
+  it('falls back to recency when the persisted last-focused session is gone (#173)', async () => {
+    await upsertSession({
+      pairing: fakePairing('old-focus'),
+      title: 'Old focus',
+      cwd: '/old',
+      addedAt: 1,
+      lastSeenAt: 100,
+      lastEventAt: 100,
+    });
+    await upsertSession({
+      pairing: fakePairing('recent-activity'),
+      title: 'Recent activity',
+      cwd: '/recent',
+      addedAt: 2,
+      lastSeenAt: 50,
+      lastEventAt: 500,
+    });
+    await setLastActiveSessionId('removed-session');
+
+    h2 = makeManager();
+    await h2.init();
+    await h2.flush();
+
+    expect(h2.snapshot().activeId).toBe('recent-activity');
+  });
+});
 
 

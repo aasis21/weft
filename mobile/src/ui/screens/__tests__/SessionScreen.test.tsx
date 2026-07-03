@@ -130,4 +130,21 @@ describe('SessionScreen approvals', () => {
     expect(screen.getByRole('button', { name: /^Suggest changes:/i })).toBeInTheDocument();
     expect(screen.getByText('Recommended')).toBeInTheDocument();
   });
+
+  it('uses a neutral preview for bookkeeping-only approval args instead of raw JSON', () => {
+    const active = makeSession('live');
+    (active.timeline.approvals as unknown[]) = [
+      {
+        requestId: 'shell-1',
+        toolName: 'shell',
+        toolArgs: { kind: 'shell', toolCallId: 'toolu_123' },
+        options: [{ id: 'approved', label: 'Approve' }],
+      },
+    ];
+
+    renderActive(active);
+
+    expect(screen.getByText('No command preview available')).toBeInTheDocument();
+    expect(screen.queryByText(/toolu_123/)).not.toBeInTheDocument();
+  });
 });

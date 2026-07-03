@@ -78,7 +78,7 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Attach image' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Interactive' })).toHaveClass('mode-pill');
     expect(screen.getByText('📁 helm')).toHaveClass('cwd-chip');
-    expect(screen.getByRole('button', { name: 'Open voice mode' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start voice mode' })).toBeEnabled();
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
   });
 
@@ -121,7 +121,7 @@ describe('Composer', () => {
     expect(onPrompt).toHaveBeenLastCalledWith('hardware shortcut', undefined);
 
     await user.clear(textbox);
-    expect(screen.getByRole('button', { name: 'Open voice mode' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start voice mode' })).toBeEnabled();
   });
 
   it('morphs the primary empty action into voice mode and back to send', async () => {
@@ -130,11 +130,22 @@ describe('Composer', () => {
     renderComposer({ onOpenVoiceMode });
     const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
 
-    await user.click(screen.getByRole('button', { name: 'Open voice mode' }));
+    await user.click(screen.getByRole('button', { name: 'Start voice mode' }));
     expect(onOpenVoiceMode).toHaveBeenCalledTimes(1);
 
     await user.type(textbox, 'hello');
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('uses distinct labels and icons for dictation and full voice mode', () => {
+    speechState.supported = true;
+    renderComposer();
+
+    const dictation = screen.getByRole('button', { name: 'Start dictation' });
+    const voiceMode = screen.getByRole('button', { name: 'Start voice mode' });
+    expect(dictation.querySelector('path')).toBeInTheDocument();
+    expect(voiceMode.querySelectorAll('rect')).toHaveLength(4);
+    expect(dictation.querySelector('svg')?.innerHTML).not.toBe(voiceMode.querySelector('svg')?.innerHTML);
   });
 
   it('shows Stop while busy and does not queue prompts while busy', async () => {
@@ -266,7 +277,7 @@ describe('Composer', () => {
     });
     const rendered = renderComposer();
 
-    await user.click(screen.getByRole('button', { name: 'Start voice input' }));
+    await user.click(screen.getByRole('button', { name: 'Start dictation' }));
     expect(speechState.start).toHaveBeenCalledTimes(1);
     speechState.stop.mockClear();
 
@@ -291,7 +302,7 @@ describe('Composer', () => {
     const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
 
     await user.type(textbox, 'draft');
-    await user.click(screen.getByRole('button', { name: 'Start voice input' }));
+    await user.click(screen.getByRole('button', { name: 'Start dictation' }));
     act(() => onSpeech?.('hello', true));
     expect(textbox).toHaveValue('draft hello');
     act(() => onSpeech?.('world', false));

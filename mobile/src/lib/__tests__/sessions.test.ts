@@ -1,4 +1,12 @@
-import { loadSessions, patchSession, removeSession, upsertSession, type StoredSession } from '@/lib/sessions';
+import {
+  loadLastActiveSessionId,
+  loadSessions,
+  patchSession,
+  removeSession,
+  setLastActiveSessionId,
+  upsertSession,
+  type StoredSession,
+} from '@/lib/sessions';
 import { saveStoredPairing, type StoredPairing } from '@/lib/storage';
 
 function pairing(channelId: string, savedAt = 1): StoredPairing {
@@ -44,6 +52,27 @@ describe('sessions storage', () => {
 
     await removeSession('ch1');
     expect(await loadSessions()).toEqual([]);
+  });
+
+  it('persists last active id as top-level session-list metadata', async () => {
+    await upsertSession(session('ch1'));
+    await setLastActiveSessionId('ch1');
+    expect(await loadLastActiveSessionId()).toBe('ch1');
+
+    await patchSession('ch1', { title: 'Still here' });
+    expect(await loadLastActiveSessionId()).toBe('ch1');
+    expect(await loadSessions()).toEqual([session('ch1', { title: 'Still here' })]);
+
+    await setLastActiveSessionId(null);
+    expect(await loadLastActiveSessionId()).toBeNull();
+  });
+
+  it('reads legacy array-shaped session stores as sessions with no last active id', async () => {
+    const legacy = [session('legacy')];
+    localStorage.setItem('helm.sessions.v1', JSON.stringify(legacy));
+
+    expect(await loadSessions()).toEqual(legacy);
+    expect(await loadLastActiveSessionId()).toBeNull();
   });
 
   it('dedupes real session ids by newest lastSeenAt while preserving position', async () => {
@@ -118,6 +147,9 @@ describe('sessions storage', () => {
 
     localStorage.removeItem('helm.pairing.v1');
     expect(await loadSessions()).toEqual(loaded);
-    expect(localStorage.getItem('helm.sessions.v1')).toBe(JSON.stringify(loaded));
+    expect(JSON.parse(localStorage.getItem('helm.sessions.v1') ?? '{}')).toEqual({
+      sessions: loaded,
+      lastActiveId: null,
+    });
   });
 });

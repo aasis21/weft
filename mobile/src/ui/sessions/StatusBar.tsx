@@ -119,76 +119,77 @@ export function StatusBar({
         </span>
       </div>
 
-      <button
-        className="icon-btn add-btn"
-        type="button"
-        onClick={onAddSession}
-        aria-label="New session"
-        title="Join another session"
-      >
-        ＋
-      </button>
-
-      <button
-        className="icon-btn home-btn"
-        type="button"
-        onClick={onGoHome}
-        aria-label="Home"
-        title="Home"
-      >
-        ⌂
-      </button>
-
-      <button
-        className="icon-btn debug-btn"
-        type="button"
-        onClick={onOpenDebug}
-        aria-label="Debug events"
-        title="Debug events"
-      >
-        <span className="debug-glyph" aria-hidden="true">{'{ }'}</span>
-      </button>
-
-      <div className="bar-menu-wrap" ref={menuRef}>
+      <div className="status-icons">
         <button
-          className="icon-btn menu-btn"
+          className="icon-btn add-btn"
           type="button"
-          ref={menuButtonRef}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
-          onKeyDown={onMenuButtonKeyDown}
-          aria-label="Session menu"
+          onClick={onAddSession}
+          aria-label="New session"
+          title="Join another session"
         >
-          ⋯
+          ＋
         </button>
-        {menuOpen ? (
-          <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
-            <button
-              type="button"
-              role="menuitem"
-              className="bar-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                onAddSession();
-              }}
-            >
-              ＋ Join another session
-            </button>
-            {canReconnect ? (
+
+        <button
+          className="icon-btn home-btn"
+          type="button"
+          onClick={onGoHome}
+          aria-label="Home"
+          title="Home"
+        >
+          ⌂
+        </button>
+
+        <button
+          className="icon-btn debug-btn"
+          type="button"
+          onClick={onOpenDebug}
+          aria-label="Debug events"
+          title="Debug events"
+        >
+          <span className="debug-glyph" aria-hidden="true">{'{ }'}</span>
+        </button>
+
+        <div className="bar-menu-wrap" ref={menuRef}>
+          <button
+            className="icon-btn menu-btn"
+            type="button"
+            ref={menuButtonRef}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+            onKeyDown={onMenuButtonKeyDown}
+            aria-label="Session menu"
+          >
+            ⋯
+          </button>
+          {menuOpen ? (
+            <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
               <button
                 type="button"
                 role="menuitem"
                 className="bar-menu-item"
                 onClick={() => {
                   setMenuOpen(false);
-                  onReconnect();
+                  onAddSession();
                 }}
               >
-                ↻ Reconnect
+                ＋ Join another session
               </button>
-            ) : null}
-            <button
+              {canReconnect ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReconnect();
+                  }}
+                >
+                  ↻ Reconnect
+                </button>
+              ) : null}
+              <button
                 type="button"
                 role="menuitem"
                 className="bar-menu-item"
@@ -200,18 +201,19 @@ export function StatusBar({
                 ⚙ Settings
               </button>
               <button
-              type="button"
-              role="menuitem"
-              className="bar-menu-item danger"
-              onClick={() => {
-                setMenuOpen(false);
-                onRemove();
-              }}
-            >
-              ✕ Leave this session
-            </button>
-          </div>
-        ) : null}
+                type="button"
+                role="menuitem"
+                className="bar-menu-item danger"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onRemove();
+                }}
+              >
+                ✕ Leave this session
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );

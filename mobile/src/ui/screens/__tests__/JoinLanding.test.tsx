@@ -69,7 +69,6 @@ describe('JoinSessionScreen', () => {
         error={null}
         onError={vi.fn()}
         onPair={onPair}
-        onStartDemo={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -81,7 +80,6 @@ describe('JoinSessionScreen', () => {
   it('accepts manual pairing JSON and submits it', async () => {
     const user = userEvent.setup();
     const onPair = vi.fn().mockResolvedValue(undefined);
-    const onStartDemo = vi.fn().mockResolvedValue(undefined);
     const onCancel = vi.fn();
     render(
       <JoinSessionScreen
@@ -90,7 +88,6 @@ describe('JoinSessionScreen', () => {
         error="Bad code"
         onError={vi.fn()}
         onPair={onPair}
-        onStartDemo={onStartDemo}
         onCancel={onCancel}
       />,
     );
@@ -102,9 +99,8 @@ describe('JoinSessionScreen', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Pair from pasted code' }));
     expect(onPair).toHaveBeenCalledWith('{"v":1,"channelId":"abc"}');
+    expect(screen.queryByRole('button', { name: 'Demo / Simulator' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Demo / Simulator' }));
-    expect(onStartDemo).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: '← Back to sessions' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });

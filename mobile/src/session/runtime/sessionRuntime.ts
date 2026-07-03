@@ -13,7 +13,14 @@ import {
 import type { EventEnvelope, PromptAttachment, SessionMode, StateSnapshotMsg } from '@aasis21/helm-shared';
 import { connectSession, pairSession, getSenderName } from '@/lib/helmClient';
 import type { HelmClient } from '@/lib/helmClient';
-import { loadSessions, patchSession, removeSession, upsertSession } from '@/lib/sessions';
+import {
+  loadLastActiveSessionId,
+  loadSessions,
+  patchSession,
+  removeSession,
+  setLastActiveSessionId,
+  upsertSession,
+} from '@/lib/sessions';
 import { creativeName } from '@/lib/sessionNames';
 import type { StoredSession } from '@/lib/sessions';
 import {
@@ -189,10 +196,12 @@ export class SessionRuntime {
     this.installResumeTriggers();
 
     let stored: StoredSession[] = [];
+    let lastActiveId: string | null = null;
     try {
-      stored = await loadSessions();
+      [stored, lastActiveId] = await Promise.all([loadSessions(), loadLastActiveSessionId()]);
     } catch {
       stored = [];
+      lastActiveId = null;
     }
 
     const restored = await Promise.all(
@@ -216,8 +225,11 @@ export class SessionRuntime {
 
     let activeId: string | null = null;
     if (stored.length > 0) {
-      const first = [...stored].sort((a, b) => recencyOf(b) - recencyOf(a))[0];
-      activeId = first?.pairing.channelId ?? stored[0].pairing.channelId;
+      const lastActiveExists = lastActiveId
+        ? stored.some((s) => s.pairing.channelId === lastActiveId)
+        : false;
+      const first = lastActiveExists ? null : [...stored].sort((a, b) => recencyOf(b) - recencyOf(a))[0];
+      activeId = lastActiveExists ? lastActiveId : (first?.pairing.channelId ?? stored[0].pairing.channelId);
       if (activeId) warmIds.add(activeId);
     }
 
@@ -753,7 +765,13 @@ export class SessionRuntime {
     this.store.dispatch(sessionActivated(channelId));
     this.touchWarm(channelId);
     this.ensureConnected(channelId);
-    if (!ctrl?.ephemeral) void patchSession(channelId, { lastSeenAt: this.clock(), unread: false, unreadCount: 0 });
+    if (!ctrl?.ephemeral) {
+      const lastSeenAt = this.clock();
+      void (async () => {
+        await setLastActiveSessionId(channelId);
+        await patchSession(channelId, { lastSeenAt, unread: false, unreadCount: 0 });
+      })();
+    }
   }
 
   async remove(channelId: string): Promise<void> {

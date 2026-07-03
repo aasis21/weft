@@ -20,6 +20,28 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+const BOOKKEEPING_ARG_KEYS = new Set([
+  'kind',
+  'toolCallId',
+  'sessionId',
+  'requestId',
+  'toolName',
+  'name',
+  'id',
+  'eventType',
+  'eventSubtype',
+  'senderId',
+  'senderName',
+  'channelId',
+  'ts',
+  'timestamp',
+]);
+
+function isBookkeepingOnlyArgs(rec: Record<string, unknown>): boolean {
+  const keys = Object.keys(rec).filter((key) => rec[key] != null);
+  return keys.length > 0 && keys.every((key) => BOOKKEEPING_ARG_KEYS.has(key));
+}
+
 /**
  * Build a readable view of an approval's tool args: a concise one-liner (the command,
  * path, url, …) plus the full pretty-printed payload when there is more to reveal.
@@ -48,6 +70,9 @@ function describeArgs(args: unknown): { line: string; full: string | null } | nu
     pickString(rec.url) ??
     pickString(rec.query) ??
     pickString(rec.pattern);
+  if (!primary && isBookkeepingOnlyArgs(rec)) {
+    return { line: 'No command preview available', full: null };
+  }
   let full: string;
   try {
     full = JSON.stringify(args, null, 2);

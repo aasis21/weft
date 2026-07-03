@@ -4,6 +4,11 @@ import { loadStoredPairing } from './storage';
 
 const SESSIONS_KEY = 'helm.sessions.v1';
 
+interface SessionsStore {
+  sessions: StoredSession[];
+  lastActiveId: string | null;
+}
+
 /** A joined session: the ECDH pairing material plus light display metadata. */
 export interface StoredSession {
   pairing: StoredPairing;
@@ -26,22 +31,46 @@ export interface StoredSession {
   renamed?: boolean;
 }
 
-async function read(): Promise<StoredSession[]> {
+function isStoredSession(value: unknown): value is StoredSession {
+  return !!value && typeof value === 'object' && !!(value as Partial<StoredSession>)?.pairing?.channelId;
+}
+
+function normalizeStore(parsed: unknown): SessionsStore {
+  if (Array.isArray(parsed)) {
+    return { sessions: parsed.filter(isStoredSession), lastActiveId: null };
+  }
+  if (!parsed || typeof parsed !== 'object') return { sessions: [], lastActiveId: null };
+  const blob = parsed as { sessions?: unknown; lastActiveId?: unknown };
+  return {
+    sessions: Array.isArray(blob.sessions) ? blob.sessions.filter(isStoredSession) : [],
+    lastActiveId: typeof blob.lastActiveId === 'string' ? blob.lastActiveId : null,
+  };
+}
+
+async function readStore(): Promise<SessionsStore> {
   try {
     const { value } = await Preferences.get({ key: SESSIONS_KEY });
     const raw = value ?? globalThis.localStorage?.getItem(SESSIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as StoredSession[];
-    return Array.isArray(parsed) ? parsed.filter((s) => s?.pairing?.channelId) : [];
+    if (!raw) return { sessions: [], lastActiveId: null };
+    return normalizeStore(JSON.parse(raw));
   } catch {
-    return [];
+    return { sessions: [], lastActiveId: null };
   }
 }
 
-async function write(list: StoredSession[]): Promise<void> {
-  const value = JSON.stringify(list);
+async function read(): Promise<StoredSession[]> {
+  return (await readStore()).sessions;
+}
+
+async function writeStore(store: SessionsStore): Promise<void> {
+  const value = JSON.stringify(store);
   await Preferences.set({ key: SESSIONS_KEY, value });
   globalThis.localStorage?.setItem(SESSIONS_KEY, value);
+}
+
+async function write(list: StoredSession[]): Promise<void> {
+  const { lastActiveId } = await readStore();
+  await writeStore({ sessions: list, lastActiveId });
 }
 
 /** Rank used to pick the winner among stored entries sharing a sessionId, compared lexicographically:
@@ -108,6 +137,15 @@ export async function loadSessions(): Promise<StoredSession[]> {
     return [migrated];
   }
   return [];
+}
+
+export async function loadLastActiveSessionId(): Promise<string | null> {
+  return (await readStore()).lastActiveId;
+}
+
+export async function setLastActiveSessionId(channelId: string | null): Promise<void> {
+  const { sessions } = await readStore();
+  await writeStore({ sessions, lastActiveId: channelId });
 }
 
 export async function upsertSession(session: StoredSession): Promise<void> {

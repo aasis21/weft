@@ -620,8 +620,8 @@ export function Composer({
                 className={`mic-btn${speech.listening ? ' listening' : ''}`}
                 type="button"
                 onClick={toggleSpeech}
-                aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
-                title={speech.listening ? 'Stop voice input' : 'Start voice input'}
+                aria-label={speech.listening ? 'Stop dictation' : 'Start dictation'}
+                title={speech.listening ? 'Stop dictation' : 'Start dictation'}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path fill="currentColor" d="M12 14a3 3 0 003-3V6a3 3 0 00-6 0v5a3 3 0 003 3zm5-3a1 1 0 10-2 0 3 3 0 01-6 0 1 1 0 10-2 0 5 5 0 004 4.9V19H8a1 1 0 100 2h8a1 1 0 100-2h-3v-3.1A5 5 0 0017 11z" />
@@ -634,14 +634,19 @@ export function Composer({
               onPointerDown={onActionPointerDown}
               onClick={onActionClick}
               disabled={!busy && (disabled || attaching)}
-              aria-label={busy ? 'Stop generating' : emptyPrompt ? 'Open voice mode' : 'Send'}
-              title={busy ? 'Stop generating' : emptyPrompt ? 'Open voice mode' : undefined}
+              aria-label={busy ? 'Stop generating' : emptyPrompt ? 'Start voice mode' : 'Send'}
+              title={busy ? 'Stop generating' : emptyPrompt ? 'Start voice mode' : undefined}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 {busy ? (
                   <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
                 ) : emptyPrompt ? (
-                  <path fill="currentColor" d="M12 14a3 3 0 003-3V6a3 3 0 00-6 0v5a3 3 0 003 3zm5-3a1 1 0 10-2 0 3 3 0 01-6 0 1 1 0 10-2 0 5 5 0 004 4.9V19H8a1 1 0 100 2h8a1 1 0 100-2h-3v-3.1A5 5 0 0017 11z" />
+                  <>
+                    <rect x="5" y="10" width="2.4" height="4" rx="1.2" fill="currentColor" />
+                    <rect x="9" y="6.5" width="2.4" height="11" rx="1.2" fill="currentColor" />
+                    <rect x="13" y="4" width="2.4" height="16" rx="1.2" fill="currentColor" />
+                    <rect x="17" y="8" width="2.4" height="8" rx="1.2" fill="currentColor" />
+                  </>
                 ) : (
                   <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
                 )}

@@ -46,7 +46,13 @@ const RECENT_OVERLAP_SCAN = 120;
 // aren't collapsed into one. Exact optimistic-echo dedup is handled by id above; this content key is
 // only a secondary guard, so a generous window is safe.
 const RECENT_DEDUPE_PREFIX = 4096;
+const STUCK_BUSY_HEARTBEATS = 3;
 const DEFAULT_MODE = MODES[0] as Session['connection']['mode'];
+
+const busyMonitor = new WeakMap<
+  Session,
+  { busySince: number | null; lastStreamAt: number | null; lastHeartbeatAt: number | null; idleBeats: number }
+>();
 
 function cap(items: TimelineItem[]): TimelineItem[] {
   return items.length > MAX_ITEMS ? items.slice(items.length - MAX_ITEMS) : items;
@@ -153,12 +159,15 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
     case EVENT_TYPE.STREAM:
       switch (message.eventSubtype) {
         case SUBTYPE.STREAM.ASSISTANT_MESSAGE:
+          noteStreamActivity(session, message.ts);
           upsertAssistant(session, message);
           return;
         case SUBTYPE.STREAM.ASSISTANT_DELTA:
+          noteStreamActivity(session, message.ts);
           appendDelta(session, message);
           return;
         case SUBTYPE.STREAM.TOOL_START:
+          noteStreamActivity(session, message.ts);
           startTool(session, message);
           return;
         case SUBTYPE.STREAM.TOOL_COMPLETE:
@@ -170,6 +179,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         case SUBTYPE.STREAM.ACTIVITY:
           session.connection.busy = message.msg.busy;
           session.connection.busyFrom = message.ts;
+          noteBusySignal(session, message.msg.busy, message.ts);
           return;
         case SUBTYPE.STREAM.USER_MESSAGE:
           appendUserEcho(session, message);
@@ -182,8 +192,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         const req = message.msg;
         session.requests.approvals = [...session.requests.approvals.filter((a) => a.requestId !== req.requestId), req];
         session.requests.approvalErrors = omitKey(session.requests.approvalErrors, req.requestId);
-      } else if (message.eventSubtype === SUBTYPE.APPROVAL.COMPLETE) {
-        dismissApproval(session, message.msg.requestId);
+      } else if ((message as { eventSubtype?: string }).eventSubtype === SUBTYPE.APPROVAL.COMPLETE) {
+        dismissApproval(session, (message as { msg: { requestId: string } }).msg.requestId);
       }
       return;
     case EVENT_TYPE.ELICITATION:
@@ -216,6 +226,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.endedReason = undefined;
           session.connection.busy = false;
           session.connection.busyFrom = message.ts;
+          noteBusySignal(session, false, message.ts);
           return;
         case SUBTYPE.CONTROL.SESSION_META:
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
@@ -229,6 +240,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.status = 'ended';
           session.connection.busy = false;
           session.connection.busyFrom = message.ts;
+          noteBusySignal(session, false, message.ts);
           appendNotice(session, 'warning', reason, message.ts, `end-${message.ts}`);
           return;
         }
@@ -236,6 +248,10 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           const beat = message.msg;
           if (typeof beat.busy === 'boolean' && !isStaleBusyHeartbeat(session, message.ts)) {
             session.connection.busy = beat.busy;
+            session.connection.busyFrom = message.ts;
+            noteBusySignal(session, beat.busy, message.ts);
+          } else if (beat.busy == null && shouldClearStuckBusy(session, message.ts)) {
+            session.connection.busy = false;
             session.connection.busyFrom = message.ts;
           }
           session.connection.lastHeartbeat = message.ts;
@@ -488,6 +504,7 @@ function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number
   if (typeof snap.busy === 'boolean') {
     session.connection.busy = snap.busy;
     session.connection.busyFrom = ts;
+    noteBusySignal(session, snap.busy, ts);
   }
   if (snap.mode) {
     if (!session.connection.pendingMode || snap.mode === session.connection.pendingMode) {
@@ -509,6 +526,68 @@ function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number
 function isStaleBusyHeartbeat(session: Session, ts: number): boolean {
   const busyFrom = session.connection.busyFrom;
   return Number.isFinite(busyFrom) && ts < (busyFrom as number);
+}
+
+function monitorFor(session: Session): {
+  busySince: number | null;
+  lastStreamAt: number | null;
+  lastHeartbeatAt: number | null;
+  idleBeats: number;
+} {
+  let state = busyMonitor.get(session);
+  if (!state) {
+    state = {
+      busySince: session.connection.busy ? session.connection.busyFrom : null,
+      lastStreamAt: null,
+      lastHeartbeatAt: null,
+      idleBeats: 0,
+    };
+    busyMonitor.set(session, state);
+  }
+  return state;
+}
+
+function noteBusySignal(session: Session, busy: boolean, ts: number): void {
+  const state = monitorFor(session);
+  if (busy) {
+    if (!session.connection.busy || state.busySince == null) {
+      state.busySince = ts;
+      state.idleBeats = 0;
+      state.lastHeartbeatAt = null;
+    }
+    return;
+  }
+  state.busySince = null;
+  state.idleBeats = 0;
+  state.lastHeartbeatAt = null;
+}
+
+function noteStreamActivity(session: Session, ts: number): void {
+  const state = monitorFor(session);
+  state.lastStreamAt = ts;
+  state.idleBeats = 0;
+}
+
+function shouldClearStuckBusy(session: Session, ts: number): boolean {
+  if (!session.connection.busy) return false;
+  const state = monitorFor(session);
+  const busySince = state.busySince ?? session.connection.busyFrom;
+  if (!Number.isFinite(busySince)) return false;
+  const streamSinceLastBeat =
+    state.lastStreamAt != null &&
+    state.lastStreamAt >= (busySince as number) &&
+    (state.lastHeartbeatAt == null || state.lastStreamAt > state.lastHeartbeatAt) &&
+    state.lastStreamAt <= ts;
+  state.lastHeartbeatAt = ts;
+  if (streamSinceLastBeat) {
+    state.idleBeats = 0;
+    return false;
+  }
+  state.idleBeats += 1;
+  if (state.idleBeats < STUCK_BUSY_HEARTBEATS) return false;
+  state.busySince = null;
+  state.idleBeats = 0;
+  return true;
 }
 
 export interface PersistedSession {
@@ -549,6 +628,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
     id: persisted.id,
     meta: { ...persisted.meta },
     unread: Boolean(persisted.unread),
+    unreadCount: Boolean(persisted.unread) ? 1 : 0,
     lastEventAt: persisted.lastEventAt ?? null,
     transcript: { items: Array.isArray(persisted.transcript?.items) ? persisted.transcript.items.slice(-MAX_ITEMS) : [] },
     history: {
@@ -565,6 +645,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
       mode: persisted.connection?.mode ?? DEFAULT_MODE,
       reconnecting: false,
       settling: false,
+      cold: false,
       lastHeartbeat: null,
       ended: false,
     },

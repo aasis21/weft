@@ -52,7 +52,6 @@ export default function App(): JSX.Element {
         error={error}
         onError={setError}
         onPair={handlePair}
-        onStartDemo={handleDemo}
         onCancel={() => {
           setError(null);
           setAddManual(false);
@@ -95,7 +94,6 @@ export default function App(): JSX.Element {
         error={error}
         onError={setError}
         onPair={handlePair}
-        onStartDemo={handleDemo}
       />
     ) : (
       <LandingScreen

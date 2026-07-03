@@ -20,10 +20,11 @@ vi.mock('@/ui/pairing/WebQrScanner', async () => {
 describe('JoinSessionScreen', () => {
   it('re-arms the inline scanner only after a failed pairing task settles', async () => {
     scannerState.mounts = 0;
-    const onPair = vi
-      .fn<() => Promise<void>>()
-      .mockRejectedValueOnce(new Error('first failed'))
-      .mockResolvedValueOnce(undefined);
+    let rejectFirst: (error: Error) => void = () => undefined;
+    const firstPair = new Promise<void>((_, reject) => {
+      rejectFirst = reject;
+    });
+    const onPair = vi.fn<() => Promise<void>>().mockReturnValueOnce(firstPair).mockResolvedValueOnce(undefined);
 
     render(
       <JoinSessionScreen
@@ -31,10 +32,12 @@ describe('JoinSessionScreen', () => {
         error={null}
         onError={() => undefined}
         onPair={onPair}
-        onStartDemo={() => Promise.resolve()}
       />,
     );
 
+    await waitFor(() => expect(onPair).toHaveBeenCalledTimes(1));
+    expect(scannerState.mounts).toBe(1);
+    rejectFirst(new Error('first failed'));
     await waitFor(() => expect(onPair).toHaveBeenCalledTimes(2));
     expect(onPair).toHaveBeenNthCalledWith(1, 'raw-1');
     expect(onPair).toHaveBeenNthCalledWith(2, 'raw-2');

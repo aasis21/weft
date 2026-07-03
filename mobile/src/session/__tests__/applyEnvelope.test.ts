@@ -43,6 +43,36 @@ describe('session applyEnvelope', () => {
     ]);
   });
 
+  it('clears a stuck busy flag after consecutive unknown heartbeats with no stream activity', () => {
+    const session = makeSession();
+
+    reduceAll(session, [
+      at(B.activity(true), 10),
+      at(B.heartbeat(1, null), 20),
+      at(B.heartbeat(1, null), 30),
+      at(B.heartbeat(1, null), 40),
+    ]);
+
+    expect(session.connection.busy).toBe(false);
+    expect(session.connection.busyFrom).toBe(40);
+  });
+
+  it('keeps busy during unknown heartbeats when stream activity is still arriving', () => {
+    const session = makeSession();
+
+    reduceAll(session, [
+      at(B.activity(true), 10),
+      at(B.assistantDelta('Hel', 'm1'), 15),
+      at(B.heartbeat(1, null), 20),
+      at(B.assistantDelta('lo', 'm1'), 25),
+      at(B.heartbeat(1, null), 30),
+      at(B.assistantDelta('!', 'm1'), 35),
+      at(B.heartbeat(1, null), 40),
+    ]);
+
+    expect(session.connection.busy).toBe(true);
+  });
+
   it('tracks approval requests and dismisses them via the pure helper', () => {
     const session = makeSession();
     const req = at(B.approvalRequest('a1', 'shell', { cmd: 'pwd' }, [{ id: 'allow', label: 'Allow' }]), 20);

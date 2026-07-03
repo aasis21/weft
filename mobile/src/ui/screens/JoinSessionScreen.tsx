@@ -14,7 +14,6 @@ interface JoinSessionScreenProps {
   error: string | null;
   onError(error: string | null): void;
   onPair(raw: string): Promise<void>;
-  onStartDemo(): Promise<void>;
   onCancel?: () => void;
 }
 
@@ -25,7 +24,6 @@ export function JoinSessionScreen({
   error,
   onError,
   onPair,
-  onStartDemo,
   onCancel,
 }: JoinSessionScreenProps): JSX.Element {
   const native = isNativeRuntime();
@@ -96,29 +94,38 @@ export function JoinSessionScreen({
   }, [native, nativeScan]);
 
   const backLabel = hasSessions ? 'Back to sessions' : 'Back';
+  const inApp = hasSessions && !firstRun;
 
   return (
-    <main className="join-shell">
-      <header className="join-head">
-        {onCancel && !firstRun ? (
-          <button type="button" className="pair-back" onClick={onCancel}>
-            ← {backLabel}
-          </button>
-        ) : null}
-        <p className="eyebrow">{hasSessions ? 'Join another session' : 'Pair your phone'}</p>
-        <h2>Point your camera at the laptop QR</h2>
-        <p className="join-hint">
-          Run <code>copilot</code> on your laptop, then frame the pairing QR it prints.
-        </p>
-      </header>
+    <main className={inApp ? 'helm-session join-session' : 'join-shell'}>
+      <div className={inApp ? 'session-join-inner' : undefined}>
+        <header className={inApp ? 'session-join-head' : 'join-head'}>
+          {onCancel && !firstRun ? (
+            <button type="button" className={inApp ? 'session-pair-back' : 'pair-back'} onClick={onCancel}>
+              ← {backLabel}
+            </button>
+          ) : null}
+          <p className={inApp ? 'session-join-kicker' : 'eyebrow'}>
+            {hasSessions ? 'Join another session' : 'Pair your phone'}
+          </p>
+          <h2>Point your camera at the laptop QR</h2>
+          <p className={inApp ? 'session-join-hint' : 'join-hint'}>
+            Run <code>copilot</code> on your laptop, then frame the pairing QR it prints.
+          </p>
+        </header>
 
-      <div className="join-scanner">
+      <div className={inApp ? 'session-join-scanner' : 'join-scanner'}>
         {native ? (
           <div className="native-scan">
             <div className="scanner-reticle" aria-hidden="true">
               <span className="scanner-line" />
             </div>
-            <button type="button" className="primary-action" disabled={busy} onClick={() => void nativeScan()}>
+            <button
+              type="button"
+              className={inApp ? 'session-primary-action' : 'primary-action'}
+              disabled={busy}
+              onClick={() => void nativeScan()}
+            >
               {busy ? 'Scanning…' : 'Scan QR'}
             </button>
           </div>
@@ -146,8 +153,13 @@ export function JoinSessionScreen({
       ) : null}
 
       {debugMode ? (
-        <div className="join-fallback">
-          <button type="button" className="secondary-action" disabled={probeRunning} onClick={() => void runProbe()}>
+        <div className={inApp ? 'session-join-fallback' : 'join-fallback'}>
+          <button
+            type="button"
+            className={inApp ? 'session-secondary-action' : 'secondary-action'}
+            disabled={probeRunning}
+            onClick={() => void runProbe()}
+          >
             {probeRunning ? 'Testing connectivity…' : 'Run connectivity test'}
           </button>
           {probeResult ? (
@@ -159,13 +171,17 @@ export function JoinSessionScreen({
         </div>
       ) : null}
 
-      <div className="join-fallback">
-        <button type="button" className="link-btn debug-toggle" onClick={toggleDebugMode}>
+      <div className={inApp ? 'session-join-fallback' : 'join-fallback'}>
+        <button
+          type="button"
+          className={`${inApp ? 'session-link-btn' : 'link-btn'} debug-toggle`}
+          onClick={toggleDebugMode}
+        >
           Debug mode: {debugMode ? 'On' : 'Off'}
         </button>
         <button
           type="button"
-          className="link-btn"
+          className={inApp ? 'session-link-btn' : 'link-btn'}
           aria-expanded={showManual}
           onClick={() => setShowManual((v) => !v)}
         >
@@ -174,6 +190,7 @@ export function JoinSessionScreen({
         {showManual ? (
           <>
             <textarea
+              className={inApp ? 'session-manual-input' : undefined}
               aria-label="Manual pairing JSON"
               value={manual}
               onChange={(event) => setManual(event.target.value)}
@@ -181,7 +198,7 @@ export function JoinSessionScreen({
             />
             <button
               type="button"
-              className="secondary-action"
+              className={inApp ? 'session-secondary-action' : 'secondary-action'}
               disabled={busy || !manual.trim()}
               onClick={() => void pair(manual)}
             >
@@ -189,9 +206,7 @@ export function JoinSessionScreen({
             </button>
           </>
         ) : null}
-        <button type="button" className="demo-action" disabled={busy} onClick={() => void run(onStartDemo)}>
-          Demo / Simulator
-        </button>
+      </div>
       </div>
     </main>
   );
