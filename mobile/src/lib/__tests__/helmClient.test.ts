@@ -46,7 +46,12 @@ describe('pairSession', () => {
 
   it('closes the transport when client construction fails', async () => {
     const { pairSession } = await import('../helmClient');
-    const transport = { close: shared.close };
+    const transport = {
+      connect: vi.fn(),
+      publish: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      close: shared.close,
+    };
 
     await expect(pairSession('{"v":1}', { transport })).rejects.toThrow('connect failed');
 

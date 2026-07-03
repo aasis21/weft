@@ -1480,3 +1480,22 @@ pre {
   width: min(64%, 240px);
   box-shadow: none;
 }
+
+.scanner-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(100%, 260px);
+}
+
+.scanner-actions .secondary-action {
+  margin-top: 0;
+}
+
+.scanner-actions .link-btn {
+  min-height: 44px;
+  padding: 10px 12px;
+}

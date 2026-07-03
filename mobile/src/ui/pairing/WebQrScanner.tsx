@@ -152,12 +152,9 @@ export function WebQrScanner({
               stopped = true;
               if (!resultDeliveredRef.current) {
                 resultDeliveredRef.current = true;
-                try {
-                  onResultRef.current(raw);
-                } finally {
-                  stopStream();
-                }
+                onResultRef.current(raw);
               }
+              stopStream();
               return;
             }
           } catch {
@@ -219,11 +216,21 @@ export function WebQrScanner({
       ) : null}
       {fatal && variant === 'inline' ? (
         <div className="scanner-actions">
-          <button className="secondary-action" type="button" onClick={retryCamera}>
+          <button
+            className="secondary-action"
+            type="button"
+            aria-label="Retry camera"
+            onClick={retryCamera}
+          >
             Retry camera
           </button>
           {onPasteCode ? (
-            <button className="link-btn" type="button" onClick={onPasteCode}>
+            <button
+              className="link-btn"
+              type="button"
+              aria-label="Paste code instead"
+              onClick={onPasteCode}
+            >
               Paste code instead
             </button>
           ) : null}

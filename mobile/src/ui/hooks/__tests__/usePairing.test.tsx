@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { usePairing } from '../usePairing';
+import { pairingErrorMessage, usePairing } from '../usePairing';
 
 function Harness({
   task,
@@ -18,6 +18,18 @@ function Harness({
 }
 
 describe('usePairing', () => {
+  it('maps known pairing failures to friendly messages', () => {
+    expect(pairingErrorMessage(new SyntaxError('Unexpected token'))).toBe(
+      "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.",
+    );
+    expect(pairingErrorMessage(new Error('wrapped: helm/pairing: invalid pairing payload'))).toBe(
+      "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.",
+    );
+    expect(pairingErrorMessage(new Error('helm/pairing: no ack from laptop'))).toBe(
+      "Couldn't reach your laptop — make sure the terminal shows the QR and try again.",
+    );
+  });
+
   it('maps invalid pasted pairing JSON to a friendly error', async () => {
     const onError = vi.fn();
     render(<Harness task={() => Promise.reject(new SyntaxError('Expected property name'))} onError={onError} />);

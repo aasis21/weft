@@ -24,11 +24,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   });
 }
 
-function pairingErrorMessage(err: unknown): string {
+export function pairingErrorMessage(err: unknown): string {
   if (err instanceof SyntaxError) return INVALID_PAIRING_CODE_MESSAGE;
   if (err instanceof Error) {
-    if (err.message === 'helm/pairing: invalid pairing payload') return INVALID_PAIRING_CODE_MESSAGE;
-    if (err.message === 'helm/pairing: no ack from laptop') return NO_ACK_MESSAGE;
+    if (err.message.includes('helm/pairing: invalid pairing payload')) return INVALID_PAIRING_CODE_MESSAGE;
+    if (err.message.includes('helm/pairing: no ack from laptop')) return NO_ACK_MESSAGE;
     return err.message;
   }
   return 'Pairing failed.';

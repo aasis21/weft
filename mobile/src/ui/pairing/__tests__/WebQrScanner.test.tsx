@@ -33,8 +33,9 @@ describe('WebQrScanner', () => {
 
   it('stops the camera stream immediately after a successful decode', async () => {
     const detect = vi.fn().mockResolvedValue([{ rawValue: 'pairing-raw' }]);
-    const BarcodeDetector = vi.fn().mockImplementation(() => ({ detect }));
-    BarcodeDetector.getSupportedFormats = vi.fn().mockResolvedValue(['qr_code']);
+    const BarcodeDetector = Object.assign(vi.fn().mockImplementation(() => ({ detect })), {
+      getSupportedFormats: vi.fn().mockResolvedValue(['qr_code']),
+    });
     (globalThis as unknown as { BarcodeDetector: unknown }).BarcodeDetector = BarcodeDetector;
     const onResult = vi.fn();
 
@@ -45,8 +46,9 @@ describe('WebQrScanner', () => {
   });
 
   it('falls back to jsQR when BarcodeDetector does not report QR support', async () => {
-    const BarcodeDetector = vi.fn();
-    BarcodeDetector.getSupportedFormats = vi.fn().mockResolvedValue([]);
+    const BarcodeDetector = Object.assign(vi.fn(), {
+      getSupportedFormats: vi.fn().mockResolvedValue([]),
+    });
     (globalThis as unknown as { BarcodeDetector: unknown }).BarcodeDetector = BarcodeDetector;
     vi.spyOn(HTMLVideoElement.prototype, 'videoWidth', 'get').mockReturnValue(2);
     vi.spyOn(HTMLVideoElement.prototype, 'videoHeight', 'get').mockReturnValue(2);

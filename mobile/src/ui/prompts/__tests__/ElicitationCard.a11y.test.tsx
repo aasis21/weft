@@ -13,6 +13,7 @@ describe('ElicitationCard multiselect accessibility', () => {
     const req = {
       requestId: 'req-1',
       message: 'Choose tools',
+      mode: 'form',
       requestedSchema: {
         type: 'object',
         properties: {
@@ -29,8 +30,9 @@ describe('ElicitationCard multiselect accessibility', () => {
 
     const label = screen.getByText('Allowed tools');
     const group = screen.getByRole('group', { name: 'Allowed tools' });
-    expect(label.id).toBeTruthy();
-    expect(group).toHaveAttribute('aria-labelledby', label.id);
+    expect(label).toHaveAttribute('id', 'elicit-req-1-tools');
+    expect(label).not.toHaveAttribute('for');
+    expect(group).toHaveAttribute('aria-labelledby', 'elicit-req-1-tools');
   });
 
   it('restores wizard answers and current step after remounting the same request', async () => {
@@ -38,6 +40,7 @@ describe('ElicitationCard multiselect accessibility', () => {
     const req = {
       requestId: 'req-persist',
       message: 'Fill this out',
+      mode: 'form',
       requestedSchema: {
         type: 'object',
         required: ['project', 'reason'],
