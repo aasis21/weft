@@ -556,6 +556,10 @@ export function SessionScreen({
             onAddSession();
           }}
           onRemove={requestRemove}
+          onGoHome={() => {
+            setDrawerOpen(false);
+            onGoHome();
+          }}
           onClose={() => setDrawerOpen(false)}
         />
       ) : null}

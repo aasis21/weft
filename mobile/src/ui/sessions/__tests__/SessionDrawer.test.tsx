@@ -49,6 +49,7 @@ describe('SessionDrawer', () => {
         onSelect={vi.fn()}
         onAddSession={vi.fn()}
         onRemove={vi.fn()}
+        onGoHome={vi.fn()}
         onClose={vi.fn()}
       />,
     );
@@ -85,6 +86,7 @@ describe('SessionDrawer', () => {
         onSelect={vi.fn()}
         onAddSession={vi.fn()}
         onRemove={vi.fn()}
+        onGoHome={vi.fn()}
         onClose={vi.fn()}
       />,
     );
@@ -104,6 +106,7 @@ describe('SessionDrawer', () => {
         onSelect={onSelect}
         onAddSession={vi.fn()}
         onRemove={onRemove}
+        onGoHome={vi.fn()}
         onClose={vi.fn()}
       />,
     );
@@ -129,6 +132,7 @@ describe('SessionDrawer', () => {
         onSelect={vi.fn()}
         onAddSession={onAddSession}
         onRemove={vi.fn()}
+        onGoHome={vi.fn()}
         onClose={onClose}
       />,
     );
@@ -141,5 +145,24 @@ describe('SessionDrawer', () => {
     expect(onAddSession).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTitle('Close'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('navigates to the landing page from the About Helm link', async () => {
+    const user = userEvent.setup();
+    const onGoHome = vi.fn();
+    render(
+      <SessionDrawer
+        sessions={[session('a', 'Alpha', 1)]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={onGoHome}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '⌂ About Helm' }));
+    expect(onGoHome).toHaveBeenCalledTimes(1);
   });
 });

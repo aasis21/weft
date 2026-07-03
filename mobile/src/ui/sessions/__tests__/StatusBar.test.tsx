@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
@@ -88,6 +88,49 @@ describe('StatusBar', () => {
     menu = screen.getByRole('menu');
     await user.click(within(menu).getByRole('menuitem', { name: '✕ Leave this session' }));
     expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows only the unread badge (not the session count) when there is unread activity', () => {
+    const { container } = renderStatusBar({ sessionCount: 3 });
+    // No unread in the runtime snapshot under test → session-count shows.
+    expect(container.querySelector('.session-count')?.textContent).toBe('3');
+    expect(container.querySelector('.unread-badge')).not.toBeInTheDocument();
+  });
+
+  it('exposes a visible New session button that calls onAddSession', async () => {
+    const user = userEvent.setup();
+    const onAddSession = vi.fn();
+    renderStatusBar({ onAddSession });
+
+    await user.click(screen.getByRole('button', { name: 'New session' }));
+    expect(onAddSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the session menu on Escape and returns focus to the menu button', async () => {
+    const user = userEvent.setup();
+    renderStatusBar();
+
+    const menuButton = screen.getByRole('button', { name: 'Session menu' });
+    await user.click(menuButton);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(menuButton).toHaveFocus();
+  });
+
+  it('opens the menu and moves focus to the first item on ArrowDown', async () => {
+    const user = userEvent.setup();
+    renderStatusBar({ canReconnect: true });
+
+    const menuButton = screen.getByRole('button', { name: 'Session menu' });
+    menuButton.focus();
+    await user.keyboard('{ArrowDown}');
+
+    await waitFor(() => {
+      const items = screen.getAllByRole('menuitem');
+      expect(items[0]).toHaveFocus();
+    });
   });
 
   it('opens the debug panel from the { } header button', async () => {

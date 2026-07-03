@@ -1133,6 +1133,18 @@
 }
 .drawer-add:hover { background: var(--accent-soft); }
 
+.drawer-home {
+  margin-top: 8px;
+  padding: 11px;
+  border: 1px solid var(--border, color-mix(in srgb, var(--fg) 14%, transparent));
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fg-muted, var(--fg));
+  font: inherit;
+  font-weight: 600;
+}
+.drawer-home:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+
 @media (prefers-reduced-motion: reduce) {
   .row,
   .bar-menu,

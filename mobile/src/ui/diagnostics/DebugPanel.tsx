@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { DebugEvent } from '@/lib/eventLog';
 
@@ -6,6 +6,13 @@ interface DebugPanelProps {
   events: DebugEvent[];
   title: string;
   onClose(): void;
+}
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function isFocusable(element: HTMLElement): boolean {
+  return element.tabIndex >= 0 && !element.hasAttribute('disabled') && element.getClientRects().length > 0;
 }
 
 function fmtTime(ts: number): string {
@@ -28,8 +35,67 @@ export function DebugPanel({ events, title, onClose }: DebugPanelProps): JSX.Ele
   const ordered = useMemo(() => [...events].reverse(), [events]);
   const toggle = (id: string): void => setExpanded((m) => ({ ...m, [id]: !m[id] }));
 
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const active = document.activeElement;
+    triggerRef.current = active instanceof HTMLElement ? active : null;
+
+    const getFocusable = (): HTMLElement[] => {
+      if (!overlayRef.current) return [];
+      return Array.from(overlayRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isFocusable);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !overlayRef.current) return;
+      const focusable = getFocusable();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        overlayRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const current = document.activeElement;
+      if (!overlayRef.current.contains(current)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && current === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && current === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    closeButtonRef.current?.focus();
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      const trigger = triggerRef.current;
+      if (trigger && document.contains(trigger) && isFocusable(trigger)) trigger.focus();
+    };
+  }, []);
+
   return (
-    <div className="debug-overlay" role="dialog" aria-modal="true" aria-label="Debug events">
+    <div
+      className="debug-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Debug events"
+      ref={overlayRef}
+      tabIndex={-1}
+    >
       <div className="debug-panel">
         <header className="debug-head">
           <div className="debug-head-text">
@@ -41,6 +107,7 @@ export function DebugPanel({ events, title, onClose }: DebugPanelProps): JSX.Ele
           <button
             type="button"
             className="icon-btn debug-close"
+            ref={closeButtonRef}
             onClick={onClose}
             aria-label="Close debug events"
             title="Close"

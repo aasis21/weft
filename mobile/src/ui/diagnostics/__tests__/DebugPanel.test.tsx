@@ -85,4 +85,15 @@ describe('DebugPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Close debug events' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('closes on Escape and focuses the close button on open', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<DebugPanel events={[]} title="t" onClose={onClose} />);
+
+    expect(screen.getByRole('button', { name: 'Close debug events' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

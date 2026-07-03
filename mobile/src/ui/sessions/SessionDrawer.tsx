@@ -7,6 +7,7 @@ interface SessionDrawerProps {
   onSelect(channelId: string): void;
   onAddSession(): void;
   onRemove(channelId: string): void;
+  onGoHome(): void;
   onClose(): void;
 }
 
@@ -45,6 +46,7 @@ export function SessionDrawer({
   onSelect,
   onAddSession,
   onRemove,
+  onGoHome,
   onClose,
 }: SessionDrawerProps): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null);
@@ -214,6 +216,10 @@ export function SessionDrawer({
 
         <button className="drawer-add" type="button" onClick={onAddSession}>
           ＋ Join another Copilot session
+        </button>
+
+        <button className="drawer-home" type="button" onClick={onGoHome}>
+          ⌂ About Helm
         </button>
       </aside>
       <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />

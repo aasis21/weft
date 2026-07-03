@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { JSX } from 'react';
+import type { JSX, KeyboardEvent } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
 
@@ -43,6 +43,7 @@ export function StatusBar({
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const unreadCount = snapshot.sessions.filter((session) => session.unread && session.meta.channelId !== snapshot.activeId).length;
   // While the agent is working the header reads "Working…" with a live pulse, so a connected but idle
@@ -56,9 +57,40 @@ export function StatusBar({
     const onDoc = (e: MouseEvent): void => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [menuOpen]);
+
+  const focusMenuItem = (direction: 1 | -1): void => {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []);
+    if (!items.length) return;
+    const index = items.findIndex((el) => el === document.activeElement);
+    items[(index + direction + items.length) % items.length]?.focus();
+  };
+
+  const onMenuButtonKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    setMenuOpen(true);
+    window.requestAnimationFrame(() => focusMenuItem(event.key === 'ArrowDown' ? 1 : -1));
+  };
+
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      focusMenuItem(event.key === 'ArrowDown' ? 1 : -1);
+    }
+  };
 
   return (
     <header className="status-bar">
@@ -73,8 +105,11 @@ export function StatusBar({
           <span />
           <span />
         </span>
-        {sessionCount > 1 ? <span className="session-count">{sessionCount}</span> : null}
-        {unreadCount > 0 ? <span className="unread-badge">{unreadCount}</span> : null}
+        {unreadCount > 0 ? (
+          <span className="unread-badge">{unreadCount}</span>
+        ) : sessionCount > 1 ? (
+          <span className="session-count">{sessionCount}</span>
+        ) : null}
       </button>
 
       <div className="status-id">
@@ -84,6 +119,16 @@ export function StatusBar({
           {statusLabel}
         </span>
       </div>
+
+      <button
+        className="icon-btn add-btn"
+        type="button"
+        onClick={onAddSession}
+        aria-label="New session"
+        title="Join another session"
+      >
+        ＋
+      </button>
 
       <button
         className="icon-btn home-btn"
@@ -109,15 +154,17 @@ export function StatusBar({
         <button
           className="icon-btn menu-btn"
           type="button"
+          ref={menuButtonRef}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
+          onKeyDown={onMenuButtonKeyDown}
           aria-label="Session menu"
         >
           ⋯
         </button>
         {menuOpen ? (
-          <div className="bar-menu" role="menu">
+          <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
             <button
               type="button"
               role="menuitem"
