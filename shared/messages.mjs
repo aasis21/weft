@@ -48,7 +48,7 @@ export const SUBTYPE = Object.freeze({
     USER_MESSAGE: "user_message",
   }),
   PROMPT: Object.freeze({ PROMPT: "prompt" }),
-  APPROVAL: Object.freeze({ REQUEST: "request" }),
+  APPROVAL: Object.freeze({ REQUEST: "request", COMPLETE: "complete" }),
   DECISION: Object.freeze({ APPROVAL_DECISION: "approval_decision" }),
   ELICITATION: Object.freeze({ REQUEST: "request", COMPLETE: "complete" }),
   ELICITATION_RESPONSE: Object.freeze({ RESPONSE: "response" }),
@@ -136,6 +136,14 @@ export const approvalRequest = (requestId, toolName, toolArgs, options) =>
   });
 export const approvalDecision = (requestId, optionId, raw) =>
   envelope(EVENT_TYPE.DECISION, SUBTYPE.DECISION.APPROVAL_DECISION, { requestId, optionId, raw });
+/**
+ * Ext -> phone notice that an approval was resolved elsewhere (timed out, decided on another device,
+ * or the relay stopped); dismiss any open banner for it. The approval analogue of elicitationComplete
+ * — permissions have no native completion event, so the relay synthesizes this on resolve. `decision`
+ * is informational (the chosen optionId, "timeout", ...); the phone only needs the requestId.
+ */
+export const approvalComplete = (requestId, decision) =>
+  envelope(EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.COMPLETE, { requestId, decision });
 
 // ---- factories (elicitation / ask_user) ------------------------------------
 /**

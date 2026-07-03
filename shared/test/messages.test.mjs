@@ -21,6 +21,7 @@ import {
   prompt,
   approvalRequest,
   approvalDecision,
+  approvalComplete,
   channelUp,
   sessionMeta,
   channelDown,
@@ -135,6 +136,13 @@ test("approvalDecision echoes the chosen option", () => {
   assert.equal(m.msg.requestId, "req-1");
   assert.equal(m.msg.optionId, "allow");
   assert.deepEqual(m.msg.raw, { extra: 1 });
+});
+
+test("approvalComplete carries the requestId and terminating decision", () => {
+  const m = approvalComplete("req-1", "timeout");
+  assertEnvelope(m, EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.COMPLETE);
+  assert.equal(m.msg.requestId, "req-1");
+  assert.equal(m.msg.decision, "timeout");
 });
 
 // ---- control ---------------------------------------------------------------
@@ -299,6 +307,7 @@ test("isValidEnvelope accepts every factory and rejects malformed input", () => 
     prompt("p"),
     approvalRequest("r", "t", {}, []),
     approvalDecision("r", "o"),
+    approvalComplete("r", "timeout"),
     channelUp("/cwd", "T"),
     sessionMeta("T"),
     channelDown("bye"),

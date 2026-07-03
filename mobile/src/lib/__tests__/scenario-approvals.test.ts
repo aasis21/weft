@@ -51,4 +51,22 @@ describe('scenario: approvals', () => {
     expect(timeline.approvals.map((a) => a.requestId)).toEqual(['r1']);
     expect(timeline.approvalErrors.r1).toContain('offline');
   });
+
+  it('dismisses an open approval when the extension echoes a completion (#78)', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    client.emit(
+      B.approvalRequest('r1', 'write_file', { path: 'a.ts' }, [
+        { id: 'allow', label: 'Allow' },
+        { id: 'deny', label: 'Deny' },
+      ]),
+    );
+    await h!.flush();
+    expect(h!.active()!.timeline.approvals.map((a) => a.requestId)).toEqual(['r1']);
+
+    // The CLI resolved r1 without this phone (timed out / decided on another device); the relay echoes it.
+    client.emit(B.approvalComplete('r1', 'timeout'));
+    await h!.flush();
+    expect(h!.active()!.timeline.approvals).toHaveLength(0);
+  });
 });

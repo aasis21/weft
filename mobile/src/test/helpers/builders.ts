@@ -23,6 +23,7 @@ export {
   prompt,
   approvalRequest,
   approvalDecision,
+  approvalComplete,
   elicitationRequest,
   elicitationResponse,
   elicitationComplete,

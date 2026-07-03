@@ -12,6 +12,7 @@ import {
   activity,
   userMessage,
   approvalRequest,
+  approvalComplete,
   elicitationRequest,
   elicitationComplete,
   channelUp,
@@ -89,6 +90,8 @@ export function createPermissionRelay({
     pending.delete(decision.requestId);
     clearTimeout(entry.timer);
     entry.resolve(permissionResultFromDecision(decision));
+    // Echo a completion so any OTHER device still showing this banner dismisses it too.
+    void channel.send(approvalComplete(decision.requestId, decision.optionId)).catch(() => {});
   });
 
   async function onPermissionRequest(request, invocation = {}) {
@@ -109,6 +112,8 @@ export function createPermissionRelay({
           `Helm: approval request timed out after ${approvalTimeoutMs}ms; denying ${toolName}.`,
           { level: "warning", ephemeral: false },
         );
+        // Tell the phone the request is gone so its banner doesn't linger as a zombie (#78).
+        void channel.send(approvalComplete(requestId, "timeout")).catch(() => {});
         resolve({
           kind: "reject",
           feedback: "Helm approval timed out",

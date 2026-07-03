@@ -178,6 +178,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         const req = message.msg;
         session.requests.approvals = [...session.requests.approvals.filter((a) => a.requestId !== req.requestId), req];
         session.requests.approvalErrors = omitKey(session.requests.approvalErrors, req.requestId);
+      } else if (message.eventSubtype === SUBTYPE.APPROVAL.COMPLETE) {
+        dismissApproval(session, message.msg.requestId);
       }
       return;
     case EVENT_TYPE.ELICITATION:

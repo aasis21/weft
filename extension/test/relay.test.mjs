@@ -523,6 +523,27 @@ test("a permission timeout fails closed with the native reject kind", async () =
   try {
     const result = await relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
     assert.equal(result.kind, "reject");
+    // #78: the phone must be told the request is gone so its banner doesn't linger as a zombie.
+    const done = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.COMPLETE);
+    assert.ok(done, "expected an approval_complete after the timeout");
+    assert.equal(done.msg.decision, "timeout");
+  } finally {
+    relay.close();
+  }
+});
+
+test("a phone decision echoes an approval_complete so other devices dismiss the banner", async () => {
+  const channel = makeFakeChannel();
+  const relay = createPermissionRelay({ channel });
+  try {
+    const pending = relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
+    await flush();
+    const req = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
+    channel.emit(EVENT_TYPE.DECISION, approvalDecision(req.msg.requestId, "approved"));
+    await pending;
+    const done = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.COMPLETE);
+    assert.ok(done, "expected an approval_complete after the decision");
+    assert.equal(done.msg.requestId, req.msg.requestId);
   } finally {
     relay.close();
   }

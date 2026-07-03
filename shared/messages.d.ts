@@ -42,7 +42,7 @@ export const SUBTYPE: {
     readonly USER_MESSAGE: "user_message";
   };
   readonly PROMPT: { readonly PROMPT: "prompt" };
-  readonly APPROVAL: { readonly REQUEST: "request" };
+  readonly APPROVAL: { readonly REQUEST: "request"; readonly COMPLETE: "complete" };
   readonly DECISION: { readonly APPROVAL_DECISION: "approval_decision" };
   readonly ELICITATION: { readonly REQUEST: "request"; readonly COMPLETE: "complete" };
   readonly ELICITATION_RESPONSE: { readonly RESPONSE: "response" };
@@ -145,6 +145,11 @@ export interface ApprovalDecisionMsg {
   requestId: string;
   optionId: string;
   raw?: unknown;
+}
+export interface ApprovalCompleteMsg {
+  requestId: string;
+  /** How it resolved elsewhere: the chosen optionId, "timeout", or "stopped". Informational only. */
+  decision?: string;
 }
 /** JSON Schema for a form-mode elicitation: an object whose properties are the fields. */
 export interface ElicitationSchema {
@@ -258,6 +263,7 @@ export type UserMessageEcho = Envelope<"stream", "user_message", UserMessageMsg>
 export type PromptMessage = Envelope<"prompt", "prompt", PromptMsg>;
 export type ApprovalRequest = Envelope<"approval", "request", ApprovalRequestMsg>;
 export type ApprovalDecision = Envelope<"decision", "approval_decision", ApprovalDecisionMsg>;
+export type ApprovalComplete = Envelope<"approval", "complete", ApprovalCompleteMsg>;
 export type ElicitationRequest = Envelope<"elicitation", "request", ElicitationRequestMsg>;
 export type ElicitationComplete = Envelope<"elicitation", "complete", ElicitationCompleteMsg>;
 export type ElicitationResponse = Envelope<"elicitation_response", "response", ElicitationResponseMsg>;
@@ -332,6 +338,10 @@ export function approvalDecision(
   optionId: string,
   raw?: unknown
 ): ApprovalDecision;
+export function approvalComplete(
+  requestId: string,
+  decision?: string
+): ApprovalComplete;
 export function elicitationRequest(
   requestId: string,
   message: string,
