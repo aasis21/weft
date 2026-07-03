@@ -686,6 +686,14 @@
   outline: none;
 }
 .composer-input::placeholder { color: var(--fg-faint); }
+/* The outer .composer-shell already shows focus (border + ring) on focus-within; suppress the
+   generic textarea:focus/:focus-visible border+box-shadow here so it doesn't double up. */
+.composer-input:focus,
+.composer-input:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
 .send-btn {
   flex: 0 0 auto;
   display: grid;
