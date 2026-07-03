@@ -74,6 +74,7 @@ export function VoiceModeOverlay({
     offset: latestAssistant?.text.length ?? 0,
   });
   const sawReplyRef = useRef(false);
+  const autoStartedRef = useRef(false);
   const stateRef = useRef<VoiceState>('ready');
   stateRef.current = state;
 
@@ -153,6 +154,17 @@ export function VoiceModeOverlay({
   useEffect(() => {
     void getVoiceAutoRelisten().then(setAutoRelisten);
   }, []);
+
+  // Hands-free entry: begin listening the moment Voice Mode opens (matches vox/Claude/Gemini voice
+  // UX) instead of parking on "Tap the orb to talk". Fires once, and only when the mic is usable and
+  // no turn is already in flight — if opened mid-turn it holds off until the agent is idle. After the
+  // first listen, subsequent turns are governed by the auto-relisten setting (#169).
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (disabled || !inputSupported || agentBusy) return;
+    autoStartedRef.current = true;
+    startListening();
+  }, [disabled, inputSupported, agentBusy, startListening]);
 
   useEffect(() => {
     closeButtonRef.current?.focus();

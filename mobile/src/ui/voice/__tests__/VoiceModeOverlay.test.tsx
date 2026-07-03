@@ -39,6 +39,19 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe('VoiceModeOverlay hands-free entry', () => {
+  it('auto-starts listening on open when the mic is usable and no turn is in flight', () => {
+    const { panel } = renderOverlay({ agentBusy: false, toolActive: false });
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+    expect(panel.getAttribute('data-state')).toBe('listening');
+  });
+
+  it('does not auto-start while a turn is already in flight (opened mid-turn)', () => {
+    renderOverlay({ agentBusy: true, toolActive: false });
+    expect(speechInput.start).not.toHaveBeenCalled();
+  });
+});
+
 describe('VoiceModeOverlay thinking vs working (#177)', () => {
   it('shows "Thinking…" with a distinct glyph while the agent reasons (no tool running)', () => {
     const { panel, orb } = renderOverlay({ agentBusy: true, toolActive: false });
