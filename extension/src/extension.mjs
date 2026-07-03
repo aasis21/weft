@@ -265,7 +265,7 @@ async function attachForPeer(transport, { key, peer }) {
     key,
     identity: {
       channelId,
-      sessionId: session.sessionId || channelId,
+      sessionId: session.sessionId || "unknown-session",
       senderId: "copilot",
       senderName: "Copilot",
     },

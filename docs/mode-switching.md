@@ -262,11 +262,14 @@ setting.
 - `session.send({ prompt: "/plan" | "/autopilot" | "/interactive" })` is only a
   best-effort fallback. It depends on real TUI slash-command behavior and may
   send a normal prompt if the command is unsupported.
-- Switching to `plan` can trigger plan-approval flows. The SDK event types
-  include `exit_plan_mode.requested` / `exit_plan_mode.completed`, but the
-  generated RPC surface inspected here did not expose a matching
-  `respondToExitPlanMode()` helper, so phone approval of plan exit should be
-  verified separately.
+- Switching to `plan` can trigger plan-approval flows. In the currently
+  installed CLI SDK (`1.0.69-0`), plan exit is **not** delivered through the
+  `onPermissionRequest` hook. It is a separate
+  `exit_plan_mode.requested` / `exit_plan_mode.completed` session event flow.
+  The response path is exposed as `session.rpc.ui.handlePendingExitPlanMode(...)`
+  (with lower-level `respondToExitPlanMode(...)` types also present), so Helm
+  relays that event to the phone as an approval banner and forwards the selected
+  action back through the UI RPC.
 - If `session.rpc.mode.set` is unavailable or fails consistently, the honest
   fallback is to tell the phone that runtime switching is unsupported by this
   host and require the user to switch mode in the terminal or restart in the
@@ -278,7 +281,10 @@ setting.
    `session.mode.set` values from a child extension process?
 2. While a turn is actively running, does `mode.set` apply immediately, apply to
    the next turn, or fail until idle?
-3. In plan mode, what exact event/RPC flow should Helm use to approve the
-   generated plan from the phone?
+3. Answered for SDK `1.0.69-0`: listen for `exit_plan_mode.requested`, render
+   its actions plus the "Suggest changes" decline path, and answer with
+   `session.rpc.ui.handlePendingExitPlanMode({ requestId, response })`.
+   NEEDS-REAL-CLI-VERIFICATION: confirm the terminal's exact action set/labels
+   and the runtime's behavior for "Suggest changes" from a paired phone.
 4. Are `/plan`, `/autopilot`, and `/interactive` real user-facing slash commands
    in the target CLI build? Treat them as fallback only until tested.

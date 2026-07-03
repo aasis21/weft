@@ -23,6 +23,7 @@ import {
 import {
   attachRelay,
   createElicitationRelay,
+  createExitPlanModeRelay,
   createPermissionRelay,
   createPromptOriginTracker,
 } from "../src/relay.mjs";
@@ -68,6 +69,7 @@ function makeFakeSession(sessionId = "unknown-session") {
   const prompts = [];
   const abortCalls = [];
   const elicitationResponses = [];
+  const exitPlanResponses = [];
   const interestCalls = [];
   return {
     sessionId,
@@ -75,6 +77,7 @@ function makeFakeSession(sessionId = "unknown-session") {
     prompts,
     abortCalls,
     elicitationResponses,
+    exitPlanResponses,
     interestCalls,
     rpc: {
       async abort(params) {
@@ -85,6 +88,10 @@ function makeFakeSession(sessionId = "unknown-session") {
         // The real runtime answers a pending elicitation here (not respondToElicitation).
         async handlePendingElicitation({ requestId, result }) {
           elicitationResponses.push({ requestId, result });
+          return { success: true };
+        },
+        async handlePendingExitPlanMode({ requestId, response }) {
+          exitPlanResponses.push({ requestId, response });
           return { success: true };
         },
       },
@@ -124,6 +131,65 @@ async function withRelay(run) {
     await relay.stop("test", { closeTransport: false });
   }
 }
+
+test("relays exit_plan_mode.requested as a three-option approval and answers via the UI RPC", async () => {
+  const channel = makeFakeChannel();
+  const session = makeFakeSession();
+  const relay = createExitPlanModeRelay({ session, channel, approvalTimeoutMs: 10_000_000 });
+  try {
+    await relay.offer({
+      requestId: "plan-1",
+      summary: "Implement the approved plan.",
+      actions: ["exit_only", "autopilot"],
+      recommendedAction: "autopilot",
+    });
+    const req = channel.sent.find(
+      (m) => m.eventType === EVENT_TYPE.APPROVAL && m.eventSubtype === SUBTYPE.APPROVAL.REQUEST,
+    );
+    assert.ok(req, "expected a plan-exit approval request to be sent to the phone");
+    assert.equal(req.msg.toolName, "Exit Plan Mode");
+    assert.deepEqual(
+      req.msg.options.map((o) => ({ id: o.id, label: o.label, recommended: o.recommended })),
+      [
+        { id: "exit_only", label: "Exit plan mode", recommended: false },
+        { id: "autopilot", label: "Accept plan and build", recommended: true },
+        { id: "suggest_changes", label: "Suggest changes", recommended: false },
+      ],
+    );
+
+    channel.emit(EVENT_TYPE.DECISION, approvalDecision("plan-1", "autopilot"));
+    await flush();
+    assert.deepEqual(session.exitPlanResponses, [
+      {
+        requestId: "plan-1",
+        response: { approved: true, selectedAction: "autopilot", autoApproveEdits: true },
+      },
+    ]);
+  } finally {
+    relay.close();
+  }
+});
+
+test("attachRelay forwards exit_plan_mode events into the approval timeline", async () => {
+  await withRelay(async ({ channel, session }) => {
+    session.emitEvent({
+      type: "exit_plan_mode.requested",
+      id: "plan-event",
+      data: {
+        requestId: "plan-2",
+        summary: "Ready",
+        actions: ["exit_only", "autopilot"],
+        recommendedAction: "autopilot",
+      },
+    });
+    await flush();
+    const req = channel.sent.find(
+      (m) => m.eventType === EVENT_TYPE.APPROVAL && m.eventSubtype === SUBTYPE.APPROVAL.REQUEST,
+    );
+    assert.ok(req, "expected exit_plan_mode.requested to relay as an approval");
+    assert.equal(req.msg.options.length, 3);
+  });
+});
 
 // ---- pure tracker ----------------------------------------------------------
 

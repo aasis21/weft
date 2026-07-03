@@ -269,6 +269,110 @@ export function createElicitationRelay({
   return { offer, complete, snapshotPending, close };
 }
 
+/**
+ * Relays the SDK's separate `exit_plan_mode.requested` event to the phone using Helm's
+ * existing approval envelope, then answers through the runtime UI RPC.
+ */
+export function createExitPlanModeRelay({
+  session,
+  channel,
+  approvalTimeoutMs = approvalTimeoutFromEnv(),
+  logger = () => {},
+} = {}) {
+  if (!channel) throw new Error("helm relay: channel is required");
+  const pending = new Map();
+  const respond = pickExitPlanModeResponder(session, logger);
+  let releaseInterest = () => {};
+
+  void registerInterestForEvent(session, "exit_plan_mode.requested", logger).then((release) => {
+    releaseInterest = release;
+  });
+
+  const unsubscribe = channel.onEvent(EVENT_TYPE.DECISION, (msg) => {
+    if (msg?.eventSubtype !== SUBTYPE.DECISION.APPROVAL_DECISION) return;
+    const decision = msg.msg;
+    const entry = pending.get(decision.requestId);
+    if (!entry) return;
+    clearPending(decision.requestId);
+    void channel.send(approvalComplete(decision.requestId, decision.optionId)).catch(() => {});
+    if (!respond) {
+      logger(
+        "Helm: this CLI build can't accept remote plan-exit answers (handlePendingExitPlanMode unavailable).",
+        { level: "warning", ephemeral: false },
+      );
+      return;
+    }
+    void Promise.resolve(respond(decision.requestId, exitPlanResponseFromOption(decision.optionId))).then(
+      (accepted) => {
+        if (accepted === false) {
+          logger("Helm: plan-exit request was already answered before the phone's reply arrived.", {
+            level: "info",
+          });
+        }
+      },
+    );
+  });
+
+  async function offer(data = {}) {
+    const requestId = data.requestId;
+    if (!requestId) return;
+    const options = exitPlanOptions(data);
+    const expiresAt = Date.now() + approvalTimeoutMs;
+    const payload = approvalRequest(
+      requestId,
+      "Exit Plan Mode",
+      {
+        summary: data.summary ?? "",
+        ...(typeof data.planContent === "string" && data.planContent ? { planContent: data.planContent } : {}),
+      },
+      options,
+      { timeoutMs: approvalTimeoutMs, expiresAt },
+    );
+    await channel.send(payload);
+    const timer = setTimeout(() => {
+      clearPending(requestId);
+      respond?.(requestId, { approved: false, feedback: "Helm plan-exit approval timed out" });
+      void channel.send(approvalComplete(requestId, "timeout")).catch(() => {});
+      logger(`Helm: plan-exit request unanswered after ${approvalTimeoutMs}ms; declined.`, {
+        level: "warning",
+        ephemeral: false,
+      });
+    }, approvalTimeoutMs);
+    timer.unref?.();
+    pending.set(requestId, { timer, payload });
+  }
+
+  async function complete(data = {}) {
+    const requestId = data.requestId;
+    if (!requestId) return;
+    clearPending(requestId);
+    await channel.send(approvalComplete(requestId, data.selectedAction ?? (data.approved ? "approved" : "rejected")));
+  }
+
+  function snapshotPending() {
+    return [...pending.values()].map((entry) => entry.payload?.msg).filter(Boolean);
+  }
+
+  function clearPending(requestId) {
+    const entry = pending.get(requestId);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    pending.delete(requestId);
+  }
+
+  function close() {
+    unsubscribe?.();
+    for (const requestId of [...pending.keys()]) clearPending(requestId);
+    try {
+      releaseInterest?.();
+    } catch {
+      // Releasing interest must never break shutdown.
+    }
+  }
+
+  return { offer, complete, snapshotPending, close };
+}
+
 export async function attachRelay({
   session,
   channel,
@@ -293,6 +397,7 @@ export async function attachRelay({
     permissionRelay ??
     createPermissionRelay({ channel, approvalTimeoutMs, logger });
   const elicitations = createElicitationRelay({ session, channel, logger });
+  const exitPlans = createExitPlanModeRelay({ session, channel, approvalTimeoutMs, logger });
   // In-memory recent-turns buffer: captures FULL assistant text live (the CLI store drops it for
   // long/multi-tool turns), so a connecting phone can backfill recent turns at full fidelity. Seeded
   // best-effort from the store so turns from before this extension started still show.
@@ -353,7 +458,7 @@ export async function attachRelay({
 
   if (typeof session.on === "function") {
     unsubscribers.push(
-      session.on((event) => void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, turnBuffer)),
+      session.on((event) => void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer)),
     );
   }
 
@@ -410,7 +515,7 @@ export async function attachRelay({
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
-        void serveStateSnapshot({ session, sessionId, approvals, elicitations, sendSafe, logger });
+        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger });
       }
     }),
   );
@@ -422,6 +527,7 @@ export async function attachRelay({
     for (const unsubscribe of unsubscribers.splice(0)) unsubscribe?.();
     approvals.close?.();
     elicitations.close?.();
+    exitPlans.close?.();
     // On a re-pair we keep the shared transport open for the next phone, so we neither announce a
     // session end (the new phone uses a different key and couldn't read it) nor close the channel.
     if (closeTransport) {
@@ -433,7 +539,7 @@ export async function attachRelay({
   return { stop, onPermissionRequest: approvals.onPermissionRequest };
 }
 
-async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, turnBuffer) {
+async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer) {
   if (!event?.type) return;
   const data = event.data ?? {};
   switch (event.type) {
@@ -454,6 +560,14 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, t
     case "elicitation.completed":
       // Answered here, at the terminal, or on another device — dismiss the phone's form.
       if (elicitations) await elicitations.complete(data);
+      break;
+    case "exit_plan_mode.requested":
+      // Plan-exit approval is not a permission hook; the SDK emits a distinct event.
+      if (exitPlans) await exitPlans.offer(data);
+      break;
+    case "exit_plan_mode.completed":
+      // Answered here, at the terminal, or on another device — dismiss the phone banner.
+      if (exitPlans) await exitPlans.complete(data);
       break;
     case "assistant.message":
       turnBuffer?.recordAssistant(data.content ?? "", event.ts ?? Date.now(), data.messageId ?? event.id);
@@ -536,7 +650,7 @@ async function serveRecentTurns(turnBuffer, req, sendSafe, logger) {
  * or MID-TURN join immediately shows the truth (working vs ready, current mode, latest turn cursor)
  * and re-renders any prompts still pending on the terminal — instead of waiting for the next event.
  */
-async function serveStateSnapshot({ session, sessionId, approvals, elicitations, sendSafe, logger }) {
+async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger }) {
   try {
     const [activity, mode, latestTurnIndex] = await Promise.all([
       readSessionActivity(session),
@@ -550,7 +664,10 @@ async function serveStateSnapshot({ session, sessionId, approvals, elicitations,
         abortable: activity?.abortable ?? false,
         mode,
         latestTurnIndex,
-        approvals: approvals?.snapshotPending?.() ?? [],
+        approvals: [
+          ...(approvals?.snapshotPending?.() ?? []),
+          ...(exitPlans?.snapshotPending?.() ?? []),
+        ],
         elicitations: elicitations?.snapshotPending?.() ?? [],
       }),
     );
@@ -691,6 +808,54 @@ function inferOptions(request = {}) {
   ];
 }
 
+const EXIT_PLAN_DEFAULT_ACTIONS = ["exit_only", "autopilot"];
+const EXIT_PLAN_REVISE_OPTION = "suggest_changes";
+
+function exitPlanOptions(data = {}) {
+  const actions = Array.isArray(data.actions) && data.actions.length ? data.actions : EXIT_PLAN_DEFAULT_ACTIONS;
+  const options = [];
+  const seen = new Set();
+  for (const action of actions) {
+    if (typeof action !== "string" || seen.has(action)) continue;
+    seen.add(action);
+    options.push({
+      id: action,
+      label: labelExitPlanAction(action),
+      recommended: action === data.recommendedAction,
+    });
+  }
+  if (!seen.has(EXIT_PLAN_REVISE_OPTION)) {
+    options.push({ id: EXIT_PLAN_REVISE_OPTION, label: "Suggest changes", recommended: false });
+  }
+  return options;
+}
+
+function labelExitPlanAction(action) {
+  switch (action) {
+    case "exit_only":
+      return "Exit plan mode";
+    case "interactive":
+    case "autopilot":
+      return "Accept plan and build";
+    case "autopilot_fleet":
+      return "Accept plan, build, and start fleet";
+    default:
+      return action.replace(/_/g, " ");
+  }
+}
+
+function exitPlanResponseFromOption(optionId) {
+  if (optionId === EXIT_PLAN_REVISE_OPTION) {
+    return { approved: false, feedback: "Please revise the plan." };
+  }
+  const selectedAction = typeof optionId === "string" ? optionId : "interactive";
+  return {
+    approved: true,
+    selectedAction,
+    autoApproveEdits: selectedAction === "autopilot" || selectedAction === "autopilot_fleet",
+  };
+}
+
 // The Copilot CLI native runtime (>= 1.0.66) requires a permission-request hook to
 // resolve to one of these kebab-case decision kinds. The older SDK-style kinds
 // ("approved" / "denied-interactively-by-user" / "denied-by-permission-request-hook")
@@ -778,16 +943,49 @@ function pickElicitationResponder(session, logger = () => {}) {
   return null;
 }
 
+function pickExitPlanModeResponder(session, logger = () => {}) {
+  for (const ui of [session?.rpc?.ui, session?.ui]) {
+    const fn = ui?.handlePendingExitPlanMode;
+    if (typeof fn !== "function") continue;
+    return async (requestId, response) => {
+      try {
+        const outcome = await fn.call(ui, { requestId, response });
+        return outcome?.success !== false;
+      } catch (err) {
+        logger(`Helm: handlePendingExitPlanMode failed: ${err?.message ?? err}`, { level: "warning" });
+        return false;
+      }
+    };
+  }
+  for (const owner of [session, session?.rpc]) {
+    const fn = owner?.respondToExitPlanMode;
+    if (typeof fn !== "function") continue;
+    return async (requestId, response) => {
+      try {
+        return (await fn.call(owner, requestId, response)) !== false;
+      } catch (err) {
+        logger(`Helm: respondToExitPlanMode failed: ${err?.message ?? err}`, { level: "warning" });
+        return false;
+      }
+    };
+  }
+  return null;
+}
+
 /**
  * Best-effort `registerInterest("elicitation.requested")` so the runtime counts this consumer
  * as a listener and routes the prompt to us (SDK long-poll consumers aren't auto-observed).
  * Returns a releaser thunk; a no-op when the host doesn't expose the interest API.
  */
 async function registerElicitationInterest(session, logger = () => {}) {
+  return registerInterestForEvent(session, "elicitation.requested", logger);
+}
+
+async function registerInterestForEvent(session, eventType, logger = () => {}) {
   for (const owner of [session?.rpc, session]) {
     if (typeof owner?.registerInterest !== "function") continue;
     try {
-      const result = await owner.registerInterest({ eventType: "elicitation.requested" });
+      const result = await owner.registerInterest({ eventType });
       const handle = result?.handle;
       return () => {
         if (handle == null || typeof owner.releaseInterest !== "function") return;
@@ -798,7 +996,7 @@ async function registerElicitationInterest(session, logger = () => {}) {
         }
       };
     } catch (err) {
-      logger(`Helm: registerInterest(elicitation.requested) failed; continuing: ${err?.message ?? err}`, {
+      logger(`Helm: registerInterest(${eventType}) failed; continuing: ${err?.message ?? err}`, {
         level: "info",
       });
       return () => {};
