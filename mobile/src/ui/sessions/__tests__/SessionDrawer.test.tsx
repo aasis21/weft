@@ -22,6 +22,7 @@ function session(
     status: opts.status ?? 'live',
     timeline: opts.timeline ?? emptyTimeline(),
     unread: opts.unread,
+    unreadCount: opts.unreadCount,
     lastEventAt: opts.lastEventAt,
     events: opts.events ?? [],
     error: opts.error,
@@ -145,6 +146,38 @@ describe('SessionDrawer', () => {
     expect(onAddSession).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTitle('Close'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the new-message count on an unread non-active row and hides it on the active row', () => {
+    const withNew: TimelineState = {
+      ...emptyTimeline(),
+      items: [
+        { kind: 'user', id: 'u1', text: 'hi', ts: 1_000 },
+        { kind: 'assistant', id: 'a1', text: 'reply', ts: 1_100 },
+      ],
+    };
+    render(
+      <SessionDrawer
+        sessions={[
+          session('bg', 'Background', 2_000, { timeline: withNew, unread: true, unreadCount: 12 }),
+          session('cur', 'Current', 1_000, { timeline: withNew, unreadCount: 5 }),
+        ]}
+        activeId="cur"
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const bgRow = screen.getByText('Background').closest('.session-row') as HTMLElement;
+    expect(within(bgRow).getByText(/12 new/)).toHaveClass('unread-new');
+    expect(bgRow.textContent).toContain('2 msg');
+
+    // The active session never shows a "new" count even if a stale count lingers.
+    const curRow = screen.getByText('Current').closest('.session-row') as HTMLElement;
+    expect(within(curRow).queryByText(/new/)).not.toBeInTheDocument();
   });
 
   it('navigates to the landing page from the About Helm link', async () => {

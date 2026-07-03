@@ -106,6 +106,9 @@ export interface Session {
   id: string;
   meta: SessionMeta;
   unread: boolean;
+  /** Number of unread host turns/events accrued while this session was NOT active. Reset to 0 on
+   *  select; summed on merge. `unread` stays as the coarse boolean mirror (`unreadCount > 0`). */
+  unreadCount: number;
   lastEventAt: number | null;
   transcript: { items: TimelineItem[] };
   history: SessionHistory;
@@ -121,6 +124,7 @@ export function emptySession(id: string, meta: SessionMeta): Session {
     id,
     meta: { ...meta },
     unread: false,
+    unreadCount: 0,
     lastEventAt: null,
     transcript: { items: [] },
     history: { items: [], cursor: null, hasMore: false, loading: false, latestTurnIndex: null },

@@ -10,7 +10,6 @@ function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) 
     cwd: 'C:\\Users\\akash\\helm',
     status: 'live',
     busy: false,
-    sessionCount: 2,
     canReconnect: false,
     onOpenDrawer: vi.fn(),
     onAddSession: vi.fn(),
@@ -27,7 +26,7 @@ function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) 
 
 describe('StatusBar', () => {
   it('renders title, cwd title attribute, and status line classes', () => {
-    const { container } = renderStatusBar({ status: 'connecting', sessionCount: 1 });
+    const { container } = renderStatusBar({ status: 'connecting' });
 
     expect(screen.getByText('helm')).toHaveAttribute('title', 'C:\\Users\\akash\\helm');
     const statusLine = screen.getByText('Connecting…').closest('.status-line');
@@ -47,7 +46,6 @@ describe('StatusBar', () => {
         cwd={null}
         status="idle"
         busy
-        sessionCount={1}
         canReconnect={false}
         onOpenDrawer={vi.fn()}
         onAddSession={vi.fn()}
@@ -90,10 +88,10 @@ describe('StatusBar', () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
-  it('shows only the unread badge (not the session count) when there is unread activity', () => {
-    const { container } = renderStatusBar({ sessionCount: 3 });
-    // No unread in the runtime snapshot under test → session-count shows.
-    expect(container.querySelector('.session-count')?.textContent).toBe('3');
+  it('never renders an ambiguous hamburger badge (neither unread nor session count)', () => {
+    const { container } = renderStatusBar();
+    // The ambiguous rollup badge was removed (#161); the drawer conveys unread per-session instead.
+    expect(container.querySelector('.session-count')).not.toBeInTheDocument();
     expect(container.querySelector('.unread-badge')).not.toBeInTheDocument();
   });
 

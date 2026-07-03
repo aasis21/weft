@@ -179,6 +179,39 @@ describe('ChatThread', () => {
     expect(container.querySelector('.row.assistant')).not.toBeInTheDocument();
   });
 
+  it('only marks the first assistant-side row after a user prompt as a turn start', () => {
+    const items: TimelineItem[] = [
+      { kind: 'user', id: 'u1', text: 'make edits', ts: now },
+      {
+        kind: 'tool',
+        id: 'tool-1',
+        name: 'edit',
+        args: { path: 'src/app.tsx', old_string: 'old', new_string: 'new' },
+        status: 'success',
+        startedAt: now + 1,
+        finishedAt: now + 2,
+        ts: now + 1,
+      },
+      {
+        kind: 'tool',
+        id: 'tool-2',
+        name: 'view',
+        args: { path: 'src/app.tsx' },
+        status: 'success',
+        startedAt: now + 3,
+        finishedAt: now + 4,
+        ts: now + 3,
+      },
+      { kind: 'assistant', id: 'a1', text: 'done', ts: now + 5 },
+    ];
+    const { container } = render(<ChatThread items={items} />);
+
+    const toolRows = container.querySelectorAll('.row.tool');
+    expect(toolRows[0]).toHaveClass('turn-start');
+    expect(toolRows[1]).not.toHaveClass('turn-start');
+    expect(screen.getByText('done').closest('.row')).not.toHaveClass('turn-start');
+  });
+
   it('marks a user row that directly follows a rendered tool card', () => {
     const items: TimelineItem[] = [
       {

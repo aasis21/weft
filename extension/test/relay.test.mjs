@@ -51,6 +51,18 @@ function makeFakeChannel() {
   };
 }
 
+function makeFailingChannel({ failUntil = Infinity } = {}) {
+  const channel = makeFakeChannel();
+  let attempts = 0;
+  channel.attempts = () => attempts;
+  channel.send = async (msg) => {
+    attempts += 1;
+    if (attempts <= failUntil) throw new Error(`send failed ${attempts}`);
+    channel.sent.push(msg);
+  };
+  return channel;
+}
+
 function makeFakeSession(sessionId = "unknown-session") {
   let handler = null;
   const prompts = [];
@@ -319,6 +331,49 @@ test("the heartbeat sends busy=null (unknown) when the host exposes no activity 
     assert.ok(beat, "expected a heartbeat to be emitted");
     // null, not false — the phone must keep its live busy rather than be forced idle each beat.
     assert.equal(beat.msg.busy, null);
+  } finally {
+    await relay.stop("test", { closeTransport: false });
+  }
+});
+
+test("sendSafe stays quiet for five failures, triggers reconnect once on the sixth, and resets after success", async () => {
+  const channel = makeFailingChannel({ failUntil: 6 });
+  const session = makeFakeSession();
+  const logs = [];
+  session.log = (message, options) => logs.push({ message, options });
+  let lostCount = 0;
+  const relay = await attachRelay({
+    session,
+    channel,
+    channelId: "chan-1",
+    heartbeatMs: 10_000_000,
+    onConnectionLost: () => {
+      lostCount += 1;
+    },
+  });
+  try {
+    assert.equal(channel.attempts(), 1, "channel_up failure is counted");
+    assert.equal(lostCount, 0);
+
+    for (let i = 0; i < 4; i += 1) {
+      session.emitEvent({ type: "assistant.idle", id: `idle-${i}`, data: {} });
+      await flush();
+    }
+    assert.equal(channel.attempts(), 5);
+    assert.equal(lostCount, 0, "below-threshold failures do not reconnect");
+    assert.equal(logs.length, 0, "below-threshold failures stay silent");
+
+    session.emitEvent({ type: "assistant.idle", id: "idle-threshold", data: {} });
+    await flush();
+    assert.equal(channel.attempts(), 6);
+    assert.equal(lostCount, 1, "sixth consecutive failure triggers reconnect");
+    assert.equal(logs.length, 0, "sendSafe does not log repeated send warnings");
+
+    session.emitEvent({ type: "assistant.idle", id: "idle-success", data: {} });
+    await flush();
+    session.emitEvent({ type: "assistant.idle", id: "idle-fail-after-reset", data: {} });
+    await flush();
+    assert.equal(lostCount, 1, "a successful send resets the consecutive failure counter");
   } finally {
     await relay.stop("test", { closeTransport: false });
   }

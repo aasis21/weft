@@ -32,6 +32,7 @@ const DEFAULT_APPROVAL_TIMEOUT_MS = 120_000;
 // the fail-safe cancel fires (a cancel is a no-op if the terminal already answered).
 const DEFAULT_ELICITATION_TIMEOUT_MS = 300_000;
 const DEFAULT_HEARTBEAT_MS = 15_000;
+const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
 // How long a phone-relayed prompt stays "claimable" so the echoed user.message session
 // event it produces is attributed to the phone (and not re-broadcast as a terminal msg).
 const PROMPT_CORRELATION_WINDOW_MS = 30_000;
@@ -271,6 +272,7 @@ export async function attachRelay({
   approvalTimeoutMs,
   heartbeatMs = DEFAULT_HEARTBEAT_MS,
   permissionRelay,
+  onConnectionLost,
 } = {}) {
   if (!session) throw new Error("helm relay: session is required");
   if (!channel) throw new Error("helm relay: channel is required");
@@ -299,6 +301,8 @@ export async function attachRelay({
   }
   const unsubscribers = [];
   let stopped = false;
+  let consecutiveSendFailures = 0;
+  let connectionLostNotified = false;
   // Correlates phone-relayed prompts with their echoed user.message events so the relay
   // only re-broadcasts prompts that were actually typed at the laptop terminal.
   const promptOrigin = createPromptOriginTracker();
@@ -306,8 +310,18 @@ export async function attachRelay({
   const sendSafe = async (msg) => {
     try {
       await channel.send(msg);
+      consecutiveSendFailures = 0;
+      connectionLostNotified = false;
     } catch (err) {
-      logger(`Helm relay send failed: ${err?.message ?? err}`, { level: "warning" });
+      consecutiveSendFailures += 1;
+      if (
+        consecutiveSendFailures >= SEND_FAILURE_RECONNECT_THRESHOLD &&
+        !connectionLostNotified &&
+        !stopped
+      ) {
+        connectionLostNotified = true;
+        onConnectionLost?.(err);
+      }
     }
   };
 

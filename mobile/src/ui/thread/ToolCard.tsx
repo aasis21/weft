@@ -38,6 +38,24 @@ interface ArgSummary {
 }
 
 const PATH_KEYS = new Set(['path', 'file']);
+const EDIT_TOOL_NAMES = new Set(['edit', 'create', 'str_replace', 'str-replace-editor', 'str_replace_editor']);
+const DIFF_PATH_KEYS = ['path', 'file', 'file_path', 'filepath', 'filePath', 'target_file', 'targetFile'];
+const OLD_TEXT_KEYS = ['old_string', 'old_str', 'oldString', 'oldText', 'old_text', 'old'];
+const NEW_TEXT_KEYS = ['new_string', 'new_str', 'newString', 'newText', 'new_text', 'replacement', 'replacement_string', 'content', 'file_text', 'text'];
+
+type DiffLineKind = 'header' | 'hunk' | 'context' | 'added' | 'removed';
+
+interface DiffLine {
+  kind: DiffLineKind;
+  text: string;
+}
+
+interface EditDiff {
+  path: string;
+  oldText: string;
+  newText: string;
+  lines: DiffLine[];
+}
 
 /** One-line summary of the most useful argument, flagging file-path args for basename styling. */
 function describeArg(args: unknown): ArgSummary {
@@ -86,6 +104,98 @@ function formatArgs(args: unknown): string {
   return text ?? '';
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') return value;
+  }
+  return undefined;
+}
+
+function diffCandidateRecords(args: unknown): Record<string, unknown>[] {
+  const root = asRecord(args);
+  if (!root) return [];
+  return [root, root.input, root.params, root.arguments]
+    .map(asRecord)
+    .filter((record): record is Record<string, unknown> => record !== null);
+}
+
+function isEditToolName(name: string): boolean {
+  return EDIT_TOOL_NAMES.has(name.trim().toLowerCase());
+}
+
+function commandLooksLikeCreate(record: Record<string, unknown>, name: string): boolean {
+  return isEditToolName(name) && (name.trim().toLowerCase() === 'create' || record.command === 'create');
+}
+
+function splitLines(text: string): string[] {
+  if (!text) return [];
+  return text.replace(/\r\n/g, '\n').split('\n');
+}
+
+function lineDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = splitLines(oldText);
+  const newLines = splitLines(newText);
+  const lengths = Array.from({ length: oldLines.length + 1 }, () => Array<number>(newLines.length + 1).fill(0));
+
+  for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex -= 1) {
+    for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex -= 1) {
+      lengths[oldIndex][newIndex] =
+        oldLines[oldIndex] === newLines[newIndex]
+          ? lengths[oldIndex + 1][newIndex + 1] + 1
+          : Math.max(lengths[oldIndex + 1][newIndex], lengths[oldIndex][newIndex + 1]);
+    }
+  }
+
+  const lines: DiffLine[] = [
+    { kind: 'header', text: '--- before' },
+    { kind: 'header', text: '+++ after' },
+    { kind: 'hunk', text: `@@ -1,${oldLines.length} +1,${newLines.length} @@` },
+  ];
+  let oldIndex = 0;
+  let newIndex = 0;
+  while (oldIndex < oldLines.length || newIndex < newLines.length) {
+    if (oldIndex < oldLines.length && newIndex < newLines.length && oldLines[oldIndex] === newLines[newIndex]) {
+      lines.push({ kind: 'context', text: ` ${oldLines[oldIndex]}` });
+      oldIndex += 1;
+      newIndex += 1;
+    } else if (newIndex < newLines.length && (oldIndex === oldLines.length || lengths[oldIndex][newIndex + 1] >= lengths[oldIndex + 1][newIndex])) {
+      lines.push({ kind: 'added', text: `+${newLines[newIndex]}` });
+      newIndex += 1;
+    } else if (oldIndex < oldLines.length) {
+      lines.push({ kind: 'removed', text: `-${oldLines[oldIndex]}` });
+      oldIndex += 1;
+    }
+  }
+  return lines;
+}
+
+function getEditDiff(name: string, args: unknown): EditDiff | null {
+  for (const record of diffCandidateRecords(args)) {
+    const path = getStringField(record, DIFF_PATH_KEYS) ?? 'edited file';
+    const oldText = getStringField(record, OLD_TEXT_KEYS);
+    const newText = getStringField(record, NEW_TEXT_KEYS);
+    const create = commandLooksLikeCreate(record, name);
+    const hasOldNewShape = typeof oldText === 'string' && typeof newText === 'string';
+    if (!hasOldNewShape && !(create && typeof newText === 'string')) continue;
+    if (!isEditToolName(name) && !hasOldNewShape) continue;
+    const before = create && oldText === undefined ? '' : (oldText ?? '');
+    return { path, oldText: before, newText, lines: lineDiff(before, newText) };
+  }
+  return null;
+}
+
 function elapsed(item: ToolItem): string {
   if (item.finishedAt) {
     const ms = Math.max(0, item.finishedAt - item.startedAt);
@@ -107,6 +217,7 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
   const argsText = formatArgs(item.args);
   const resultText = item.resultPreview ?? '';
   const canViewFull = isLongOutput(resultText);
+  const editDiff = getEditDiff(item.name, item.args);
 
   useEffect(() => {
     return () => {
@@ -152,7 +263,29 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
       </button>
       {expanded ? (
         <div className="tc-detail">
-          {argLine ? (
+          {editDiff ? (
+            <>
+              <div className="tc-section">
+                <span>DIFF</span>
+                <button
+                  type="button"
+                  className="tc-copy"
+                  aria-label="Copy diff"
+                  onClick={() => void copyText('args', editDiff.lines.map((line) => line.text).join('\n'))}
+                >
+                  {copied === 'args' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="tc-diff" role="region" aria-label={`Diff for ${editDiff.path}`}>
+                <div className="tc-diff-file">{editDiff.path}</div>
+                {editDiff.lines.map((line, index) => (
+                  <div key={`${line.kind}-${index}`} className={`tc-diff-line ${line.kind}`}>
+                    {line.text || ' '}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : argLine ? (
             <>
               <div className="tc-section">
                 <span>ARGUMENTS</span>

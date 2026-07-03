@@ -198,6 +198,9 @@ export function SessionDrawer({
                     </span>
                     <span className="session-sub">
                       {turnCount(session)} msg
+                      {!isActive && (session.unreadCount ?? 0) > 0 ? (
+                        <span className="unread-new">{` · ${session.unreadCount} new`}</span>
+                      ) : null}
                       {activity ? ` · ${fmtRelative(activity)}` : ''}
                       {session.meta.cwd ? ` · ${session.meta.cwd.split(/[\\/]/).pop()}` : ''}
                     </span>

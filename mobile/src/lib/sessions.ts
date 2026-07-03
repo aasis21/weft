@@ -19,6 +19,8 @@ export interface StoredSession {
   lastEventAt?: number | null;
   /** Whether the session has unread host activity, persisted so a reload keeps the badge. */
   unread?: boolean;
+  /** Number of unread host turns/events, persisted so a reload keeps the "N new" count. */
+  unreadCount?: number;
 }
 
 async function read(): Promise<StoredSession[]> {
@@ -98,7 +100,7 @@ export async function upsertSession(session: StoredSession): Promise<void> {
 export async function patchSession(
   channelId: string,
   patch: Partial<
-    Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId' | 'lastEventAt' | 'unread'>
+    Pick<StoredSession, 'title' | 'cwd' | 'lastSeenAt' | 'sessionId' | 'lastEventAt' | 'unread' | 'unreadCount'>
   >,
 ): Promise<void> {
   const list = await read();

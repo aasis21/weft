@@ -85,5 +85,37 @@ describe('sessionsSlice', () => {
       events: [],
     });
   });
+
+  it('tracks an unread count that increments off-active, resets on select, and sums on merge', () => {
+    let state = sessionsReducer(undefined, sessionAdded(makeSession('one', { channelId: 'ch-one' })));
+    state = sessionsReducer(state, sessionAdded(makeSession('two', { channelId: 'ch-two', sessionId: 'sess-x' })));
+    state = sessionsReducer(state, sessionActivated('one'));
+
+    // Activity on the non-active session bumps its unread count; the active one stays at 0.
+    state = sessionsReducer(state, envelopeReceived({ id: 'two', envelope: B.stamp(B.assistantDelta('a', 'm1'), { ts: 10 }) }));
+    state = sessionsReducer(state, envelopeReceived({ id: 'two', envelope: B.stamp(B.assistantDelta('b', 'm2'), { ts: 11 }) }));
+    expect(state.entities.two?.unreadCount).toBe(2);
+    expect(state.entities.two?.unread).toBe(true);
+
+    // Activity on the active session never accrues unread.
+    state = sessionsReducer(state, envelopeReceived({ id: 'one', envelope: B.stamp(B.assistantDelta('c', 'm3'), { ts: 12 }) }));
+    expect(state.entities.one?.unreadCount).toBe(0);
+    expect(state.entities.one?.unread).toBe(false);
+
+    // Selecting a session clears its unread count.
+    state = sessionsReducer(state, sessionActivated('two'));
+    expect(state.entities.two?.unreadCount).toBe(0);
+    expect(state.entities.two?.unread).toBe(false);
+
+    // A merge sums the two counts rather than OR-ing booleans.
+    state = sessionsReducer(state, sessionActivated('one'));
+    state = sessionsReducer(state, envelopeReceived({ id: 'two', envelope: B.stamp(B.assistantDelta('d', 'm4'), { ts: 13 }) }));
+    const dup = makeSession('dup', { channelId: 'ch-dup', sessionId: 'sess-x' });
+    dup.unread = true;
+    dup.unreadCount = 3;
+    state = sessionsReducer(state, sessionAdded(dup));
+    state = sessionsReducer(state, sessionReconciled({ id: 'dup', sessionId: 'sess-x' }));
+    expect(state.entities.dup?.unreadCount).toBe(4);
+  });
 });
 

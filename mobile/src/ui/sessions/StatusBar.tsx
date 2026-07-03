@@ -9,7 +9,6 @@ interface StatusBarProps {
   status: SessionStatus;
   /** True while the agent is actively working (busy). Overrides the "Live" label with "Working…". */
   busy?: boolean;
-  sessionCount: number;
   canReconnect: boolean;
   onOpenDrawer(): void;
   onAddSession(): void;
@@ -32,7 +31,6 @@ export function StatusBar({
   cwd,
   status,
   busy = false,
-  sessionCount,
   canReconnect,
   onOpenDrawer,
   onAddSession,
@@ -105,11 +103,6 @@ export function StatusBar({
           <span />
           <span />
         </span>
-        {unreadCount > 0 ? (
-          <span className="unread-badge">{unreadCount}</span>
-        ) : sessionCount > 1 ? (
-          <span className="session-count">{sessionCount}</span>
-        ) : null}
       </button>
 
       <div className="status-id">

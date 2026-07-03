@@ -75,11 +75,13 @@ let relayHandle = null;
 let permissionRelay = null;
 let shuttingDown = false;
 let connecting = false;
+let reconnecting = false;
 // Persistent pairing state. `listenForPeers` keeps the laptop answering phone hellos for the whole
 // session (not just the first pair), so re-scans/reloads always re-pair. We dedupe by peer public
 // key so a phone re-broadcasting its hello only re-attaches the relay once.
 let pairingStop = null;
 let activeTransport = null;
+let activeStatusStop = null;
 let currentPeerPub = null;
 let pairChain = Promise.resolve();
 
@@ -135,8 +137,8 @@ void connectRelayWithRetry();
 // each attempt (a realtime channel is single-use after an error). Once subscribed, `listenForPeers`
 // answers every hello — the first scan AND any later re-scan/reload — so pairing self-heals.
 // `/helm` can re-kick this if all attempts gave up.
-async function connectRelayWithRetry() {
-  if (connecting || pairingStop || shuttingDown) return;
+async function connectRelayWithRetry({ reconnect = false } = {}) {
+  if (connecting || pairingStop || shuttingDown) return false;
   connecting = true;
   try {
     const maxAttempts = positiveIntFromEnv("HELM_CONNECT_MAX_ATTEMPTS", 6);
@@ -147,21 +149,28 @@ async function connectRelayWithRetry() {
           transport,
           keyPair: laptopKeys,
           connect: true,
-                channelId,
-                onPeer: (info) => onPeerPaired(transport, info),
-              });
+          channelId,
+          onPeer: (info) => onPeerPaired(transport, info),
+        });
         if (shuttingDown) {
           listener.stop();
           await closeQuietly(transport);
-          return;
+          return false;
         }
         pairingStop = listener.stop;
         activeTransport = transport;
-        session.log?.("Helm: pairing channel ready; listening for phone hellos…");
-        return;
+        activeStatusStop = transport.onStatus?.((status, detail) => {
+          if (status === "disconnected") requestReconnect(detail);
+        }) ?? null;
+        session.log?.(
+          reconnect
+            ? "Helm: reconnected."
+            : "Helm: pairing channel ready; listening for phone hellos…",
+        );
+        return true;
       } catch (err) {
         await closeQuietly(transport);
-        if (shuttingDown) return;
+        if (shuttingDown) return false;
         if (attempt >= maxAttempts) {
           process.stderr.write(
             `Helm: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
@@ -170,7 +179,7 @@ async function connectRelayWithRetry() {
             `Helm: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /helm to retry.`,
             { level: "warning", ephemeral: false },
           );
-          return;
+          return false;
         }
         const backoffMs = Math.min(1500 * 2 ** (attempt - 1), 15_000);
         session.log?.(
@@ -183,6 +192,43 @@ async function connectRelayWithRetry() {
   } finally {
     connecting = false;
   }
+  return false;
+}
+
+function requestReconnect(detail) {
+  if (shuttingDown || reconnecting) return;
+  reconnecting = true;
+  session.log?.("Helm: connection lost, reconnecting…", { level: "warning", ephemeral: false });
+  void reconnectRelay(detail).finally(() => {
+    reconnecting = false;
+  });
+}
+
+async function reconnectRelay() {
+  const previousRelay = relayHandle;
+  const previousStop = pairingStop;
+  const previousTransport = activeTransport;
+  activeStatusStop?.();
+  activeStatusStop = null;
+  pairingStop = null;
+  activeTransport = null;
+  relayHandle = null;
+  permissionRelay = null;
+  currentPeerPub = null;
+  try {
+    previousStop?.();
+  } catch {
+    // best-effort; reconnect creates a fresh transport below.
+  }
+  if (previousRelay) {
+    try {
+      await previousRelay.stop("reconnect", { closeTransport: false });
+    } catch {
+      // best-effort; reconnect must continue.
+    }
+  }
+  await closeQuietly(previousTransport);
+  await connectRelayWithRetry({ reconnect: true });
 }
 
 // (Re)attach the encrypted relay for a freshly-paired phone. Serialized through `pairChain` so a
@@ -231,7 +277,13 @@ async function attachForPeer(transport, { key, peer }) {
   // SupabaseTransport is subscribe-order independent (single catch-all broadcast listener +
   // internal dispatch), so attachRelay may register SecureChannel handlers after the channel is
   // already connected without losing events.
-  relayHandle = await attachRelay({ session, channel, channelId, permissionRelay });
+  relayHandle = await attachRelay({
+    session,
+    channel,
+    channelId,
+    permissionRelay,
+    onConnectionLost: requestReconnect,
+  });
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
   session.log?.(
@@ -244,6 +296,8 @@ async function attachForPeer(transport, { key, peer }) {
 async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
+  activeStatusStop?.();
+  activeStatusStop = null;
   pairingStop?.();
   pairingStop = null;
   if (relayHandle) {

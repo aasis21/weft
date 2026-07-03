@@ -277,6 +277,7 @@ export class SessionRuntime {
     };
     const session = emptySession(channelId, meta);
     session.unread = stored.unread ?? false;
+    session.unreadCount = stored.unreadCount ?? (stored.unread ? 1 : 0);
     session.lastEventAt = stored.lastEventAt ?? null;
     session.transcript.items = timeline.items;
     session.history = {
@@ -717,14 +718,14 @@ export class SessionRuntime {
     if (this.activeId() === channelId) {
       if (session.unread) {
         this.store.dispatch(unreadSet({ id: channelId, on: false }));
-        if (!ctrl?.ephemeral) void patchSession(channelId, { unread: false });
+        if (!ctrl?.ephemeral) void patchSession(channelId, { unread: false, unreadCount: 0 });
       }
       return;
     }
     this.store.dispatch(sessionActivated(channelId));
     this.touchWarm(channelId);
     this.ensureConnected(channelId);
-    if (!ctrl?.ephemeral) void patchSession(channelId, { lastSeenAt: this.clock(), unread: false });
+    if (!ctrl?.ephemeral) void patchSession(channelId, { lastSeenAt: this.clock(), unread: false, unreadCount: 0 });
   }
 
   async remove(channelId: string): Promise<void> {
@@ -992,7 +993,7 @@ export class SessionRuntime {
       () => {
         ctrl.clear('meta');
         const s = this.session(channelId);
-        if (s) void patchSession(channelId, { lastEventAt: s.lastEventAt ?? null, unread: s.unread ?? false });
+        if (s) void patchSession(channelId, { lastEventAt: s.lastEventAt ?? null, unread: s.unread ?? false, unreadCount: s.unreadCount ?? 0 });
       },
       META_PERSIST_THROTTLE_MS,
     );

@@ -14,6 +14,8 @@ export interface SessionView {
   /** The flat timeline the thread renders (items + history + mode + cwd/title). */
   timeline: TimelineState;
   unread?: boolean;
+  /** Count of unread host turns/events accrued while this session was not active (0 = none). */
+  unreadCount?: number;
   /** Last real host activity (ms). Drives the sidebar's newest-first ordering; survives reload. */
   lastEventAt?: number;
   /** True during the brief, bounded post-Live grace while the first history page is still arriving —

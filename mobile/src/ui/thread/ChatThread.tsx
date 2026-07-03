@@ -520,8 +520,8 @@ export function ChatThread({ items, history = [], streaming = false, busy = fals
         }
 
         const { item, index: idx } = unit;
-        const prev = items[idx - 1];
-        const turnStart = isAssistantSide(item) && !isAssistantSide(prev);
+        const prev = previousRenderableItem(items, idx);
+        const turnStart = isAssistantSide(item) && prev?.kind === 'user';
         const isLast = idx === items.length - 1;
 
         if (item.kind === 'user') {

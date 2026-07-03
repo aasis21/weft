@@ -263,7 +263,8 @@
   text-align: center;
 }
 
-.row { padding: 1px 0; animation: helm-slide 240ms cubic-bezier(0.16, 1, 0.3, 1); }
+.row { padding: 0; animation: helm-slide 240ms cubic-bezier(0.16, 1, 0.3, 1); }
+.row + .row { margin-top: 3px; }
 .row.turn-start { margin-top: 12px; }
 @keyframes helm-slide {
   from { opacity: 0; transform: translateY(5px); }
@@ -489,6 +490,41 @@
   font-size: 11.5px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.tc-diff {
+  max-height: min(280px, 44vh);
+  overflow: auto;
+  border: 1px solid var(--bg-rule);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.tc-diff-file {
+  position: sticky;
+  top: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--bg-rule);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  overflow-wrap: anywhere;
+}
+.tc-diff-line {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.tc-diff-line.header,
+.tc-diff-line.hunk { color: var(--fg-faint); }
+.tc-diff-line.added {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: color-mix(in srgb, var(--success) 78%, var(--fg));
+}
+.tc-diff-line.removed {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: color-mix(in srgb, var(--error) 82%, var(--fg));
 }
 
 /* ===================== markdown inside assistant bubble ===================== */
@@ -1112,6 +1148,11 @@
   font-size: 11px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.unread-new {
+  color: var(--accent, #4c8dff);
+  font-weight: 600;
 }
 .session-row .row-x { width: 30px; height: 30px; font-size: 13px; }
 .tag {

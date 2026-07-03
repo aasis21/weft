@@ -65,6 +65,7 @@ export function toSessionView(session: Session): SessionView {
     status: session.connection.status,
     timeline: toTimelineState(session),
     ...(session.unread ? { unread: true } : {}),
+    ...(session.unreadCount ? { unreadCount: session.unreadCount } : {}),
     ...(session.lastEventAt ? { lastEventAt: session.lastEventAt } : {}),
     ...(session.connection.settling ? { settling: true } : {}),
     events: session.debug,

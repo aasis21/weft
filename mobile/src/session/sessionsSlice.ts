@@ -64,6 +64,7 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
     keep.history = { ...keep.history, ...drop.history, loading: keep.history.loading || drop.history.loading };
   }
   keep.unread = keep.unread || drop.unread;
+  keep.unreadCount = (keep.unreadCount ?? 0) + (drop.unreadCount ?? 0);
   keep.lastEventAt = Math.max(keep.lastEventAt ?? 0, drop.lastEventAt ?? 0) || null;
   keep.debug = [...keep.debug, ...drop.debug].slice(-EVENT_LOG_CAP);
   if (drop.connection.status === 'live' || keep.connection.status !== 'live') keep.connection.status = drop.connection.status;
@@ -96,7 +97,10 @@ const sessionsSlice = createSlice({
     sessionActivated(state, action: PayloadAction<string>) {
       state.activeId = action.payload;
       const session = state.entities[action.payload];
-      if (session) session.unread = false;
+      if (session) {
+        session.unread = false;
+        session.unreadCount = 0;
+      }
     },
     sessionReconciled(state, action: PayloadAction<{ id: string; sessionId: string }>) {
       const incoming = state.entities[action.payload.id];
@@ -117,8 +121,14 @@ const sessionsSlice = createSlice({
       if (!session) return;
       applyEnvelope(session, action.payload.envelope);
       if (isUnreadActivity(action.payload.envelope)) {
-        session.unread = action.payload.id !== state.activeId;
         session.lastEventAt = action.payload.envelope.ts;
+        if (action.payload.id !== state.activeId) {
+          session.unread = true;
+          session.unreadCount += 1;
+        } else {
+          session.unread = false;
+          session.unreadCount = 0;
+        }
       }
     },
     userPromptAppended(state, action: PayloadAction<{ id: string; item: UserItem }>) {
@@ -213,7 +223,11 @@ const sessionsSlice = createSlice({
     },
     unreadSet(state, action: PayloadAction<{ id: string; on: boolean }>) {
       const session = state.entities[action.payload.id];
-      if (session) session.unread = action.payload.on;
+      if (session) {
+        session.unread = action.payload.on;
+        if (!action.payload.on) session.unreadCount = 0;
+        else if (session.unreadCount === 0) session.unreadCount = 1;
+      }
     },
     lastEventAtSet(state, action: PayloadAction<{ id: string; ts: number | null }>) {
       const session = state.entities[action.payload.id];
