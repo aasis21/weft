@@ -106,7 +106,17 @@ export function SessionDrawer({
   useEffect(() => {
     // Docked (desktop, always-visible) sidebar is not a modal: it must not steal focus on
     // every render or trap Tab globally — that would fight the user typing in the composer.
-    if (docked) return undefined;
+    // It still supports Escape-to-collapse, but only when focus is inside the sidebar itself
+    // (so Escape typed elsewhere, e.g. in the composer, doesn't unexpectedly collapse it).
+    if (docked) {
+      const handleDockedKeyDown = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape') return;
+        if (!drawerRef.current?.contains(document.activeElement)) return;
+        onCloseRef.current();
+      };
+      document.addEventListener('keydown', handleDockedKeyDown);
+      return () => document.removeEventListener('keydown', handleDockedKeyDown);
+    }
 
     const drawer = drawerRef.current;
     const activeElement = document.activeElement;

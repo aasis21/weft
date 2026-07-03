@@ -11,7 +11,7 @@ import { StatusBar } from '@/ui/sessions/StatusBar';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
 import { getStableDeviceId } from '@/lib/helmClient';
-import { useIsWideViewport } from '@/lib/platform';
+import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -258,7 +258,45 @@ export function SessionScreen({
   const prevElicitationCount = useRef(0);
   const { timeline, status, meta } = active;
   const ended = status === 'ended';
-  // A turn is in flight whenever the agent reports it's busy (text/reasoning/tool) —
+
+  // Desktop keyboard shortcuts (Slack/Discord/ChatGPT-style): "/" jumps focus to the
+  // composer from anywhere on the page, Ctrl/Cmd+1..9 switches to the Nth session in the
+  // docked list order. Both are no-ops on mobile (isDesktopInput() gate) and both bail out
+  // when focus is already inside an editable field, so they never fight normal typing.
+  useEffect(() => {
+    if (!isDesktopInput()) return undefined;
+
+    const handleShortcut = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      const inEditable =
+        !!target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+      if (event.key === '/' && !inEditable && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const composerInput = rootRef.current?.querySelector<HTMLTextAreaElement>('.composer-input');
+        if (composerInput) {
+          event.preventDefault();
+          composerInput.focus();
+        }
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && /^[1-9]$/.test(event.key)) {
+        // Same ordering as the docked sidebar (SessionDrawer): most recently scanned first.
+        const ordered = [...sessions].sort(
+          (a, b) => (b.meta.scannedAt ?? b.meta.addedAt ?? 0) - (a.meta.scannedAt ?? a.meta.addedAt ?? 0),
+        );
+        const targetSession = ordered[Number(event.key) - 1];
+        if (targetSession) {
+          event.preventDefault();
+          onSelectSession(targetSession.meta.channelId);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleShortcut);
+    return () => document.removeEventListener('keydown', handleShortcut);
+  }, [sessions, onSelectSession]);  // A turn is in flight whenever the agent reports it's busy (text/reasoning/tool) —
   // which is exactly what the phone Stop aborts. Fall back to a running tool so a
   // tool-first turn still shows Stop even if the activity signal is missed.
   const agentBusy =

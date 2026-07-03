@@ -216,6 +216,13 @@
   box-shadow: 0 24px 80px color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
+/* Desktop-only: the settings dialog looks cramped centered at mobile's 560px on wide
+   monitors; give it a bit more room. Voice overlay is untouched — it's a focused,
+   full-attention view where extra width doesn't help. */
+@media (min-width: 1024px) {
+  .settings-panel { width: min(100%, 680px); max-height: min(820px, 90%); }
+}
+
 .settings-head,
 .voice-head {
   display: flex;

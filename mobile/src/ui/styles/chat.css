@@ -712,6 +712,25 @@
   border-color: color-mix(in srgb, var(--accent) 55%, var(--bg-rule));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
+.composer-shell-dragover {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--bg-rule));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  position: relative;
+}
+.composer-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev) 85%);
+  color: var(--accent, #4c8dff);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
 
 .composer-controls {
   display: flex;
@@ -1225,6 +1244,14 @@
 .drawer-title { flex: 1; color: var(--fg-faint); font-size: 12px; letter-spacing: 0.14em; }
 .drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
 .drawer-empty { padding: 18px 8px; color: var(--fg-faint); font-size: 12.5px; text-align: center; }
+/* Docked (desktop) sidebar: themed thin scrollbar instead of the OS default, matching .debug-list. */
+.drawer-docked .drawer-list { scrollbar-width: thin; scrollbar-color: var(--bg-rule) transparent; }
+.drawer-docked .drawer-list::-webkit-scrollbar { width: 8px; }
+.drawer-docked .drawer-list::-webkit-scrollbar-thumb { background: var(--bg-rule); border-radius: 8px; }
+/* Docked rail is narrower than the mobile overlay drawer; shrink the rename/remove tap targets
+   from mobile's 30px touch size down to a more desktop-appropriate compact size. */
+.drawer-docked .session-row .row-x,
+.drawer-docked .session-row .row-rename { width: 22px; height: 22px; font-size: 12px; }
 
 .session-row {
   display: flex;

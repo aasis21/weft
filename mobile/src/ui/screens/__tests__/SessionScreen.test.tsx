@@ -179,3 +179,57 @@ describe('SessionScreen desktop docked sidebar (#183)', () => {
     expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
   });
 });
+
+describe('SessionScreen desktop keyboard shortcuts', () => {
+  it('switches sessions with Ctrl/Cmd+1..9 in docked-list order, only on desktop input', () => {
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: true, // desktop input (hover+fine pointer) AND wide viewport
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const active = makeSession('live');
+      const second = { ...makeSession('live'), id: 'session-b', meta: { ...active.meta, channelId: 'b' } };
+      const first = { ...active, meta: { ...active.meta, channelId: 'a' } };
+      const onSelectSession = vi.fn();
+      render(
+        <SessionScreen
+          active={first as never}
+          sessions={[
+            { ...first, meta: { channelId: 'a', title: 'A', kind: 'paired', addedAt: 1, scannedAt: 2 } },
+            { ...second, meta: { channelId: 'b', title: 'B', kind: 'paired', addedAt: 1, scannedAt: 5 } },
+          ] as never}
+          activeId="a"
+          onPrompt={vi.fn()}
+          onApprove={vi.fn()}
+          onElicitationRespond={vi.fn()}
+          onInterrupt={vi.fn()}
+          onModeChange={vi.fn()}
+          onRetry={vi.fn()}
+          onSelectSession={onSelectSession}
+          onAddSession={vi.fn()}
+          onRemoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onReconnect={vi.fn()}
+          onGoHome={vi.fn()}
+          onLoadEarlier={vi.fn()}
+        />,
+      );
+
+      // "b" was scanned more recently, so it's first in docked order — Ctrl+1 selects it.
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true }));
+      expect(onSelectSession).toHaveBeenCalledWith('b');
+
+      onSelectSession.mockClear();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', ctrlKey: true, bubbles: true }));
+      expect(onSelectSession).toHaveBeenCalledWith('a');
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+});

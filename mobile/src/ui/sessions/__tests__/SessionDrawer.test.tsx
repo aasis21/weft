@@ -223,4 +223,51 @@ describe('SessionDrawer', () => {
 
     expect(onRename).toHaveBeenCalledWith('a', 'Deploy Box');
   });
+
+  it('collapses the docked sidebar on Escape only when focus is inside it, and not for the mobile overlay', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <SessionDrawer
+        sessions={[session('a', 'Alpha', 1)]}
+        activeId="a"
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={onClose}
+        docked
+      />,
+    );
+
+    // Escape fired outside the drawer (e.g. while typing in the composer) must not collapse it.
+    await user.keyboard('{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTitle('Collapse sidebar'));
+    // Clicking the collapse button itself calls onClose once via its own onClick, not via Escape.
+    expect(onClose).toHaveBeenCalledTimes(1);
+    onClose.mockClear();
+
+    // Escape fired with focus inside the docked drawer should collapse it.
+    screen.getByTitle('Collapse sidebar').focus();
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    onClose.mockClear();
+    rerender(
+      <SessionDrawer
+        sessions={[session('a', 'Alpha', 1)]}
+        activeId="a"
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+    // Mobile overlay drawer already closes on any Escape (existing modal focus-trap behavior).
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

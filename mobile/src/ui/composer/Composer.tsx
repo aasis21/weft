@@ -1,7 +1,7 @@
 import '@/ui/styles/composer.css';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, ClipboardEvent, JSX, KeyboardEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/helm-shared';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
@@ -194,6 +194,8 @@ export function Composer({
   const [attachments, setAttachments] = useState<PromptAttachment[]>([]);
   const [attachingCount, setAttachingCount] = useState(0);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
   const attaching = attachingCount > 0;
   sessionIdRef.current = sessionId;
 
@@ -361,6 +363,40 @@ export function Composer({
     void attachFiles(imageFiles);
   };
 
+  /** Desktop-only enhancement pairing with Ctrl+V paste: dropping image files onto the
+   * composer attaches them via the same `attachFiles` path. Mobile/touch has no drag
+   * source for files, so this is inert there — nothing to gate behind isDesktopInput(). */
+  const onDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDragEnter = (event: DragEvent<HTMLDivElement>): void => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    setDragOver(true);
+  };
+
+  const onDragLeave = (event: DragEvent<HTMLDivElement>): void => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragOver(false);
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>): void => {
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    dragDepthRef.current = 0;
+    setDragOver(false);
+    if (!files.length) return;
+    event.preventDefault();
+    const imageFiles = files.filter((file) => typeof file.type === 'string' && file.type.startsWith('image/'));
+    if (!imageFiles.length) return;
+    void attachFiles(imageFiles);
+  };
+
   const removeAttachment = (index: number): void => {
     setAttachments((prev) => {
       const updated = prev.filter((_, i) => i !== index);
@@ -516,7 +552,14 @@ export function Composer({
         </div>
       ) : null}
 
-      <div className="composer-shell">
+      <div
+        className={`composer-shell${dragOver ? ' composer-shell-dragover' : ''}`}
+        onDragOver={onDragOver}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {dragOver ? <div className="composer-drop-hint" aria-hidden="true">Drop images to attach</div> : null}
         <input
           ref={fileInputRef}
           type="file"

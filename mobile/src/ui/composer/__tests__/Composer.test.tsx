@@ -235,6 +235,21 @@ describe('Composer', () => {
     expect(fileToAttachment).not.toHaveBeenCalled();
   });
 
+  it('attaches an image file dropped onto the composer shell', async () => {
+    const { container } = renderComposer();
+    const shell = container.querySelector('.composer-shell');
+    expect(shell).not.toBeNull();
+
+    const file = new File(['fake'], 'dropped.png', { type: 'image/png' });
+    fireEvent.dragEnter(shell as Element, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(container.querySelector('.composer-shell-dragover')).not.toBeNull();
+
+    fireEvent.drop(shell as Element, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(fileToAttachment).toHaveBeenCalledWith(file);
+    expect(await screen.findByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
+    expect(container.querySelector('.composer-shell-dragover')).toBeNull();
+  });
+
   it('keeps the attachment spinner visible until concurrent picks finish', async () => {
     const first = deferred<PromptAttachment>();
     const second = deferred<PromptAttachment>();

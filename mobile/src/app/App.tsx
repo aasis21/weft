@@ -67,6 +67,18 @@ export default function App(): JSX.Element {
   const active = snapshot.sessions.find((s) => s.meta.channelId === activeId) ?? snapshot.sessions[0] ?? null;
   const hasSessions = snapshot.sessions.length > 0;
 
+  // Desktop multi-tab convenience: reflect the active session name and total unread count
+  // in the browser tab title, so a backgrounded Helm tab is distinguishable at a glance.
+  // Mobile PWA installs also get this (harmless there — no tab strip to read it from).
+  useEffect(() => {
+    const unreadCount = snapshot.sessions.reduce((sum, s) => sum + (s.unread ? 1 : 0), 0);
+    const prefix = unreadCount > 0 ? `(${unreadCount}) ` : '';
+    document.title = active ? `${prefix}${active.meta.title} · Helm` : 'Helm';
+    return () => {
+      document.title = 'Helm';
+    };
+  }, [active, snapshot.sessions]);
+
   if (!snapshot.ready) {
     return (
       <main className="boot">
