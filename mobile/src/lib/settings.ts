@@ -4,12 +4,14 @@ export type ThemeSetting = 'system' | 'light' | 'dark';
 
 export interface HelmSettings {
   voiceAutoRelisten: boolean;
+  voiceSpeakStreaming: boolean;
   theme: ThemeSetting;
 }
 
 const SETTINGS_KEY = 'helm.settings.v1';
 const DEFAULT_SETTINGS: HelmSettings = {
   voiceAutoRelisten: false,
+  voiceSpeakStreaming: false,
   theme: 'system',
 };
 const SETTINGS_EVENT = 'helm-settings-change';
@@ -22,6 +24,7 @@ function parseSettings(raw: string | null | undefined): Partial<HelmSettings> {
     const record = parsed as Record<string, unknown>;
     const out: Partial<HelmSettings> = {};
     if (typeof record.voiceAutoRelisten === 'boolean') out.voiceAutoRelisten = record.voiceAutoRelisten;
+    if (typeof record.voiceSpeakStreaming === 'boolean') out.voiceSpeakStreaming = record.voiceSpeakStreaming;
     if (record.theme === 'light' || record.theme === 'dark' || record.theme === 'system') out.theme = record.theme;
     return out;
   } catch {
@@ -32,6 +35,7 @@ function parseSettings(raw: string | null | undefined): Partial<HelmSettings> {
 function normalize(settings: Partial<HelmSettings>): HelmSettings {
   return {
     voiceAutoRelisten: settings.voiceAutoRelisten ?? DEFAULT_SETTINGS.voiceAutoRelisten,
+    voiceSpeakStreaming: settings.voiceSpeakStreaming ?? DEFAULT_SETTINGS.voiceSpeakStreaming,
     theme: settings.theme ?? DEFAULT_SETTINGS.theme,
   };
 }
@@ -80,6 +84,15 @@ export async function getVoiceAutoRelisten(): Promise<boolean> {
 export async function setVoiceAutoRelisten(enabled: boolean): Promise<void> {
   const current = await getSettings();
   await writeSettings({ ...current, voiceAutoRelisten: enabled });
+}
+
+export async function getVoiceSpeakStreaming(): Promise<boolean> {
+  return (await getSettings()).voiceSpeakStreaming;
+}
+
+export async function setVoiceSpeakStreaming(enabled: boolean): Promise<void> {
+  const current = await getSettings();
+  await writeSettings({ ...current, voiceSpeakStreaming: enabled });
 }
 
 export async function getTheme(): Promise<ThemeSetting> {

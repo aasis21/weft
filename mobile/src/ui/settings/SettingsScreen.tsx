@@ -4,6 +4,7 @@ import {
   getSettings,
   setTheme,
   setVoiceAutoRelisten,
+  setVoiceSpeakStreaming,
   type HelmSettings,
   type ThemeSetting,
 } from '@/lib/settings';
@@ -26,7 +27,11 @@ const THEME_OPTIONS: Array<{ value: ThemeSetting; label: string }> = [
 ];
 
 export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
-  const [settings, setSettingsState] = useState<HelmSettings>({ voiceAutoRelisten: false, theme: 'system' });
+  const [settings, setSettingsState] = useState<HelmSettings>({
+    voiceAutoRelisten: false,
+    voiceSpeakStreaming: false,
+    theme: 'system',
+  });
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -100,6 +105,11 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
     void setVoiceAutoRelisten(enabled);
   };
 
+  const toggleSpeakStreaming = (enabled: boolean): void => {
+    setSettingsState((current) => ({ ...current, voiceSpeakStreaming: enabled }));
+    void setVoiceSpeakStreaming(enabled);
+  };
+
   return (
     <div
       className="settings-overlay"
@@ -167,6 +177,22 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
               </label>
             </div>
             <span className="settings-row-label">Auto-relisten after the assistant speaks</span>
+
+            <div className="settings-row-head">
+              <div>
+                <h2 id="settings-voice-stream-title">Stream spoken reply</h2>
+                <p>On: speak words as they generate. Off: speak each reply once it's complete (more natural).</p>
+              </div>
+              <label className="settings-switch">
+                <input
+                  type="checkbox"
+                  aria-labelledby="settings-voice-stream-title"
+                  checked={settings.voiceSpeakStreaming}
+                  onChange={(event) => toggleSpeakStreaming(event.currentTarget.checked)}
+                />
+                <span aria-hidden="true" />
+              </label>
+            </div>
           </section>
         </div>
       </section>

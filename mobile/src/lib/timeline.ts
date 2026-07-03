@@ -43,6 +43,9 @@ export interface AssistantItem {
   id: string;
   text: string;
   ts: number;
+  /** True once the extension sends the finalized `assistant_message` for this id (vs. still
+   *  streaming via `assistant_delta`). Drives whether Voice Mode speaks it in full-message mode. */
+  final?: boolean;
 }
 export interface ToolItem {
   kind: 'tool';
@@ -370,13 +373,13 @@ function upsertAssistant(state: TimelineState, message: AssistantMessage): Timel
   const id = message.msg.messageId ?? `assistant-${message.ts}`;
   const index = state.items.findIndex((item) => item.id === id && item.kind === 'assistant');
   if (index === -1) {
-    const item: AssistantItem = { kind: 'assistant', id, text: message.msg.content, ts: message.ts };
+    const item: AssistantItem = { kind: 'assistant', id, text: message.msg.content, ts: message.ts, final: true };
     return { ...state, items: cap([...state.items, item]) };
   }
   return {
     ...state,
     items: state.items.map((item, i) =>
-      i === index ? { ...(item as AssistantItem), text: message.msg.content, ts: message.ts } : item,
+      i === index ? { ...(item as AssistantItem), text: message.msg.content, ts: message.ts, final: true } : item,
     ),
   };
 }
@@ -385,14 +388,14 @@ function appendDelta(state: TimelineState, message: AssistantDelta): TimelineSta
   const id = message.msg.messageId ?? `assistant-${message.ts}`;
   const index = state.items.findIndex((item) => item.id === id && item.kind === 'assistant');
   if (index === -1) {
-    const item: AssistantItem = { kind: 'assistant', id, text: message.msg.content, ts: message.ts };
+    const item: AssistantItem = { kind: 'assistant', id, text: message.msg.content, ts: message.ts, final: false };
     return { ...state, items: cap([...state.items, item]) };
   }
   return {
     ...state,
     items: state.items.map((item, i) =>
       i === index
-        ? { ...(item as AssistantItem), text: `${(item as AssistantItem).text}${message.msg.content}`, ts: message.ts }
+        ? { ...(item as AssistantItem), text: `${(item as AssistantItem).text}${message.msg.content}`, ts: message.ts, final: false }
         : item,
     ),
   };

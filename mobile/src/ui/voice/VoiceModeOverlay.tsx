@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { getVoiceAutoRelisten } from '@/lib/settings';
+import { getVoiceAutoRelisten, getVoiceSpeakStreaming } from '@/lib/settings';
 import type { AssistantItem } from '@/lib/timeline';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { useSpeechOutput } from '@/ui/hooks/useSpeechOutput';
@@ -65,6 +65,7 @@ export function VoiceModeOverlay({
   const [state, setState] = useState<VoiceState>('ready');
   const [caption, setCaption] = useState('');
   const [autoRelisten, setAutoRelisten] = useState(false);
+  const [speakStreaming, setSpeakStreaming] = useState(false);
   const silenceTimerRef = useRef<number | null>(null);
   const committedRef = useRef('');
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -153,6 +154,7 @@ export function VoiceModeOverlay({
 
   useEffect(() => {
     void getVoiceAutoRelisten().then(setAutoRelisten);
+    void getVoiceSpeakStreaming().then(setSpeakStreaming);
   }, []);
 
   // Hands-free entry: begin listening the moment Voice Mode opens (matches vox/Claude/Gemini voice
@@ -201,35 +203,49 @@ export function VoiceModeOverlay({
       cursor.offset = 0;
       sawReplyRef.current = false;
     }
+    // Full-message mode (streaming off): hold TTS until the extension finalizes this message
+    // (assistant_message → item.final) or the turn goes idle, so speech is whole sentences instead of
+    // partial deltas. Streaming on: speak each delta as it arrives.
+    if (!speakStreaming && latestAssistant.final !== true && agentBusy) return;
     if (latestAssistant.text.length <= cursor.offset) return;
     const delta = latestAssistant.text.slice(cursor.offset);
     cursor.offset = latestAssistant.text.length;
     if (!delta.trim()) return;
     sawReplyRef.current = true;
     enqueueSpeech(delta);
-  }, [enqueueSpeech, latestAssistant]);
+  }, [agentBusy, enqueueSpeech, latestAssistant, speakStreaming]);
 
   useEffect(() => {
     if (!agentBusy && sawReplyRef.current) flushSpeech();
   }, [agentBusy, flushSpeech]);
 
+  // Speaking + settle. TTS speaking → speaking. When speech stops mid-turn (agent still busy — e.g. a
+  // narration block finished before a tool call) fall back to working/thinking so the orb tracks the
+  // live turn (#181). When the turn is fully done → ready or auto-relisten.
   useEffect(() => {
-    if (!outputSupported && (state === 'thinking' || state === 'working') && !agentBusy && sawReplyRef.current) {
-      sawReplyRef.current = false;
-      if (autoRelisten) startListening();
-      else setState('ready');
-      return;
-    }
     if (outputSpeaking) {
       setState('speaking');
       return;
     }
-    if (state === 'speaking' && !agentBusy) {
-      sawReplyRef.current = false;
-      if (autoRelisten) startListening();
-      else setState('ready');
+    if (state === 'speaking') {
+      if (agentBusy) {
+        setState(toolActive ? 'working' : 'thinking');
+      } else {
+        sawReplyRef.current = false;
+        if (autoRelisten) startListening();
+        else setState('ready');
+      }
     }
-  }, [agentBusy, autoRelisten, outputSpeaking, outputSupported, startListening, state]);
+  }, [agentBusy, autoRelisten, outputSpeaking, startListening, state, toolActive]);
+
+  // Turn ended with nothing (more) to speak — an empty/whitespace-only reply, or speech output is
+  // unavailable. Don't leave the orb stuck on Thinking…/Working…; settle to ready or auto-relisten.
+  useEffect(() => {
+    if (agentBusy || outputSpeaking || sawReplyRef.current) return;
+    if (state !== 'thinking' && state !== 'working') return;
+    if (autoRelisten) startListening();
+    else setState('ready');
+  }, [agentBusy, autoRelisten, outputSpeaking, startListening, state]);
 
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
@@ -237,30 +253,55 @@ export function VoiceModeOverlay({
     return LABELS[state];
   }, [inputSupported, outputSupported, state]);
 
+  const orbGlyph =
+    state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : state === 'thinking' ? '⋯' : '🎙';
+
+  const replyText = latestAssistant?.text ?? '';
+  const showReply = (state === 'thinking' || state === 'working' || state === 'speaking') && replyText.trim().length > 0;
+  const userSaid = caption.trim();
+
   return (
-    <div className="voice-overlay" role="dialog" aria-modal="true" aria-label="Voice mode" ref={overlayRef}>
+    <div className="voice-overlay" role="dialog" aria-modal="true" aria-label="Vox voice mode" ref={overlayRef}>
       <div className="voice-panel" data-state={state}>
         <header className="voice-head">
-          <div>
-            <span className="voice-title">Voice Mode</span>
-            <span className="voice-sub">Hands-free Helm conversation</span>
-          </div>
-          <button ref={closeButtonRef} type="button" className="icon-btn voice-close" onClick={onClose} aria-label="Close voice mode">
-            ✕
-          </button>
+          <span className="voice-brandmark" aria-hidden="true">
+            <span className="voice-brandmark-bar" />
+            <span className="voice-brandmark-bar" />
+            <span className="voice-brandmark-bar" />
+          </span>
+          <span className="voice-title">Vox</span>
+          <span className="voice-sub">Hands-free conversation</span>
         </header>
 
         <button type="button" className="voice-orb" onClick={handleOrb} disabled={disabled && state !== 'speaking'} aria-label={status}>
           <span className="voice-orb-ring" aria-hidden="true" />
-          <span className="voice-orb-core" aria-hidden="true">{state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : state === 'thinking' ? '⋯' : '🎙'}</span>
+          <span className="voice-orb-core" aria-hidden="true">{orbGlyph}</span>
         </button>
 
         <p className="voice-status" aria-live="polite">{status}</p>
-        <p className="voice-caption" aria-live="polite">{caption || (state === 'listening' ? 'Listening…' : ' ')}</p>
+
+        <div className="voice-body">
+          {state === 'listening' ? (
+            <p className="voice-caption" aria-live="polite">{caption || 'Listening…'}</p>
+          ) : (
+            <>
+              {userSaid ? <p className="voice-you">“{userSaid}”</p> : null}
+              {showReply ? (
+                <div className="voice-transcript" aria-live="polite">{replyText}</div>
+              ) : (
+                <p className="voice-caption" aria-live="polite">{'\u00A0'}</p>
+              )}
+            </>
+          )}
+        </div>
+
         <div className={`voice-countdown${state === 'listening' && caption.trim() ? ' active' : ''}`} aria-hidden="true">
           <span />
         </div>
-        <p className="voice-hint">Tap the orb to start, send, or interrupt. Escape exits.</p>
+
+        <button ref={closeButtonRef} type="button" className="voice-back-btn" onClick={onClose}>
+          <span aria-hidden="true">←</span> Back to chat
+        </button>
       </div>
     </div>
   );

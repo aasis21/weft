@@ -634,8 +634,8 @@ export function Composer({
               onPointerDown={onActionPointerDown}
               onClick={onActionClick}
               disabled={!busy && (disabled || attaching)}
-              aria-label={busy ? 'Stop generating' : emptyPrompt ? 'Start voice mode' : 'Send'}
-              title={busy ? 'Stop generating' : emptyPrompt ? 'Start voice mode' : undefined}
+              aria-label={busy ? 'Stop generating' : emptyPrompt ? 'Open Vox' : 'Send'}
+              title={busy ? 'Stop generating' : emptyPrompt ? 'Open Vox' : undefined}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 {busy ? (

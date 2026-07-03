@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
+import type { AssistantItem } from '@/lib/timeline';
 
 const speechInput = { supported: true, start: vi.fn(), stop: vi.fn() };
 const speechOutput = {
@@ -13,6 +14,10 @@ const speechOutput = {
 
 vi.mock('@/ui/hooks/useSpeechInput', () => ({ useSpeechInput: () => speechInput }));
 vi.mock('@/ui/hooks/useSpeechOutput', () => ({ useSpeechOutput: () => speechOutput }));
+
+function mkAssistant(text: string, final: boolean, id = 'm1'): AssistantItem {
+  return { kind: 'assistant', id, text, ts: 1, final };
+}
 
 function renderOverlay(props: Partial<React.ComponentProps<typeof VoiceModeOverlay>> = {}) {
   const onInterrupt = vi.fn();
@@ -96,5 +101,70 @@ describe('VoiceModeOverlay interrupt while busy (#179)', () => {
     fireEvent.click(orb);
     expect(onInterrupt).toHaveBeenCalledTimes(1);
     expect(speechInput.start).toHaveBeenCalled();
+  });
+});
+
+describe('VoiceModeOverlay full-message speech (streaming off, default)', () => {
+  it('does not speak partial deltas while the message is still streaming', async () => {
+    const { rerender } = renderOverlay({ agentBusy: true, latestAssistant: null });
+    await Promise.resolve();
+    rerender(
+      <VoiceModeOverlay
+        latestAssistant={mkAssistant('Hello wor', false)}
+        agentBusy
+        toolActive={false}
+        disabled={false}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('speaks the whole message once it is finalized (assistant_message)', async () => {
+    const { rerender } = renderOverlay({ agentBusy: true, latestAssistant: null });
+    await Promise.resolve();
+    rerender(
+      <VoiceModeOverlay
+        latestAssistant={mkAssistant('Hello wor', false)}
+        agentBusy
+        toolActive={false}
+        disabled={false}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+    rerender(
+      <VoiceModeOverlay
+        latestAssistant={mkAssistant('Hello world.', true)}
+        agentBusy
+        toolActive={false}
+        disabled={false}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(speechOutput.enqueue).toHaveBeenCalledWith('Hello world.');
+  });
+
+  it('never speaks an empty / whitespace-only finalized message', async () => {
+    const { rerender } = renderOverlay({ agentBusy: true, latestAssistant: null });
+    await Promise.resolve();
+    rerender(
+      <VoiceModeOverlay
+        latestAssistant={mkAssistant('   ', true)}
+        agentBusy={false}
+        toolActive={false}
+        disabled={false}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
   });
 });

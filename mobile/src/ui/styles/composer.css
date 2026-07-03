@@ -355,12 +355,118 @@
   gap: 1rem;
   padding-bottom: 1.25rem;
   text-align: center;
+  background:
+    radial-gradient(120% 80% at 50% -10%, color-mix(in srgb, var(--voice-orb-color, var(--accent)) 14%, transparent), transparent 60%),
+    var(--bg-elev);
 }
 
 .voice-head {
   width: 100%;
   box-sizing: border-box;
+  display: grid;
+  justify-items: center;
+  gap: 0.3rem;
+  padding: 1.4rem 1.1rem 0.4rem;
+  text-align: center;
+}
+
+.voice-brandmark {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 20px;
+  margin-bottom: 0.15rem;
+}
+
+.voice-brandmark-bar {
+  width: 3px;
+  border-radius: 999px;
+  background: var(--voice-orb-color, var(--accent));
+  opacity: 0.9;
+  height: 40%;
+}
+
+.voice-brandmark-bar:nth-child(1) { height: 55%; }
+.voice-brandmark-bar:nth-child(2) { height: 100%; }
+.voice-brandmark-bar:nth-child(3) { height: 70%; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .voice-panel[data-state='listening'] .voice-brandmark-bar,
+  .voice-panel[data-state='speaking'] .voice-brandmark-bar {
+    animation: voice-brandwave 1s ease-in-out infinite;
+  }
+  .voice-brandmark-bar:nth-child(2) { animation-delay: 0.15s; }
+  .voice-brandmark-bar:nth-child(3) { animation-delay: 0.3s; }
+}
+
+.voice-title {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1.35rem;
+  text-transform: none;
+}
+
+.voice-body {
+  width: min(100% - 2rem, 460px);
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  min-height: 3.4rem;
+}
+
+.voice-you {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 0.92rem;
+  font-style: italic;
+  max-width: 100%;
+}
+
+.voice-transcript {
+  width: 100%;
+  max-height: 34vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border: 1px solid var(--bg-rule);
+  color: var(--fg);
+  line-height: 1.5;
   text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-overflow-scrolling: touch;
+}
+
+.voice-back-btn {
+  margin-top: 0.4rem;
+  padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--bg-rule);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.voice-back-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+.voice-back-btn:active {
+  transform: translateY(1px);
+}
+
+@keyframes voice-brandwave {
+  0%, 100% { transform: scaleY(0.7); }
+  50% { transform: scaleY(1.15); }
 }
 
 .voice-orb {
