@@ -10,6 +10,8 @@ import { SessionScreen } from '@/ui/screens/SessionScreen';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { sessionRuntime } from '@/session/runtime/instance';
 
+type ModalHistoryState = { helmView: 'devices' } | { helmView: 'device-details'; channelId: string } | null;
+
 export default function App(): JSX.Element {
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const [adding, setAdding] = useState(false);
@@ -25,6 +27,27 @@ export default function App(): JSX.Element {
     void sessionRuntime.init();
   }, []);
 
+  // Devices / Device details have no dedicated in-page back button — the phone's own Back
+  // gesture (or the browser Back button on web) closes them, via history entries we push when
+  // opening each one. `null` state means "neither is open" (whatever screen would render below).
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent): void => {
+      const state = event.state as ModalHistoryState;
+      if (state?.helmView === 'devices') {
+        setDevicesOpen(true);
+        setDeviceDetailsChannelId(undefined);
+      } else if (state?.helmView === 'device-details') {
+        setDevicesOpen(false);
+        setDeviceDetailsChannelId(state.channelId);
+      } else {
+        setDevicesOpen(false);
+        setDeviceDetailsChannelId(undefined);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   const handlePair = useCallback(async (raw: string): Promise<void> => {
     const route = await sessionRuntime.addByQr(raw);
     setAdding(false);
@@ -33,6 +56,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openJoin = useCallback((manual = false): void => {
+    window.history.replaceState(null, '');
     setError(null);
     setAddManual(manual);
     setStarting(false);
@@ -42,6 +66,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openStart = useCallback((channelId?: string): void => {
+    window.history.replaceState(null, '');
     setError(null);
     setAdding(false);
     setDevicesOpen(false);
@@ -56,6 +81,7 @@ export default function App(): JSX.Element {
     setStarting(false);
     setDeviceDetailsChannelId(undefined);
     setDevicesOpen(true);
+    window.history.pushState({ helmView: 'devices' } satisfies ModalHistoryState, '');
   }, []);
 
   const openDeviceDetails = useCallback((channelId: string): void => {
@@ -64,6 +90,13 @@ export default function App(): JSX.Element {
     setStarting(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(channelId);
+    window.history.pushState({ helmView: 'device-details', channelId } satisfies ModalHistoryState, '');
+  }, []);
+
+  const closeDeviceScreens = useCallback((): void => {
+    window.history.replaceState(null, '');
+    setDevicesOpen(false);
+    setDeviceDetailsChannelId(undefined);
   }, []);
 
   const handleVoiceModeChange = useCallback((channelId: string, active: boolean): void => {
@@ -71,6 +104,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const handleDemo = useCallback(async (): Promise<void> => {
+    window.history.replaceState(null, '');
     await sessionRuntime.addDemo();
     setAdding(false);
     setShowLanding(false);
@@ -148,7 +182,8 @@ export default function App(): JSX.Element {
   if (devicesOpen) {
     return (
       <DevicesScreen
-        hasSessions={hasSessions}
+        sessions={snapshot.sessions}
+        activeId={activeId}
         devices={snapshot.devices}
         onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
         onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
@@ -156,9 +191,18 @@ export default function App(): JSX.Element {
         onStartOnDevice={(id) => openStart(id)}
         onOpenDetails={(id) => openDeviceDetails(id)}
         onScanListener={() => openJoin(false)}
-        onCancel={() => {
-          setDevicesOpen(false);
+        onSelectSession={(id) => {
+          closeDeviceScreens();
+          sessionRuntime.setActive(id);
+        }}
+        onAddSession={() => openJoin(false)}
+        onStartSession={() => openStart()}
+        onRemoveSession={(id) => void sessionRuntime.remove(id)}
+        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+        onGoHome={() => {
+          closeDeviceScreens();
           setError(null);
+          setShowLanding(true);
         }}
       />
     );
@@ -172,19 +216,32 @@ export default function App(): JSX.Element {
       return (
         <DeviceDetailsScreen
           device={device}
+          activeId={activeId}
           sessions={snapshot.sessions}
           onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
           onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
           onForget={async (id) => {
             await sessionRuntime.forgetDevice(id);
-            setDeviceDetailsChannelId(undefined);
+            closeDeviceScreens();
           }}
           onStartOnDevice={(id) => openStart(id)}
           onOpenSession={(id) => {
+            closeDeviceScreens();
             sessionRuntime.setActive(id);
-            setDeviceDetailsChannelId(undefined);
           }}
-          onBack={() => setDeviceDetailsChannelId(undefined)}
+          onSelectSession={(id) => {
+            closeDeviceScreens();
+            sessionRuntime.setActive(id);
+          }}
+          onAddSession={() => openJoin(false)}
+          onStartSession={() => openStart()}
+          onRemoveSession={(id) => void sessionRuntime.remove(id)}
+          onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+          onGoHome={() => {
+            closeDeviceScreens();
+            setError(null);
+            setShowLanding(true);
+          }}
         />
       );
     }

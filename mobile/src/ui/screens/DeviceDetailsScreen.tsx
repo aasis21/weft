@@ -4,9 +4,12 @@ import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
+import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
+  activeId: string | null;
   /** Every session in the app; filtered here to the ones this device spawned. */
   sessions: SessionView[];
   onRefreshProjects(channelId: string): void;
@@ -14,7 +17,12 @@ interface DeviceDetailsScreenProps {
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
   onOpenSession(channelId: string): void;
-  onBack(): void;
+  onSelectSession(channelId: string): void;
+  onAddSession(): void;
+  onStartSession(): void;
+  onRemoveSession(channelId: string): void;
+  onRenameSession(channelId: string, title: string): void;
+  onGoHome(): void;
 }
 
 function sessionStatusLabel(session: SessionView): string {
@@ -37,22 +45,35 @@ function sessionStatusLabel(session: SessionView): string {
 
 /**
  * Device details (#device-events): the full record for ONE registered listener — its live status,
- * a "Sessions from this device" list (every session ever spawned here via "Start session", matched
- * by the listener's stable deviceId so it survives `helm-cli start` restarts), and the raw
+ * its stable identifiers (deviceId survives `helm-cli start` restarts; channelId is the current
+ * pairing channel, freshly minted every run), a "Sessions from this device" list (every session
+ * ever spawned here via "Start session", matched by the listener's stable deviceId), and the raw
  * DEVICE-channel event log (project list / spawn / forget — reuses the same DebugPanel component
  * the per-session debug view uses). Reached from a device row on DevicesScreen.
+ *
+ * Navigation: the header always shows the same hamburger as every other screen (opens the
+ * sessions sidebar, never "back") — leaving this screen relies on the browser/app Back gesture,
+ * not a dedicated in-page back button.
  */
 export function DeviceDetailsScreen({
   device,
+  activeId,
   sessions,
   onRefreshProjects,
   onSetDefault,
   onForget,
   onStartOnDevice,
   onOpenSession,
-  onBack,
+  onSelectSession,
+  onAddSession,
+  onStartSession,
+  onRemoveSession,
+  onRenameSession,
+  onGoHome,
 }: DeviceDetailsScreenProps): JSX.Element {
   const [logOpen, setLogOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const status = deviceStatus(device);
   const lastSeen = formatLastSeen(device.lastSeenAt);
   const deviceKey = device.deviceId ?? device.channelId;
@@ -62,34 +83,57 @@ export function DeviceDetailsScreen({
 
   return (
     <main className="helm-session join-session device-details-screen">
+      <header className="status-bar">
+        <button
+          className="icon-btn drawer-btn"
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open sessions"
+        >
+          <span className="hamburger" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+        <div className="status-id">
+          <span className="status-title" title={deviceLabel(device)}>{deviceLabel(device)}</span>
+          <span className={`device-status device-status-${status.tone}`}>
+            <span className="device-status-dot" aria-hidden="true" />
+            <span>{status.label}</span>
+            {lastSeen ? <span className="device-status-seen">· last seen {lastSeen}</span> : null}
+          </span>
+        </div>
+      </header>
+
       <div className="session-join-inner">
         <header className="session-join-head device-details-head">
-          <button
-            type="button"
-            className="icon-btn drawer-btn device-details-menu-btn"
-            onClick={onBack}
-            aria-label="Back to devices"
-            title="Back to devices"
-          >
-            <span className="hamburger" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-          </button>
           <p className="session-join-kicker">Device details</p>
           <h2>
             {deviceLabel(device)}
             {device.isDefault ? <span className="tag">default</span> : null}
           </h2>
-          <div className={`device-status device-status-${status.tone}`}>
-            <span className="device-status-dot" aria-hidden="true" />
-            <span>{status.label}</span>
-            {lastSeen ? <span className="device-status-seen">· last seen {lastSeen}</span> : null}
-          </div>
         </header>
 
         {device.error ? <p className="error-banner">{device.error}</p> : null}
+
+        <section className="session-join-fallback device-card device-identifiers">
+          <h3>Comms identifiers</h3>
+          <dl className="device-id-list">
+            <div className="device-id-row">
+              <dt>Device ID</dt>
+              <dd className="mono">{device.deviceId ?? '—'}</dd>
+            </div>
+            <div className="device-id-row">
+              <dt>Latest channel ID</dt>
+              <dd className="mono">{device.channelId}</dd>
+            </div>
+          </dl>
+          <p className="device-card-sub">
+            Device ID is stable across <code>helm-cli start</code> restarts; the channel ID is a
+            fresh pairing channel minted every run, for forward secrecy.
+          </p>
+        </section>
 
         <section className="session-join-fallback device-card">
           <p className="device-card-sub">
@@ -146,6 +190,40 @@ export function DeviceDetailsScreen({
       {logOpen ? (
         <DebugPanel events={device.events} title={deviceLabel(device)} onClose={() => setLogOpen(false)} />
       ) : null}
+
+      {drawerOpen ? (
+        <SessionDrawer
+          sessions={sessions}
+          activeId={activeId}
+          onSelect={(id) => {
+            setDrawerOpen(false);
+            onSelectSession(id);
+          }}
+          onAddSession={() => {
+            setDrawerOpen(false);
+            onAddSession();
+          }}
+          onStartSession={() => {
+            setDrawerOpen(false);
+            onStartSession();
+          }}
+          onRemove={(id) => {
+            onRemoveSession(id);
+          }}
+          onRename={onRenameSession}
+          onGoHome={() => {
+            setDrawerOpen(false);
+            onGoHome();
+          }}
+          onOpenSettings={() => {
+            setDrawerOpen(false);
+            setSettingsOpen(true);
+          }}
+          onClose={() => setDrawerOpen(false)}
+        />
+      ) : null}
+
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} /> : null}
     </main>
   );
 }

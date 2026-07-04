@@ -1,9 +1,14 @@
+import { useState } from 'react';
 import type { JSX } from 'react';
 import type { ListenerDeviceState } from '@/session/model';
+import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
+import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 
 interface DevicesScreenProps {
-  hasSessions: boolean;
+  sessions: SessionView[];
+  activeId: string | null;
   devices: ListenerDeviceState[];
   onRefreshProjects(channelId: string): void;
   onSetDefault(channelId: string): Promise<void>;
@@ -11,7 +16,12 @@ interface DevicesScreenProps {
   onStartOnDevice(channelId: string): void;
   onOpenDetails(channelId: string): void;
   onScanListener(): void;
-  onCancel(): void;
+  onSelectSession(channelId: string): void;
+  onAddSession(): void;
+  onStartSession(): void;
+  onRemoveSession(channelId: string): void;
+  onRenameSession(channelId: string, title: string): void;
+  onGoHome(): void;
 }
 
 /**
@@ -20,9 +30,14 @@ interface DevicesScreenProps {
  * is scoped to launching ONE new session on ONE device). Reached from the sessions drawer/menu
  * as "Devices", distinct from "Join another session" (mirror an existing session by its QR) and
  * "Start another session" (spawn a new one via a device already registered here).
+ *
+ * Navigation: the header always shows the same hamburger as every other screen (opens the
+ * sessions sidebar, never "back") — leaving this screen relies on the browser/app Back
+ * gesture (history pushed by the caller), not a dedicated in-page back button.
  */
 export function DevicesScreen({
-  hasSessions,
+  sessions,
+  activeId,
   devices,
   onRefreshProjects,
   onSetDefault,
@@ -30,17 +45,39 @@ export function DevicesScreen({
   onStartOnDevice,
   onOpenDetails,
   onScanListener,
-  onCancel,
+  onSelectSession,
+  onAddSession,
+  onStartSession,
+  onRemoveSession,
+  onRenameSession,
+  onGoHome,
 }: DevicesScreenProps): JSX.Element {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const sortedDevices = sortDevices(devices);
 
   return (
     <main className="helm-session join-session devices-screen">
+      <header className="status-bar">
+        <button
+          className="icon-btn drawer-btn"
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open sessions"
+        >
+          <span className="hamburger" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+        <div className="status-id">
+          <span className="status-title">Connected devices</span>
+        </div>
+      </header>
+
       <div className="session-join-inner">
         <header className="session-join-head">
-          <button type="button" className="session-pair-back" onClick={onCancel}>
-            ← {hasSessions ? 'Back to sessions' : 'Back'}
-          </button>
           <p className="session-join-kicker">Connected devices</p>
           <h2>Laptops registered with this phone</h2>
           <p className="session-join-hint">
@@ -113,6 +150,40 @@ export function DevicesScreen({
           </section>
         )}
       </div>
+
+      {drawerOpen ? (
+        <SessionDrawer
+          sessions={sessions}
+          activeId={activeId}
+          onSelect={(id) => {
+            setDrawerOpen(false);
+            onSelectSession(id);
+          }}
+          onAddSession={() => {
+            setDrawerOpen(false);
+            onAddSession();
+          }}
+          onStartSession={() => {
+            setDrawerOpen(false);
+            onStartSession();
+          }}
+          onRemove={(id) => {
+            onRemoveSession(id);
+          }}
+          onRename={onRenameSession}
+          onGoHome={() => {
+            setDrawerOpen(false);
+            onGoHome();
+          }}
+          onOpenSettings={() => {
+            setDrawerOpen(false);
+            setSettingsOpen(true);
+          }}
+          onClose={() => setDrawerOpen(false)}
+        />
+      ) : null}
+
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} /> : null}
     </main>
   );
 }

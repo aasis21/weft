@@ -1385,11 +1385,6 @@
   background: var(--bg-elev);
 }
 
-.helm-session .device-details-menu-btn {
-  align-self: flex-start;
-  margin-inline-start: -8px;
-}
-
 .helm-session .session-join-kicker {
   margin: 0;
   color: var(--accent);
@@ -1694,6 +1689,44 @@
 .helm-session .device-status-seen {
   opacity: 0.7;
   font-weight: 400;
+}
+
+.helm-session .device-identifiers h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-dim);
+}
+
+.helm-session .device-id-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.helm-session .device-id-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.helm-session .device-id-row dt {
+  flex: 0 0 auto;
+  min-width: 120px;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.helm-session .device-id-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.helm-session .device-id-row dd.mono {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
 }
 
 @keyframes device-status-pulse {

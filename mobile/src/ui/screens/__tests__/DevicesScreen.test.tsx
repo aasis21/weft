@@ -6,15 +6,15 @@ import type { ListenerDeviceState } from '@/session/model';
 function makeDevice(overrides: Partial<ListenerDeviceState> = {}): ListenerDeviceState {
   return {
     channelId: 'chan-1',
+    pub: 'pub-1',
     name: 'MacBook Pro',
     deviceId: 'device-1',
     isDefault: true,
-    cwd: null,
-    kind: 'live',
-    addedAt: Date.now(),
+    savedAt: Date.now(),
     projects: [],
     projectsLoading: false,
     connected: true,
+    events: [],
     ...overrides,
   };
 }
@@ -24,7 +24,8 @@ describe('DevicesScreen', () => {
     const onScanListener = vi.fn();
     render(
       <DevicesScreen
-        hasSessions={false}
+        sessions={[]}
+        activeId={null}
         devices={[]}
         onRefreshProjects={vi.fn()}
         onSetDefault={vi.fn()}
@@ -32,7 +33,12 @@ describe('DevicesScreen', () => {
         onStartOnDevice={vi.fn()}
         onOpenDetails={vi.fn()}
         onScanListener={onScanListener}
-        onCancel={vi.fn()}
+        onSelectSession={vi.fn()}
+        onAddSession={vi.fn()}
+        onStartSession={vi.fn()}
+        onRemoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onGoHome={vi.fn()}
       />,
     );
 
@@ -47,7 +53,8 @@ describe('DevicesScreen', () => {
 
     render(
       <DevicesScreen
-        hasSessions
+        sessions={[]}
+        activeId={null}
         devices={[makeDevice()]}
         onRefreshProjects={vi.fn()}
         onSetDefault={onSetDefault}
@@ -55,7 +62,12 @@ describe('DevicesScreen', () => {
         onStartOnDevice={onStartOnDevice}
         onOpenDetails={vi.fn()}
         onScanListener={vi.fn()}
-        onCancel={vi.fn()}
+        onSelectSession={vi.fn()}
+        onAddSession={vi.fn()}
+        onStartSession={vi.fn()}
+        onRemoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onGoHome={vi.fn()}
       />,
     );
 
@@ -76,7 +88,8 @@ describe('DevicesScreen', () => {
     const onSetDefault = vi.fn().mockResolvedValue(undefined);
     render(
       <DevicesScreen
-        hasSessions
+        sessions={[]}
+        activeId={null}
         devices={[makeDevice({ isDefault: false })]}
         onRefreshProjects={vi.fn()}
         onSetDefault={onSetDefault}
@@ -84,7 +97,12 @@ describe('DevicesScreen', () => {
         onStartOnDevice={vi.fn()}
         onOpenDetails={vi.fn()}
         onScanListener={vi.fn()}
-        onCancel={vi.fn()}
+        onSelectSession={vi.fn()}
+        onAddSession={vi.fn()}
+        onStartSession={vi.fn()}
+        onRemoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onGoHome={vi.fn()}
       />,
     );
 
