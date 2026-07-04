@@ -37,19 +37,19 @@ describe('scenario: device (listener) heartbeat watchdog', () => {
     await h!.flush();
     expect(h!.snapshot().devices[0]).toMatchObject({ channelId: 'listener-1', connected: true });
 
-    // Advance well past a session's OFFLINE_AFTER_MS (30s) but keep beating every 15s, as the real
+    // Advance well past a session's OFFLINE_AFTER_MS (30s) but keep beating every 2min, as the real
     // listener does — the device should stay online the whole time.
     for (let i = 0; i < 3; i += 1) {
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(120_000);
       listener.emit(B.deviceHeartbeat('device-1'));
       await h!.flush();
       expect(h!.snapshot().devices[0]).toMatchObject({ connected: true });
     }
 
     // Now the beats stop entirely (process hung/killed) — the watchdog should flip it offline once
-    // lastSeenAt exceeds DEVICE_OFFLINE_AFTER_MS (40s), even though nothing told the transport itself
-    // to disconnect.
-    await vi.advanceTimersByTimeAsync(41_000);
+    // lastSeenAt exceeds DEVICE_OFFLINE_AFTER_MS (3min = 2min heartbeat + 50%), even though nothing
+    // told the transport itself to disconnect.
+    await vi.advanceTimersByTimeAsync(181_000);
     expect(h!.snapshot().devices[0]).toMatchObject({ connected: false });
   });
 });

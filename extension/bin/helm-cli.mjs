@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
@@ -9,6 +9,26 @@ import { loadLocalEnv } from "../src/transportFactory.mjs";
 import { addProject, helmHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 
 const [, , command, ...args] = process.argv;
+
+const supportsColor = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined;
+const wrap = (open, close) => (text) => (supportsColor ? `\x1b[${open}m${text}\x1b[${close}m` : String(text));
+const c = {
+  bold: wrap(1, 22),
+  dim: wrap(2, 22),
+  cyan: wrap(36, 39),
+  green: wrap(32, 39),
+  brightGreen: wrap(92, 39),
+  yellow: wrap(33, 39),
+  red: wrap(31, 39),
+};
+
+function printHeader(title) {
+  const width = title.length + 4;
+  const bar = "─".repeat(width);
+  console.log(c.cyan(`┌${bar}┐`));
+  console.log(`${c.cyan("│")}  ${c.bold(title)}  ${c.cyan("│")}`);
+  console.log(c.cyan(`└${bar}┘`));
+}
 
 try {
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -50,15 +70,42 @@ async function start() {
     lock.release();
   };
 
-  const listener = createListener();
+  const status = createStatusLine();
+  const listener = createListener({
+    onDeviceConnected: () => status.setConnected(true),
+    onDeviceDisconnected: () => status.setConnected(false),
+    onHeartbeat: () => status.pulse(),
+    onSpawnRequest: ({ projectName, mode, name }) =>
+      status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${projectName || "default project"} ${c.dim(`[${mode}]`)}`),
+    onSpawnResult: ({ ok, error, name, projectName }) =>
+      status.log(
+        ok
+          ? `${c.green("✓")} Session started: ${c.bold(name)} ${c.dim(`(${projectName})`)}`
+          : `${c.red("✗")} Session failed${projectName ? ` (${projectName})` : ""}: ${error}`,
+      ),
+  });
+
+  printHeader(`HELM DEVICE STATION — ${hostname()}`);
+  console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions.\n"));
+
   await listener.start();
+
+  console.log(`${c.bold("1.")} Scan the QR code below with the Helm app to pair your phone:\n`);
   const qr = (await QRCode.toString(JSON.stringify(listener.pairingPayload), { type: "terminal", small: true })).replace(/\n+$/, "");
   console.log(qr);
-  console.log(`\nHelm listener ready on ${listener.channelId}. Scan this listener QR from your phone.`);
+  console.log();
+  console.log(`${c.bold("2.")} These identify this station for the pairing/session comms:\n`);
+  console.log(`   ${c.cyan("Device ID")}   ${c.bold(listener.deviceId)}`);
+  console.log(`   ${c.cyan("Channel ID")}  ${c.bold(listener.channelId)}`);
+  console.log(`   ${c.dim(`Heartbeat every ${Math.round(listener.heartbeatMs / 1000)}s keeps the pairing alive.`)}\n`);
+  console.log(`${c.bold("3.")} Projects available to spawn sessions in:\n`);
   printProjects(listProjects());
-  console.log("Hint: add projects with `helm-cli add-project <name> <path> --default`.");
+  console.log(c.dim("   Hint: add projects with `helm-cli add-project <name> <path> --default`.\n"));
+  console.log(`${c.bold("4.")} Waiting for your phone to connect…\n`);
+  status.start();
 
   const shutdown = async (signal) => {
+    status.stop();
     await listener.stop();
     release();
     if (signal) process.exit(0);
@@ -85,7 +132,7 @@ function acquireLock() {
     // no lock
   }
   if (existing && isProcessAlive(existing)) {
-    throw new Error(`A Helm listener is already running (pid ${existing}).`);
+    throw new Error(`A Helm Device Station is already running (pid ${existing}).`);
   }
   writeFileSync(file, String(process.pid), { mode: 0o600 });
   try {
@@ -113,14 +160,130 @@ function isProcessAlive(pid) {
   }
 }
 
+// Renders a single, in-place status line under the QR/banner output so the terminal shows the
+// Device Station's live connection + heartbeat state without growing the scrollback. Falls back to
+// one plain, non-blinking log line when stdout isn't a TTY (e.g. piped to a file or `nohup`), since
+// carriage-return redraws only make sense on an interactive terminal.
+function createStatusLine() {
+  const tty = Boolean(process.stdout.isTTY);
+  const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let connected = false;
+  let spinnerFrame = 0;
+  let spinnerTimer = null;
+  let tickTimer = null;
+  let pulseTimer = null;
+  let bright = false;
+  let lastBeatAt = null;
+
+  function render() {
+    if (!tty) return;
+    let line;
+    if (!connected) {
+      // Spinner proves the station process itself is alive/listening even before any phone has
+      // ever paired (the DEVICE_HEARTBEAT protocol only starts once a phone is bound).
+      const spin = c.yellow(SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length]);
+      line = `${spin} ${c.dim("listening for phone…")}`;
+    } else {
+      const dot = bright ? c.brightGreen("●") : c.green("●");
+      const agoMs = lastBeatAt ? Date.now() - lastBeatAt : null;
+      const ago = agoMs === null ? "warming up…" : `last heartbeat ${Math.max(0, Math.round(agoMs / 1000))}s ago`;
+      line = `${dot} ${c.bold("device connected")} ${c.dim(`· ${ago}`)}`;
+    }
+    process.stdout.write(`\r\x1b[2K${line}`);
+  }
+
+  function startSpinner() {
+    stopSpinner();
+    spinnerTimer = setInterval(() => {
+      spinnerFrame += 1;
+      render();
+    }, 120);
+    spinnerTimer.unref?.();
+  }
+
+  function stopSpinner() {
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
+  }
+
+  function startTicking() {
+    stopTicking();
+    tickTimer = setInterval(render, 1000);
+    tickTimer.unref?.();
+  }
+
+  function stopTicking() {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+
+  return {
+    start() {
+      if (!tty) {
+        console.log("Waiting for phone to connect…");
+        return;
+      }
+      startSpinner();
+      render();
+    },
+    setConnected(value) {
+      connected = value;
+      if (value) {
+        lastBeatAt = Date.now();
+        stopSpinner();
+        startTicking();
+      } else {
+        lastBeatAt = null;
+        stopTicking();
+        startSpinner();
+      }
+      if (!tty) {
+        console.log(value ? "Device connected." : "Device disconnected; waiting for phone…");
+        return;
+      }
+      render();
+    },
+    // Print a one-off line (session request/result) above the live status line, then redraw it,
+    // so events scroll normally while the connection/heartbeat indicator stays pinned at the bottom.
+    log(line) {
+      if (!tty) {
+        console.log(line);
+        return;
+      }
+      process.stdout.write(`\r\x1b[2K${line}\n`);
+      render();
+    },
+    // Flash the dot brighter on every outgoing DEVICE_HEARTBEAT and reset the "Ns ago" ticker, so a
+    // real beat is visible even though the interval (15s) is too long to rely on a single flash.
+    pulse() {
+      lastBeatAt = Date.now();
+      if (!tty) return;
+      bright = true;
+      render();
+      clearTimeout(pulseTimer);
+      pulseTimer = setTimeout(() => {
+        bright = false;
+        render();
+      }, 350);
+      pulseTimer.unref?.();
+    },
+    stop() {
+      stopSpinner();
+      stopTicking();
+      clearTimeout(pulseTimer);
+      if (tty) process.stdout.write("\r\x1b[2K");
+    },
+  };
+}
+
 function printProjects(projects) {
   if (!projects.length) {
-    console.log("No projects registered.");
+    console.log(c.dim("   No projects registered."));
     return;
   }
-  console.log("Registered projects:");
   for (const p of projects) {
-    console.log(`- ${p.name}${p.default ? " (default)" : ""}: ${resolve(p.path)}`);
+    const tag = p.default ? c.cyan(" (default)") : "";
+    console.log(`   ${c.bold(p.name)}${tag}  ${c.dim(resolve(p.path))}`);
   }
 }
 

@@ -119,14 +119,20 @@ import { selectAllSessions, selectManagerSnapshot, toTimelineState } from '@/ses
 const IDLE_AFTER_MS = 20_000;
 const OFFLINE_AFTER_MS = 30_000;
 const HOST_CONFIRM_MS = 30_000;
-// Device (listener) channel heartbeat cadence is 15s (extension/src/listener.mjs); allow ~2.5
-// missed beats before flipping the Online dot to Offline, so one dropped packet doesn't flap it.
-const DEVICE_OFFLINE_AFTER_MS = 40_000;
+// Device (listener) channel heartbeat cadence is 2min (extension/src/listener.mjs). Rule: allow the
+// mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
+// doesn't flap the Online dot, without waiting too long to notice a real disconnect.
+const DEVICE_OFFLINE_AFTER_MS = 180_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
 const RESUME_DEBOUNCE_MS = 500;
-const MAX_WARM_SESSIONS = 10;
+const MAX_WARM_SESSIONS = 50;
 const META_PERSIST_THROTTLE_MS = 1_500;
 const PERSIST_THROTTLE_MS = 800;
+const LIVENESS_PERSIST_THROTTLE_MS = 30_000;
+// #163 session lifecycle: after AUTO_ARCHIVE_MS of witnessed silence (subscribed but no heartbeat)
+// a session is cooled down (Archived); after AUTO_DELETE_MS of witnessed silence it is purged.
+const AUTO_ARCHIVE_MS = 2 * 60 * 60 * 1_000; // 2 hours
+const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
 const SPAWN_TIMEOUT_MS = 30_000;
 
@@ -213,6 +219,9 @@ export class SessionRuntime {
   private eventSeq = 0;
   private resumeCleanups: Array<() => void> = [];
   private lastResumeAt = 0;
+  /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
+   *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
+  private readonly lastLivenessWriteAt = new Map<string, number>();
   // requestIds of approvals/elicitations whose decision send is in flight. Guards a double-tap from
   // dispatching twice (#88) and lets onMessage strip an already-answered card from a racing state
   // snapshot before the send settles (#79).
@@ -382,6 +391,7 @@ export class SessionRuntime {
     session.unread = stored.unread ?? false;
     session.unreadCount = stored.unreadCount ?? (stored.unread ? 1 : 0);
     session.lastEventAt = stored.lastEventAt ?? null;
+    session.pinned = stored.pinned ?? false;
     session.transcript.items = timeline.items;
     session.history = {
       items: timeline.history,
@@ -421,6 +431,9 @@ export class SessionRuntime {
     } else {
       this.touchWarm(channelId);
       this.beginHostConfirm(channelId, client);
+      // We now hold an open subscription: stamp the witness clock (#163) so witnessed-silence and
+      // boot-probe ordering have a start edge even before the first heartbeat lands.
+      this.persistLiveness(channelId, /* flush */ true);
     }
     this.requestState(channelId);
     this.syncHistory(channelId, client);
@@ -1436,6 +1449,31 @@ export class SessionRuntime {
       },
       PERSIST_THROTTLE_MS,
     );
+  }
+
+  /** Persist the two liveness clocks (#163): `lastHeartbeatAt` (last observed pulse) and
+   *  `lastSubscribedAt` (= now, the moment the running app last witnessed this session). Throttled
+   *  to a coarse window so a per-second watchdog tick can't thrash storage; pass `flush` to write
+   *  the exact edge synchronously (subscribe-success / coolDown / pagehide) regardless of throttle.
+   *  Controller-INDEPENDENT on purpose: it runs for cold/archived sessions too, so the witnessed
+   *  clock keeps advancing while the app is foreground. Because the watchdog only ticks while the
+   *  app is alive, phone-off time never advances it — that's what makes the delete clock count only
+   *  *witnessed* silence, so a still-alive laptop is never auto-deleted. */
+  private persistLiveness(channelId: string, flush = false): void {
+    const ctrl = this.controllers.get(channelId);
+    if (ctrl?.ephemeral) return; // never persist ephemeral (unstored) sessions
+    const now = this.clock();
+    if (!flush) {
+      const last = this.lastLivenessWriteAt.get(channelId) ?? 0;
+      if (now - last < LIVENESS_PERSIST_THROTTLE_MS) return;
+    }
+    const s = this.session(channelId);
+    if (!s) return;
+    this.lastLivenessWriteAt.set(channelId, now);
+    void patchSession(channelId, {
+      lastHeartbeatAt: s.connection.lastHeartbeat ?? null,
+      lastSubscribedAt: now,
+    });
   }
 
   // --- watchdog + resume ---------------------------------------------------------------------------

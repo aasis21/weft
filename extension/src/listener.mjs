@@ -27,7 +27,7 @@ const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"
 // Proactive DEVICE_HEARTBEAT cadence: independent of PROJECT_LIST_REQUEST/PROJECT_LIST, so an idle
 // phone (not polling) can still tell the listener process is alive, not just that the transport
 // socket is up.
-const DEVICE_HEARTBEAT_MS = 15_000;
+const DEVICE_HEARTBEAT_MS = 120_000;
 
 export function createListener({
   transport = null,
@@ -38,6 +38,13 @@ export function createListener({
   spawnFn,
   projectsApi = projectsStore,
   log = console,
+  // Optional UI hooks so a host (e.g. helm-cli) can render a live connection/heartbeat indicator
+  // without this module knowing anything about terminals or rendering.
+  onDeviceConnected = null,
+  onDeviceDisconnected = null,
+  onHeartbeat = null,
+  onSpawnRequest = null,
+  onSpawnResult = null,
 } = {}) {
   let listenerTransport = transport;
   let listenerKeyPair = keyPair;
@@ -95,12 +102,20 @@ export function createListener({
       // best-effort
     }
     pairingStop = null;
+    const hadPeer = boundPeerPub !== null;
     boundPeerPub = null;
     channel = null;
     try {
       await listenerTransport?.close?.();
     } catch {
       // best-effort
+    }
+    if (hadPeer) {
+      try {
+        onDeviceDisconnected?.();
+      } catch {
+        // best-effort UI hook
+      }
     }
   };
 
@@ -112,7 +127,7 @@ export function createListener({
   async function bindPeer({ key, peer }) {
     if (stopped) return;
     if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
-      log?.warn?.(`Helm listener: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
+      log?.warn?.(`Helm Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
       return;
     }
     boundPeerPub = peer.publicKeyB64;
@@ -135,10 +150,24 @@ export function createListener({
       void handleControl(envelope);
     });
     await sendProjectList();
+    try {
+      onDeviceConnected?.(peer);
+    } catch {
+      // best-effort UI hook
+    }
     // Proactive liveness beat: unlike PROJECT_LIST (request/reply), this fires on a fixed interval
     // so the phone can tell the listener process is alive even when it isn't actively polling.
     heartbeatTimer = setInterval(() => {
-      void channel?.send(deviceHeartbeat(listenerDeviceId))?.catch?.(() => {});
+      void channel
+        ?.send(deviceHeartbeat(listenerDeviceId))
+        ?.then(() => {
+          try {
+            onHeartbeat?.();
+          } catch {
+            // best-effort UI hook
+          }
+        })
+        ?.catch?.(() => {});
     }, heartbeatMs);
     heartbeatTimer.unref?.();
   }
@@ -171,6 +200,11 @@ export function createListener({
   async function handleSpawn({ requestId, projectName, mode = "default", name }) {
     const id = requestId || `request-${Date.now()}`;
     try {
+      onSpawnRequest?.({ requestId: id, projectName, mode, name });
+    } catch {
+      // best-effort UI hook
+    }
+    try {
       const project = await resolveProject(projectName);
       const sessionName = cleanSessionName(name) || friendlyName();
       const newChannelId = randomChannelId();
@@ -184,7 +218,13 @@ export function createListener({
         spawnFn,
       });
       if (!result.ok) {
-        await channel?.send(spawnResult(id, false, result.error || "Could not spawn Copilot"));
+        const error = result.error || "Could not spawn Copilot";
+        await channel?.send(spawnResult(id, false, error));
+        try {
+          onSpawnResult?.({ requestId: id, ok: false, error, name: sessionName, projectName: project.name });
+        } catch {
+          // best-effort UI hook
+        }
         return;
       }
       await channel?.send(
@@ -196,8 +236,19 @@ export function createListener({
         ),
       );
       await channel?.send(spawnResult(id, true));
+      try {
+        onSpawnResult?.({ requestId: id, ok: true, name: sessionName, projectName: project.name });
+      } catch {
+        // best-effort UI hook
+      }
     } catch (err) {
-      await channel?.send(spawnResult(id, false, err?.message ?? String(err)));
+      const error = err?.message ?? String(err);
+      await channel?.send(spawnResult(id, false, error));
+      try {
+        onSpawnResult?.({ requestId: id, ok: false, error, projectName });
+      } catch {
+        // best-effort UI hook
+      }
     }
   }
 
@@ -225,6 +276,9 @@ export function createListener({
     },
     get pairingPayload() {
       return pairingPayload;
+    },
+    get heartbeatMs() {
+      return heartbeatMs;
     },
   };
   return api;
