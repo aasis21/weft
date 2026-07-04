@@ -5,7 +5,8 @@ import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
-import { loadLocalEnv } from "../src/transportFactory.mjs";
+import { loadLocalEnv, resolveTransportDescriptor } from "../src/transportFactory.mjs";
+import { clearTransportConfig, saveTransportConfig } from "../src/transportConfig.mjs";
 import { addProject, helmHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 
 const [, , command, ...args] = process.argv;
@@ -52,6 +53,10 @@ try {
     if (!name) throw new Error("Usage: helm-cli set-default <name>");
     setDefault(name);
     console.log(`Default project set to ${name}`);
+  } else if (command === "set-transport") {
+    setTransport(args);
+  } else if (command === "show-transport") {
+    showTransport();
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -287,6 +292,66 @@ function printProjects(projects) {
   }
 }
 
+/** Parses `--flag value` pairs out of a CLI args array (case-insensitive flag names). */
+function parseFlags(args) {
+  const flags = {};
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (!arg.startsWith("--")) continue;
+    flags[arg.slice(2).toLowerCase()] = args[i + 1];
+    i += 1;
+  }
+  return flags;
+}
+
+function describeTransport(descriptor) {
+  if (descriptor.kind === "local") return "local (same-machine, no relay)";
+  if (descriptor.kind === "supabase") return `supabase (${descriptor.url})`;
+  if (descriptor.kind === "webpubsub") return `webpubsub (${descriptor.negotiateUrl})`;
+  return descriptor.kind;
+}
+
+function setTransport(args) {
+  const [kind, ...rest] = args;
+  const flags = parseFlags(rest);
+  if (kind === "local") {
+    saveTransportConfig({ kind: "local" });
+  } else if (kind === "supabase") {
+    const url = flags.url;
+    const anonKey = flags["anon-key"];
+    if (!url || !anonKey) {
+      throw new Error("Usage: helm-cli set-transport supabase --url <url> --anon-key <key>");
+    }
+    saveTransportConfig({ kind: "supabase", url, anonKey });
+  } else if (kind === "webpubsub") {
+    const negotiateUrl = flags["negotiate-url"];
+    if (!negotiateUrl) {
+      throw new Error("Usage: helm-cli set-transport webpubsub --negotiate-url <url>");
+    }
+    saveTransportConfig({ kind: "webpubsub", negotiateUrl });
+  } else if (kind === "clear") {
+    clearTransportConfig();
+    console.log("Cleared the configured transport; falling back to env vars / the default (supabase).");
+    return;
+  } else {
+    throw new Error(
+      "Usage: helm-cli set-transport <local|supabase|webpubsub|clear> [--url <url>] " +
+        "[--anon-key <key>] [--negotiate-url <url>]",
+    );
+  }
+  console.log(`Transport set to ${kind}. This is stamped into every pairing QR, so re-pair your phone to pick it up.`);
+}
+
+function showTransport() {
+  loadLocalEnv();
+  const descriptor = resolveTransportDescriptor();
+  const source = process.env.HELM_TRANSPORT
+    ? "HELM_TRANSPORT env var"
+    : "helm-cli set-transport (or the built-in default)";
+  console.log(`Current transport: ${describeTransport(descriptor)}`);
+  console.log(c.dim(`Source: ${source}`));
+}
+
 function usage() {
   console.log(`Usage:
   helm-cli start
@@ -294,5 +359,7 @@ function usage() {
   helm-cli remove-project <name>
   helm-cli list-projects
   helm-cli set-default <name>
+  helm-cli set-transport <local|supabase|webpubsub|clear> [--url <url>] [--anon-key <key>] [--negotiate-url <url>]
+  helm-cli show-transport
   helm-cli help`);
 }

@@ -10,6 +10,7 @@ import {
   createSupabaseTransport,
   createWebPubSubTransport,
 } from "@aasis21/helm-shared";
+import { loadTransportConfig } from "./transportConfig.mjs";
 
 export function loadLocalEnv({ files } = {}) {
   if (typeof parseEnv !== "function") return;
@@ -38,15 +39,39 @@ function defaultEnvFiles() {
 }
 
 /**
- * Resolve which transport + endpoint the laptop should use, purely from env — no client is
- * constructed here. This descriptor is (a) fed into createTransportFromDescriptor to build the
- * real transport, and (b) stamped into the pairing QR so the phone builds the SAME transport at
- * runtime with zero pre-baked config. Nothing returned here is a secret: Supabase's anon key is
- * meant to be public (RLS enforces access) and Web PubSub's negotiateUrl is just an endpoint —
- * the actual per-connection token is minted separately by that endpoint, never carried here.
+ * Resolve which transport + endpoint the laptop should use — no client is constructed here.
+ * This descriptor is (a) fed into createTransportFromDescriptor to build the real transport, and
+ * (b) stamped into the pairing QR so the phone builds the SAME transport at runtime with zero
+ * pre-baked config. Nothing returned here is a secret: Supabase's anon key is meant to be public
+ * (RLS enforces access) and Web PubSub's negotiateUrl is just an endpoint — the actual
+ * per-connection token is minted separately by that endpoint, never carried here.
+ *
+ * Precedence: an explicit HELM_TRANSPORT env var (e.g. from a repo-root .env, for CI/power-user
+ * overrides) wins outright. Otherwise, the persisted choice from `helm-cli set-transport` (see
+ * transportConfig.mjs) applies. With neither set, Helm defaults to Supabase — Helm's own relay is
+ * the supported out-of-the-box path — reading HELM_SUPABASE_URL/HELM_SUPABASE_ANON_KEY (or the
+ * generic SUPABASE_* fallback); `local` is opt-in only, for same-machine testing.
  */
-export function resolveTransportDescriptor() {
-  const transportName = process.env.HELM_TRANSPORT || "local";
+export function resolveTransportDescriptor({ baseDir } = {}) {
+  if (process.env.HELM_TRANSPORT) {
+    return resolveFromEnv(process.env.HELM_TRANSPORT);
+  }
+
+  const configured = loadTransportConfig({ baseDir });
+  if (configured) return configured;
+
+  try {
+    return resolveFromEnv("supabase");
+  } catch (err) {
+    throw new Error(
+      `${err.message}\nHelm: no transport configured. Run \`helm-cli set-transport supabase ` +
+        "--url <url> --anon-key <key>\` (or `helm-cli set-transport local` to test without a " +
+        "relay) to choose one.",
+    );
+  }
+}
+
+function resolveFromEnv(transportName) {
   if (transportName === "local") return { kind: "local" };
 
   if (transportName === "webpubsub") {
