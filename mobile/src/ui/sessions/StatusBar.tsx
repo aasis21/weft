@@ -10,16 +10,19 @@ interface StatusBarProps {
   status: SessionStatus;
   /** True while the agent is actively working (busy). Overrides the "Live" label with "Working…". */
   busy?: boolean;
-  canReconnect: boolean;
   onOpenDrawer(): void;
   onAddSession(): void;
   onStartSession?(): void;
-  onOpenDevices?(): void;
+  /** #163: re-scan the QR / re-pair this session (opens the Join screen). Shown only when not live. */
+  onRejoin?(): void;
   onReconnect(): void;
+  /** #163: archive this session now (drop the live socket, keep the card). Shown only when live. */
+  onArchive?(): void;
+  /** #163: demo sessions can't rejoin/reconnect/archive — hide those items. */
+  isDemo?: boolean;
   onRemove(): void;
   onGoHome(): void;
   onOpenDebug(): void;
-  onOpenSettings?(): void;
   /** Desktop (#183): the session list is already docked and always visible, so the
    *  hamburger that opens it would be redundant (and confusing — nothing "opens").
    *  Show a static Helm mark instead, linking to About Helm like a typical app logo. */
@@ -31,16 +34,16 @@ export function StatusBar({
   cwd,
   status,
   busy = false,
-  canReconnect,
   onOpenDrawer,
   onAddSession,
   onStartSession,
-  onOpenDevices,
+  onRejoin,
   onReconnect,
+  onArchive,
+  isDemo = false,
   onRemove,
   onGoHome,
   onOpenDebug,
-  onOpenSettings,
   desktopDocked = false,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -186,10 +189,10 @@ export function StatusBar({
                 className="bar-menu-item"
                 onClick={() => {
                   setMenuOpen(false);
-                  onAddSession();
+                  onStartSession?.();
                 }}
               >
-                ＋ Join another session
+                ▻ Start another session
               </button>
               <button
                 type="button"
@@ -197,25 +200,25 @@ export function StatusBar({
                 className="bar-menu-item"
                 onClick={() => {
                   setMenuOpen(false);
-                  onStartSession?.();
+                  onAddSession();
                 }}
               >
-                ▻ Start another session
+                ＋ Join another session
               </button>
-              {onOpenDevices ? (
+              {!derived.active && !isDemo ? (
                 <button
                   type="button"
                   role="menuitem"
                   className="bar-menu-item"
                   onClick={() => {
                     setMenuOpen(false);
-                    onOpenDevices();
+                    onRejoin?.();
                   }}
                 >
-                  🖥 Devices
+                  ⟲ Rejoin this session
                 </button>
               ) : null}
-              {canReconnect ? (
+              {!derived.active && !isDemo ? (
                 <button
                   type="button"
                   role="menuitem"
@@ -225,20 +228,22 @@ export function StatusBar({
                     onReconnect();
                   }}
                 >
-                  ↻ Reconnect
+                  ↻ Reconnect this session
                 </button>
               ) : null}
-              <button
-                type="button"
-                role="menuitem"
-                className="bar-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onOpenSettings?.();
-                }}
-              >
-                ⚙ Settings
-              </button>
+              {derived.active && !isDemo && onArchive ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onArchive();
+                  }}
+                >
+                  ⏸ Archive this session
+                </button>
+              ) : null}
               <button
                 type="button"
                 role="menuitem"

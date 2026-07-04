@@ -97,7 +97,10 @@ export function DeviceDetailsScreen({
           </span>
         </button>
         <div className="status-id">
-          <span className="status-title" title={deviceLabel(device)}>{deviceLabel(device)}</span>
+          <span className="status-title" title={deviceLabel(device)}>
+            {deviceLabel(device)}
+            {device.isDefault ? <span className="tag">default</span> : null}
+          </span>
           <span className={`device-status device-status-${status.tone}`}>
             <span className="device-status-dot" aria-hidden="true" />
             <span>{status.label}</span>
@@ -107,14 +110,6 @@ export function DeviceDetailsScreen({
       </header>
 
       <div className="session-join-inner">
-        <header className="session-join-head device-details-head">
-          <p className="session-join-kicker">Device details</p>
-          <h2>
-            {deviceLabel(device)}
-            {device.isDefault ? <span className="tag">default</span> : null}
-          </h2>
-        </header>
-
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
         <section className="session-join-fallback device-card device-identifiers">

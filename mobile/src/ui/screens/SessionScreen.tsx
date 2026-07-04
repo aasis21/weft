@@ -511,16 +511,16 @@ export function SessionScreen({
         cwd={meta.cwd}
         status={status}
         busy={agentBusy}
-        canReconnect={canReconnect}
         onOpenDrawer={() => setDrawerOpen(true)}
         onAddSession={onAddSession}
         onStartSession={onStartSession}
-        onOpenDevices={onOpenDevices}
+        onRejoin={onAddSession}
         onReconnect={() => onReconnect(activeId)}
+        {...(onArchiveSession ? { onArchive: () => onArchiveSession(activeId) } : {})}
+        isDemo={meta.kind === 'demo'}
         onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}
         onOpenDebug={() => setDebugOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
         desktopDocked={isDesktopWide}
       />
 

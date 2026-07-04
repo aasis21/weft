@@ -422,14 +422,15 @@ export function SessionDrawer({
           </button>
         ) : null}
 
-        <button className="drawer-home" type="button" onClick={onGoHome}>
-          ⌂ About Helm
-        </button>
         {onOpenSettings ? (
           <button className="drawer-home" type="button" onClick={onOpenSettings}>
             ⚙ Settings
           </button>
         ) : null}
+
+        <button className="drawer-home" type="button" onClick={onGoHome}>
+          ⌂ About Helm
+        </button>
       </aside>
       {docked ? null : <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />}
     </>

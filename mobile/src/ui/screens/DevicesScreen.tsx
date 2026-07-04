@@ -55,6 +55,13 @@ export function DevicesScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const sortedDevices = sortDevices(devices);
+  const onlineCount = sortedDevices.filter((d) => deviceStatus(d).tone === 'online').length;
+  const countLabel =
+    sortedDevices.length === 0
+      ? 'No devices yet'
+      : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'}${
+          onlineCount > 0 ? ` · ${onlineCount} online` : ''
+        }`;
 
   return (
     <main className="helm-session join-session devices-screen">
@@ -73,18 +80,18 @@ export function DevicesScreen({
         </button>
         <div className="status-id">
           <span className="status-title">Connected devices</span>
+          <span className="status-line">
+            <span className="status-dot" aria-hidden="true" />
+            {countLabel}
+          </span>
         </div>
       </header>
 
       <div className="session-join-inner">
-        <header className="session-join-head">
-          <p className="session-join-kicker">Connected devices</p>
-          <h2>Laptops registered with this phone</h2>
-          <p className="session-join-hint">
-            Each is a laptop running <code>helm-cli start</code>. Start a fresh Copilot session on
-            one, or manage its default/projects here.
-          </p>
-        </header>
+        <p className="session-join-hint">
+          Each is a laptop running <code>helm-cli start</code>. Tap a device to view its details,
+          projects, and event log.
+        </p>
 
         {sortedDevices.length === 0 ? (
           <section className="session-join-scanner start-empty">
@@ -98,48 +105,85 @@ export function DevicesScreen({
             {sortedDevices.map((device) => {
               const status = deviceStatus(device);
               const lastSeen = formatLastSeen(device.lastSeenAt);
+              const projectsLabel = device.projectsLoading
+                ? 'Loading projects…'
+                : device.projects.length > 0
+                  ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
+                  : 'No projects yet';
               return (
-                <div key={device.channelId} className="device-card">
-                  <div className="device-card-head">
-                    <span className="device-card-name">
+                <div
+                  key={device.channelId}
+                  className="session-row device-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onOpenDetails(device.channelId)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') onOpenDetails(device.channelId);
+                    if (e.key === ' ' || e.key === 'Spacebar') {
+                      e.preventDefault();
+                      onOpenDetails(device.channelId);
+                    }
+                  }}
+                >
+                  <span className="session-info">
+                    <span className="session-title">
                       {deviceLabel(device)}
                       {device.isDefault ? <span className="tag">default</span> : null}
                     </span>
-                    <div className={`device-status device-status-${status.tone}`}>
-                      <span className="device-status-dot" aria-hidden="true" />
-                      <span>{status.label}</span>
-                      {lastSeen ? <span className="device-status-seen">· last seen {lastSeen}</span> : null}
-                    </div>
-                  </div>
+                    <span className="session-sub">
+                      <span className={`device-status device-status-${status.tone}`}>
+                        <span className="device-status-dot" aria-hidden="true" />
+                        {status.label}
+                      </span>
+                      {lastSeen ? ` · last seen ${lastSeen}` : ''}
+                      {` · ${projectsLabel}`}
+                    </span>
+                    {device.error ? <p className="error-banner">{device.error}</p> : null}
+                  </span>
 
-                  <p className="device-card-sub">
-                    {device.projectsLoading
-                      ? 'Loading projects…'
-                      : device.projects.length > 0
-                        ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'} advertised`
-                        : 'No projects received yet.'}
-                  </p>
-                  {device.error ? <p className="error-banner">{device.error}</p> : null}
-
-                  <div className="device-actions">
-                    <button type="button" className="session-primary-action device-start-btn" onClick={() => onStartOnDevice(device.channelId)}>
-                      Start session
-                    </button>
-                    <button type="button" className="session-link-btn" onClick={() => onRefreshProjects(device.channelId)}>
-                      Refresh
+                  <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={() => onStartOnDevice(device.channelId)}
+                      title="Start session"
+                      aria-label="Start session"
+                    >
+                      ▻
                     </button>
                     {!device.isDefault ? (
-                      <button type="button" className="session-link-btn" onClick={() => void onSetDefault(device.channelId)}>
-                        Make default
+                      <button
+                        className="icon-btn"
+                        type="button"
+                        onClick={() => void onSetDefault(device.channelId)}
+                        title="Make default"
+                        aria-label="Make default"
+                      >
+                        ⭐
                       </button>
                     ) : null}
-                    <button type="button" className="session-link-btn" onClick={() => onOpenDetails(device.channelId)}>
-                      Details
+                    <button
+                      className="icon-btn"
+                      type="button"
+                      onClick={() => onRefreshProjects(device.channelId)}
+                      title="Refresh projects"
+                      aria-label="Refresh projects"
+                    >
+                      ↻
                     </button>
-                    <button type="button" className="session-link-btn danger" onClick={() => void onForget(device.channelId)}>
-                      Forget
+                    <button
+                      className="icon-btn danger"
+                      type="button"
+                      onClick={() => void onForget(device.channelId)}
+                      title="Forget device"
+                      aria-label="Forget device"
+                    >
+                      🗑
                     </button>
-                  </div>
+                  </span>
+                  <span className="row-chevron" aria-hidden="true">
+                    ›
+                  </span>
                 </div>
               );
             })}

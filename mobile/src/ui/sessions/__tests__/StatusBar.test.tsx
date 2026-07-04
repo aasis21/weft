@@ -23,7 +23,6 @@ function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) 
     cwd: 'C:\\Users\\akash\\helm',
     status: 'live',
     busy: false,
-    canReconnect: false,
     onOpenDrawer: vi.fn(),
     onAddSession: vi.fn(),
     onReconnect: vi.fn(),
@@ -59,7 +58,6 @@ describe('StatusBar', () => {
         cwd={null}
         status="idle"
         busy
-        canReconnect={false}
         onOpenDrawer={vi.fn()}
         onAddSession={vi.fn()}
         onReconnect={vi.fn()}
@@ -93,7 +91,8 @@ describe('StatusBar', () => {
     const onAddSession = vi.fn();
     const onReconnect = vi.fn();
     const onRemove = vi.fn();
-    renderStatusBar({ canReconnect: true, onOpenDrawer, onGoHome, onAddSession, onReconnect, onRemove });
+    // status 'ended' is not live, so Rejoin + Reconnect surface in the menu.
+    renderStatusBar({ status: 'ended', onOpenDrawer, onGoHome, onAddSession, onReconnect, onRemove });
 
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
@@ -107,7 +106,7 @@ describe('StatusBar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Session menu' }));
     menu = screen.getByRole('menu');
-    await user.click(within(menu).getByRole('menuitem', { name: '↻ Reconnect' }));
+    await user.click(within(menu).getByRole('menuitem', { name: '↻ Reconnect this session' }));
     expect(onReconnect).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Session menu' }));
@@ -162,7 +161,7 @@ describe('StatusBar', () => {
 
   it('opens the menu and moves focus to the first item on ArrowDown', async () => {
     const user = userEvent.setup();
-    renderStatusBar({ canReconnect: true });
+    renderStatusBar({ status: 'ended' });
 
     const menuButton = screen.getByRole('button', { name: 'Session menu' });
     menuButton.focus();

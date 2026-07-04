@@ -1256,8 +1256,8 @@
 .session-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 9px;
+  padding: 7px 10px;
   border: 1px solid transparent;
   border-radius: 12px;
   cursor: pointer;
@@ -1371,6 +1371,19 @@
 .session-row .row-archive:focus-visible { opacity: 1; }
 .session-row .row-pin.on { opacity: 1; }
 
+/* Device list rows (#186 redesign): reuse the session-row idiom (tappable card, row-actions,
+   session-info/-title/-sub) so the devices list matches the sessions sidebar's visual language.
+   Device rows carry more per-row detail than a session row, so they wrap onto multiple lines
+   instead of the single-line, vertically centered session-row layout. */
+.session-row.device-row { align-items: flex-start; }
+.session-row.device-row .session-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; white-space: normal; }
+.session-row.device-row .device-status { display: inline-flex; align-items: center; gap: 5px; }
+.row-actions .icon-btn { width: 30px; height: 30px; font-size: 13px; opacity: 0.65; }
+.row-actions .icon-btn:hover,
+.row-actions .icon-btn:focus-visible { opacity: 1; }
+.row-actions .icon-btn.danger { color: var(--error); }
+.row-chevron { flex: 0 0 auto; margin-left: 2px; color: var(--fg-faint); font-size: 16px; }
+
 .row-confirm { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .row-confirm-label { font-size: 11px; color: var(--fg-dim); }
 .session-row .row-confirm-yes { width: 30px; height: 30px; font-size: 13px; color: var(--error); }
@@ -1397,8 +1410,8 @@
 .tag.demo { background: var(--bg-rule); color: var(--fg-dim); }
 .tag.alert { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--warning); }
 .drawer-add {
-  margin-top: 8px;
-  padding: 11px;
+  margin-top: 6px;
+  padding: 8px 11px;
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 12px;
   background: transparent;
@@ -1409,8 +1422,8 @@
 .drawer-add:hover { background: var(--accent-soft); }
 
 .drawer-home {
-  margin-top: 8px;
-  padding: 11px;
+  margin-top: 6px;
+  padding: 8px 11px;
   border: 1px solid var(--border, color-mix(in srgb, var(--fg) 14%, transparent));
   border-radius: 12px;
   background: transparent;
@@ -1954,10 +1967,17 @@
 .helm-session .icon-btn,
 .helm-session .send-btn,
 .helm-session .stop-btn,
-.helm-session .drawer-add,
 .helm-session .mode-menu-item {
   min-width: 44px;
   min-height: 44px;
+}
+
+/* Drawer menu buttons run down a dense list; keep them comfortably tappable but
+   more compact than the 44px minimum used for standalone icon controls. */
+.helm-session .drawer-add,
+.helm-session .drawer-home {
+  min-width: 44px;
+  min-height: 38px;
 }
 
 .helm-session .pill,
