@@ -49,7 +49,11 @@ export interface StoredSession {
 }
 
 function isStoredSession(value: unknown): value is StoredSession {
-  return !!value && typeof value === 'object' && !!(value as Partial<StoredSession>)?.pairing?.channelId;
+  const pairing = (value as Partial<StoredSession> | undefined)?.pairing;
+  // Sessions cached before the transport-descriptor refactor won't have `pairing.transport` —
+  // reject them here (rather than crash on reconnect) so they're silently dropped from the list;
+  // the user just rescans the QR to re-pair with a fresh, transport-carrying payload.
+  return !!value && typeof value === 'object' && !!pairing?.channelId && !!pairing?.transport?.kind;
 }
 
 function normalizeStore(parsed: unknown): SessionsStore {

@@ -895,6 +895,7 @@ export class SessionRuntime {
     const stored: RegisteredDevice = {
       channelId: pairing.channelId,
       pub: pairing.peerPublicKeyB64,
+      transport: pairing.transport,
       name: prior?.name,
       savedAt: now,
       isDefault: prior?.isDefault ?? this.store.getState().sessions.devices.length === 0,
@@ -925,7 +926,11 @@ export class SessionRuntime {
     if (current?.client) return;
     this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
     try {
-      const { client } = await pairWithPublicKey({ channelId, publicKeyB64: device.pub });
+      const { client } = await pairWithPublicKey({
+        channelId,
+        publicKeyB64: device.pub,
+        transportDescriptor: device.transport,
+      });
       this.attachListener(channelId, client);
     } catch (err) {
       this.store.dispatch(

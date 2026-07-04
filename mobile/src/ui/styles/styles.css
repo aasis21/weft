@@ -104,6 +104,21 @@ body {
   background-attachment: fixed;
 }
 
+/* Pin the mobile browser toolbar on the in-app (.helm-session) screens.
+   Those screens are a position:fixed, 100dvh shell with their own internal
+   scroll, so the page body should not scroll at all. A scrollable body is
+   what lets mobile browsers hide/collapse their address bar, so we lock
+   html/body to the small viewport whenever a .helm-session screen is mounted.
+   The landing/pairing (.join-shell / .pairing-shell) screens are unaffected
+   and keep normal page scrolling. */
+html:has(.helm-session),
+body:has(.helm-session) {
+  height: 100svh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body::before {
   position: fixed;
   inset: 0;

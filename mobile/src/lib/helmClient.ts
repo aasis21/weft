@@ -208,6 +208,12 @@ function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
  * descriptor says, switching transport/endpoint requires only a fresh scan, not a rebuild.
  */
 function createTransportFromDescriptor(descriptor: TransportDescriptor, channelId: string): Transport {
+  if (!descriptor?.kind) {
+    // Belt-and-braces: sessions.ts already filters these out on load, but a directly-stored
+    // pairing (e.g. storage.ts's single "current" pairing) could still reach here. Fail with a
+    // clear, actionable message instead of a raw "Cannot read properties of undefined" crash.
+    throw new Error('Helm: this session has no transport info — remove it and re-pair by scanning a fresh QR.');
+  }
   if (descriptor.kind === 'local') return createLocalTransport({ channelId });
   if (descriptor.kind === 'supabase') {
     const client = getSupabaseClient(descriptor.url, descriptor.anonKey);

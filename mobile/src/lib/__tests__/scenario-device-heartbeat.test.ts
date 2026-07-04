@@ -9,7 +9,13 @@ import { registry } from '@/test/helpers/fakeHelmClient';
 import * as B from '@/test/helpers/builders';
 
 function listenerQr(channelId: string): string {
-  return JSON.stringify({ v: 1, channelId, pub: `listener-pub-${channelId}`, kind: 'listener' });
+  return JSON.stringify({
+    v: 1,
+    channelId,
+    pub: `listener-pub-${channelId}`,
+    kind: 'listener',
+    transport: { kind: 'local' },
+  });
 }
 
 describe('scenario: device (listener) heartbeat watchdog', () => {

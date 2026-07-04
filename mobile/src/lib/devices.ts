@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences';
+import type { TransportDescriptor } from '@aasis21/helm-shared';
 
 const DEVICES_KEY = 'helm.devices.v1';
 
@@ -6,6 +7,8 @@ export interface RegisteredDevice {
   channelId: string;
   /** Listener public key from its LISTENER QR. */
   pub: string;
+  /** Which transport + endpoint this listener was paired with — reused on reconnect via connectDevice. */
+  transport: TransportDescriptor;
   name?: string;
   savedAt: number;
   isDefault?: boolean;
@@ -26,7 +29,10 @@ export interface RegisteredDevice {
 function isRegisteredDevice(value: unknown): value is RegisteredDevice {
   if (!value || typeof value !== 'object') return false;
   const device = value as Partial<RegisteredDevice>;
-  return typeof device.channelId === 'string' && typeof device.pub === 'string';
+  // Devices cached before the transport-descriptor refactor won't have `transport` — reject them
+  // here (rather than crash inside pairWithPublicKey on reconnect) so they're silently dropped;
+  // the user just rescans the listener's QR to re-register with a fresh, transport-carrying payload.
+  return typeof device.channelId === 'string' && typeof device.pub === 'string' && !!device.transport?.kind;
 }
 
 function normalize(parsed: unknown): RegisteredDevice[] {
