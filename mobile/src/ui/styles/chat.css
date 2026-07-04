@@ -1385,6 +1385,11 @@
   background: var(--bg-elev);
 }
 
+.helm-session .device-details-menu-btn {
+  align-self: flex-start;
+  margin-inline-start: -8px;
+}
+
 .helm-session .session-join-kicker {
   margin: 0;
   color: var(--accent);

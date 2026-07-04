@@ -63,9 +63,19 @@ export function DeviceDetailsScreen({
   return (
     <main className="helm-session join-session device-details-screen">
       <div className="session-join-inner">
-        <header className="session-join-head">
-          <button type="button" className="session-pair-back" onClick={onBack}>
-            ← Back to devices
+        <header className="session-join-head device-details-head">
+          <button
+            type="button"
+            className="icon-btn drawer-btn device-details-menu-btn"
+            onClick={onBack}
+            aria-label="Back to devices"
+            title="Back to devices"
+          >
+            <span className="hamburger" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
           </button>
           <p className="session-join-kicker">Device details</p>
           <h2>
