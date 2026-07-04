@@ -27,7 +27,7 @@ import type {
   SpawnResultMsg,
   StateSnapshotMsg,
 } from '@aasis21/helm-shared';
-import { connectSession, pairSession, pairWithPublicKey, getSenderName } from '@/lib/helmClient';
+import { connectDevice as connectDeviceSession, connectSession, pairSession, getSenderName } from '@/lib/helmClient';
 import type { HelmClient } from '@/lib/helmClient';
 import {
   loadLastActiveSessionId,
@@ -127,6 +127,13 @@ const DEVICE_OFFLINE_AFTER_MS = 180_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
 const RESUME_DEBOUNCE_MS = 500;
 const MAX_WARM_SESSIONS = 50;
+/** Hard cap on registered listener devices (#186 reconnect fix follow-up): unlike sessions, whose
+ *  warm pool is just an LRU of how many stay actively connected, EVERY registered device attempts
+ *  to reconnect on boot/resume (see init()/handleResume()) — an unbounded list would mean an
+ *  unbounded number of live listener sockets. Registering an 11th device is refused outright
+ *  (registerListenerFromQr) rather than silently evicting the least-recently-seen one, since
+ *  forgetting a laptop is a deliberate, named action the user should take themselves. */
+const MAX_DEVICES = 10;
 const META_PERSIST_THROTTLE_MS = 1_500;
 const PERSIST_THROTTLE_MS = 800;
 const LIVENESS_PERSIST_THROTTLE_MS = 30_000;
@@ -264,6 +271,15 @@ export class SessionRuntime {
     return this.listenerControllers.get(channelId);
   }
 
+  private ensureListenerController(channelId: string): ChannelController {
+    let ctrl = this.listenerControllers.get(channelId);
+    if (!ctrl) {
+      ctrl = new ChannelController(channelId, { ephemeral: true });
+      this.listenerControllers.set(channelId, ctrl);
+    }
+    return ctrl;
+  }
+
   // --- lifecycle -----------------------------------------------------------------------------------
   async init(): Promise<void> {
     if (this.initStarted) return;
@@ -303,13 +319,15 @@ export class SessionRuntime {
 
     this.store.dispatch(
       devicesHydrated(
-        devices.map((device) => ({
-          ...device,
-          projects: [],
-          projectsLoading: false,
-          connected: false,
-          events: [],
-        })),
+        await Promise.all(
+          devices.map(async (device) => ({
+            ...device,
+            projects: [],
+            projectsLoading: false,
+            connected: false,
+            events: await loadEventLog(device.channelId).catch(() => []),
+          })),
+        ),
       ),
     );
 
@@ -378,6 +396,11 @@ export class SessionRuntime {
           }
         }),
     );
+
+    // Every registered device reconnects on boot, unlike sessions' warm/cold split — the hard
+    // MAX_DEVICES=10 cap (see registerListenerFromQr) already bounds how many live listener
+    // sockets this can ever open, so there's no need for a warm-pool LRU here.
+    await Promise.all(devices.map((d) => this.connectDevice(d.channelId)));
   }
 
   /** Rebuild a store `Session` from a restored transcript + stored metadata (mirrors restoreTimeline:
@@ -889,13 +912,24 @@ export class SessionRuntime {
   async registerListenerFromQr(raw: string): Promise<string> {
     const parsed = parsePairingPayload(raw);
     if (parsed.kind !== PAIR_KIND.LISTENER) throw new Error('This QR is not a listener device.');
+    const channelId = parsed.channelId;
+    const prior = this.device(channelId);
+    // Only a genuinely NEW device counts against the cap — re-scanning an already-registered
+    // listener (e.g. after `helm-cli start` was restarted and minted a fresh channelId, before
+    // reconcileDevice folds it in) must never be blocked by its own prior entry.
+    if (!prior && this.store.getState().sessions.devices.length >= MAX_DEVICES) {
+      throw new Error(
+        `You already have ${MAX_DEVICES} devices connected — forget one (Devices → Forget) before adding another.`,
+      );
+    }
     const { client, pairing } = await pairSession(raw);
     const now = this.clock();
-    const prior = this.device(pairing.channelId);
     const stored: RegisteredDevice = {
       channelId: pairing.channelId,
       pub: pairing.peerPublicKeyB64,
       transport: pairing.transport,
+      publicKeyB64: pairing.publicKeyB64,
+      privateKeyJwk: pairing.privateKeyJwk,
       name: prior?.name,
       savedAt: now,
       isDefault: prior?.isDefault ?? this.store.getState().sessions.devices.length === 0,
@@ -908,7 +942,7 @@ export class SessionRuntime {
         projects: prior?.projects ?? [],
         projectsLoading: true,
         connected: true,
-        events: prior?.events ?? [],
+        events: prior?.events ?? (await loadEventLog(pairing.channelId).catch(() => [])),
       }),
     );
     this.attachListener(pairing.channelId, client);
@@ -922,20 +956,30 @@ export class SessionRuntime {
   async connectDevice(channelId: string): Promise<void> {
     const device = this.device(channelId);
     if (!device) return;
-    const current = this.listenerController(channelId);
-    if (current?.client) return;
+    const ctrl = this.ensureListenerController(channelId);
+    if (ctrl.client || ctrl.reconnecting) return;
+    ctrl.reconnecting = true;
     this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
     try {
-      const { client } = await pairWithPublicKey({
+      // Reuse the phone's ORIGINAL keypair from registration (connectDeviceSession, mirroring
+      // connectSession) rather than pairWithPublicKey's fresh-keypair full handshake — the
+      // listener locks onto the first phone public key it sees per run and would otherwise
+      // reject every reconnect as "a different phone".
+      const client = await connectDeviceSession({
         channelId,
-        publicKeyB64: device.pub,
-        transportDescriptor: device.transport,
+        peerPublicKeyB64: device.pub,
+        publicKeyB64: device.publicKeyB64,
+        privateKeyJwk: device.privateKeyJwk,
+        deviceId: device.deviceId,
+        transport: device.transport,
       });
       this.attachListener(channelId, client);
     } catch (err) {
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not reach this listener device.'), connected: false }),
       );
+    } finally {
+      ctrl.reconnecting = false;
     }
   }
 
@@ -1024,6 +1068,7 @@ export class SessionRuntime {
       if (pending.deviceId === channelId) this.failSpawn(pending.requestId, 'Listener device was forgotten.');
     }
     await removeDevice(channelId);
+    await clearEventLog(channelId).catch(() => {});
     this.store.dispatch(deviceRemoved(channelId));
   }
 
@@ -1033,11 +1078,7 @@ export class SessionRuntime {
   }
 
   private attachListener(channelId: string, client: HelmClient): void {
-    let ctrl = this.listenerControllers.get(channelId);
-    if (!ctrl) {
-      ctrl = new ChannelController(channelId, { ephemeral: true });
-      this.listenerControllers.set(channelId, ctrl);
-    }
+    const ctrl = this.ensureListenerController(channelId);
     const previous = ctrl.client;
     ctrl.detach();
     ctrl.client = client;
@@ -1460,12 +1501,13 @@ export class SessionRuntime {
     this.scheduleEventPersist(channelId);
   }
 
-  /** Mirrors recordEvent() but for the DEVICE (listener) channel — same shape, its own (unpersisted,
-   *  smaller) ring buffer, and the same consecutive-heartbeat collapsing (#185). */
+  /** Mirrors recordEvent() but for the DEVICE (listener) channel — same shape, its own (smaller,
+   *  now-persisted) ring buffer, and the same consecutive-heartbeat collapsing (#185). */
   private recordDeviceEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
     const fallback = dir === 'out' ? getSenderName() : (this.device(channelId)?.name ?? 'Listener');
     const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
     this.store.dispatch(deviceEventAppended({ channelId, event }));
+    this.scheduleDeviceEventPersist(channelId);
   }
 
   private schedulePersist(channelId: string): void {
@@ -1505,6 +1547,23 @@ export class SessionRuntime {
         ctrl.clear('eventSave');
         const s = this.session(channelId);
         if (s) void saveEventLog(channelId, s.debug);
+      },
+      PERSIST_THROTTLE_MS,
+    );
+  }
+
+  /** Mirrors scheduleEventPersist() but for a listener/device channel. listenerControllers are
+   *  always `ephemeral: true` (that flag only means "not a real session" here, not "don't
+   *  persist") so, unlike the session persist helpers, this does NOT gate on ctrl.ephemeral. */
+  private scheduleDeviceEventPersist(channelId: string): void {
+    const ctrl = this.ensureListenerController(channelId);
+    if (ctrl.has('deviceEventSave')) return;
+    ctrl.arm(
+      'deviceEventSave',
+      () => {
+        ctrl.clear('deviceEventSave');
+        const d = this.device(channelId);
+        if (d) void saveEventLog(channelId, d.events);
       },
       PERSIST_THROTTLE_MS,
     );
@@ -1616,6 +1675,15 @@ export class SessionRuntime {
       } else {
         this.requestState(channelId);
         if (ctrl.client) this.syncHistory(channelId, ctrl.client);
+      }
+    }
+    // Devices: mirror the session revive check above. Every registered device is always "warm" (no
+    // LRU, capped at MAX_DEVICES), so just revive any whose listener client is missing/stale.
+    for (const device of this.store.getState().sessions.devices) {
+      const ctrl = this.listenerController(device.channelId);
+      const stale = device.lastSeenAt != null && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS;
+      if (!ctrl?.client || !device.connected || stale) {
+        void this.connectDevice(device.channelId);
       }
     }
   };

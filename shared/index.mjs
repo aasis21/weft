@@ -5,5 +5,10 @@ export * from "./history.mjs";
 export * from "./crypto.mjs";
 export * from "./pairing.mjs";
 export { SecureChannel } from "./channel.mjs";
-export { createLocalTransport, createSupabaseTransport, createWebPubSubTransport } from "./transport.mjs";
+export {
+  createLocalTransport,
+  createSupabaseTransport,
+  createWebPubSubTransport,
+  createRelayTransport,
+} from "./transport.mjs";
 export { _resetLocalBus } from "./transport-local.mjs";

@@ -9,6 +9,15 @@ export interface RegisteredDevice {
   pub: string;
   /** Which transport + endpoint this listener was paired with — reused on reconnect via connectDevice. */
   transport: TransportDescriptor;
+  /**
+   * This phone's OWN ECDH keypair from the original pairing (mirrors StoredPairing). Reused
+   * verbatim on every reconnect instead of minting a new keypair: the listener locks onto the
+   * FIRST phone public key it sees per run (`boundPeerPub` in listener.mjs) and silently drops
+   * any hello carrying a different key ("ignoring pairing from a different phone"). Without this,
+   * every reconnect looked like a new/different phone and was rejected.
+   */
+  publicKeyB64: string;
+  privateKeyJwk: JsonWebKey;
   name?: string;
   savedAt: number;
   isDefault?: boolean;
@@ -29,10 +38,17 @@ export interface RegisteredDevice {
 function isRegisteredDevice(value: unknown): value is RegisteredDevice {
   if (!value || typeof value !== 'object') return false;
   const device = value as Partial<RegisteredDevice>;
-  // Devices cached before the transport-descriptor refactor won't have `transport` — reject them
-  // here (rather than crash inside pairWithPublicKey on reconnect) so they're silently dropped;
-  // the user just rescans the listener's QR to re-register with a fresh, transport-carrying payload.
-  return typeof device.channelId === 'string' && typeof device.pub === 'string' && !!device.transport?.kind;
+  // Devices cached before the transport-descriptor / stable-identity refactors won't have
+  // `transport`/`publicKeyB64`/`privateKeyJwk` — reject them here (rather than crash or silently
+  // regenerate a mismatched identity on reconnect) so they're silently dropped; the user just
+  // rescans the listener's QR to re-register with fresh, complete pairing material.
+  return (
+    typeof device.channelId === 'string' &&
+    typeof device.pub === 'string' &&
+    !!device.transport?.kind &&
+    typeof device.publicKeyB64 === 'string' &&
+    !!device.privateKeyJwk
+  );
 }
 
 function normalize(parsed: unknown): RegisteredDevice[] {

@@ -8,6 +8,7 @@ export {
   createLocalTransport,
   createSupabaseTransport,
   createWebPubSubTransport,
+  createRelayTransport,
   _resetLocalBus,
 } from "./transport";
 export type { Transport, Unsubscribe, TransportDescriptor } from "./transport";

@@ -7,6 +7,7 @@ import {
   createLocalTransport,
   createSupabaseTransport,
   createWebPubSubTransport,
+  createRelayTransport,
   generateKeyPair,
   isValidEnvelope,
   parsePairingPayload,
@@ -116,36 +117,55 @@ export async function pairWithPublicKey(opts: {
   return { client, pairing };
 }
 
-/** Reconnect to a previously-joined session from its stored ECDH material. */
-export async function connectSession(
-  pairing: StoredPairing,
+/** Shared shape for "reuse a previously-derived ECDH identity to reconnect without a fresh
+ *  handshake" — satisfied by both StoredPairing (sessions) and RegisteredDevice (listeners). */
+interface ReconnectMaterial {
+  channelId: string;
+  peerPublicKeyB64: string;
+  publicKeyB64: string;
+  privateKeyJwk: JsonWebKey;
+  deviceId?: string;
+  transport: TransportDescriptor;
+}
+
+/**
+ * Reconnect using a previously-derived ECDH keypair instead of minting a new one. Critical for
+ * listener devices (#device-reconnect): the laptop's `helm-cli` listener locks onto the FIRST
+ * phone public key it sees per run (`boundPeerPub` in listener.mjs) and silently ignores any hello
+ * from a different key ("ignoring pairing from a different phone"). Generating a fresh keypair on
+ * every reconnect (as a first-time pairing does) would make the SAME phone look like an intruder
+ * to its own listener. Reusing the stored keypair + a fire-and-forget hello (no ack wait, mirroring
+ * connectSession) keeps the phone's identity stable across reconnects.
+ */
+async function reconnectFromMaterial(
+  material: ReconnectMaterial,
   opts?: { transport?: Transport },
 ): Promise<HelmClient> {
   const privateKey = await crypto.subtle.importKey(
     'jwk',
-    pairing.privateKeyJwk,
+    material.privateKeyJwk,
     { name: 'ECDH', namedCurve: 'P-256' },
     true,
     ['deriveBits'],
   );
   const transport =
-    opts?.transport ?? createTransportFromDescriptor(pairing.transport, pairing.channelId);
+    opts?.transport ?? createTransportFromDescriptor(material.transport, material.channelId);
   try {
     return await withTimeout(
       (async () => {
         const { key } = await sayHello({
           transport,
-          keyPair: { privateKey, publicKeyB64: pairing.publicKeyB64 },
-          peerPublicKeyB64: pairing.peerPublicKeyB64,
-          deviceId: pairing.deviceId,
+          keyPair: { privateKey, publicKeyB64: material.publicKeyB64 },
+          peerPublicKeyB64: material.peerPublicKeyB64,
+          deviceId: material.deviceId,
           senderName: getSenderName(),
-          channelId: pairing.channelId,
+          channelId: material.channelId,
           waitForAck: false,
         });
         return createClientFromMaterial({
-          channelId: pairing.channelId,
+          channelId: material.channelId,
           key,
-          deviceId: pairing.deviceId,
+          deviceId: material.deviceId,
           transport,
         });
       })(),
@@ -158,6 +178,23 @@ export async function connectSession(
     void transport.close().catch(() => {});
     throw err;
   }
+}
+
+/** Reconnect to a previously-joined session from its stored ECDH material. */
+export async function connectSession(
+  pairing: StoredPairing,
+  opts?: { transport?: Transport },
+): Promise<HelmClient> {
+  return reconnectFromMaterial(pairing, opts);
+}
+
+/** Reconnect to a previously-registered listener device from its stored ECDH material — mirrors
+ *  connectSession(), so a re-scan is never required just to resume talking to the same laptop. */
+export async function connectDevice(
+  device: ReconnectMaterial,
+  opts?: { transport?: Transport },
+): Promise<HelmClient> {
+  return reconnectFromMaterial(device, opts);
 }
 
 export async function createClientFromMaterial(opts: {
@@ -228,6 +265,16 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
       getClientAccessUrl: () => fetchWebPubSubClientAccessUrl(descriptor.negotiateUrl, channelId),
     });
     return createWebPubSubTransport({ client, channelId });
+  }
+  if (descriptor.kind === 'relay') {
+    // A relay/tunnel URL (e.g. a Microsoft Dev Tunnel) is single-use and pairing-scoped, unlike
+    // Supabase's shared long-lived anon key — so it needs no per-channel negotiate step, and no
+    // caching across sessions. The URL already carries any access token (e.g. as a query param)
+    // baked in by the laptop when it minted the descriptor; the phone just connects to it as-is.
+    // React Native's global WebSocket is the standard-compliant socket createRelayTransport
+    // expects (addEventListener/send/close/readyState).
+    const socket = new WebSocket(descriptor.url);
+    return createRelayTransport({ socket, channelId });
   }
   throw new Error(`Helm: unknown transport descriptor kind "${(descriptor as { kind: string }).kind}"`);
 }

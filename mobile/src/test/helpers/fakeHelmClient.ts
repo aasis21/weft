@@ -158,6 +158,9 @@ export const helmClientMock = {
     const client = registry.create(opts.channelId);
     return { client, pairing: { ...fakePairing(opts.channelId), peerPublicKeyB64: opts.publicKeyB64 } };
   },
+  async connectDevice(opts: { channelId: string }): Promise<FakeHelmClient> {
+    return registry.create(opts.channelId);
+  },
   async connectSession(pairing: StoredPairing): Promise<FakeHelmClient> {
     return registry.create(pairing.channelId);
   },

@@ -7,6 +7,9 @@ function makeDevice(overrides: Partial<ListenerDeviceState> = {}): ListenerDevic
   return {
     channelId: 'chan-1',
     pub: 'pub-1',
+    transport: { kind: 'local' },
+    publicKeyB64: 'phone-pub-1',
+    privateKeyJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'd' } as JsonWebKey,
     name: 'MacBook Pro',
     deviceId: 'device-1',
     isDefault: true,

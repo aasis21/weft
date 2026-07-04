@@ -84,20 +84,20 @@ describe('StatusBar', () => {
     expect(statusLine).toHaveClass('error');
   });
 
-  it('opens the drawer, home button, menu actions, reconnect, and direct leave callback', async () => {
+  it('opens the drawer, start session button, menu actions, reconnect, and direct leave callback', async () => {
     const user = userEvent.setup();
     const onOpenDrawer = vi.fn();
-    const onGoHome = vi.fn();
+    const onStartSession = vi.fn();
     const onAddSession = vi.fn();
     const onReconnect = vi.fn();
     const onRemove = vi.fn();
     // status 'ended' is not live, so Rejoin + Reconnect surface in the menu.
-    renderStatusBar({ status: 'ended', onOpenDrawer, onGoHome, onAddSession, onReconnect, onRemove });
+    renderStatusBar({ status: 'ended', onOpenDrawer, onStartSession, onAddSession, onReconnect, onRemove });
 
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: 'Home' }));
-    expect(onGoHome).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Start another session' }));
+    expect(onStartSession).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Session menu' }));
     let menu = screen.getByRole('menu');

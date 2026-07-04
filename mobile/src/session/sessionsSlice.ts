@@ -238,7 +238,8 @@ const sessionsSlice = createSlice({
       if (device) device.lastProjectName = action.payload.projectName;
     },
     // Raw wire events over the device (listener) channel — mirrors `debugAppended` for sessions but
-    // scoped to ListenerDeviceState.events and its own (smaller) cap, since these aren't persisted.
+    // scoped to ListenerDeviceState.events and its own (smaller) cap. Persisted via eventLog.ts,
+    // throttled by sessionRuntime's scheduleDeviceEventPersist, same as sessions' debug log.
     deviceEventAppended(state, action: PayloadAction<{ channelId: string; event: DebugEvent }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) device.events = appendEvent(device.events, action.payload.event, DEVICE_EVENT_LOG_CAP);
