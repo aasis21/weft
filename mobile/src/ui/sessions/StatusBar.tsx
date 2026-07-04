@@ -149,13 +149,13 @@ export function StatusBar({
         </button>
 
         <button
-          className="icon-btn home-btn"
+          className="icon-btn start-btn"
           type="button"
-          onClick={onGoHome}
-          aria-label="Home"
-          title="Home"
+          onClick={onStartSession}
+          aria-label="Start another session"
+          title="Start another session"
         >
-          ⌂
+          ▻
         </button>
 
         <button

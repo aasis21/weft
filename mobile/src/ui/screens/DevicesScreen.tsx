@@ -19,6 +19,7 @@ interface DevicesScreenProps {
   onSelectSession(channelId: string): void;
   onAddSession(): void;
   onStartSession(): void;
+  onOpenDevices(): void;
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
   onGoHome(): void;
@@ -48,6 +49,7 @@ export function DevicesScreen({
   onSelectSession,
   onAddSession,
   onStartSession,
+  onOpenDevices,
   onRemoveSession,
   onRenameSession,
   onGoHome,
@@ -215,6 +217,10 @@ export function DevicesScreen({
             onRemoveSession(id);
           }}
           onRename={onRenameSession}
+          onOpenDevices={() => {
+            setDrawerOpen(false);
+            onOpenDevices();
+          }}
           onGoHome={() => {
             setDrawerOpen(false);
             onGoHome();

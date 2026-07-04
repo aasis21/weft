@@ -197,6 +197,7 @@ export default function App(): JSX.Element {
         }}
         onAddSession={() => openJoin(false)}
         onStartSession={() => openStart()}
+        onOpenDevices={openDevices}
         onRemoveSession={(id) => void sessionRuntime.remove(id)}
         onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
         onGoHome={() => {
@@ -235,6 +236,7 @@ export default function App(): JSX.Element {
           }}
           onAddSession={() => openJoin(false)}
           onStartSession={() => openStart()}
+          onOpenDevices={openDevices}
           onRemoveSession={(id) => void sessionRuntime.remove(id)}
           onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
           onGoHome={() => {
