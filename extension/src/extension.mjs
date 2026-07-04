@@ -4,18 +4,16 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parseEnv } from "node:util";
 import QRCode from "qrcode";
-import { createClient } from "@supabase/supabase-js";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
   SecureChannel,
-  createLocalTransport,
-  createSupabaseTransport,
   generateKeyPair,
   importKeyPair,
   randomChannelId,
   buildPairingPayload,
   listenForPeers,
 } from "@aasis21/helm-shared";
+import { createTransport, resolveTransportDescriptor } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 
 // Minimal ANSI styling for the pairing banner. The Copilot CLI forwards ANSI straight to the
@@ -69,9 +67,17 @@ const handedOffIdentity = await loadIdentityFromFile(process.env.HELM_IDENTITY_F
 const identityFileWasPresent = Boolean(handedOffIdentity);
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
 const channelId = handedOffIdentity?.channelId ?? (process.env.HELM_CHANNEL_ID || randomChannelId());
+// Resolved once from this laptop's own env (HELM_TRANSPORT / HELM_SUPABASE_* / HELM_WEBPUBSUB_*)
+// and stamped into the QR below so the phone builds a matching transport at connect time, with
+// no pre-baked config of its own. A misconfigured transport (e.g. HELM_TRANSPORT=webpubsub
+// without HELM_WEBPUBSUB_NEGOTIATE_URL) is not something pairing can work around, so this fails
+// fast at load with a clear, actionable error rather than surfacing as a confusing retry-loop
+// timeout later.
+const transportDescriptor = resolveTransportDescriptor();
 const pairingPayload = buildPairingPayload({
   channelId,
   publicKeyB64: laptopKeys.publicKeyB64,
+  transport: transportDescriptor,
 });
 
 let relayHandle = null;
@@ -391,45 +397,4 @@ async function logPairing(session, payload, { full = false } = {}) {
         `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}   ${ui.dim("·")}   ${ui.dim("run")} ${ui.lime("/helm")} ${ui.dim("for setup steps")}`,
       ];
   session.log?.(lines.join("\n"), { level: "info", ephemeral: false });
-}
-
-function createTransport({ channelId }) {
-  const transportName = process.env.HELM_TRANSPORT || "local";
-  if (transportName === "local") return createLocalTransport({ channelId });
-
-  // Prefer Helm-namespaced vars. The generic SUPABASE_URL / SUPABASE_ANON_KEY are extremely
-  // common and are frequently exported globally for an UNRELATED Supabase project; because an
-  // already-exported env var beats our .env, that ambient value silently hijacks the relay and
-  // the private-channel join is rejected (CHANNEL_ERROR). Namespacing avoids the collision; the
-  // generic names stay as a fallback for "bring your own relay" users who only set those.
-  const url = process.env.HELM_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.HELM_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    throw new Error(
-      "Helm: HELM_TRANSPORT=supabase requires HELM_SUPABASE_URL and HELM_SUPABASE_ANON_KEY",
-    );
-  }
-  if (!process.env.HELM_SUPABASE_URL || !process.env.HELM_SUPABASE_ANON_KEY) {
-    process.stderr.write(
-      `Helm: using generic SUPABASE_* env (relay host ${safeHost(url)}). Set ` +
-        "HELM_SUPABASE_URL / HELM_SUPABASE_ANON_KEY so a global SUPABASE_URL for another " +
-        "project cannot hijack the relay.\n",
-    );
-  }
-  const client = createClient(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  // Helm uses *private* broadcast channels, authorized by RLS on realtime.messages
-  // (see supabase/migrations). The anon key is the realtime access token; without
-  // setAuth + the RLS policies applied, channel joins are denied.
-  client.realtime.setAuth(anonKey);
-  return createSupabaseTransport({ client, channelId });
-}
-
-function safeHost(url) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "?";
-  }
 }

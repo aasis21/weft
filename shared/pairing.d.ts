@@ -1,4 +1,4 @@
-import type { Transport } from "./transport";
+import type { Transport, TransportDescriptor } from "./transport";
 
 export declare const PAIR_VERSION: 1;
 
@@ -13,6 +13,8 @@ export interface PairingPayload {
   v: 1;
   channelId: string;
   pub: string;
+  /** Which transport + endpoint the phone should connect with. Laptop-resolved, non-secret. */
+  transport: TransportDescriptor;
   /** Absent for normal sessions; "listener" marks a `helm-cli` spawn-capable device. */
   kind?: PairKind;
 }
@@ -27,12 +29,13 @@ export interface PairedPeer {
 export declare function buildPairingPayload(opts: {
   channelId: string;
   publicKeyB64: string;
+  transport: TransportDescriptor;
   kind?: PairKind;
 }): PairingPayload;
 
 export declare function parsePairingPayload(
   input: string | PairingPayload,
-): { channelId: string; publicKeyB64: string; kind: PairKind };
+): { channelId: string; publicKeyB64: string; kind: PairKind; transport: TransportDescriptor };
 
 export declare function listenForPeers(opts: {
   transport: Transport;

@@ -204,6 +204,8 @@ interface SessionScreenProps {
   onVoiceModeChange?(channelId: string, active: boolean): void;
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
+  onPinSession?(channelId: string, pinned: boolean): void;
+  onArchiveSession?(channelId: string): void;
   onReconnect(channelId: string): void;
   onGoHome(): void;
   onLoadEarlier(): void;
@@ -226,6 +228,8 @@ export function SessionScreen({
   onVoiceModeChange,
   onRemoveSession,
   onRenameSession,
+  onPinSession,
+  onArchiveSession,
   onReconnect,
   onGoHome,
   onLoadEarlier,
@@ -493,6 +497,8 @@ export function SessionScreen({
             onOpenDevices={onOpenDevices}
             onRemove={requestRemove}
             onRename={onRenameSession}
+            onPin={onPinSession}
+            onArchive={onArchiveSession}
             onGoHome={onGoHome}
             onOpenSettings={() => setSettingsOpen(true)}
             onClose={collapseSidebar}
@@ -532,6 +538,8 @@ export function SessionScreen({
             lastEventAt: active.lastEventAt ?? null,
             status: active.status,
             mode: active.timeline.mode,
+            ...(active.pinned ? { pinned: true } : {}),
+            ...(active.cold ? { cold: true } : {}),
           }}
           onClose={() => setDebugOpen(false)}
         />
@@ -777,6 +785,8 @@ export function SessionScreen({
           }}
           onRemove={requestRemove}
           onRename={onRenameSession}
+          onPin={onPinSession}
+          onArchive={onArchiveSession}
           onGoHome={() => {
             setDrawerOpen(false);
             onGoHome();

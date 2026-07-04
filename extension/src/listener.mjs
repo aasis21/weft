@@ -17,7 +17,7 @@ import {
   spawnPairing,
   spawnResult,
 } from "@aasis21/helm-shared";
-import { createTransport } from "./transportFactory.mjs";
+import { createTransport, resolveTransportDescriptor } from "./transportFactory.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
@@ -31,6 +31,7 @@ const DEVICE_HEARTBEAT_MS = 120_000;
 
 export function createListener({
   transport = null,
+  transportDescriptor = null,
   keyPair = null,
   channelId = null,
   deviceId = null,
@@ -47,6 +48,12 @@ export function createListener({
   onSpawnResult = null,
 } = {}) {
   let listenerTransport = transport;
+  // Resolved once from env (or caller-provided, e.g. tests supplying a matching descriptor
+  // alongside a hand-built `transport`) — stamped into every pairing payload this listener
+  // builds, both its own persistent QR and any spawn-flow pairing for a freshly-launched
+  // session, since a spawned Copilot process inherits this listener's env and would resolve
+  // the same descriptor anyway.
+  let listenerTransportDescriptor = transportDescriptor;
   let listenerKeyPair = keyPair;
   let listenerChannelId = channelId;
   // Stable, non-secret device id (persisted across restarts) — see deviceIdentity.mjs. Independent
@@ -68,9 +75,11 @@ export function createListener({
     listenerKeyPair ??= await generateKeyPair();
     listenerChannelId ??= randomChannelId();
     listenerTransport ??= createTransport({ channelId: listenerChannelId });
+    listenerTransportDescriptor ??= resolveTransportDescriptor();
     pairingPayload = buildPairingPayload({
       channelId: listenerChannelId,
       publicKeyB64: listenerKeyPair.publicKeyB64,
+      transport: listenerTransportDescriptor,
       kind: PAIR_KIND.LISTENER,
     });
     const handle = await listenForPeers({
@@ -230,7 +239,12 @@ export function createListener({
       await channel?.send(
         spawnPairing(
           id,
-          buildPairingPayload({ channelId: newChannelId, publicKeyB64, kind: PAIR_KIND.SESSION }),
+          buildPairingPayload({
+            channelId: newChannelId,
+            publicKeyB64,
+            transport: listenerTransportDescriptor ?? resolveTransportDescriptor(),
+            kind: PAIR_KIND.SESSION,
+          }),
           sessionName,
           project.name,
         ),

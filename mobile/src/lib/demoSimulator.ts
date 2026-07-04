@@ -44,7 +44,11 @@ export async function startDemoSession(): Promise<DemoSession> {
     keyPair: laptopKeys,
     timeoutMs: 10_000,
   });
-  const pairingPayload = buildPairingPayload({ channelId, publicKeyB64: laptopKeys.publicKeyB64 });
+  const pairingPayload = buildPairingPayload({
+    channelId,
+    publicKeyB64: laptopKeys.publicKeyB64,
+    transport: { kind: 'local' },
+  });
   // The Demo/Simulator runs entirely in-process: force the phone side onto the same
   // in-memory LocalTransport bus as the simulated laptop, regardless of the build's
   // VITE_HELM_TRANSPORT (which may be `supabase` for real pairing).

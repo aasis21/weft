@@ -55,24 +55,25 @@ describe('scenario: debug event log', () => {
     expect(stored.some((e) => e.eventType === 'prompt' && e.dir === 'out')).toBe(true);
   });
 
-  it('excludes control.heartbeat from the debug log so real events survive the ring (#67)', async () => {
+  it('collapses a burst of control.heartbeats into a single row so real events survive the ring (#67, #185)', async () => {
     const { client } = await h!.pair('c1');
     client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
     await h!.flush();
 
     const before = h!.active()!.events.length;
-    // A burst of heartbeats must not add any rows to the debug log.
+    // A burst of heartbeats must collapse to a single trailing row, not stack up N-deep.
     for (let i = 0; i < 20; i += 1) {
       client.emit(heartbeat(i, false));
     }
     await h!.flush();
     const after = h!.active()!.events;
-    expect(after.length).toBe(before);
-    expect(after.some((e) => e.eventType === 'control' && e.eventSubtype === 'heartbeat')).toBe(
-      false,
+    expect(after.length).toBe(before + 1);
+    const heartbeats = after.filter(
+      (e) => e.eventType === 'control' && e.eventSubtype === 'heartbeat',
     );
+    expect(heartbeats.length).toBe(1);
 
-    // A subsequent real event is still recorded.
+    // A subsequent real event is still recorded (not collapsed into/overwritten by the heartbeat).
     client.emit(B.assistantDelta('still here', 'm9'));
     await h!.flush();
     expect(

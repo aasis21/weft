@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences';
+import type { TransportDescriptor } from '@aasis21/helm-shared';
 
 const PAIRING_KEY = 'helm.pairing.v1';
 
@@ -9,6 +10,8 @@ export interface StoredPairing {
   privateKeyJwk: JsonWebKey;
   deviceId: string;
   savedAt: number;
+  /** Which transport + endpoint this session was paired with — reused verbatim on reconnect. */
+  transport: TransportDescriptor;
 }
 
 export async function loadStoredPairing(): Promise<StoredPairing | null> {

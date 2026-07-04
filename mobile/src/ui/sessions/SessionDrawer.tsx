@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '@/session/view';
+import { deriveStatus } from './sessionStatus';
 
 interface SessionDrawerProps {
   sessions: SessionView[];
@@ -10,6 +11,10 @@ interface SessionDrawerProps {
   onOpenDevices?(): void;
   onRemove(channelId: string): void;
   onRename?(channelId: string, title: string): void;
+  /** #163: pin/unpin a session (exempt from auto-delete + eviction preference). */
+  onPin?(channelId: string, pinned: boolean): void;
+  /** #163: manually archive (drop the live socket now, keep the card). */
+  onArchive?(channelId: string): void;
   onGoHome(): void;
   onOpenSettings?(): void;
   onClose(): void;
@@ -64,6 +69,8 @@ export function SessionDrawer({
   onOpenDevices,
   onRemove,
   onRename,
+  onPin,
+  onArchive,
   onGoHome,
   onOpenSettings,
   onClose,
@@ -102,6 +109,19 @@ export function SessionDrawer({
     const scannedAt = (s: SessionView): number => s.meta.scannedAt ?? s.meta.addedAt ?? 0;
     return [...matched].sort((a, b) => scannedAt(b) - scannedAt(a));
   }, [query, sessions]);
+
+  // #163: split the (already stably-sorted) list into Active vs Archived using the shared status
+  // derivation, so the sidebar mirrors the detail-header pill exactly. Search filters both groups.
+  const { activeGroup, archivedGroup } = useMemo(() => {
+    const activeGroup: SessionView[] = [];
+    const archivedGroup: SessionView[] = [];
+    for (const s of filteredSessions) {
+      (deriveStatus(s).active ? activeGroup : archivedGroup).push(s);
+    }
+    return { activeGroup, archivedGroup };
+  }, [filteredSessions]);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     // Docked (desktop, always-visible) sidebar is not a modal: it must not steal focus on
@@ -177,6 +197,165 @@ export function SessionDrawer({
     };
   }, [docked]);
 
+  const renderRow = (session: SessionView): JSX.Element => {
+    const id = session.meta.channelId;
+    const isActive = id === activeId;
+    const pending = session.timeline.approvals.length;
+    const activity = lastActivity(session);
+    const derived = deriveStatus(session);
+    const isDemo = session.meta.kind === 'demo';
+    const confirming = confirmDeleteId === id;
+    return (
+      <div
+        key={id}
+        className={`session-row ${isActive ? 'current' : ''} ${session.unread && !isActive ? 'unread' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => onSelect(id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onSelect(id);
+          if (e.key === ' ' || e.key === 'Spacebar') {
+            e.preventDefault();
+            onSelect(id);
+          }
+        }}
+      >
+        <span
+          className={`unread-dot ${session.unread && !isActive ? 'on' : ''}`}
+          aria-label={session.unread && !isActive ? 'Unread activity' : undefined}
+        />
+        <span className="session-info">
+          <span className="session-title">
+            {editingId === id ? (
+              <input
+                className="session-rename-input"
+                type="text"
+                value={draft}
+                autoFocus
+                aria-label="Rename session"
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') commitRename(id);
+                  if (e.key === 'Escape') cancelRename();
+                }}
+                onBlur={() => commitRename(id)}
+              />
+            ) : (
+              <>
+                {session.pinned ? <span className="pin-mark" title="Pinned" aria-label="Pinned">📌</span> : null}
+                {session.meta.title}
+                {isDemo ? <span className="tag demo">demo</span> : null}
+                {pending > 0 ? <span className="tag alert">{pending} approval</span> : null}
+              </>
+            )}
+          </span>
+          <span className="session-sub">
+            <span className={`session-pill ${derived.tone}`}>
+              <span className="pill-dot" aria-hidden="true" />
+              {derived.label}
+            </span>
+            {` · ${turnCount(session)} msg`}
+            {!isActive && (session.unreadCount ?? 0) > 0 ? (
+              <span className="unread-new">{` · ${session.unreadCount} new`}</span>
+            ) : null}
+            {activity ? ` · ${fmtRelative(activity)}` : ''}
+            {session.meta.cwd ? ` · ${session.meta.cwd.split(/[\\/]/).pop()}` : ''}
+          </span>
+        </span>
+        {confirming ? (
+          <span className="row-confirm" onClick={(e) => e.stopPropagation()}>
+            <span className="row-confirm-label">Delete?</span>
+            <button
+              className="icon-btn row-confirm-yes"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDeleteId(null);
+                onRemove(id);
+              }}
+              title="Confirm delete"
+              aria-label="Confirm delete session"
+            >
+              ✓
+            </button>
+            <button
+              className="icon-btn row-confirm-no"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDeleteId(null);
+              }}
+              title="Cancel"
+              aria-label="Cancel delete"
+            >
+              ✕
+            </button>
+          </span>
+        ) : editingId === id ? null : (
+          <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+            {!isDemo && onPin ? (
+              <button
+                className={`icon-btn row-pin ${session.pinned ? 'on' : ''}`}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPin(id, !session.pinned);
+                }}
+                title={session.pinned ? 'Unpin' : 'Pin (keep, never auto-delete)'}
+                aria-label={session.pinned ? 'Unpin session' : 'Pin session'}
+                aria-pressed={session.pinned ?? false}
+              >
+                📌
+              </button>
+            ) : null}
+            {!isDemo && onArchive && derived.active ? (
+              <button
+                className="icon-btn row-archive"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchive(id);
+                }}
+                title="Archive now (drop the live connection)"
+                aria-label="Archive session now"
+              >
+                ⏸
+              </button>
+            ) : null}
+            {!isDemo ? (
+              <button
+                className="icon-btn row-rename"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  beginRename(id, session.meta.title);
+                }}
+                title="Rename session"
+                aria-label="Rename session"
+              >
+                ✎
+              </button>
+            ) : null}
+            <button
+              className="icon-btn row-x"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirmDeleteId(id);
+              }}
+              title="Delete session"
+              aria-label="Delete session"
+            >
+              🗑
+            </button>
+          </span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
       <aside
@@ -212,93 +391,20 @@ export function SessionDrawer({
           ) : filteredSessions.length === 0 ? (
             <p className="drawer-empty">No matches.</p>
           ) : (
-            filteredSessions.map((session) => {
-              const id = session.meta.channelId;
-              const isActive = id === activeId;
-              const pending = session.timeline.approvals.length;
-              const activity = lastActivity(session);
-              return (
-                <div
-                  key={id}
-                  className={`session-row ${isActive ? 'current' : ''} ${session.unread && !isActive ? 'unread' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onSelect(id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') onSelect(id);
-                    if (e.key === ' ' || e.key === 'Spacebar') {
-                      e.preventDefault();
-                      onSelect(id);
-                    }
-                  }}
-                >
-                  <span
-                    className={`unread-dot ${session.unread && !isActive ? 'on' : ''}`}
-                    aria-label={session.unread && !isActive ? 'Unread activity' : undefined}
-                  />
-                  <span className="session-info">
-                    <span className="session-title">
-                      {editingId === id ? (
-                        <input
-                          className="session-rename-input"
-                          type="text"
-                          value={draft}
-                          autoFocus
-                          aria-label="Rename session"
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => setDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            e.stopPropagation();
-                            if (e.key === 'Enter') commitRename(id);
-                            if (e.key === 'Escape') cancelRename();
-                          }}
-                          onBlur={() => commitRename(id)}
-                        />
-                      ) : (
-                        <>
-                          {session.meta.title}
-                          {session.meta.kind === 'demo' ? <span className="tag demo">demo</span> : null}
-                          {pending > 0 ? <span className="tag alert">{pending} approval</span> : null}
-                        </>
-                      )}
-                    </span>
-                    <span className="session-sub">
-                      {turnCount(session)} msg
-                      {!isActive && (session.unreadCount ?? 0) > 0 ? (
-                        <span className="unread-new">{` · ${session.unreadCount} new`}</span>
-                      ) : null}
-                      {activity ? ` · ${fmtRelative(activity)}` : ''}
-                      {session.meta.cwd ? ` · ${session.meta.cwd.split(/[\\/]/).pop()}` : ''}
-                    </span>
-                  </span>
-                  {session.meta.kind !== 'demo' && editingId !== id ? (
-                    <button
-                      className="icon-btn row-rename"
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        beginRename(id, session.meta.title);
-                      }}
-                      title="Rename session"
-                      aria-label="Rename session"
-                    >
-                      ✎
-                    </button>
-                  ) : null}
-                  <button
-                    className="icon-btn row-x"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemove(id);
-                    }}
-                    title="Leave session"
-                  >
-                    ✕
-                  </button>
+            <>
+              {activeGroup.length > 0 ? (
+                <div className="drawer-group-head">
+                  Active <span className="drawer-group-count">{activeGroup.length}</span>
                 </div>
-              );
-            })
+              ) : null}
+              {activeGroup.map(renderRow)}
+              {archivedGroup.length > 0 ? (
+                <div className="drawer-group-head">
+                  Archived <span className="drawer-group-count">{archivedGroup.length}</span>
+                </div>
+              ) : null}
+              {archivedGroup.map(renderRow)}
+            </>
           )}
         </div>
 

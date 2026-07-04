@@ -17,6 +17,7 @@ function pairing(channelId: string, savedAt = 1): StoredPairing {
     privateKeyJwk: { kty: 'oct', k: `key-${channelId}` },
     deviceId: `device-${channelId}`,
     savedAt,
+    transport: { kind: 'local' },
   };
 }
 
@@ -52,6 +53,32 @@ describe('sessions storage', () => {
 
     await removeSession('ch1');
     expect(await loadSessions()).toEqual([]);
+  });
+
+  it('persists the #163 lifecycle clocks and pin flag through patchSession', async () => {
+    await upsertSession(session('ch-life', { sessionId: 's-life' }));
+
+    await patchSession('ch-life', {
+      lastHeartbeatAt: 1_000,
+      lastSubscribedAt: 2_000,
+      pinned: true,
+    });
+    let loaded = await loadSessions();
+    expect(loaded[0]).toMatchObject({
+      lastHeartbeatAt: 1_000,
+      lastSubscribedAt: 2_000,
+      pinned: true,
+    });
+
+    // A later liveness write advances the witnessed-subscription clock without clobbering the pin.
+    await patchSession('ch-life', { lastHeartbeatAt: 5_000, lastSubscribedAt: 6_000 });
+    loaded = await loadSessions();
+    expect(loaded[0]).toMatchObject({ lastHeartbeatAt: 5_000, lastSubscribedAt: 6_000, pinned: true });
+
+    // Unpin persists as false.
+    await patchSession('ch-life', { pinned: false });
+    loaded = await loadSessions();
+    expect(loaded[0]).toMatchObject({ pinned: false });
   });
 
   it('still persists channel IDs to the localStorage mirror when the Preferences backend throws (#186)', async () => {

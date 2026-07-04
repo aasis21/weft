@@ -28,6 +28,24 @@ import {
 const EVENT_LOG_CAP = 200;
 const DEVICE_EVENT_LOG_CAP = 100;
 
+function isHeartbeatEvent(event: DebugEvent): boolean {
+  return (
+    event.eventType === EVENT_TYPE.CONTROL &&
+    (event.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT || event.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT)
+  );
+}
+
+/** Appends `event` to `list`, but collapses a run of consecutive heartbeats (same subtype + dir)
+ *  down to just the latest one — heartbeats are liveness noise, not history worth stacking up,
+ *  yet still worth *seeing* (last-beat timestamp) rather than hiding entirely. */
+function appendEvent(list: DebugEvent[], event: DebugEvent, cap: number): DebugEvent[] {
+  const last = list[list.length - 1];
+  if (last && isHeartbeatEvent(event) && last.eventSubtype === event.eventSubtype && last.dir === event.dir) {
+    return [...list.slice(0, -1), event].slice(-cap);
+  }
+  return [...list, event].slice(-cap);
+}
+
 export const sessionsAdapter = createEntityAdapter<Session>();
 
 export const sessionsInitialState = sessionsAdapter.getInitialState({
@@ -106,6 +124,7 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
   keep.unread = keep.unread || drop.unread;
   keep.unreadCount = (keep.unreadCount ?? 0) + (drop.unreadCount ?? 0);
   keep.lastEventAt = Math.max(keep.lastEventAt ?? 0, drop.lastEventAt ?? 0) || null;
+  keep.pinned = keep.pinned || drop.pinned; // pin is sticky across a resume/reconcile merge (#163)
   keep.debug = [...keep.debug, ...drop.debug].slice(-EVENT_LOG_CAP);
   if (drop.connection.status === 'live' || keep.connection.status !== 'live') keep.connection.status = drop.connection.status;
   keep.connection.busy = keep.connection.busy || drop.connection.busy;
@@ -222,7 +241,7 @@ const sessionsSlice = createSlice({
     // scoped to ListenerDeviceState.events and its own (smaller) cap, since these aren't persisted.
     deviceEventAppended(state, action: PayloadAction<{ channelId: string; event: DebugEvent }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
-      if (device) device.events = [...device.events, action.payload.event].slice(-DEVICE_EVENT_LOG_CAP);
+      if (device) device.events = appendEvent(device.events, action.payload.event, DEVICE_EVENT_LOG_CAP);
     },
     sessionAdded: sessionsAdapter.addOne,
     sessionRemoved(state, action: PayloadAction<string>) {
@@ -338,6 +357,10 @@ const sessionsSlice = createSlice({
       const session = state.entities[action.payload.id];
       if (session) session.connection.cold = action.payload.on;
     },
+    pinnedSet(state, action: PayloadAction<{ id: string; pinned: boolean }>) {
+      const session = state.entities[action.payload.id];
+      if (session) session.pinned = action.payload.pinned;
+    },
     endedSet(state, action: PayloadAction<{ id: string; reason?: string }>) {
       const session = state.entities[action.payload.id];
       if (session) {
@@ -392,7 +415,7 @@ const sessionsSlice = createSlice({
     },
     debugAppended(state, action: PayloadAction<{ id: string; event: DebugEvent }>) {
       const session = state.entities[action.payload.id];
-      if (session) session.debug = [...session.debug, action.payload.event].slice(-EVENT_LOG_CAP);
+      if (session) session.debug = appendEvent(session.debug, action.payload.event, EVENT_LOG_CAP);
     },
     readySet(state, action: PayloadAction<boolean>) {
       state.ready = action.payload;
@@ -434,6 +457,7 @@ export const {
   interruptRequested,
   statusSet,
   coldSet,
+  pinnedSet,
   endedSet,
   historyLoadingSet,
   reconnectingSet,

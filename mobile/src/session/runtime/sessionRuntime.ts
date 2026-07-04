@@ -99,6 +99,7 @@ import {
   metaScannedAtSet,
   modeSet,
   noticeAppended,
+  pinnedSet,
   promptFailed,
   readySet,
   sessionActivated,
@@ -280,6 +281,24 @@ export class SessionRuntime {
       stored = [];
       devices = [];
       lastActiveId = null;
+    }
+
+    // #163 boot delete-sweep: purge sessions whose *witnessed* silence already exceeds the delete
+    // window, straight from storage, BEFORE they are restored into the store (remove() can't run yet
+    // — there's no card in state). The last-active session is always spared so activation never
+    // dangles. Pinned sessions are exempt (isDeleteEligible checks that).
+    const doomed = stored.filter((s) => this.isDeleteEligible(s, lastActiveId));
+    if (doomed.length > 0) {
+      const doomedIds = new Set(doomed.map((s) => s.pairing.channelId));
+      await Promise.all(
+        doomed.map(async (s) => {
+          const channelId = s.pairing.channelId;
+          await removeSession(channelId).catch(() => {});
+          await clearTranscript(channelId).catch(() => {});
+          await clearEventLog(channelId).catch(() => {});
+        }),
+      );
+      stored = stored.filter((s) => !doomedIds.has(s.pairing.channelId));
     }
 
     this.store.dispatch(
@@ -1174,11 +1193,58 @@ export class SessionRuntime {
       await clearEventLog(channelId);
     }
     this.store.dispatch(sessionRemoved(channelId));
+    this.lastLivenessWriteAt.delete(channelId);
     if (wasActive) {
       const nextId = (this.store.getState().sessions.ids[0] as string | undefined) ?? null;
       if (nextId) {
         this.store.dispatch(sessionActivated(nextId));
         this.ensureConnected(nextId);
+      }
+    }
+  }
+
+  /** Pin or unpin a session (#163): pinned cards are exempt from the 2-day auto-delete sweep and are
+   *  the last picked for warm-pool eviction. Persisted so the choice survives reload. */
+  async pin(channelId: string, pinned: boolean): Promise<void> {
+    if (!this.session(channelId)) return;
+    this.store.dispatch(pinnedSet({ id: channelId, pinned }));
+    await patchSession(channelId, { pinned });
+  }
+
+  /** Manually archive a session now (#163): drop its live subscription/socket but keep the card,
+   *  transcript, and unread. The user can tap to reconnect later. No-op for cold/ephemeral sessions. */
+  archive(channelId: string): void {
+    this.coolDown(channelId);
+  }
+
+  /** True when a stored session should be auto-deleted (#163): not pinned, not the spared (active/
+   *  last-active) session, and its *witnessed* silence — the app-observed gap between the last time
+   *  we saw it (`lastSubscribedAt`) and its last real pulse (`lastHeartbeatAt`) — exceeds
+   *  AUTO_DELETE_MS. Sessions we've never witnessed with a pulse yet (either clock missing) are never
+   *  eligible, so a freshly-paired card is safe. */
+  private isDeleteEligible(s: StoredSession, spareId: string | null): boolean {
+    if (s.pinned) return false;
+    if (s.pairing.channelId === spareId) return false;
+    const beat = s.lastHeartbeatAt;
+    const witnessed = s.lastSubscribedAt;
+    if (beat == null || witnessed == null) return false;
+    return witnessed - beat > AUTO_DELETE_MS;
+  }
+
+  /** #163 auto-delete sweep. Runs on every foreground. Purges any stored, non-pinned session whose
+   *  witnessed silence exceeds AUTO_DELETE_MS (see {@link isDeleteEligible}). Silent, no undo. The
+   *  currently-active session is always spared. */
+  private async sweepExpired(): Promise<void> {
+    const activeId = this.activeId();
+    let stored: StoredSession[];
+    try {
+      stored = await loadSessions();
+    } catch {
+      return;
+    }
+    for (const s of stored) {
+      if (this.isDeleteEligible(s, activeId)) {
+        await this.remove(s.pairing.channelId);
       }
     }
   }
@@ -1380,15 +1446,9 @@ export class SessionRuntime {
   }
 
   private recordEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
-    // Heartbeats fire ~every 2.5s and would evict the substantive event chain (prompts, approvals,
-    // tool_start/complete, elicitations) from the bounded ring within minutes (#67). Liveness is
-    // already surfaced via connection.lastHeartbeat, so keep them out of the persisted debug log.
-    if (
-      message.eventType === EVENT_TYPE.CONTROL &&
-      message.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT
-    ) {
-      return;
-    }
+    // Heartbeats fire ~every 2.5s; the reducer collapses a run of consecutive heartbeats down to
+    // the latest one (#67, #185) so they surface liveness in the log without evicting the
+    // substantive event chain (prompts, approvals, tool_start/complete, elicitations).
     const fallback = dir === 'out' ? getSenderName() : 'Copilot';
     const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
     this.store.dispatch(debugAppended({ id: channelId, event }));
@@ -1396,14 +1456,8 @@ export class SessionRuntime {
   }
 
   /** Mirrors recordEvent() but for the DEVICE (listener) channel — same shape, its own (unpersisted,
-   *  smaller) ring buffer, and excludes DEVICE_HEARTBEAT for the identical noise reason. */
+   *  smaller) ring buffer, and the same consecutive-heartbeat collapsing (#185). */
   private recordDeviceEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
-    if (
-      message.eventType === EVENT_TYPE.CONTROL &&
-      message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT
-    ) {
-      return;
-    }
     const fallback = dir === 'out' ? getSenderName() : (this.device(channelId)?.name ?? 'Listener');
     const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
     this.store.dispatch(deviceEventAppended({ channelId, event }));
@@ -1470,10 +1524,13 @@ export class SessionRuntime {
     const s = this.session(channelId);
     if (!s) return;
     this.lastLivenessWriteAt.set(channelId, now);
-    void patchSession(channelId, {
-      lastHeartbeatAt: s.connection.lastHeartbeat ?? null,
-      lastSubscribedAt: now,
-    });
+    // Only rewrite lastHeartbeatAt when we actually hold a fresh in-memory pulse. A cold/archived
+    // session has no live beat (connection.lastHeartbeat is null after load) — writing null would
+    // erase the real last-beat clock from a prior run and break the witnessed-silence math. In that
+    // case advance only lastSubscribedAt; the stored lastHeartbeatAt stays put.
+    const patch: Parameters<typeof patchSession>[1] = { lastSubscribedAt: now };
+    if (s.connection.lastHeartbeat) patch.lastHeartbeatAt = s.connection.lastHeartbeat;
+    void patchSession(channelId, patch);
   }
 
   // --- watchdog + resume ---------------------------------------------------------------------------
@@ -1537,6 +1594,7 @@ export class SessionRuntime {
     // so each warm session issues at most one state+history sync (#75).
     if (now - this.lastResumeAt < RESUME_DEBOUNCE_MS) return;
     this.lastResumeAt = now;
+    void this.sweepExpired(); // #163: purge witnessed-silence-expired sessions on each foreground
     for (const channelId of [...this.warmLru]) {
       const ctrl = this.controllers.get(channelId);
       const session = this.session(channelId);
@@ -1557,16 +1615,31 @@ export class SessionRuntime {
     }
   };
 
+  /** #163: on background/hide, flush the witness clock for every session we currently hold warm so
+   *  `lastSubscribedAt` records the exact moment we stopped watching (the throttled per-tick writes
+   *  may lag by up to LIVENESS_PERSIST_THROTTLE_MS). This keeps witnessed-silence honest across an
+   *  app suspend, without waiting for the next foreground tick. */
+  private handleHide = (): void => {
+    for (const channelId of [...this.warmLru]) {
+      this.persistLiveness(channelId, /* flush */ true);
+    }
+  };
+
   private installResumeTriggers(): void {
     if (typeof window === 'undefined') return;
     window.addEventListener('online', this.handleResume);
     this.resumeCleanups.push(() => window.removeEventListener('online', this.handleResume));
+    window.addEventListener('pagehide', this.handleHide);
+    this.resumeCleanups.push(() => window.removeEventListener('pagehide', this.handleHide));
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleResume);
       this.resumeCleanups.push(() => document.removeEventListener('visibilitychange', this.handleResume));
+      document.addEventListener('visibilitychange', this.handleHide);
+      this.resumeCleanups.push(() => document.removeEventListener('visibilitychange', this.handleHide));
     }
     App.addListener('appStateChange', ({ isActive }) => {
       if (isActive) this.handleResume();
+      else this.handleHide();
     })
       .then((handle) => {
         this.resumeCleanups.push(() => handle.remove());

@@ -1302,6 +1302,79 @@
 .session-row .row-rename { width: 30px; height: 30px; font-size: 13px; opacity: 0.55; }
 .session-row .row-rename:hover,
 .session-row .row-rename:focus-visible { opacity: 1; }
+
+/* #163 session lifecycle: sidebar Active/Archived grouping, status pills, pin + row actions */
+.drawer-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.drawer-group-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-rule);
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+.session-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 5px;
+  border-radius: 999px;
+  background: var(--bg-rule);
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.session-pill .pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+.session-pill.live { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.session-pill.live .pill-dot { background: var(--success); }
+.session-pill.busy { color: var(--accent); background: var(--accent-soft); }
+.session-pill.busy .pill-dot { background: var(--accent); animation: helm-beat 1.2s ease-in-out infinite; }
+.session-pill.idle { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.session-pill.idle .pill-dot { background: var(--warning); }
+.session-pill.connecting { color: var(--accent); }
+.session-pill.connecting .pill-dot { background: var(--accent); animation: helm-beat 1.2s ease-in-out infinite; }
+.session-pill.archived { color: var(--fg-dim); }
+.session-pill.archived .pill-dot { background: var(--fg-faint); }
+.session-pill.error { color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent); }
+.session-pill.error .pill-dot { background: var(--error); }
+.session-pill.ended,
+.session-pill.initializing { color: var(--fg-faint); }
+.session-pill.ended .pill-dot,
+.session-pill.initializing .pill-dot { background: var(--fg-faint); }
+
+.pin-mark { margin-right: 3px; font-size: 11px; }
+
+.row-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.session-row .row-pin,
+.session-row .row-archive { width: 30px; height: 30px; font-size: 13px; opacity: 0.55; }
+.session-row .row-pin:hover,
+.session-row .row-pin:focus-visible,
+.session-row .row-archive:hover,
+.session-row .row-archive:focus-visible { opacity: 1; }
+.session-row .row-pin.on { opacity: 1; }
+
+.row-confirm { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.row-confirm-label { font-size: 11px; color: var(--fg-dim); }
+.session-row .row-confirm-yes { width: 30px; height: 30px; font-size: 13px; color: var(--error); }
+.session-row .row-confirm-no { width: 30px; height: 30px; font-size: 13px; }
 .session-rename-input {
   flex: 1 1 auto;
   min-width: 0;

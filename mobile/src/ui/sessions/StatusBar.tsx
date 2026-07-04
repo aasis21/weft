@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX, KeyboardEvent } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
+import { deriveStatus } from './sessionStatus';
 
 interface StatusBarProps {
   title: string;
@@ -24,15 +25,6 @@ interface StatusBarProps {
    *  Show a static Helm mark instead, linking to About Helm like a typical app logo. */
   desktopDocked?: boolean;
 }
-
-const STATUS_LABEL: Record<SessionStatus, string> = {
-  initializing: 'Initializing…',
-  connecting: 'Connecting…',
-  live: 'Live',
-  idle: 'Quiet',
-  ended: 'Ended',
-  error: 'Offline',
-};
 
 export function StatusBar({
   title,
@@ -57,19 +49,15 @@ export function StatusBar({
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const unreadCount = snapshot.sessions.filter((session) => session.unread && session.meta.channelId !== snapshot.activeId).length;
   const activeSession = snapshot.sessions.find((session) => session.meta.channelId === snapshot.activeId);
-  // A cold (warm-pool-evicted) session has no live socket, so surface it as "Offline" rather than the
-  // warm-idle "Quiet" — otherwise the header contradicts the thread's "waiting to reconnect" banner (#127).
-  const activeCold = activeSession?.cold ?? false;
-  // Hard invariant: the header must never read "Live"/"Quiet" while a reachability error banner is
-  // shown. If the active session carries a connection error, force the "Offline" header regardless of
-  // the raw status, so the pill can't contradict the banner below it (#185).
-  const errored = !!activeSession?.error && status !== 'ended';
-  // While the agent is working the header reads "Working…" with a live pulse, so a connected but idle
-  // session ("Live") is visibly distinct from one that's actively churning a turn.
-  const working = busy && status === 'live' && !errored;
-  const showCold = (activeCold && status === 'idle' && !working) || errored;
-  const lineClass = working ? 'busy' : showCold ? 'error' : status;
-  const statusLabel = working ? 'Working…' : showCold ? 'Offline' : STATUS_LABEL[status];
+  // Single source of truth for the pill (#163): the same derivation the sidebar rows use, so the
+  // header can never read "Live" while a row (or the banner below) says otherwise. Splits the calm
+  // "Archived" (cold, tap to reconnect) from the problem "Offline" (error, reconnect).
+  const derived = deriveStatus(
+    { status, cold: activeSession?.cold ?? false, error: activeSession?.error },
+    { busy },
+  );
+  const lineClass = derived.tone;
+  const statusLabel = derived.label;
 
   useEffect(() => {
     if (!menuOpen) return undefined;

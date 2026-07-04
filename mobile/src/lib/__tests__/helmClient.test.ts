@@ -33,7 +33,11 @@ vi.mock('@aasis21/helm-shared', () => ({
     }),
   ),
   isValidEnvelope: vi.fn(() => true),
-  parsePairingPayload: vi.fn(() => ({ channelId: 'channel-1', publicKeyB64: 'laptop-public-key' })),
+  parsePairingPayload: vi.fn(() => ({
+    channelId: 'channel-1',
+    publicKeyB64: 'laptop-public-key',
+    transport: { kind: 'local' },
+  })),
   sayHello: vi.fn(() => Promise.resolve({ key: {} as CryptoKey })),
 }));
 

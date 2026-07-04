@@ -13,9 +13,11 @@
 //   type Envelope = { iv: string, ciphertext: string, ts: number }
 //   type Unsubscribe = () => void
 //
-// Two implementations:
+// Three implementations:
 //   - createLocalTransport  (transport-local.mjs)     — in-process pub/sub for the harness/tests
 //   - createSupabaseTransport (transport-supabase.mjs) — Supabase Realtime Broadcast (Phase 2)
+//   - createWebPubSubTransport (transport-webpubsub.mjs) — Azure Web PubSub group broadcast
 
 export { createLocalTransport } from "./transport-local.mjs";
 export { createSupabaseTransport } from "./transport-supabase.mjs";
+export { createWebPubSubTransport } from "./transport-webpubsub.mjs";

@@ -154,6 +154,9 @@ export interface Session {
    *  select; summed on merge. `unread` stays as the coarse boolean mirror (`unreadCount > 0`). */
   unreadCount: number;
   lastEventAt: number | null;
+  /** User-pinned (#163): exempt from warm-pool eviction preference AND the 2-day auto-delete sweep.
+   *  Hydrated from the persisted `StoredSession.pinned`; never auto-cleared. */
+  pinned: boolean;
   transcript: { items: TimelineItem[] };
   history: SessionHistory;
   connection: SessionConnection;
@@ -170,6 +173,7 @@ export function emptySession(id: string, meta: SessionMeta): Session {
     unread: false,
     unreadCount: 0,
     lastEventAt: null,
+    pinned: false,
     transcript: { items: [] },
     history: { items: [], cursor: null, hasMore: false, loading: false, latestTurnIndex: null },
     connection: {

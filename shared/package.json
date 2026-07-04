@@ -18,7 +18,8 @@
     "./channel": "./channel.mjs",
     "./transport": "./transport.mjs",
     "./transport-local": "./transport-local.mjs",
-    "./transport-supabase": "./transport-supabase.mjs"
+    "./transport-supabase": "./transport-supabase.mjs",
+    "./transport-webpubsub": "./transport-webpubsub.mjs"
   },
   "scripts": {
     "test": "node --test"

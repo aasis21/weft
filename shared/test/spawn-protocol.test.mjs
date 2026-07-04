@@ -26,18 +26,26 @@ import {
 } from "../messages.mjs";
 
 test("pairing payload carries an explicit listener kind, defaults to session", () => {
-  const session = buildPairingPayload({ channelId: "c1", publicKeyB64: "AAAA" });
-  assert.equal(session.kind, undefined, "default session QR stays byte-identical (no kind field)");
+  const session = buildPairingPayload({ channelId: "c1", publicKeyB64: "AAAA", transport: { kind: "local" } });
+  assert.equal(session.kind, undefined, "default session QR omits kind field for non-listener kinds");
   assert.equal(parsePairingPayload(session).kind, PAIR_KIND.SESSION);
 
-  const listener = buildPairingPayload({ channelId: "c2", publicKeyB64: "BBBB", kind: PAIR_KIND.LISTENER });
+  const listener = buildPairingPayload({
+    channelId: "c2",
+    publicKeyB64: "BBBB",
+    transport: { kind: "local" },
+    kind: PAIR_KIND.LISTENER,
+  });
   assert.equal(listener.kind, "listener");
   const parsed = parsePairingPayload(JSON.stringify(listener));
   assert.equal(parsed.kind, PAIR_KIND.LISTENER);
   assert.equal(parsed.channelId, "c2");
 
   // Unknown kinds fall back to session (defensive).
-  assert.equal(parsePairingPayload({ v: 1, channelId: "c3", pub: "x", kind: "bogus" }).kind, PAIR_KIND.SESSION);
+  assert.equal(
+    parsePairingPayload({ v: 1, channelId: "c3", pub: "x", kind: "bogus", transport: { kind: "local" } }).kind,
+    PAIR_KIND.SESSION,
+  );
 });
 
 test("exportKeyPair -> importKeyPair round-trips a working ECDH identity", async () => {

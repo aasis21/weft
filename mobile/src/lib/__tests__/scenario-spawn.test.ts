@@ -4,7 +4,13 @@ import { registry } from '@/test/helpers/fakeHelmClient';
 import * as B from '@/test/helpers/builders';
 
 function listenerQr(channelId: string): string {
-  return JSON.stringify({ v: 1, channelId, pub: `listener-pub-${channelId}`, kind: 'listener' });
+  return JSON.stringify({
+    v: 1,
+    channelId,
+    pub: `listener-pub-${channelId}`,
+    kind: 'listener',
+    transport: { kind: 'local' },
+  });
 }
 
 describe('scenario: phone-launched sessions', () => {
@@ -60,6 +66,7 @@ describe('scenario: phone-launched sessions', () => {
       channelId: 'spawned-1',
       pub: 'spawned-pub',
       kind: 'session',
+      transport: { kind: 'local' },
     }, 'Phone launch', 'helm'));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();

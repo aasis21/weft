@@ -26,6 +26,19 @@ export const PAIR_VERSION = 1;
 /** Pairing payload kinds: a normal mirrored-session QR vs an ephemeral `helm-cli` listener QR. */
 export const PAIR_KIND = Object.freeze({ SESSION: "session", LISTENER: "listener" });
 
+/**
+ * Validate a transport descriptor's shape for the QR/pairing payload. See transport.d.ts
+ * TransportDescriptor. Rejects anything with an unknown `kind` or missing required fields for
+ * that kind — the phone must be able to build a matching transport from this alone.
+ */
+function isValidTransportDescriptor(t) {
+  if (!t || typeof t !== "object") return false;
+  if (t.kind === "local") return true;
+  if (t.kind === "supabase") return typeof t.url === "string" && typeof t.anonKey === "string";
+  if (t.kind === "webpubsub") return typeof t.negotiateUrl === "string";
+  return false;
+}
+
 /** Build a standardized plaintext pairing envelope (hello or ack). */
 function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {}) {
   return {
@@ -40,15 +53,23 @@ function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {
 }
 
 /**
- * Build the QR payload shown by the laptop. Carries the laptop PUBLIC key only. `kind` marks
- * whether this is a normal mirrored session ("session", default) or a `helm-cli` listener
- * ("listener") the phone should register as a spawn-capable device rather than open as a session.
+ * Build the QR payload shown by the laptop. Carries the laptop PUBLIC key AND the transport
+ * descriptor (kind + non-secret endpoint) the laptop resolved from its own env — the laptop is
+ * the single source of truth for transport selection; the phone builds its transport straight
+ * from this, with no pre-baked config of its own. `kind` marks whether this is a normal mirrored
+ * session ("session", default) or a `helm-cli` listener ("listener") the phone should register as
+ * a spawn-capable device rather than open as a session.
  */
-export function buildPairingPayload({ channelId, publicKeyB64, kind = PAIR_KIND.SESSION }) {
+export function buildPairingPayload({ channelId, publicKeyB64, transport, kind = PAIR_KIND.SESSION }) {
   if (!channelId || !publicKeyB64) {
     throw new Error("helm/pairing: channelId and publicKeyB64 are required");
   }
-  const payload = { v: PAIR_VERSION, channelId, pub: publicKeyB64 };
+  if (!isValidTransportDescriptor(transport)) {
+    throw new Error(
+      'helm/pairing: transport descriptor is required (kind: "local" | "supabase" | "webpubsub")',
+    );
+  }
+  const payload = { v: PAIR_VERSION, channelId, pub: publicKeyB64, transport };
   // Only stamp non-default kinds so existing session QRs stay byte-identical (back-compat).
   if (kind && kind !== PAIR_KIND.SESSION) payload.kind = kind;
   return payload;
@@ -61,12 +82,13 @@ export function parsePairingPayload(input) {
     !o ||
     o.v !== PAIR_VERSION ||
     typeof o.channelId !== "string" ||
-    typeof o.pub !== "string"
+    typeof o.pub !== "string" ||
+    !isValidTransportDescriptor(o.transport)
   ) {
     throw new Error("helm/pairing: invalid pairing payload");
   }
   const kind = o.kind === PAIR_KIND.LISTENER ? PAIR_KIND.LISTENER : PAIR_KIND.SESSION;
-  return { channelId: o.channelId, publicKeyB64: o.pub, kind };
+  return { channelId: o.channelId, publicKeyB64: o.pub, kind, transport: o.transport };
 }
 
 /** Read a hello envelope's public key + sender, tolerating a missing/foreign message. */

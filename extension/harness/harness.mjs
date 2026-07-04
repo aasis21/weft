@@ -81,6 +81,7 @@ async function main() {
   const qrPayload = buildPairingPayload({
     channelId,
     publicKeyB64: laptop.publicKeyB64,
+    transport: { kind: "local" },
   });
   const parsed = parsePairingPayload(qrPayload);
 

@@ -22,6 +22,18 @@ export interface StoredSession {
   /** Last real host activity (ms). Drives newest-first ordering + warm-pool recency across reloads.
    *  Optional: older stored entries won't have it. */
   lastEventAt?: number | null;
+  /** Last observed heartbeat pulse (ms) — the liveness clock. Drives boot-probe ordering and the
+   *  2h auto-archive rule. Persisted (throttled) so a reload knows how recently the laptop was alive
+   *  (#163). Optional: older stored entries won't have it. */
+  lastHeartbeatAt?: number | null;
+  /** Last moment (ms) the running app *witnessed* this session — advanced by the watchdog while the
+   *  app is foreground (whether subscribed OR archived/cold). Because the watchdog only ticks while
+   *  the app is alive, phone-off time never advances it. The 2-day auto-delete measures WITNESSED
+   *  silence (`lastSubscribedAt − lastHeartbeatAt`), so a still-alive laptop is never auto-deleted
+   *  (#163). Optional on legacy entries. */
+  lastSubscribedAt?: number | null;
+  /** User-pinned (#163): exempt from warm-pool eviction preference AND the 2-day auto-delete. */
+  pinned?: boolean;
   /** Whether the session has unread host activity, persisted so a reload keeps the badge. */
   unread?: boolean;
   /** Number of unread host turns/events, persisted so a reload keeps the "N new" count. */
@@ -185,6 +197,9 @@ export async function patchSession(
       | 'lastSeenAt'
       | 'sessionId'
       | 'lastEventAt'
+      | 'lastHeartbeatAt'
+      | 'lastSubscribedAt'
+      | 'pinned'
       | 'unread'
       | 'unreadCount'
       | 'renamed'

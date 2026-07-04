@@ -10,7 +10,7 @@ import type { Transport } from '@aasis21/helm-shared';
 export type ConnectOpts =
   | { raw: string; transport?: Transport }
   | { pairing: StoredPairing; transport?: Transport }
-  | { channelId: string; key: CryptoKey; deviceId?: string; transport?: Transport };
+  | { channelId: string; key: CryptoKey; deviceId?: string; transport: Transport };
 
 export interface TransportRegistry {
   connect(id: string, opts: ConnectOpts): Promise<HelmClient>;

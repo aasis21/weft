@@ -24,6 +24,11 @@ export interface SessionView {
   /** True when the session was evicted from the warm pool (no live socket) — the header shows
    *  "Offline" and reconnect is offered, instead of the warm-idle "Quiet". */
   cold?: boolean;
+  /** User-pinned (#163): shown with a marker and exempt from auto-delete/eviction. */
+  pinned?: boolean;
+  /** Last observed heartbeat pulse (ms) — liveness clock; drives the drawer's live/offline dot and
+   *  the archived "expires in Nd" hint. */
+  lastHeartbeatAt?: number;
   /** Raw wire events exchanged with the laptop (both directions), oldest-first — the debug panel
    *  renders them newest-first. Persisted per session and restored on reload. */
   events: DebugEvent[];

@@ -9,11 +9,35 @@ import { waitForPeer, sayHello, listenForPeers, buildPairingPayload, parsePairin
 import { createLocalTransport, _resetLocalBus } from "../transport-local.mjs";
 
 test("buildPairingPayload / parsePairingPayload round-trip", () => {
-  const payload = buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB" });
+  const payload = buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB", transport: { kind: "local" } });
   const parsed = parsePairingPayload(JSON.stringify(payload));
   assert.equal(parsed.channelId, "abc");
   assert.equal(parsed.publicKeyB64, "PUB");
-  assert.throws(() => parsePairingPayload({ v: 999, channelId: "x", pub: "y" }), /invalid pairing/);
+  assert.deepEqual(parsed.transport, { kind: "local" });
+  assert.throws(() => parsePairingPayload({ v: 999, channelId: "x", pub: "y", transport: { kind: "local" } }), /invalid pairing/);
+});
+
+test("buildPairingPayload requires a valid transport descriptor", () => {
+  assert.throws(() => buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB" }), /transport descriptor is required/);
+  assert.throws(
+    () => buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB", transport: { kind: "bogus" } }),
+    /transport descriptor is required/,
+  );
+  assert.throws(
+    () => buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB", transport: { kind: "supabase" } }),
+    /transport descriptor is required/,
+  );
+});
+
+test("parsePairingPayload rejects a missing or malformed transport descriptor", () => {
+  assert.throws(
+    () => parsePairingPayload({ v: 1, channelId: "abc", pub: "PUB" }),
+    /invalid pairing/,
+  );
+  assert.throws(
+    () => parsePairingPayload({ v: 1, channelId: "abc", pub: "PUB", transport: { kind: "webpubsub" } }),
+    /invalid pairing/,
+  );
 });
 
 test("handshake derives matching keys on both ends and round-trips encryption", async () => {
@@ -27,7 +51,7 @@ test("handshake derives matching keys on both ends and round-trips encryption", 
   const phoneT = createLocalTransport({ channelId });
 
   // Laptop shows QR (its public key); start waiting for the phone.
-  const qr = buildPairingPayload({ channelId, publicKeyB64: laptop.publicKeyB64 });
+  const qr = buildPairingPayload({ channelId, publicKeyB64: laptop.publicKeyB64, transport: { kind: "local" } });
   const laptopPromise = waitForPeer({ transport: laptopT, keyPair: laptop, timeoutMs: 5000 });
 
   // Phone scans QR, derives key, says hello (and waits for the laptop ACK).

@@ -12,6 +12,10 @@ export interface DebugDetail {
   lastEventAt: number | null;
   status: string;
   mode?: string;
+  /** #163 lifecycle: user-pinned (exempt from auto-delete/eviction). */
+  pinned?: boolean;
+  /** #163 lifecycle: evicted from the warm pool (no live socket) — "Archived". */
+  cold?: boolean;
 }
 
 interface DebugPanelProps {
@@ -44,6 +48,49 @@ function fmtStamp(ts: number | null | undefined): string {
   } catch {
     return String(ts);
   }
+}
+
+// #163 lifecycle windows (mirrors sessionRuntime constants) — for the Dev-detail countdowns only.
+const AUTO_ARCHIVE_MS = 2 * 60 * 60 * 1_000;
+const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000;
+
+/** Coarse "2h 14m" / "1d 3h" style duration for the lifecycle countdown. */
+function fmtCountdown(ms: number): string {
+  if (ms <= 0) return 'now';
+  const totalMin = Math.floor(ms / 60_000);
+  const d = Math.floor(totalMin / (60 * 24));
+  const h = Math.floor((totalMin % (60 * 24)) / 60);
+  const m = totalMin % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+/** Present the lifecycle state + next-transition countdown from a {@link DebugDetail}. Best-effort:
+ *  the archive clock uses the in-memory heartbeat; the delete clock is a wall-clock approximation of
+ *  the witnessed-silence rule (the exact witnessed math lives in the runtime). */
+function lifecycleSummary(detail: DebugDetail): string {
+  const now = Date.now();
+  const parts: string[] = [];
+  if (detail.status === 'ended') parts.push('Ended');
+  else if (detail.cold) parts.push('Archived');
+  else if (detail.status === 'error') parts.push('Offline');
+  else if (detail.status === 'live' || detail.status === 'idle') parts.push('Active');
+  else parts.push(detail.status);
+  if (detail.pinned) parts.push('📌 Pinned');
+
+  const beat = detail.lastHeartbeat;
+  if (beat) {
+    if (!detail.cold && detail.status !== 'ended') {
+      parts.push(`archives in ${fmtCountdown(AUTO_ARCHIVE_MS - (now - beat))}`);
+    }
+    if (!detail.pinned && detail.status !== 'ended') {
+      parts.push(`deletes in ~${fmtCountdown(AUTO_DELETE_MS - (now - beat))}`);
+    } else if (detail.pinned) {
+      parts.push('never auto-deletes');
+    }
+  }
+  return parts.join(' · ');
 }
 
 export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps): JSX.Element {
@@ -175,6 +222,8 @@ export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps):
               {detail.status}
               {detail.mode ? ` · ${detail.mode}` : ''}
             </dd>
+            <dt>Lifecycle</dt>
+            <dd>{lifecycleSummary(detail)}</dd>
             <dt>Started</dt>
             <dd>{fmtStamp(detail.addedAt)}</dd>
             <dt>Latest heartbeat</dt>

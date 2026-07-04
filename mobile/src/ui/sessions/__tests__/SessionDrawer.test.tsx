@@ -26,6 +26,8 @@ function session(
     lastEventAt: opts.lastEventAt,
     events: opts.events ?? [],
     error: opts.error,
+    cold: opts.cold,
+    pinned: opts.pinned,
   };
 }
 
@@ -80,7 +82,7 @@ describe('SessionDrawer', () => {
     render(
       <SessionDrawer
         sessions={[
-          session('active', 'Active', 2_000, { timeline: activeTimeline, cwd: '' }),
+          session('active', 'Worker', 2_000, { timeline: activeTimeline, cwd: '' }),
           session('heartbeat', 'Heartbeat Only', 1_000, { timeline: heartbeatOnlyTimeline, cwd: '' }),
         ]}
         activeId={null}
@@ -92,11 +94,11 @@ describe('SessionDrawer', () => {
       />,
     );
 
-    expect(screen.getByText('Active').closest('.session-row')?.textContent).toContain('· 5m');
+    expect(screen.getByText('Worker').closest('.session-row')?.textContent).toContain('· 5m');
     expect(screen.getByText('Heartbeat Only').closest('.session-row')?.textContent).not.toContain('· now');
   });
 
-  it('selects a session row and removes via the row leave button without selecting', async () => {
+  it('selects a session row and removes via the row delete button (with confirm) without selecting', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     const onRemove = vi.fn();
@@ -117,9 +119,52 @@ describe('SessionDrawer', () => {
     await user.click(betaRow!);
     expect(onSelect).toHaveBeenCalledWith('b');
 
-    await user.click(within(betaRow as HTMLElement).getByRole('button', { name: '✕' }));
+    await user.click(within(betaRow as HTMLElement).getByRole('button', { name: 'Delete session' }));
+    await user.click(
+      within(betaRow as HTMLElement).getByRole('button', { name: 'Confirm delete session' }),
+    );
     expect(onRemove).toHaveBeenCalledWith('b');
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it('groups sessions into Active/Archived, shows a status pill per row, and marks pinned rows (#163)', async () => {
+    const user = userEvent.setup();
+    const onPin = vi.fn();
+    const onArchive = vi.fn();
+    render(
+      <SessionDrawer
+        sessions={[
+          session('live', 'Live One', 3_000, { status: 'live' }),
+          session('cold', 'Cold One', 2_000, { status: 'idle', cold: true, pinned: true }),
+          session('err', 'Broken One', 1_000, { status: 'live', error: 'unreachable' }),
+        ]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={vi.fn()}
+        onPin={onPin}
+        onArchive={onArchive}
+      />,
+    );
+
+    // Two group headers with counts: 1 Active (Live One), 2 not-Active (Cold One archived, Broken One offline).
+    const activeHead = screen.getByText('Active', { selector: '.drawer-group-head' });
+    const archivedHead = screen.getByText('Archived', { selector: '.drawer-group-head' });
+    expect(activeHead.textContent).toContain('1');
+    expect(archivedHead.textContent).toContain('2');
+
+    // Per-row pills reflect deriveStatus.
+    expect(screen.getByText('Live One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Live');
+    const coldRow = screen.getByText('Cold One').closest('.session-row') as HTMLElement;
+    expect(coldRow.querySelector('.session-pill')?.textContent).toBe('Archived');
+    expect(screen.getByText('Broken One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Offline');
+
+    // Pinned row shows the marker and pin toggles through the callback.
+    expect(within(coldRow).getByLabelText('Pinned')).toBeInTheDocument();
+    await user.click(within(coldRow).getByRole('button', { name: 'Unpin session' }));
+    expect(onPin).toHaveBeenCalledWith('cold', false);
   });
 
   it('filters sessions and fires add and close controls', async () => {

@@ -1,16 +1,18 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { WebPubSubClient } from '@azure/web-pubsub-client';
 import { Capacitor } from '@capacitor/core';
 import {
   EVENT_TYPE,
   SecureChannel,
   createLocalTransport,
   createSupabaseTransport,
+  createWebPubSubTransport,
   generateKeyPair,
   isValidEnvelope,
   parsePairingPayload,
   sayHello,
 } from '@aasis21/helm-shared';
-import type { EventEnvelope, EventType, Transport } from '@aasis21/helm-shared';
+import type { EventEnvelope, EventType, Transport, TransportDescriptor } from '@aasis21/helm-shared';
 import type { PairingPayload } from '@aasis21/helm-shared';
 import type { StoredPairing } from './storage';
 
@@ -64,19 +66,26 @@ export async function pairSession(
   raw: string | PairingPayload,
   opts?: { transport?: Transport },
 ): Promise<{ client: HelmClient; pairing: StoredPairing }> {
-  const { channelId, publicKeyB64 } = parsePairingPayload(raw);
-  return pairWithPublicKey({ channelId, publicKeyB64, transport: opts?.transport });
+  const { channelId, publicKeyB64, transport: transportDescriptor } = parsePairingPayload(raw);
+  return pairWithPublicKey({
+    channelId,
+    publicKeyB64,
+    transportDescriptor,
+    transport: opts?.transport,
+  });
 }
 
 export async function pairWithPublicKey(opts: {
   channelId: string;
   publicKeyB64: string;
+  /** Which transport + endpoint to connect with — laptop-resolved, carried in the QR/pairing payload. */
+  transportDescriptor: TransportDescriptor;
   transport?: Transport;
 }): Promise<{ client: HelmClient; pairing: StoredPairing }> {
-  const { channelId, publicKeyB64 } = opts;
+  const { channelId, publicKeyB64, transportDescriptor } = opts;
   const phoneKeys = await generateKeyPair();
   const deviceId = getStableDeviceId();
-  const transport = opts.transport ?? createTransport(channelId);
+  const transport = opts.transport ?? createTransportFromDescriptor(transportDescriptor, channelId);
   const { key } = await sayHello({
     transport,
     keyPair: phoneKeys,
@@ -95,6 +104,7 @@ export async function pairWithPublicKey(opts: {
     privateKeyJwk,
     deviceId,
     savedAt: Date.now(),
+    transport: transportDescriptor,
   };
   let client: HelmClient;
   try {
@@ -118,7 +128,8 @@ export async function connectSession(
     true,
     ['deriveBits'],
   );
-  const transport = opts?.transport ?? createTransport(pairing.channelId);
+  const transport =
+    opts?.transport ?? createTransportFromDescriptor(pairing.transport, pairing.channelId);
   try {
     return await withTimeout(
       (async () => {
@@ -153,10 +164,10 @@ export async function createClientFromMaterial(opts: {
   channelId: string;
   key: CryptoKey;
   deviceId?: string;
-  transport?: Transport;
+  transport: Transport;
 }): Promise<HelmClient> {
   const channel = new SecureChannel({
-    transport: opts.transport ?? createTransport(opts.channelId),
+    transport: opts.transport,
     key: opts.key,
     identity: {
       channelId: opts.channelId,
@@ -168,34 +179,67 @@ export async function createClientFromMaterial(opts: {
   return wrapChannel(opts.channelId, channel);
 }
 
-// ONE Supabase client (hence one WebSocket) is shared across every channel. Supabase Realtime — like
-// Phoenix Channels underneath it — multiplexes many channel subscriptions over a single socket, so a
-// client-per-channel (the previous shape) opened N sockets for no reason. Memoizing it means N joined
-// sessions cost one socket and N cheap topic subscriptions, with a single managed reconnect loop.
-// Each channel still authorizes independently (private-channel RLS) and carries its own ECDH key.
-let sharedClient: SupabaseClient | undefined;
+// ONE Supabase client (hence one WebSocket) is shared per distinct (url, anonKey) pair — Supabase
+// Realtime, like Phoenix Channels underneath it, multiplexes many channel subscriptions over a
+// single socket, so a client-per-channel opened N sockets for no reason. Memoizing it means N
+// joined sessions on the same relay cost one socket and N cheap topic subscriptions, with a
+// single managed reconnect loop. Each channel still authorizes independently (private-channel
+// RLS) and carries its own ECDH key. Keyed (not a single global) because the transport descriptor
+// is now laptop-controlled per pairing — different sessions may point at different relays.
+const sharedSupabaseClients = new Map<string, SupabaseClient>();
 
 function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
-  if (!sharedClient) {
-    sharedClient = createClient(url, anonKey);
+  const cacheKey = `${url}::${anonKey}`;
+  let client = sharedSupabaseClients.get(cacheKey);
+  if (!client) {
+    client = createClient(url, anonKey);
     // Private channels authorize against RLS on realtime.messages; the anon key is the realtime
     // access token. Apply supabase/migrations first or joins are denied.
-    sharedClient.realtime.setAuth(anonKey);
+    client.realtime.setAuth(anonKey);
+    sharedSupabaseClients.set(cacheKey, client);
   }
-  return sharedClient;
+  return client;
 }
 
-function createTransport(channelId: string): Transport {
-  if (import.meta.env.VITE_HELM_TRANSPORT === 'supabase') {
-    const url = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!url || !anonKey) {
-      throw new Error('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY before using Supabase transport.');
-    }
-    const client = getSupabaseClient(url, anonKey);
+/**
+ * Build a live Transport from a pairing's transport descriptor (see TransportDescriptor). The
+ * laptop resolves this from its own env at pairing time and stamps it into the QR/pairing
+ * payload — the phone has no transport env config of its own and just builds whatever the
+ * descriptor says, switching transport/endpoint requires only a fresh scan, not a rebuild.
+ */
+function createTransportFromDescriptor(descriptor: TransportDescriptor, channelId: string): Transport {
+  if (descriptor.kind === 'local') return createLocalTransport({ channelId });
+  if (descriptor.kind === 'supabase') {
+    const client = getSupabaseClient(descriptor.url, descriptor.anonKey);
     return createSupabaseTransport({ client, channelId });
   }
-  return createLocalTransport({ channelId });
+  if (descriptor.kind === 'webpubsub') {
+    // One client access URL per channel — Web PubSub tokens are short-lived and scoped by the
+    // negotiate endpoint, unlike the shared, long-lived Supabase anon key above. Passing a
+    // WebPubSubClientCredential (not a bare string) lets the SDK re-negotiate transparently on
+    // reconnect/token expiry instead of failing once the token lapses.
+    const client = new WebPubSubClient({
+      getClientAccessUrl: () => fetchWebPubSubClientAccessUrl(descriptor.negotiateUrl, channelId),
+    });
+    return createWebPubSubTransport({ client, channelId });
+  }
+  throw new Error(`Helm: unknown transport descriptor kind "${(descriptor as { kind: string }).kind}"`);
+}
+
+/**
+ * Calls the caller-hosted negotiate endpoint (e.g. an Azure Function) which holds the Web
+ * PubSub connection string secret and mints a short-lived client access URL scoped to this
+ * channel's group. Passed to WebPubSubClient as a token provider so the SDK can transparently
+ * re-negotiate on reconnect/token expiry.
+ */
+async function fetchWebPubSubClientAccessUrl(negotiateUrl: string, channelId: string): Promise<string> {
+  const response = await fetch(`${negotiateUrl}?channelId=${encodeURIComponent(channelId)}`);
+  if (!response.ok) {
+    throw new Error(`Helm: Web PubSub negotiate failed with status ${response.status}`);
+  }
+  const { url } = (await response.json()) as { url?: string };
+  if (!url) throw new Error('Helm: Web PubSub negotiate response missing "url"');
+  return url;
 }
 
 function wrapChannel(channelId: string, channel: SecureChannel): HelmClient {

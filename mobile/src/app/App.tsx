@@ -322,6 +322,8 @@ export default function App(): JSX.Element {
       onVoiceModeChange={handleVoiceModeChange}
       onRemoveSession={(id) => void sessionRuntime.remove(id)}
       onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+      onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
+      onArchiveSession={(id) => sessionRuntime.archive(id)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
       onGoHome={() => {
         setError(null);

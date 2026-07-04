@@ -131,6 +131,7 @@ export function fakePairing(channelId: string): StoredPairing {
     privateKeyJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'd' } as JsonWebKey,
     deviceId: `dev-${channelId}`,
     savedAt: Date.now(),
+    transport: { kind: 'local' },
   };
 }
 

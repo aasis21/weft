@@ -595,6 +595,7 @@ export interface PersistedSession {
   meta: SessionMeta;
   unread: boolean;
   lastEventAt: number | null;
+  pinned?: boolean;
   transcript: { items: TimelineItem[] };
   history: Omit<Session['history'], 'loading'>;
   connection?: { mode?: Session['connection']['mode'] };
@@ -607,6 +608,7 @@ export function toPersistedSession(session: Session): PersistedSession {
     meta: session.meta,
     unread: session.unread,
     lastEventAt: session.lastEventAt,
+    pinned: session.pinned,
     transcript: {
       items: session.transcript.items.map((item) =>
         item.kind === 'user' && item.attachments ? { ...item, attachments: undefined } : item,
@@ -630,6 +632,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
     unread: Boolean(persisted.unread),
     unreadCount: Boolean(persisted.unread) ? 1 : 0,
     lastEventAt: persisted.lastEventAt ?? null,
+    pinned: Boolean(persisted.pinned),
     transcript: { items: Array.isArray(persisted.transcript?.items) ? persisted.transcript.items.slice(-MAX_ITEMS) : [] },
     history: {
       items: Array.isArray(persisted.history?.items) ? persisted.history.items.slice(-MAX_HISTORY) : [],

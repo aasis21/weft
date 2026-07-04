@@ -8,6 +8,7 @@ const pairing: StoredPairing = {
   privateKeyJwk: { kty: 'oct', k: 'secret-key-material' },
   deviceId: 'device1',
   savedAt: 123,
+  transport: { kind: 'local' },
 };
 
 describe('pairing storage', () => {

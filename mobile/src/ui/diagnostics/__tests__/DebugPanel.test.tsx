@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
@@ -127,6 +127,41 @@ describe('DebugPanel', () => {
     expect(screen.getByText('chan-current')).toBeInTheDocument();
     expect(screen.getByText('chan-old-1, chan-old-2')).toBeInTheDocument();
     expect(screen.getByText('phone-abc')).toBeInTheDocument();
+  });
+
+  it('renders the #163 lifecycle summary with state, pin marker, and countdowns', () => {
+    // fireEvent (not userEvent) so the tab switch stays synchronous under fake timers — userEvent's
+    // internal delays deadlock against vi.useFakeTimers and time the test out.
+    vi.useFakeTimers();
+    const now = new Date('2026-06-01T00:00:00Z').getTime();
+    vi.setSystemTime(now);
+    try {
+      render(
+        <DebugPanel
+          events={[]}
+          title="t"
+          onClose={vi.fn()}
+          detail={{
+            channelId: 'chan-1',
+            senderId: 'phone-abc',
+            addedAt: now - 60_000,
+            lastHeartbeat: now - 60_000, // 1m since last pulse
+            lastEventAt: now - 60_000,
+            status: 'live',
+            pinned: true,
+          }}
+        />,
+      );
+      fireEvent.click(screen.getByRole('tab', { name: 'Dev detail' }));
+      const lifecycle = screen.getByText('Lifecycle').nextElementSibling;
+      expect(lifecycle?.textContent).toContain('Active');
+      expect(lifecycle?.textContent).toContain('📌 Pinned');
+      expect(lifecycle?.textContent).toContain('never auto-deletes');
+      // Archive clock: 2h window minus the 1m elapsed ⇒ "1h 59m".
+      expect(lifecycle?.textContent).toContain('archives in 1h 59m');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not render tabs when no detail is provided (event log only)', () => {
