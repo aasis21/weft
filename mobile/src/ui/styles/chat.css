@@ -1378,6 +1378,49 @@
 .session-row.device-row { align-items: flex-start; }
 .session-row.device-row .session-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; white-space: normal; }
 .session-row.device-row .device-status { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Round laptop-icon avatar, tinted by device status — shown on both the list row and the
+   details-page header, so the same device always reads the same visual identity. */
+.device-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  border: 1px solid var(--bg-rule);
+  color: var(--fg-dim);
+}
+.device-avatar svg { width: 16px; height: 16px; display: block; }
+.device-avatar-online {
+  color: #2fae9f;
+  background: color-mix(in srgb, #3fe0ce 16%, var(--bg-elev));
+  border-color: color-mix(in srgb, #3fe0ce 30%, var(--bg-rule));
+}
+.device-avatar-loading {
+  color: #b8842e;
+  background: color-mix(in srgb, #e0b23f 16%, var(--bg-elev));
+  border-color: color-mix(in srgb, #e0b23f 30%, var(--bg-rule));
+}
+.device-avatar-offline { opacity: 0.7; }
+.status-title .device-avatar,
+.status-id .device-avatar { margin-right: 2px; }
+
+/* Online/Offline grouping (device list): a small muted section label, only shown when both
+   groups are non-empty so a device list with just one kind of device stays label-free. */
+.device-group + .device-group { margin-top: 14px; }
+.device-group-header {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.device-group .device-group-header:not(:first-child) { margin-top: 4px; }
+
 .row-actions .icon-btn { width: 30px; height: 30px; font-size: 13px; opacity: 0.65; }
 .row-actions .icon-btn:hover,
 .row-actions .icon-btn:focus-visible { opacity: 1; }
@@ -1777,13 +1820,6 @@
   font-weight: 400;
 }
 
-.helm-session .device-identifiers h3 {
-  margin: 0 0 10px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--fg-dim);
-}
-
 .helm-session .device-id-list {
   display: flex;
   flex-direction: column;
@@ -1886,6 +1922,34 @@
   cursor: pointer;
   color: inherit;
 }
+
+.helm-session .device-session-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.helm-session .device-session-status .status-dot { width: 8px; height: 8px; }
+
+/* Advanced/comms-identifiers collapses behind a <details> (moved out of the main flow so the
+   details page leads with "Start session" + projects, not raw device/channel IDs). */
+.helm-session .device-advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-dim);
+  list-style: none;
+}
+.helm-session .device-advanced summary::-webkit-details-marker { display: none; }
+.helm-session .device-advanced summary::before {
+  content: '›';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+.helm-session .device-advanced[open] summary::before { transform: rotate(90deg); }
+.helm-session .device-advanced .device-id-list { margin-top: 12px; }
 
 
 /* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */

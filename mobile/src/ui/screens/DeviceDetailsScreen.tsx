@@ -3,9 +3,11 @@ import type { JSX } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
+import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
+import { deriveStatus } from '@/ui/sessions/sessionStatus';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -24,24 +26,6 @@ interface DeviceDetailsScreenProps {
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
   onGoHome(): void;
-}
-
-function sessionStatusLabel(session: SessionView): string {
-  switch (session.status) {
-    case 'live':
-      return session.timeline.busy ? 'Working' : 'Live';
-    case 'idle':
-      return 'Quiet';
-    case 'connecting':
-    case 'initializing':
-      return 'Connecting…';
-    case 'error':
-      return 'Offline';
-    case 'ended':
-      return 'Ended';
-    default:
-      return session.status;
-  }
 }
 
 /**
@@ -98,6 +82,7 @@ export function DeviceDetailsScreen({
             <span />
           </span>
         </button>
+        <DeviceAvatar tone={status.tone} />
         <div className="status-id">
           <span className="status-title" title={deviceLabel(device)}>
             {deviceLabel(device)}
@@ -113,24 +98,6 @@ export function DeviceDetailsScreen({
 
       <div className="session-join-inner">
         {device.error ? <p className="error-banner">{device.error}</p> : null}
-
-        <section className="session-join-fallback device-card device-identifiers">
-          <h3>Comms identifiers</h3>
-          <dl className="device-id-list">
-            <div className="device-id-row">
-              <dt>Device ID</dt>
-              <dd className="mono">{device.deviceId ?? '—'}</dd>
-            </div>
-            <div className="device-id-row">
-              <dt>Latest channel ID</dt>
-              <dd className="mono">{device.channelId}</dd>
-            </div>
-          </dl>
-          <p className="device-card-sub">
-            Device ID is stable across <code>helm-cli start</code> restarts; the channel ID is a
-            fresh pairing channel minted every run, for forward secrecy.
-          </p>
-        </section>
 
         <section className="session-join-fallback device-card">
           <p className="device-card-sub">
@@ -167,21 +134,45 @@ export function DeviceDetailsScreen({
             <p className="device-card-sub">No sessions started on this device yet.</p>
           ) : (
             <ul className="devices-list device-sessions-list">
-              {spawnedSessions.map((session) => (
-                <li key={session.meta.channelId} className="device-card device-session-row">
-                  <button
-                    type="button"
-                    className="device-session-open"
-                    onClick={() => onOpenSession(session.meta.channelId)}
-                  >
-                    <span className="device-card-name">{session.meta.title}</span>
-                    <span className="device-card-sub">{sessionStatusLabel(session)}</span>
-                  </button>
-                </li>
-              ))}
+              {spawnedSessions.map((session) => {
+                const derived = deriveStatus(session, { busy: session.timeline.busy });
+                return (
+                  <li key={session.meta.channelId} className="device-card device-session-row">
+                    <button
+                      type="button"
+                      className="device-session-open"
+                      onClick={() => onOpenSession(session.meta.channelId)}
+                    >
+                      <span className="device-card-name">{session.meta.title}</span>
+                      <span className={`status-line ${derived.tone} device-session-status`}>
+                        <span className="status-dot" aria-hidden="true" />
+                        {derived.label}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
+
+        <details className="session-join-fallback device-card device-advanced">
+          <summary>Advanced: comms identifiers</summary>
+          <dl className="device-id-list">
+            <div className="device-id-row">
+              <dt>Device ID</dt>
+              <dd className="mono">{device.deviceId ?? '—'}</dd>
+            </div>
+            <div className="device-id-row">
+              <dt>Latest channel ID</dt>
+              <dd className="mono">{device.channelId}</dd>
+            </div>
+          </dl>
+          <p className="device-card-sub">
+            Device ID is stable across <code>helm-cli start</code> restarts; the channel ID is a
+            fresh pairing channel minted every run, for forward secrecy.
+          </p>
+        </details>
       </div>
 
       {logOpen ? (

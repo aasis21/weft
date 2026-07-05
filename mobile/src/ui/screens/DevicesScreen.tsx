@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
+import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 
@@ -57,13 +58,102 @@ export function DevicesScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const sortedDevices = sortDevices(devices);
-  const onlineCount = sortedDevices.filter((d) => deviceStatus(d).tone === 'online').length;
+  const onlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone !== 'offline');
+  const offlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone === 'offline');
+  const onlineCount = onlineDevices.length;
   const countLabel =
     sortedDevices.length === 0
       ? 'No devices yet'
       : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'}${
           onlineCount > 0 ? ` · ${onlineCount} online` : ''
         }`;
+
+  const renderDevice = (device: ListenerDeviceState): JSX.Element => {
+    const status = deviceStatus(device);
+    const lastSeen = formatLastSeen(device.lastSeenAt);
+    const projectsLabel = device.projectsLoading
+      ? 'Loading projects…'
+      : device.projects.length > 0
+        ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
+        : 'No projects yet';
+    return (
+      <div
+        key={device.channelId}
+        className="session-row device-row"
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpenDetails(device.channelId)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onOpenDetails(device.channelId);
+          if (e.key === ' ' || e.key === 'Spacebar') {
+            e.preventDefault();
+            onOpenDetails(device.channelId);
+          }
+        }}
+      >
+        <DeviceAvatar tone={status.tone} />
+        <span className="session-info">
+          <span className="session-title">
+            {deviceLabel(device)}
+            {device.isDefault ? <span className="tag">default</span> : null}
+          </span>
+          <span className="session-sub">
+            <span className={`device-status device-status-${status.tone}`}>
+              <span className="device-status-dot" aria-hidden="true" />
+              {status.label}
+            </span>
+            {lastSeen ? ` · last seen ${lastSeen}` : ''}
+            {` · ${projectsLabel}`}
+          </span>
+          {device.error ? <p className="error-banner">{device.error}</p> : null}
+        </span>
+
+        <span className="row-actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            className="icon-btn"
+            type="button"
+            onClick={() => onStartOnDevice(device.channelId)}
+            title="Start session"
+            aria-label="Start session"
+          >
+            ▻
+          </button>
+          {!device.isDefault ? (
+            <button
+              className="icon-btn"
+              type="button"
+              onClick={() => void onSetDefault(device.channelId)}
+              title="Make default"
+              aria-label="Make default"
+            >
+              ⭐
+            </button>
+          ) : null}
+          <button
+            className="icon-btn"
+            type="button"
+            onClick={() => onRefreshProjects(device.channelId)}
+            title="Refresh projects"
+            aria-label="Refresh projects"
+          >
+            ↻
+          </button>
+          <button
+            className="icon-btn danger"
+            type="button"
+            onClick={() => void onForget(device.channelId)}
+            title="Forget device"
+            aria-label="Forget device"
+          >
+            🗑
+          </button>
+        </span>
+        <span className="row-chevron" aria-hidden="true">
+          ›
+        </span>
+      </div>
+    );
+  };
 
   return (
     <main className="helm-session join-session devices-screen">
@@ -104,91 +194,18 @@ export function DevicesScreen({
           </section>
         ) : (
           <section className="session-join-fallback devices-list">
-            {sortedDevices.map((device) => {
-              const status = deviceStatus(device);
-              const lastSeen = formatLastSeen(device.lastSeenAt);
-              const projectsLabel = device.projectsLoading
-                ? 'Loading projects…'
-                : device.projects.length > 0
-                  ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
-                  : 'No projects yet';
-              return (
-                <div
-                  key={device.channelId}
-                  className="session-row device-row"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onOpenDetails(device.channelId)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') onOpenDetails(device.channelId);
-                    if (e.key === ' ' || e.key === 'Spacebar') {
-                      e.preventDefault();
-                      onOpenDetails(device.channelId);
-                    }
-                  }}
-                >
-                  <span className="session-info">
-                    <span className="session-title">
-                      {deviceLabel(device)}
-                      {device.isDefault ? <span className="tag">default</span> : null}
-                    </span>
-                    <span className="session-sub">
-                      <span className={`device-status device-status-${status.tone}`}>
-                        <span className="device-status-dot" aria-hidden="true" />
-                        {status.label}
-                      </span>
-                      {lastSeen ? ` · last seen ${lastSeen}` : ''}
-                      {` · ${projectsLabel}`}
-                    </span>
-                    {device.error ? <p className="error-banner">{device.error}</p> : null}
-                  </span>
-
-                  <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="icon-btn"
-                      type="button"
-                      onClick={() => onStartOnDevice(device.channelId)}
-                      title="Start session"
-                      aria-label="Start session"
-                    >
-                      ▻
-                    </button>
-                    {!device.isDefault ? (
-                      <button
-                        className="icon-btn"
-                        type="button"
-                        onClick={() => void onSetDefault(device.channelId)}
-                        title="Make default"
-                        aria-label="Make default"
-                      >
-                        ⭐
-                      </button>
-                    ) : null}
-                    <button
-                      className="icon-btn"
-                      type="button"
-                      onClick={() => onRefreshProjects(device.channelId)}
-                      title="Refresh projects"
-                      aria-label="Refresh projects"
-                    >
-                      ↻
-                    </button>
-                    <button
-                      className="icon-btn danger"
-                      type="button"
-                      onClick={() => void onForget(device.channelId)}
-                      title="Forget device"
-                      aria-label="Forget device"
-                    >
-                      🗑
-                    </button>
-                  </span>
-                  <span className="row-chevron" aria-hidden="true">
-                    ›
-                  </span>
-                </div>
-              );
-            })}
+            {onlineDevices.length > 0 ? (
+              <div className="device-group">
+                <h3 className="device-group-header">Online</h3>
+                {onlineDevices.map(renderDevice)}
+              </div>
+            ) : null}
+            {offlineDevices.length > 0 ? (
+              <div className="device-group">
+                {onlineDevices.length > 0 ? <h3 className="device-group-header">Offline</h3> : null}
+                {offlineDevices.map(renderDevice)}
+              </div>
+            ) : null}
 
             <button type="button" className="session-secondary-action" onClick={onScanListener}>
               + Scan another listener QR
