@@ -1741,6 +1741,185 @@
   color: var(--fg-dim);
 }
 
+/* ---- Redesigned "start a session" flow (numbered card sections) --------- */
+.helm-session .start-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 18px;
+  background: var(--bg-elev);
+}
+
+.helm-session .start-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.helm-session .start-section-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.helm-session .start-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.helm-session .start-device-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.helm-session .start-device-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--bg-rule));
+}
+
+.helm-session .start-device-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.helm-session .start-device-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.helm-session .start-device-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.helm-session .start-device-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.helm-session .start-device-default {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.helm-session .start-device-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.helm-session .start-device-check {
+  flex: none;
+  color: var(--accent);
+  font-weight: 800;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.helm-session .start-device-card.selected .start-device-check {
+  opacity: 1;
+}
+
+.helm-session .start-device-actions {
+  padding-top: 2px;
+  border-top: 1px solid var(--bg-rule);
+}
+
+.helm-session .start-project-field select {
+  width: 100%;
+}
+
+.helm-session .start-loading {
+  margin: 0;
+}
+
+.helm-session .start-mode-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.helm-session .start-mode-toggle button {
+  flex: 1 1 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.helm-session .start-mode-toggle button.selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.helm-session .start-name-field {
+  margin-top: 2px;
+}
+
+.helm-session .start-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  padding-top: 4px;
+}
+
+.helm-session .start-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  justify-content: center;
+}
+
 .helm-session .start-form,
 .helm-session .session-field {
   display: flex;

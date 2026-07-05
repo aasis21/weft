@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import type { SpawnMode } from '@aasis21/helm-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
+import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
@@ -73,17 +74,15 @@ export function StartSessionScreen({
   };
 
   return (
-    <main className="helm-session join-session start-session">
+    <main className="helm-session join-session start-session-v2">
       <div className="session-join-inner">
         <header className="session-join-head">
           <button type="button" className="session-pair-back" onClick={onCancel}>
             ← {hasSessions ? 'Back to sessions' : 'Back'}
           </button>
           <p className="session-join-kicker">Start another session</p>
-          <h2>Launch Copilot on a registered laptop</h2>
-          <p className="session-join-hint">
-            Choose a listener device, pick one of its advertised projects, then start a fresh session.
-          </p>
+          <h2>Launch Copilot</h2>
+          <p className="session-join-hint">Pick a laptop, pick a project, go.</p>
         </header>
 
         {sortedDevices.length === 0 ? (
@@ -94,102 +93,136 @@ export function StartSessionScreen({
             </button>
           </section>
         ) : (
-          <section className="session-join-fallback start-form">
-            <label className="session-field">
-              <span>Listener device</span>
-              <select value={selected?.channelId ?? ''} onChange={(e) => setSelectedId(e.target.value)}>
+          <>
+            <section className="start-section">
+              <h3 className="start-section-title">
+                1. Device
+                {sortedDevices.length > 1 ? <span className="start-section-count">{sortedDevices.length}</span> : null}
+              </h3>
+              <div className="start-device-list" role="radiogroup" aria-label="Listener device">
                 {sortedDevices.map((device) => {
                   const status = deviceStatus(device);
+                  const isSelected = device.channelId === selected?.channelId;
                   return (
-                    <option key={device.channelId} value={device.channelId}>
-                      {status.tone === 'online' ? '🟢' : status.tone === 'loading' ? '🟡' : '⚪️'} {deviceLabel(device)}
-                      {device.isDefault ? ' (default)' : ''}
-                    </option>
+                    <button
+                      key={device.channelId}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      className={`start-device-card${isSelected ? ' selected' : ''}`}
+                      onClick={() => setSelectedId(device.channelId)}
+                    >
+                      <DeviceAvatar tone={status.tone} />
+                      <span className="start-device-info">
+                        <span className="start-device-name">
+                          {deviceLabel(device)}
+                          {device.isDefault ? <span className="start-device-default">default</span> : null}
+                        </span>
+                        <span className={`start-device-status device-status-${status.tone}`}>
+                          <span className="device-status-dot" aria-hidden="true" />
+                          {status.label}
+                          {formatLastSeen(device.lastSeenAt) ? ` · seen ${formatLastSeen(device.lastSeenAt)}` : ''}
+                        </span>
+                      </span>
+                      <span className="start-device-check" aria-hidden="true">✓</span>
+                    </button>
                   );
                 })}
-              </select>
-            </label>
-
-            {selected ? (
-              <div className={`device-status device-status-${deviceStatus(selected).tone}`}>
-                <span className="device-status-dot" aria-hidden="true" />
-                <span>{deviceStatus(selected).label}</span>
-                {formatLastSeen(selected.lastSeenAt) ? (
-                  <span className="device-status-seen">· last seen {formatLastSeen(selected.lastSeenAt)}</span>
-                ) : null}
               </div>
-            ) : null}
 
-            {selected ? (
-              <div className="device-actions">
-                <button type="button" className="session-link-btn" onClick={() => void onRefreshProjects(selected.channelId)}>
-                  Refresh projects
+              {selected ? (
+                <div className="device-actions start-device-actions">
+                  <button type="button" className="session-link-btn" onClick={() => void onRefreshProjects(selected.channelId)}>
+                    ↻ Refresh
+                  </button>
+                  {!selected.isDefault ? (
+                    <button type="button" className="session-link-btn" onClick={() => void onSetDefault(selected.channelId)}>
+                      ⭐ Make default
+                    </button>
+                  ) : null}
+                  <button type="button" className="session-link-btn danger" onClick={() => void onForget(selected.channelId)}>
+                    🗑 Forget
+                  </button>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="start-section">
+              <h3 className="start-section-title">2. Project</h3>
+              {selected?.projectsLoading ? (
+                <p className="session-join-hint start-loading">Loading projects from the listener…</p>
+              ) : selected && selected.projects.length === 0 ? (
+                <p className="session-join-hint">No projects received yet. Refresh after the listener is online.</p>
+              ) : (
+                <label className="session-field start-project-field">
+                  <select
+                    value={projectName}
+                    disabled={!selected || selected.projects.length === 0}
+                    onChange={(e) => setProjectName(e.target.value)}
+                  >
+                    {selected?.projects.map((project) => (
+                      <option key={project.name} value={project.name}>
+                        {project.name}{project.isDefault ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
+            </section>
+
+            <section className="start-section">
+              <h3 className="start-section-title">3. Options</h3>
+              <div className="start-mode-toggle" role="radiogroup" aria-label="Permission mode">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === 'default'}
+                  className={mode === 'default' ? 'selected' : ''}
+                  onClick={() => setMode('default')}
+                >
+                  Default
                 </button>
-                <button type="button" className="session-link-btn" onClick={() => void onSetDefault(selected.channelId)}>
-                  Make default
-                </button>
-                <button type="button" className="session-link-btn danger" onClick={() => void onForget(selected.channelId)}>
-                  Forget
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === 'allow-all'}
+                  className={mode === 'allow-all' ? 'selected' : ''}
+                  onClick={() => setMode('allow-all')}
+                >
+                  Allow all tools
                 </button>
               </div>
-            ) : null}
 
-            <label className="session-field">
-              <span>Project</span>
-              <select
-                value={projectName}
-                disabled={!selected || selected.projectsLoading || selected.projects.length === 0}
-                onChange={(e) => setProjectName(e.target.value)}
-              >
-                {selected?.projects.map((project) => (
-                  <option key={project.name} value={project.name}>
-                    {project.name}{project.isDefault ? ' (default)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {selected?.projectsLoading ? <p className="session-join-hint">Loading projects from the listener…</p> : null}
-            {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
-            {selected && !selected.projectsLoading && selected.projects.length === 0 ? (
-              <p className="session-join-hint">No projects received yet. Refresh after the listener is online.</p>
-            ) : null}
-
-            <fieldset className="session-field mode-field">
-              <legend>Permission mode</legend>
-              <label>
-                <input type="radio" checked={mode === 'default'} onChange={() => setMode('default')} />
-                Default
+              <label className="session-field start-name-field">
+                <span>Session name (optional)</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mobile bug sweep" />
               </label>
-              <label>
-                <input type="radio" checked={mode === 'allow-all'} onChange={() => setMode('allow-all')} />
-                Allow all tools
-              </label>
-            </fieldset>
-
-            <label className="session-field">
-              <span>Optional session name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mobile bug sweep" />
-            </label>
+            </section>
 
             {error ? <p className="error-banner">{error}</p> : null}
 
-            <button
-              type="button"
-              className="session-primary-action"
-              disabled={busy || !selected || !projectName || selected.projectsLoading}
-              onClick={() => void submit()}
-            >
-              {busy ? 'Starting…' : 'Start'}
-            </button>
-            <button type="button" className="session-secondary-action" onClick={onScanListener}>
-              Scan another listener QR
-            </button>
-            {onManageDevices ? (
-              <button type="button" className="session-link-btn" onClick={onManageDevices}>
-                Manage all devices
+            <div className="start-footer">
+              <button
+                type="button"
+                className="session-primary-action"
+                disabled={busy || !selected || !projectName || selected.projectsLoading}
+                onClick={() => void submit()}
+              >
+                {busy ? 'Starting…' : `Start on ${selected ? deviceLabel(selected) : 'device'}`}
               </button>
-            ) : null}
-          </section>
+              <div className="start-footer-links">
+                <button type="button" className="session-link-btn" onClick={onScanListener}>
+                  Scan another listener QR
+                </button>
+                {onManageDevices ? (
+                  <button type="button" className="session-link-btn" onClick={onManageDevices}>
+                    Manage all devices
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </>
         )}
       </div>
     </main>
