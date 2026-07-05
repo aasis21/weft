@@ -16,9 +16,11 @@ import {
   spawnSession,
 } from "@aasis21/helm-shared";
 import { createListener } from "../src/listener.mjs";
+import { readRegistry } from "../src/registryFile.mjs";
 
 let dirs = [];
 let identityFiles = [];
+let connectionsHomes = [];
 
 beforeEach(() => {
   _resetLocalBus();
@@ -30,6 +32,7 @@ afterEach(() => {
     try { unlinkSync(file); } catch {}
   }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of connectionsHomes.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
@@ -48,6 +51,10 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
   const listenerTransport = createLocalTransport({ channelId });
   const projectsApi = { listProjects: () => projects ?? [] };
+  // Isolate the connections.json registry per test so these tests never touch a real user's
+  // ~/.helm — see registryFile.mjs / the CONNECTIONS_REGISTRY_FILE comment in listener.mjs.
+  const connectionsHome = mkdtempSync(join(tmpdir(), "helm-connections-"));
+  connectionsHomes.push(connectionsHome);
   const listener = createListener({
     transport: listenerTransport,
     keyPair: listenerKeys,
@@ -57,6 +64,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
     projectsApi,
     spawnFn,
     log,
+    connectionsHome,
   });
   await listener.start();
 
@@ -82,7 +90,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
     retryMs: 20,
   });
   await waitFor(() => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST), "project list");
-  return { listener, listenerKeys, channelId, phoneChannel, messages };
+  return { listener, listenerKeys, channelId, phoneChannel, messages, connectionsHome };
 }
 
 test("emits PROJECT_LIST when the phone pairs", async () => {
@@ -200,4 +208,38 @@ test("a second different phone public key is ignored after first binding", async
   const lists = messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
   assert.equal(lists.length, 1);
   await listener.stop();
+});
+
+test("records a connections.json entry on bind and removes it on stop", async () => {
+  const { listener, channelId, connectionsHome } = await pairedHarness({ projects: [] });
+  const map = readRegistry("connections.json", { baseDir: connectionsHome });
+  assert.ok(map, "registry file should exist after a successful bind");
+  const entry = map[channelId];
+  assert.ok(entry, "entry for this listener's channelId should be present");
+  assert.equal(entry.pid, process.pid);
+  assert.equal(entry.deviceId, "test-device");
+  assert.equal(entry.peerDeviceId, "phone-1");
+  assert.equal(entry.peerSenderName, "Phone");
+  assert.ok(typeof entry.peerPublicKeyB64 === "string" && entry.peerPublicKeyB64.length > 0);
+  assert.ok(entry.boundAt);
+
+  await listener.stop();
+  const mapAfterStop = readRegistry("connections.json", { baseDir: connectionsHome });
+  assert.equal(mapAfterStop?.[channelId], undefined, "entry should be removed on clean stop");
+});
+
+test("connections.json entries from processes that no longer exist are pruned on the next write", async () => {
+  const { listener, connectionsHome } = await pairedHarness({ projects: [] });
+  // Seed a stale entry as if a crashed session (pid that doesn't exist) never cleaned up after
+  // itself — pruneDeadConnections() should drop it the next time ANY listener writes.
+  const before = readRegistry("connections.json", { baseDir: connectionsHome }) ?? {};
+  before["stale-channel"] = { pid: 999_999_999, deviceId: "ghost" };
+  const { writeRegistryAtomic } = await import("../src/registryFile.mjs");
+  writeRegistryAtomic("connections.json", before, { baseDir: connectionsHome });
+
+  // Trigger another write by stopping (which removes this listener's own entry and rewrites the
+  // file), which should prune the stale ghost entry along the way.
+  await listener.stop();
+  const after = readRegistry("connections.json", { baseDir: connectionsHome });
+  assert.equal(after?.["stale-channel"], undefined, "stale pid entry should have been pruned");
 });

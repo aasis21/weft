@@ -72,6 +72,21 @@ test("rejects a connection with no channelId", async () => {
   await relay.close();
 });
 
+test("totalConnections reflects sockets across all rooms combined", async () => {
+  const relay = startRelayServer();
+  await relay.ready;
+  assert.equal(relay.totalConnections(), 0);
+  const a = await connect(relay.port, "room-x");
+  const b = await connect(relay.port, "room-y");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(relay.totalConnections(), 2);
+  a.close();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(relay.totalConnections(), 1);
+  b.close();
+  await relay.close();
+});
+
 test("roomSize tracks connect/disconnect and drops empty rooms", async () => {
   const relay = startRelayServer();
   await relay.ready;

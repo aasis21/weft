@@ -65,6 +65,12 @@ export function startRelayServer({ port = 0 } = {}) {
     roomSize(channelId) {
       return rooms.get(channelId)?.size ?? 0;
     },
+    /** Total sockets connected across every room — used by relayServerProcess.mjs's idle timer to
+     * decide whether the shared devtunnel relay is currently in use by anyone, not just this
+     * process's own session. */
+    totalConnections() {
+      return wss.clients.size;
+    },
     async close() {
       for (const room of rooms.values()) {
         for (const socket of room) socket.close(1001, "server shutting down");

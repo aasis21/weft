@@ -1,19 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 // Provisions the `devtunnel` transport: a local relay server (relayServer.mjs) exposed publicly
 // through a Microsoft Dev Tunnel, so the phone can reach it without any cloud relay account
-// (Supabase/Web PubSub) — see the design discussion this followed. This is the ONE place in Helm
-// that shells out to the `devtunnel` CLI; everything downstream (shared/transport-relay.mjs, the
-// mobile devtunnel branch in helmClient.ts) only ever sees a plain `wss://` URL and knows nothing
-// about tunnels, tokens, or the CLI. Access is anonymous-connect (like the reference e2e test run
-// during development): the tunnel URL is short-lived/pairing-scoped and travels inside the same
-// QR as the (never-anonymous) end-to-end encryption keys, so — as transport.d.ts calls out for the
-// "devtunnel" descriptor kind — embedding it is safe even though it's not a durable secret.
-import { spawn, execFile } from "node:child_process";
+// (Supabase/Web PubSub). This is the ONE place in Helm that shells out to the `devtunnel` CLI;
+// everything downstream (shared/transport-relay.mjs, the mobile devtunnel branch in
+// helmClient.ts) only ever sees a plain `wss://` URL and knows nothing about tunnels, tokens, or
+// the CLI. Access is anonymous-connect: the tunnel URL is short-lived/pairing-scoped and travels
+// inside the same QR as the (never-anonymous) end-to-end encryption keys, so — as transport.d.ts
+// calls out for the "devtunnel" descriptor kind — embedding it is safe even though it's not a
+// durable secret.
+//
+// SHARED ACROSS SESSIONS: Dev Tunnels are capped at 10 per account (a hard Microsoft quota), and
+// every `/helm devtunnel` call used to provision a brand-new tunnel — a handful of crashed/killed
+// sessions (which skip graceful shutdown) would leak tunnels toward that ceiling. So the actual
+// relay + tunnel now lives in a DETACHED child process (relayServerProcess.mjs) that outlives any
+// one CLI session, discoverable via a small registry file at ~/.helm/devtunnel.json (see
+// registryFile.mjs). The first `/helm devtunnel` anywhere on the machine spawns it; every
+// subsequent call (from this session or any other) just reuses it. Nothing here "owns" tearing it
+// down — relayServerProcess.mjs watches its own room occupancy and self-deletes the tunnel once
+// idle for a while, so no CLI session's shutdown (clean or crashed) needs to coordinate cleanup.
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { startRelayServer } from "./relayServer.mjs";
+import WebSocket from "ws";
+import { isPidAlive, readRegistry } from "./registryFile.mjs";
 
 const execFileAsync = promisify(execFile);
+
+export const DEVTUNNEL_REGISTRY_FILE = "devtunnel.json";
+const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mjs", import.meta.url));
+const PROVISION_TIMEOUT_MS = 20_000;
+const REGISTRY_POLL_MS = 100;
 
 // winget installs devtunnel.exe here without adding it to PATH until the shell is restarted —
 // fall back to this well-known location so Helm works in the same session it was installed in.
@@ -48,102 +65,21 @@ export async function findDevTunnelBinary() {
   return null;
 }
 
-async function run(bin, args) {
+/** Run a `devtunnel` subcommand to completion and return its stdout. Exported for
+ * relayServerProcess.mjs's use — this is the ONE shared exec helper for the CLI. */
+export async function run(bin, args) {
   const { stdout } = await execFileAsync(bin, args, { shell: process.platform === "win32" });
   return stdout;
 }
 
-// Reused across `/helm devtunnel` calls within one laptop process — one relay server + one tunnel
-// is plenty (rooms are keyed by channelId, so a fresh pairing channel doesn't need a fresh tunnel).
-let provisioned = null;
-
 /**
- * Provision (or reuse) the devtunnel transport for `channelId`. Throws an actionable error if the
- * CLI is missing or the user isn't logged in — both are one-time, user-fixable setup steps, so
- * `/helm devtunnel`'s caller is expected to surface err.message directly rather than retry.
+ * Cross-platform-safe process-tree kill for a child that was spawned with shell:true on Windows
+ * (required to launch a .cmd/.bat shim directly; harmless for a real .exe too) — that wraps it in
+ * a cmd.exe parent, so a plain child.kill() only kills the shell and leaves the actual process
+ * (and anything IT spawned) running forever. `taskkill /t` kills the whole process tree by pid;
+ * POSIX doesn't need this since there's no shell wrapper. Exported for relayServerProcess.mjs.
  */
-export async function provisionDevTunnelTransport({ channelId }) {
-  if (!channelId) throw new Error("Helm: provisionDevTunnelTransport requires a channelId");
-
-  const bin = await findDevTunnelBinary();
-  if (!bin) {
-    throw new Error(
-      "Helm: the devtunnel CLI isn't installed. Run `winget install Microsoft.devtunnel`, " +
-        "then `devtunnel user login -g`, and try /helm devtunnel again.",
-    );
-  }
-
-  if (!provisioned) {
-    try {
-      await run(bin, ["user", "show"]);
-    } catch {
-      throw new Error("Helm: not logged in to devtunnel. Run `devtunnel user login -g` and try again.");
-    }
-    provisioned = await createTunnelAndHost(bin);
-  }
-
-  const url = `${provisioned.baseUrl}?channelId=${encodeURIComponent(channelId)}`;
-  return { kind: "devtunnel", url };
-}
-
-async function createTunnelAndHost(bin) {
-  const relay = startRelayServer();
-  await relay.ready;
-
-  let tunnelId;
-  try {
-    const createOut = await run(bin, ["create", "--json"]);
-    tunnelId = JSON.parse(createOut).tunnel.tunnelId;
-    await run(bin, ["port", "create", tunnelId, "-p", String(relay.port), "--protocol", "http"]);
-    await run(bin, ["access", "create", tunnelId, "--anonymous", "--scopes", "connect"]);
-  } catch (err) {
-    await relay.close();
-    throw new Error(`Helm: devtunnel setup failed: ${err?.message ?? err}`);
-  }
-
-  const host = spawn(bin, ["host", tunnelId], { stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
-  const baseUrl = await new Promise((resolve, reject) => {
-    let buffer = "";
-    const onData = (chunk) => {
-      buffer += chunk.toString();
-      const match = buffer.match(/https:\/\/\S+\.devtunnels\.ms/);
-      if (match) {
-        host.stdout.off("data", onData);
-        resolve(match[0].replace(/^https:/, "wss:"));
-      }
-    };
-    host.stdout.on("data", onData);
-    host.once("error", reject);
-    host.once("exit", (code) => reject(new Error(`Helm: devtunnel host exited early (code ${code})`)));
-    setTimeout(() => reject(new Error("Helm: timed out waiting for devtunnel host to come up")), 20_000);
-  });
-
-  return { tunnelId, host, relay, baseUrl };
-}
-
-/** Tear down the hosted tunnel + relay server + cloud tunnel (best-effort). Call on shutdown. */
-export async function stopDevTunnel() {
-  if (!provisioned) return;
-  const { host, relay, tunnelId } = provisioned;
-  provisioned = null;
-  await killProcessTree(host);
-  await relay.close().catch(() => {});
-  const bin = await findDevTunnelBinary();
-  if (bin) {
-    try {
-      await run(bin, ["delete", tunnelId, "--force"]);
-    } catch {
-      // best-effort — an orphaned tunnel just expires after 30 days.
-    }
-  }
-}
-
-// `host` was spawned with shell:true on Windows (required to launch a .cmd/.bat shim directly;
-// harmless for a real .exe too) — that wraps it in a cmd.exe parent, so a plain host.kill() only
-// kills the shell and leaves the actual devtunnel process (and anything IT spawned) running
-// forever, which in turn keeps the extension process alive past session shutdown. `taskkill /t`
-// kills the whole process tree by pid; POSIX doesn't need this since there's no shell wrapper.
-async function killProcessTree(child) {
+export async function killProcessTree(child) {
   if (!child.pid) return;
   if (process.platform === "win32") {
     try {
@@ -158,4 +94,110 @@ async function killProcessTree(child) {
   } catch {
     // best-effort
   }
+}
+
+/** Probe whether a relay server is actually accepting connections on 127.0.0.1:port — guards
+ * against a stale/reused pid whose registry entry no longer corresponds to a live relay. */
+function probeRelay(port, timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket.terminate();
+      } catch {
+        // best-effort
+      }
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    let socket;
+    try {
+      socket = new WebSocket(`ws://127.0.0.1:${port}/?channelId=__helm_healthcheck__`);
+    } catch {
+      clearTimeout(timer);
+      resolve(false);
+      return;
+    }
+    socket.once("open", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+async function healthyRegistryEntry(baseDir) {
+  const entry = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
+  if (!entry || !isPidAlive(entry.pid) || !entry.relayPort || !entry.baseUrl) return null;
+  const alive = await probeRelay(entry.relayPort);
+  return alive ? entry : null;
+}
+
+/**
+ * Provision (or, in the common case, discover and reuse) the devtunnel transport for
+ * `channelId`. Throws an actionable error if the CLI is missing or the user isn't logged in —
+ * both are one-time, user-fixable setup steps, so `/helm devtunnel`'s caller is expected to
+ * surface err.message directly rather than retry.
+ */
+export async function provisionDevTunnelTransport({ channelId, baseDir } = {}) {
+  if (!channelId) throw new Error("Helm: provisionDevTunnelTransport requires a channelId");
+
+  const existing = await healthyRegistryEntry(baseDir);
+  if (existing) return descriptorFor(existing.baseUrl, channelId);
+
+  const bin = await findDevTunnelBinary();
+  if (!bin) {
+    throw new Error(
+      "Helm: the devtunnel CLI isn't installed. Run `winget install Microsoft.devtunnel`, " +
+        "then `devtunnel user login -g`, and try /helm devtunnel again.",
+    );
+  }
+  try {
+    await run(bin, ["user", "show"]);
+  } catch {
+    throw new Error("Helm: not logged in to devtunnel. Run `devtunnel user login -g` and try again.");
+  }
+
+  const entry = await spawnRelayServerProcess({ bin, baseDir });
+  return descriptorFor(entry.baseUrl, channelId);
+}
+
+function descriptorFor(baseUrl, channelId) {
+  return { kind: "devtunnel", url: `${baseUrl}?channelId=${encodeURIComponent(channelId)}` };
+}
+
+// Spawns relayServerProcess.mjs DETACHED (survives this process's exit) and waits for it to
+// publish a healthy registry entry. A second caller racing this one (e.g. two `/helm devtunnel`
+// calls on different machines' sessions at nearly the same moment) will each spawn their own
+// process — a harmless, self-resolving race: relayServerProcess.mjs's own registry write is
+// atomic, and either process type ends up as a temporarily-unused, soon-to-self-idle-out relay,
+// not a correctness problem for pairing itself.
+async function spawnRelayServerProcess({ bin, baseDir }) {
+  const env = { ...process.env };
+  if (baseDir) env.HELM_HOME = baseDir;
+  if (bin) env.HELM_DEVTUNNEL_BIN = bin;
+  const child = spawn(process.execPath, [RELAY_SERVER_PROCESS_PATH], {
+    detached: true,
+    stdio: "ignore",
+    env,
+  });
+  child.unref();
+
+  const deadline = Date.now() + PROVISION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const entry = await healthyRegistryEntry(baseDir);
+    if (entry) return entry;
+    await new Promise((r) => setTimeout(r, REGISTRY_POLL_MS));
+  }
+  throw new Error("Helm: timed out waiting for the shared devtunnel relay to come up");
+}
+
+/**
+ * No-op by design: the shared relay + tunnel (relayServerProcess.mjs) is a DETACHED process that
+ * outlives any single CLI session and tears itself down on its own idle timer (see that file) —
+ * no session's shutdown owns or coordinates that lifecycle anymore. Kept exported so
+ * extension.mjs's existing shutdown() call site doesn't need special-casing.
+ */
+export async function stopDevTunnel() {
+  // Intentionally empty.
 }

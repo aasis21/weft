@@ -21,6 +21,7 @@ import { createTransport, resolveTransportDescriptor } from "./transportFactory.
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
+import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
@@ -28,6 +29,40 @@ const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"
 // phone (not polling) can still tell the listener process is alive, not just that the transport
 // socket is up.
 const DEVICE_HEARTBEAT_MS = 120_000;
+
+// A machine-wide, cross-session view of "which phone is bound to which live Helm listener right
+// now", persisted at ~/.helm/connections.json (see registryFile.mjs — same atomic-write + pid
+// liveness pattern as devtunnel.json). Diagnostic only: it never gates or changes pairing
+// behavior (each listener still binds/rejects peers purely from its own in-memory boundPeerPub),
+// it just makes that already-existing state observable across processes — e.g. a future
+// `/helm status` or the mobile debug panel could show every session a given phone is paired to,
+// and a listener could warn if the same phone is already bound live somewhere else.
+const CONNECTIONS_REGISTRY_FILE = "connections.json";
+
+/** Drop any registry entries whose owning process has exited — keeps the file self-cleaning
+ * without a separate GC pass, the same way healthyRegistryEntry() does for devtunnel.json. */
+function pruneDeadConnections(map) {
+  const next = {};
+  for (const [channelId, entry] of Object.entries(map ?? {})) {
+    if (entry && isPidAlive(entry.pid)) next[channelId] = entry;
+  }
+  return next;
+}
+
+// NOTE: concurrent read-modify-write from multiple Helm sessions binding/unbinding at almost the
+// exact same instant could race and drop one session's update — acceptable for a diagnostic-only,
+// low-frequency (once per phone connect/disconnect, not the message hot path) view.
+function upsertConnection(channelId, entry, baseDir) {
+  const map = pruneDeadConnections(readRegistry(CONNECTIONS_REGISTRY_FILE, { baseDir }));
+  map[channelId] = entry;
+  writeRegistryAtomic(CONNECTIONS_REGISTRY_FILE, map, { baseDir });
+}
+
+function removeConnection(channelId, baseDir) {
+  const map = pruneDeadConnections(readRegistry(CONNECTIONS_REGISTRY_FILE, { baseDir }));
+  delete map[channelId];
+  writeRegistryAtomic(CONNECTIONS_REGISTRY_FILE, map, { baseDir });
+}
 
 export function createListener({
   transport = null,
@@ -39,6 +74,9 @@ export function createListener({
   spawnFn,
   projectsApi = projectsStore,
   log = console,
+  // ~/.helm by default (see projects.mjs's helmHome()) — overridable so tests don't touch a real
+  // user's Helm home when exercising the connections.json registry.
+  connectionsHome = undefined,
   // Optional UI hooks so a host (e.g. helm-cli) can render a live connection/heartbeat indicator
   // without this module knowing anything about terminals or rendering.
   onDeviceConnected = null,
@@ -114,6 +152,7 @@ export function createListener({
     const hadPeer = boundPeerPub !== null;
     boundPeerPub = null;
     channel = null;
+    if (hadPeer) removeConnection(listenerChannelId, connectionsHome);
     try {
       await listenerTransport?.close?.();
     } catch {
@@ -166,6 +205,19 @@ export function createListener({
       void handleControl(envelope);
     });
     await sendProjectList();
+    upsertConnection(
+      listenerChannelId,
+      {
+        pid: process.pid,
+        deviceId: listenerDeviceId,
+        peerPublicKeyB64: peer.publicKeyB64,
+        peerDeviceId: peer.deviceId ?? null,
+        peerSenderName: peer.senderName ?? null,
+        transportKind: listenerTransportDescriptor?.kind ?? null,
+        boundAt: new Date().toISOString(),
+      },
+      connectionsHome,
+    );
     try {
       onDeviceConnected?.(peer);
     } catch {
