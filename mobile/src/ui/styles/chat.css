@@ -1303,6 +1303,15 @@
 .session-row .row-rename:hover,
 .session-row .row-rename:focus-visible { opacity: 1; }
 
+/* Compact "Devices" group at the top of the drawer (#186 nav simplification): a single-line
+   row per device — avatar, name/status, and a lone "start session" button — no per-device
+   management actions here (those live on the "Manage devices" screen). */
+.session-row.device-drawer-row .device-avatar { width: 26px; height: 26px; }
+.session-row.device-drawer-row .device-avatar svg { width: 13px; height: 13px; }
+.session-row.device-drawer-row .row-actions { width: 26px; height: 26px; font-size: 12px; opacity: 0.7; }
+.session-row.device-drawer-row .row-actions:hover,
+.session-row.device-drawer-row .row-actions:focus-visible { opacity: 1; }
+
 /* #163 session lifecycle: sidebar Active/Archived grouping, status pills, pin + row actions */
 .drawer-group-head {
   display: flex;
@@ -1871,6 +1880,55 @@
   border-radius: 16px;
   background: var(--bg-elev);
 }
+
+/* Devices-list card (#186 "Manage devices" restyle): the whole card is tappable (opens details),
+   with a baked-in primary "Start session" button and a `⋯` overflow menu for the secondary,
+   less-common actions (default/refresh/forget) so the card face stays uncluttered. */
+.helm-session .device-tile {
+  position: relative;
+  cursor: pointer;
+}
+.helm-session .device-tile-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.helm-session .device-tile-head .session-info { min-width: 0; }
+.helm-session .device-tile-head .session-sub { white-space: normal; }
+.helm-session .device-menu-btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.helm-session .device-start-btn { margin-top: 2px; }
+.helm-session .device-menu {
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  margin-top: 4px;
+  padding: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--bg-rule);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.helm-session .device-menu-item {
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+}
+.helm-session .device-menu-item:hover,
+.helm-session .device-menu-item:focus-visible { background: var(--bg); }
+.helm-session .device-menu-item.danger { color: var(--error); }
 
 .helm-session .device-card-head {
   display: flex;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
 import type { SessionView } from '@/session/view';
+import type { ListenerDeviceState } from '@/session/model';
 import { ChatThread } from '@/ui/thread/ChatThread';
 import { Composer } from '@/ui/composer/Composer';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
@@ -201,6 +202,10 @@ interface SessionScreenProps {
   onAddSession(): void;
   onStartSession?(): void;
   onOpenDevices?(): void;
+  /** #186 nav simplification: registered listener devices, surfaced in the drawer so picking one
+   *  to start a session on doesn't need the separate Devices screen. */
+  devices?: ListenerDeviceState[];
+  onStartOnDevice?(channelId: string): void;
   onVoiceModeChange?(channelId: string, active: boolean): void;
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
@@ -225,6 +230,8 @@ export function SessionScreen({
   onAddSession,
   onStartSession,
   onOpenDevices,
+  devices,
+  onStartOnDevice,
   onVoiceModeChange,
   onRemoveSession,
   onRenameSession,
@@ -495,6 +502,8 @@ export function SessionScreen({
             onAddSession={onAddSession}
             onStartSession={onStartSession}
             onOpenDevices={onOpenDevices}
+            devices={devices}
+            onStartOnDevice={onStartOnDevice}
             onRemove={requestRemove}
             onRename={onRenameSession}
             onPin={onPinSession}
@@ -782,6 +791,11 @@ export function SessionScreen({
           onOpenDevices={() => {
             setDrawerOpen(false);
             onOpenDevices?.();
+          }}
+          devices={devices}
+          onStartOnDevice={(id) => {
+            setDrawerOpen(false);
+            onStartOnDevice?.(id);
           }}
           onRemove={requestRemove}
           onRename={onRenameSession}

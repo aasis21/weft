@@ -57,6 +57,7 @@ export function DevicesScreen({
 }: DevicesScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const sortedDevices = sortDevices(devices);
   const onlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone !== 'offline');
   const offlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone === 'offline');
@@ -76,12 +77,14 @@ export function DevicesScreen({
       : device.projects.length > 0
         ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
         : 'No projects yet';
+    const menuOpen = menuOpenId === device.channelId;
     return (
       <div
         key={device.channelId}
-        className="session-row device-row"
+        className="device-card device-tile"
         role="button"
         tabIndex={0}
+        aria-label={`View details for ${deviceLabel(device)}`}
         onClick={() => onOpenDetails(device.channelId)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onOpenDetails(device.channelId);
@@ -91,66 +94,89 @@ export function DevicesScreen({
           }
         }}
       >
-        <DeviceAvatar tone={status.tone} />
-        <span className="session-info">
-          <span className="session-title">
-            {deviceLabel(device)}
-            {device.isDefault ? <span className="tag">default</span> : null}
-          </span>
-          <span className="session-sub">
-            <span className={`device-status device-status-${status.tone}`}>
-              <span className="device-status-dot" aria-hidden="true" />
-              {status.label}
+        <div className="device-tile-head">
+          <DeviceAvatar tone={status.tone} />
+          <span className="session-info">
+            <span className="session-title">
+              {deviceLabel(device)}
+              {device.isDefault ? <span className="tag">default</span> : null}
             </span>
-            {lastSeen ? ` · last seen ${lastSeen}` : ''}
-            {` · ${projectsLabel}`}
+            <span className="session-sub">
+              <span className={`device-status device-status-${status.tone}`}>
+                <span className="device-status-dot" aria-hidden="true" />
+                {status.label}
+              </span>
+              {lastSeen ? ` · last seen ${lastSeen}` : ''}
+              {` · ${projectsLabel}`}
+            </span>
           </span>
-          {device.error ? <p className="error-banner">{device.error}</p> : null}
-        </span>
+          <button
+            className="icon-btn device-menu-btn"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="Device actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpenId(menuOpen ? null : device.channelId);
+            }}
+          >
+            ⋯
+          </button>
+        </div>
 
-        <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-          <button
-            className="icon-btn"
-            type="button"
-            onClick={() => onStartOnDevice(device.channelId)}
-            title="Start session"
-            aria-label="Start session"
-          >
-            ▻
-          </button>
-          {!device.isDefault ? (
+        {device.error ? <p className="error-banner">{device.error}</p> : null}
+
+        <button
+          type="button"
+          className="session-primary-action device-start-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onStartOnDevice(device.channelId);
+          }}
+        >
+          ▻ Start session
+        </button>
+
+        {menuOpen ? (
+          <div className="device-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+            {!device.isDefault ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="device-menu-item"
+                onClick={() => {
+                  setMenuOpenId(null);
+                  void onSetDefault(device.channelId);
+                }}
+              >
+                ⭐ Make default
+              </button>
+            ) : null}
             <button
-              className="icon-btn"
               type="button"
-              onClick={() => void onSetDefault(device.channelId)}
-              title="Make default"
-              aria-label="Make default"
+              role="menuitem"
+              className="device-menu-item"
+              onClick={() => {
+                setMenuOpenId(null);
+                onRefreshProjects(device.channelId);
+              }}
             >
-              ⭐
+              ↻ Refresh projects
             </button>
-          ) : null}
-          <button
-            className="icon-btn"
-            type="button"
-            onClick={() => onRefreshProjects(device.channelId)}
-            title="Refresh projects"
-            aria-label="Refresh projects"
-          >
-            ↻
-          </button>
-          <button
-            className="icon-btn danger"
-            type="button"
-            onClick={() => void onForget(device.channelId)}
-            title="Forget device"
-            aria-label="Forget device"
-          >
-            🗑
-          </button>
-        </span>
-        <span className="row-chevron" aria-hidden="true">
-          ›
-        </span>
+            <button
+              type="button"
+              role="menuitem"
+              className="device-menu-item danger"
+              onClick={() => {
+                setMenuOpenId(null);
+                void onForget(device.channelId);
+              }}
+            >
+              🗑 Forget device
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -171,7 +197,7 @@ export function DevicesScreen({
           </span>
         </button>
         <div className="status-id">
-          <span className="status-title">Connected devices</span>
+          <span className="status-title">Manage devices</span>
           <span className="status-line">
             <span className="status-dot" aria-hidden="true" />
             {countLabel}
@@ -181,7 +207,7 @@ export function DevicesScreen({
 
       <div className="session-join-inner">
         <p className="session-join-hint">
-          Each is a laptop running <code>helm-cli start</code>. Tap a device to view its details,
+          Each is a laptop running <code>helm-cli start</code>. Tap a card to view its details,
           projects, and event log.
         </p>
 

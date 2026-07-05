@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '@/session/view';
+import type { ListenerDeviceState } from '@/session/model';
 import { deriveStatus } from './sessionStatus';
+import { deviceLabel, deviceStatus, sortDevices } from '@/ui/screens/deviceDisplay';
+import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 
 interface SessionDrawerProps {
   sessions: SessionView[];
@@ -9,6 +12,11 @@ interface SessionDrawerProps {
   onAddSession(): void;
   onStartSession?(): void;
   onOpenDevices?(): void;
+  /** #186 nav simplification: registered listener devices, shown as a compact group at the top
+   *  of the drawer so picking one to start a session on never needs a separate screen. */
+  devices?: ListenerDeviceState[];
+  /** Tapping a device row (the common case) starts a new session on it directly. */
+  onStartOnDevice?(channelId: string): void;
   onRemove(channelId: string): void;
   onRename?(channelId: string, title: string): void;
   /** #163: pin/unpin a session (exempt from auto-delete + eviction preference). */
@@ -67,6 +75,8 @@ export function SessionDrawer({
   onAddSession,
   onStartSession,
   onOpenDevices,
+  devices,
+  onStartOnDevice,
   onRemove,
   onRename,
   onPin,
@@ -196,6 +206,47 @@ export function SessionDrawer({
       }
     };
   }, [docked]);
+
+  const renderDeviceRow = (device: ListenerDeviceState): JSX.Element => {
+    const status = deviceStatus(device);
+    return (
+      <div
+        key={device.channelId}
+        className="session-row device-drawer-row"
+        role="button"
+        tabIndex={0}
+        onClick={() => onStartOnDevice?.(device.channelId)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onStartOnDevice?.(device.channelId);
+          if (e.key === ' ' || e.key === 'Spacebar') {
+            e.preventDefault();
+            onStartOnDevice?.(device.channelId);
+          }
+        }}
+      >
+        <DeviceAvatar tone={status.tone} />
+        <span className="session-info">
+          <span className="session-title">
+            {deviceLabel(device)}
+            {device.isDefault ? <span className="tag">default</span> : null}
+          </span>
+          <span className="session-sub">{status.label}</span>
+        </span>
+        <button
+          className="icon-btn row-actions"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onStartOnDevice?.(device.channelId);
+          }}
+          title="Start session"
+          aria-label={`Start session on ${deviceLabel(device)}`}
+        >
+          ▻
+        </button>
+      </div>
+    );
+  };
 
   const renderRow = (session: SessionView): JSX.Element => {
     const id = session.meta.channelId;
@@ -386,6 +437,14 @@ export function SessionDrawer({
         />
 
         <div className="drawer-list">
+          {devices && devices.length > 0 ? (
+            <>
+              <div className="drawer-group-head">
+                Devices <span className="drawer-group-count">{devices.length}</span>
+              </div>
+              {sortDevices(devices).map(renderDeviceRow)}
+            </>
+          ) : null}
           {sessions.length === 0 ? (
             <p className="drawer-empty">No sessions joined yet.</p>
           ) : filteredSessions.length === 0 ? (
@@ -418,7 +477,7 @@ export function SessionDrawer({
 
         {onOpenDevices ? (
           <button className="drawer-home" type="button" onClick={onOpenDevices}>
-            🖥 Devices
+            🖥 Manage devices
           </button>
         ) : null}
 

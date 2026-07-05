@@ -82,11 +82,14 @@ describe('DevicesScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: /start session/i }));
     expect(onStartOnDevice).toHaveBeenCalledWith('chan-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /forget/i }));
+    // Secondary actions (default/refresh/forget) live behind the "⋯" overflow menu.
+    fireEvent.click(screen.getByRole('button', { name: /device actions/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /forget/i }));
     expect(onForget).toHaveBeenCalledWith('chan-1');
 
-    // Default device has no "Make default" button.
-    expect(screen.queryByRole('button', { name: /make default/i })).not.toBeInTheDocument();
+    // Default device has no "Make default" menu item.
+    fireEvent.click(screen.getByRole('button', { name: /device actions/i }));
+    expect(screen.queryByRole('menuitem', { name: /make default/i })).not.toBeInTheDocument();
   });
 
   it('shows a "Make default" action for non-default devices', () => {
@@ -112,7 +115,8 @@ describe('DevicesScreen', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /make default/i }));
+    fireEvent.click(screen.getByRole('button', { name: /device actions/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /make default/i }));
     expect(onSetDefault).toHaveBeenCalledWith('chan-1');
   });
 });
