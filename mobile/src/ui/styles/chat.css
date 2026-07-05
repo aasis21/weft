@@ -242,6 +242,17 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.status-rename-input {
+  width: 100%;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+}
 .status-line {
   display: inline-flex;
   align-items: center;
@@ -1251,7 +1262,7 @@
 /* Docked rail is narrower than the mobile overlay drawer; shrink the rename/remove tap targets
    from mobile's 30px touch size down to a more desktop-appropriate compact size. */
 .drawer-docked .session-row .row-x,
-.drawer-docked .session-row .row-rename { width: 22px; height: 22px; font-size: 12px; }
+.drawer-docked .session-row .row-menu-btn { width: 22px; height: 22px; font-size: 12px; }
 
 .session-row {
   display: flex;
@@ -1299,9 +1310,6 @@
   font-weight: 600;
 }
 .session-row .row-x { width: 30px; height: 30px; font-size: 13px; }
-.session-row .row-rename { width: 30px; height: 30px; font-size: 13px; opacity: 0.55; }
-.session-row .row-rename:hover,
-.session-row .row-rename:focus-visible { opacity: 1; }
 
 /* Compact "Devices" group at the top of the drawer (#186 nav simplification): a single-line
    row per device — avatar, name/status, and a lone "start session" button — no per-device
@@ -1372,13 +1380,46 @@
 .pin-mark { margin-right: 3px; font-size: 11px; }
 
 .row-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
-.session-row .row-pin,
-.session-row .row-archive { width: 30px; height: 30px; font-size: 13px; opacity: 0.55; }
-.session-row .row-pin:hover,
-.session-row .row-pin:focus-visible,
-.session-row .row-archive:hover,
-.session-row .row-archive:focus-visible { opacity: 1; }
-.session-row .row-pin.on { opacity: 1; }
+
+/* Row-level "⋮" menu: collapses pin/archive/rename behind one button so only delete ("✕")
+   stays directly on the row. The dropdown is a small absolutely-positioned popover anchored
+   to the menu button; outside clicks close it (see SessionDrawer's document click listener). */
+.row-menu-wrap { position: relative; display: inline-flex; }
+.session-row .row-menu-btn { width: 30px; height: 30px; font-size: 15px; opacity: 0.55; }
+.session-row .row-menu-btn:hover,
+.session-row .row-menu-btn:focus-visible,
+.session-row .row-menu-btn[aria-expanded="true"] { opacity: 1; }
+.row-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.row-menu-item:hover,
+.row-menu-item:focus-visible { background: var(--bg); }
 
 /* Device list rows (#186 redesign): reuse the session-row idiom (tappable card, row-actions,
    session-info/-title/-sub) so the devices list matches the sessions sidebar's visual language.
@@ -2567,31 +2608,6 @@
 
 .helm-session .drawer-head {
   flex-wrap: nowrap;
-}
-
-.helm-session .drawer-search {
-  flex: 0 0 auto;
-  width: 100%;
-  min-height: 44px;
-  margin-bottom: 8px;
-  padding: 9px 11px;
-  border: 1px solid var(--bg-rule);
-  border-radius: 11px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 13px;
-  outline: none;
-}
-
-.helm-session .drawer-search::placeholder {
-  color: var(--fg-faint);
-}
-
-.helm-session .drawer-search:focus,
-.helm-session .drawer-search:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .helm-session .session-row {

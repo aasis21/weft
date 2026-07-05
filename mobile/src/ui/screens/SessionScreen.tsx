@@ -526,6 +526,9 @@ export function SessionScreen({
         onRejoin={onAddSession}
         onReconnect={() => onReconnect(activeId)}
         {...(onArchiveSession ? { onArchive: () => onArchiveSession(activeId) } : {})}
+        onRename={(newTitle) => onRenameSession(activeId, newTitle)}
+        {...(onPinSession ? { onPin: (nextPinned: boolean) => onPinSession(activeId, nextPinned) } : {})}
+        pinned={active.pinned ?? false}
         isDemo={meta.kind === 'demo'}
         onRemove={() => requestRemove(activeId)}
         onGoHome={onGoHome}

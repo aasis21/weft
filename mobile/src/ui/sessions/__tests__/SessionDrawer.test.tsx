@@ -161,13 +161,14 @@ describe('SessionDrawer', () => {
     expect(coldRow.querySelector('.session-pill')?.textContent).toBe('Archived');
     expect(screen.getByText('Broken One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Offline');
 
-    // Pinned row shows the marker and pin toggles through the callback.
+    // Pinned row shows the marker; pin/archive/rename live behind the row's "⋮" menu.
     expect(within(coldRow).getByLabelText('Pinned')).toBeInTheDocument();
-    await user.click(within(coldRow).getByRole('button', { name: 'Unpin session' }));
+    await user.click(within(coldRow).getByRole('button', { name: 'More actions' }));
+    await user.click(within(coldRow).getByRole('menuitem', { name: 'Unpin session' }));
     expect(onPin).toHaveBeenCalledWith('cold', false);
   });
 
-  it('filters sessions and fires add and close controls', async () => {
+  it('fires add and close controls', async () => {
     const user = userEvent.setup();
     const onAddSession = vi.fn();
     const onClose = vi.fn();
@@ -183,9 +184,8 @@ describe('SessionDrawer', () => {
       />,
     );
 
-    await user.type(screen.getByRole('textbox', { name: 'Filter sessions' }), 'alp');
     expect(screen.getByText('Alpha')).toBeInTheDocument();
-    expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
 
     await user.click(screen.getByTitle('Join another session'));
     expect(onAddSession).toHaveBeenCalledTimes(1);
@@ -261,7 +261,8 @@ describe('SessionDrawer', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Rename session' }));
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rename session' }));
     const input = screen.getByRole('textbox', { name: 'Rename session' });
     await user.clear(input);
     await user.type(input, 'Deploy Box{Enter}');

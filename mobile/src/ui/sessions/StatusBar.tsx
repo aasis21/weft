@@ -18,6 +18,11 @@ interface StatusBarProps {
   onReconnect(): void;
   /** #163: archive this session now (drop the live socket, keep the card). Shown only when live. */
   onArchive?(): void;
+  /** Rename this session (shown in the "⋯" menu; opens an inline title editor in the header). */
+  onRename?(title: string): void;
+  /** Pin/unpin this session (exempt from auto-delete + eviction preference). */
+  onPin?(pinned: boolean): void;
+  pinned?: boolean;
   /** #163: demo sessions can't rejoin/reconnect/archive — hide those items. */
   isDemo?: boolean;
   onRemove(): void;
@@ -40,6 +45,9 @@ export function StatusBar({
   onRejoin,
   onReconnect,
   onArchive,
+  onRename,
+  onPin,
+  pinned = false,
   isDemo = false,
   onRemove,
   onGoHome,
@@ -47,6 +55,8 @@ export function StatusBar({
   desktopDocked = false,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(title);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
@@ -61,6 +71,17 @@ export function StatusBar({
   );
   const lineClass = derived.tone;
   const statusLabel = derived.label;
+
+  const beginRename = (): void => {
+    setRenameDraft(title);
+    setRenaming(true);
+  };
+  const commitRename = (): void => {
+    const trimmed = renameDraft.trim();
+    if (trimmed && trimmed !== title) onRename?.(trimmed);
+    setRenaming(false);
+  };
+  const cancelRename = (): void => setRenaming(false);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -130,7 +151,27 @@ export function StatusBar({
       )}
 
       <div className="status-id">
-        <span className="status-title" title={cwd ?? undefined}>{title}</span>
+        {renaming ? (
+          <input
+            className="status-rename-input"
+            type="text"
+            value={renameDraft}
+            autoFocus
+            aria-label="Rename session"
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') cancelRename();
+            }}
+            onBlur={commitRename}
+          />
+        ) : (
+          <span className="status-title" title={cwd ?? undefined}>
+            {pinned ? <span className="pin-mark" title="Pinned" aria-label="Pinned">📌</span> : null}
+            {title}
+          </span>
+        )}
         <span className={`status-line ${lineClass}`}>
           <span className="status-dot" aria-hidden="true" />
           {statusLabel}
@@ -205,6 +246,32 @@ export function StatusBar({
               >
                 ＋ Join another session
               </button>
+              {onRename ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    beginRename();
+                  }}
+                >
+                  ✎ Rename session
+                </button>
+              ) : null}
+              {onPin ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onPin(!pinned);
+                  }}
+                >
+                  📌 {pinned ? 'Unpin session' : 'Pin session'}
+                </button>
+              ) : null}
               {!derived.active && !isDemo ? (
                 <button
                   type="button"

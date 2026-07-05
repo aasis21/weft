@@ -89,10 +89,23 @@ export function SessionDrawer({
   const drawerRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
-  const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   onCloseRef.current = onClose;
+
+  // Row actions are collapsed behind a "⋮" menu (pin/archive/rename); only delete stays as a
+  // direct "✕" icon on the row. Close that menu on any click outside a row's menu wrapper.
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handleDocClick = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.row-menu-wrap')) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener('click', handleDocClick);
+    return () => document.removeEventListener('click', handleDocClick);
+  }, [openMenuId]);
 
   const beginRename = (id: string, current: string): void => {
     setEditingId(id);
@@ -105,23 +118,17 @@ export function SessionDrawer({
   const cancelRename = (): void => setEditingId(null);
 
   const filteredSessions = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const matched = q
-      ? sessions.filter((session) => {
-          const title = session.meta.title.toLowerCase();
-          const cwd = session.meta.cwd?.toLowerCase() ?? '';
-          return title.includes(q) || cwd.includes(q);
-        })
-      : sessions;
-    // STABLE order by when each session's QR was last scanned — deliberately NOT by last activity, so
-    // incoming events/heartbeats never reshuffle the list under the user. A re-scan bumps scannedAt so
-    // that card jumps to the top. Fall back to addedAt for legacy/demo cards without a scan time.
+    // Filter search box removed for now (#see chat request) — sidebar just shows all sessions,
+    // stably ordered by when each session's QR was last scanned. Deliberately NOT by last
+    // activity, so incoming events/heartbeats never reshuffle the list under the user. A
+    // re-scan bumps scannedAt so that card jumps to the top. Fall back to addedAt for
+    // legacy/demo cards without a scan time.
     const scannedAt = (s: SessionView): number => s.meta.scannedAt ?? s.meta.addedAt ?? 0;
-    return [...matched].sort((a, b) => scannedAt(b) - scannedAt(a));
-  }, [query, sessions]);
+    return [...sessions].sort((a, b) => scannedAt(b) - scannedAt(a));
+  }, [sessions]);
 
   // #163: split the (already stably-sorted) list into Active vs Archived using the shared status
-  // derivation, so the sidebar mirrors the detail-header pill exactly. Search filters both groups.
+  // derivation, so the sidebar mirrors the detail-header pill exactly.
   const { activeGroup, archivedGroup } = useMemo(() => {
     const activeGroup: SessionView[] = [];
     const archivedGroup: SessionView[] = [];
@@ -357,60 +364,83 @@ export function SessionDrawer({
           </span>
         ) : editingId === id ? null : (
           <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-            {!isDemo && onPin ? (
-              <button
-                className={`icon-btn row-pin ${session.pinned ? 'on' : ''}`}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPin(id, !session.pinned);
-                }}
-                title={session.pinned ? 'Unpin' : 'Pin (keep, never auto-delete)'}
-                aria-label={session.pinned ? 'Unpin session' : 'Pin session'}
-                aria-pressed={session.pinned ?? false}
-              >
-                📌
-              </button>
-            ) : null}
-            {!isDemo && onArchive && derived.active ? (
-              <button
-                className="icon-btn row-archive"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onArchive(id);
-                }}
-                title="Archive now (drop the live connection)"
-                aria-label="Archive session now"
-              >
-                ⏸
-              </button>
-            ) : null}
             {!isDemo ? (
-              <button
-                className="icon-btn row-rename"
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  beginRename(id, session.meta.title);
-                }}
-                title="Rename session"
-                aria-label="Rename session"
-              >
-                ✎
-              </button>
+              <span className="row-menu-wrap">
+                <button
+                  className="icon-btn row-menu-btn"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenMenuId(openMenuId === id ? null : id);
+                  }}
+                  title="More actions"
+                  aria-label="More actions"
+                  aria-haspopup="menu"
+                  aria-expanded={openMenuId === id}
+                >
+                  ⋮
+                </button>
+                {openMenuId === id ? (
+                  <div className="row-menu-dropdown" role="menu">
+                    {onPin ? (
+                      <button
+                        className="row-menu-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPin(id, !session.pinned);
+                          setOpenMenuId(null);
+                        }}
+                        aria-label={session.pinned ? 'Unpin session' : 'Pin session'}
+                      >
+                        📌 {session.pinned ? 'Unpin' : 'Pin'}
+                      </button>
+                    ) : null}
+                    {onArchive && derived.active ? (
+                      <button
+                        className="row-menu-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onArchive(id);
+                          setOpenMenuId(null);
+                        }}
+                        aria-label="Archive session now"
+                      >
+                        ⏸ Archive now
+                      </button>
+                    ) : null}
+                    <button
+                      className="row-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(null);
+                        beginRename(id, session.meta.title);
+                      }}
+                      aria-label="Rename session"
+                    >
+                      ✎ Rename
+                    </button>
+                  </div>
+                ) : null}
+              </span>
             ) : null}
             <button
               className="icon-btn row-x"
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
+                setOpenMenuId(null);
                 setConfirmDeleteId(id);
               }}
               title="Delete session"
               aria-label="Delete session"
             >
-              🗑
+              ✕
             </button>
           </span>
         )}
@@ -438,15 +468,6 @@ export function SessionDrawer({
           </button>
         </div>
 
-        <input
-          className="drawer-search"
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Filter sessions"
-          placeholder="Filter sessions"
-        />
-
         <div className="drawer-list">
           {devices && devices.length > 0 ? (
             <>
@@ -458,8 +479,6 @@ export function SessionDrawer({
           ) : null}
           {sessions.length === 0 ? (
             <p className="drawer-empty">No sessions joined yet.</p>
-          ) : filteredSessions.length === 0 ? (
-            <p className="drawer-empty">No matches.</p>
           ) : (
             <>
               {activeGroup.length > 0 ? (
