@@ -139,6 +139,13 @@ export function createListener({
       log?.warn?.(`Helm Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
       return;
     }
+    // The phone re-broadcasts HELLO on a short retry loop until it sees our ACK (see
+    // listenForPeers in shared/pairing.mjs), so a retry can reach us again before the phone gives
+    // up — even though we already ACKed and bound it. Since each run's keypair is ephemeral, the
+    // same publicKeyB64 arriving again while already bound/connected means "duplicate hello",
+    // never a fresh pairing — skip the rebind so we don't resend PROJECT_LIST / reset the
+    // heartbeat timer for no reason.
+    if (boundPeerPub === peer.publicKeyB64 && channel) return;
     boundPeerPub = peer.publicKeyB64;
     try {
       controlUnsub?.();
