@@ -29,6 +29,11 @@ cyan "=== Installing Helm extension ==="
 mkdir -p "$INSTALL_DIR"
 curl -fsSL "$BASE/extension.mjs" -o "$INSTALL_DIR/extension.mjs"
 green "extension.mjs -> $INSTALL_DIR"
+# relayServerProcess.mjs is spawned as a DETACHED sibling process by devtunnel.mjs (resolved next
+# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can outlive any one CLI
+# session — must always be installed alongside extension.mjs, not just on first install.
+curl -fsSL "$BASE/relayServerProcess.mjs" -o "$INSTALL_DIR/relayServerProcess.mjs"
+green "relayServerProcess.mjs -> $INSTALL_DIR"
 
 ENV_PATH="$INSTALL_DIR/.env"
 if [ -f "$ENV_PATH" ] && [ "${HELM_FORCE:-0}" != "1" ]; then

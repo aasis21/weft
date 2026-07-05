@@ -23,6 +23,27 @@ await build({
   logLevel: "info",
 });
 
+// devtunnel.mjs spawns relayServerProcess.mjs as a DETACHED sibling file (resolved relative to
+// its own import.meta.url at runtime — see devtunnel.mjs's RELAY_SERVER_PROCESS_PATH) so the
+// shared devtunnel relay/tunnel can outlive any one CLI session. Since the main bundle above
+// inlines everything into a single extension.mjs, that sibling file has to be produced (and
+// installed) as ITS OWN standalone bundle — otherwise "./relayServerProcess.mjs" resolves to a
+// file that was never written to disk. Must be built with the same bundle:true/platform/format so
+// it has zero dependency on files outside dist/ once installed.
+await build({
+  entryPoints: ["src/relayServerProcess.mjs"],
+  outfile: "dist/relayServerProcess.mjs",
+  bundle: true,
+  platform: "node",
+  target: "node18",
+  format: "esm",
+  sourcemap: true,
+  banner: {
+    js: "import { createRequire as __helmCreateRequire } from 'node:module'; const require = __helmCreateRequire(import.meta.url);",
+  },
+  logLevel: "info",
+});
+
 // Post-build smoke check: import the freshly built bundle with the host SDK stubbed.
 // Reaching the stub means all top-level CJS requires initialized — i.e. the bundle is
 // actually loadable by the CLI. Fails the build otherwise (don't ship a dead extension).

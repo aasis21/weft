@@ -43,6 +43,11 @@ Step 'Installing Helm extension'
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Invoke-WebRequest -Uri "$base/extension.mjs" -OutFile (Join-Path $InstallDir 'extension.mjs') -UseBasicParsing
 Ok "extension.mjs -> $InstallDir"
+# relayServerProcess.mjs is spawned as a DETACHED sibling process by devtunnel.mjs (resolved next
+# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can outlive any one CLI
+# session — must always be installed alongside extension.mjs, not just on first install.
+Invoke-WebRequest -Uri "$base/relayServerProcess.mjs" -OutFile (Join-Path $InstallDir 'relayServerProcess.mjs') -UseBasicParsing
+Ok "relayServerProcess.mjs -> $InstallDir"
 
 $envPath = Join-Path $InstallDir '.env'
 $envTemplate = @"

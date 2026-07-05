@@ -18,6 +18,7 @@ coverage/
 
 # deploy-time artifact: prebuilt extension bundle copied into public/ for hosting
 mobile/public/extension.mjs
+mobile/public/relayServerProcess.mjs
 
 # env & secrets
 .env

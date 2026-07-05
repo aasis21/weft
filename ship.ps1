@@ -56,6 +56,7 @@ function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
 
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
+    $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
     $publicBundle = Join-Path $root 'mobile\public\extension.mjs'
     $distDir      = Join-Path $root 'mobile\dist'
 
@@ -70,10 +71,15 @@ try {
         npm run build -w '@aasis21/helm-extension' | Out-Null
         if (-not (Test-Path $extBundle)) { throw "extension build did not produce $extBundle" }
         Ok 'extension/dist/extension.mjs'
+        if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
+        Ok 'extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)'
 
         Step 'Refreshing site bits (extension bundle -> mobile/public)'
         Copy-Item $extBundle $publicBundle -Force
         Ok 'mobile/public/extension.mjs  (served as /extension.mjs by the installer)'
+        $publicRelayBundle = Join-Path $root 'mobile\public\relayServerProcess.mjs'
+        Copy-Item $relayBundle $publicRelayBundle -Force
+        Ok 'mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)'
 
         Step 'Building mobile web app (Vite)'
         npm run build -w '@aasis21/helm-mobile' | Out-Null
@@ -93,6 +99,7 @@ try {
     } else {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle - run once without -SkipBuild first" }
+        if (-not (Test-Path $relayBundle)) { throw "no $relayBundle - run once without -SkipBuild first" }
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "no $distDir - run once without -SkipBuild first" }
     }
 
@@ -118,6 +125,12 @@ try {
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item $extBundle (Join-Path $dest 'extension.mjs') -Force
         Ok "extension.mjs -> $dest"
+        if (Test-Path $relayBundle) {
+            Copy-Item $relayBundle (Join-Path $dest 'relayServerProcess.mjs') -Force
+            Ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
+        } else {
+            Warn "no $relayBundle - /helm devtunnel will fail to spawn the shared relay until rebuilt"
+        }
         $envFile = Join-Path $root '.env'
         if (Test-Path $envFile) {
             Copy-Item $envFile (Join-Path $dest '.env') -Force
