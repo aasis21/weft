@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
 import type { SpawnMode } from '@aasis21/helm-shared';
 import type { ListenerDeviceState } from '@/session/model';
+import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
+import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
@@ -20,6 +22,14 @@ interface StartSessionScreenProps {
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
   onManageDevices?(): void;
   onCancel(): void;
+  /** Same hamburger + sessions drawer every other screen shows (#186 nav consistency) — lets you
+   *  jump straight to another live session, or back here from it, without losing this in-progress flow. */
+  sessions: SessionView[];
+  activeId: string | null;
+  onSelectSession(channelId: string): void;
+  onRemoveSession(channelId: string): void;
+  onRenameSession(channelId: string, title: string): void;
+  onGoHome(): void;
 }
 
 export function StartSessionScreen({
@@ -34,6 +44,12 @@ export function StartSessionScreen({
   onScanListener,
   onManageDevices,
   onCancel,
+  sessions,
+  activeId,
+  onSelectSession,
+  onRemoveSession,
+  onRenameSession,
+  onGoHome,
 }: StartSessionScreenProps): JSX.Element {
   const [selectedId, setSelectedId] = useState<string>(initialChannelId ?? '');
   const [projectName, setProjectName] = useState('');
@@ -41,6 +57,7 @@ export function StartSessionScreen({
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const sortedDevices = sortDevices(devices);
   const selected = sortedDevices.find((d) => d.channelId === selectedId) ?? sortedDevices[0] ?? null;
@@ -73,18 +90,41 @@ export function StartSessionScreen({
     }
   };
 
+  const onlineCount = sortedDevices.filter((d) => deviceStatus(d).tone === 'online').length;
+  const deviceCountLabel = sortedDevices.length === 0
+    ? 'No devices yet'
+    : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'} · ${onlineCount} online`;
+
   return (
     <main className="helm-session join-session start-session-v2">
-      <div className="session-join-inner">
-        <header className="session-join-head">
-          <button type="button" className="session-pair-back" onClick={onCancel}>
-            ← {hasSessions ? 'Back to sessions' : 'Back'}
+      <header className="status-bar">
+        <button
+          className="icon-btn drawer-btn"
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open sessions"
+        >
+          <span className="hamburger" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
+        <div className="status-id">
+          <span className="status-title">Start a session</span>
+          <span className="status-line">
+            <span className="status-dot" aria-hidden="true" />
+            {deviceCountLabel}
+          </span>
+        </div>
+        {hasSessions ? (
+          <button className="icon-btn" type="button" onClick={onCancel} aria-label="Cancel">
+            ✕
           </button>
-          <p className="session-join-kicker">Start another session</p>
-          <h2>Launch Copilot</h2>
-          <p className="session-join-hint">Pick a laptop, pick a project, go.</p>
-        </header>
+        ) : null}
+      </header>
 
+      <div className="session-join-inner">
         {sortedDevices.length === 0 ? (
           <section className="session-join-scanner start-empty">
             <p>No listener devices saved yet.</p>
@@ -225,6 +265,37 @@ export function StartSessionScreen({
           </>
         )}
       </div>
+
+      {drawerOpen ? (
+        <SessionDrawer
+          sessions={sessions}
+          activeId={activeId}
+          devices={devices}
+          onStartOnDevice={(id) => {
+            setDrawerOpen(false);
+            setSelectedId(id);
+          }}
+          onSelect={(id) => {
+            setDrawerOpen(false);
+            onSelectSession(id);
+          }}
+          onAddSession={() => {
+            setDrawerOpen(false);
+            onScanListener();
+          }}
+          onRemove={onRemoveSession}
+          onRename={onRenameSession}
+          onOpenDevices={onManageDevices ? () => {
+            setDrawerOpen(false);
+            onManageDevices();
+          } : undefined}
+          onGoHome={() => {
+            setDrawerOpen(false);
+            onGoHome();
+          }}
+          onClose={() => setDrawerOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }

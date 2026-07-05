@@ -273,6 +273,21 @@ export default function App(): JSX.Element {
           setStartDeviceId(undefined);
           setError(null);
         }}
+        sessions={snapshot.sessions}
+        activeId={activeId}
+        onSelectSession={(id) => {
+          setStarting(false);
+          setStartDeviceId(undefined);
+          sessionRuntime.setActive(id);
+        }}
+        onRemoveSession={(id) => void sessionRuntime.remove(id)}
+        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+        onGoHome={() => {
+          setStarting(false);
+          setStartDeviceId(undefined);
+          setError(null);
+          setShowLanding(true);
+        }}
       />
     );
   }
