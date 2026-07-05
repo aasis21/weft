@@ -146,7 +146,7 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
 
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0].command, "copilot");
-  assert.deepEqual(spawnCalls[0].args, ["-n", "phone-started", "--allow-all-tools"]);
+  assert.deepEqual(spawnCalls[0].args, ["-n", "phone-started", "--allow-all"]);
   assert.equal(spawnCalls[0].options.cwd, projectDir);
   assert.equal(spawnCalls[0].options.shell, false);
   const identity = JSON.parse(readFileSync(spawnCalls[0].options.env.HELM_IDENTITY_FILE, "utf8"));

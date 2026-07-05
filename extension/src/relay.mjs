@@ -645,14 +645,18 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       if (relayActivity) relayActivity.idleReaffirmPending = false;
       await sendSafe(activity(true));
       await sendSafe(
-        toolStart(data.toolCallId ?? event.id, data.toolName ?? data.name ?? "tool", data.arguments),
+        toolStart(
+          data.toolCallId ?? event.id,
+          data.toolName ?? data.name ?? data.mcpToolName ?? data.functionName ?? "tool",
+          data.arguments,
+        ),
       );
       break;
     case "tool.execution_complete":
       await sendSafe(
         toolComplete(
           data.toolCallId ?? event.id,
-          data.toolName ?? data.name ?? "tool",
+          data.toolName ?? data.name ?? data.mcpToolName ?? data.functionName ?? "tool",
           Boolean(data.success),
           previewToolResult(data),
         ),

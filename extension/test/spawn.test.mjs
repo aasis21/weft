@@ -63,7 +63,7 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   assert.deepEqual(result, { ok: true });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, "copilot");
-  assert.deepEqual(calls[0].args, ["-n", "brave-otter", "--allow-all-tools"]);
+  assert.deepEqual(calls[0].args, ["-n", "brave-otter", "--allow-all"]);
   assert.equal(calls[0].options.cwd, projectDir);
   assert.equal(calls[0].options.shell, false);
   assert.equal(calls[0].options.env.HELM_CHANNEL_ID, "chan-spawn");

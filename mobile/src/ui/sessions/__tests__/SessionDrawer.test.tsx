@@ -187,7 +187,7 @@ describe('SessionDrawer', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
 
-    await user.click(screen.getByTitle('Join another session'));
+    await user.click(screen.getByText('＋ Join another Copilot session'));
     expect(onAddSession).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTitle('Close'));
     expect(onClose).toHaveBeenCalledTimes(1);

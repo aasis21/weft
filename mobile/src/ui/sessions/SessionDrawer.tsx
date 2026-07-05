@@ -460,13 +460,15 @@ export function SessionDrawer({
       >
         <div className="drawer-head">
           <span className="drawer-title">SESSIONS</span>
-          <button className="icon-btn" type="button" onClick={onAddSession} title="Join another session">
-            ＋
-          </button>
-          <button className="icon-btn" type="button" onClick={onClose} title={docked ? 'Collapse sidebar' : 'Close'}>
-            {docked ? '⟨' : '✕'}
-          </button>
         </div>
+        <button
+          className="drawer-close"
+          type="button"
+          onClick={onClose}
+          title={docked ? 'Collapse sidebar' : 'Close'}
+        >
+          {docked ? '⟨' : '✕'}
+        </button>
 
         <div className="drawer-list">
           {devices && devices.length > 0 ? (

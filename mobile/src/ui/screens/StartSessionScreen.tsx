@@ -230,9 +230,14 @@ export function StartSessionScreen({
                   className={mode === 'allow-all' ? 'selected' : ''}
                   onClick={() => setMode('allow-all')}
                 >
-                  Allow all tools
+                  Allow all
                 </button>
               </div>
+              {mode === 'allow-all' ? (
+                <p className="start-mode-hint">
+                  Grants full permissions: tools, file paths, and URLs run without confirmation.
+                </p>
+              ) : null}
 
               <label className="session-field start-name-field">
                 <span>Session name (optional)</span>

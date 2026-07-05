@@ -36,7 +36,7 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
   try {
     identityFile = writeIdentityFile(identity);
     const copilotArgs = ["-n", sessionName];
-    if (mode === "allow-all") copilotArgs.push("--allow-all-tools");
+    if (mode === "allow-all") copilotArgs.push("--allow-all");
     const env = {
       ...process.env,
       HELM_IDENTITY_FILE: identityFile,

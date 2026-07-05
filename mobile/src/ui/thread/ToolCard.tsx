@@ -28,8 +28,28 @@ function titleCase(name: string): string {
     .trim();
 }
 
-function label(name: string): string {
-  return TOOL_LABELS[name] ?? titleCase(name);
+/**
+ * When the relay couldn't resolve a real tool name (falls back to the literal "tool"), infer a
+ * friendlier generic label from the argument shape instead of showing bare "Tool" in the header.
+ */
+function labelFromArgs(args: unknown): string | null {
+  if (!args || typeof args !== 'object') return null;
+  const record = args as Record<string, unknown>;
+  if (typeof record.command === 'string') return 'Run';
+  if (typeof record.old_string === 'string' || typeof record.new_string === 'string') return 'Edit';
+  if (typeof record.pattern === 'string' || typeof record.query === 'string') return 'Search';
+  if (typeof record.url === 'string') return 'Fetch';
+  if (typeof record.path === 'string' || typeof record.file === 'string') return 'View';
+  return null;
+}
+
+function label(name: string, args?: unknown): string {
+  const known = TOOL_LABELS[name];
+  if (known) return known;
+  if (!name || name.trim().toLowerCase() === 'tool') {
+    return labelFromArgs(args) ?? 'Tool';
+  }
+  return titleCase(name);
 }
 
 interface ArgSummary {
@@ -57,11 +77,21 @@ interface EditDiff {
   lines: DiffLine[];
 }
 
-/** One-line summary of the most useful argument, flagging file-path args for basename styling. */
-function describeArg(args: unknown): ArgSummary {
+const SHELL_TOOL_NAMES = new Set(['powershell', 'bash', 'shell']);
+
+/**
+ * One-line summary of the most useful argument, flagging file-path args for basename styling.
+ * For shell-style tools, the human-authored `description` is favored over the raw `command`
+ * (often a long/noisy one-liner) so the collapsed header reads like "Check disk usage" rather
+ * than "df -h | grep ...". The raw command is still available in the expanded ARGUMENTS section.
+ */
+function describeArg(args: unknown, name = ''): ArgSummary {
   if (!args || typeof args !== 'object') return { primary: '', isPath: false };
   const record = args as Record<string, unknown>;
-  for (const key of ['command', 'path', 'file', 'pattern', 'query', 'url', 'description']) {
+  const keys = SHELL_TOOL_NAMES.has(name.trim().toLowerCase())
+    ? ['description', 'command', 'path', 'file', 'pattern', 'query', 'url']
+    : ['command', 'path', 'file', 'pattern', 'query', 'url', 'description'];
+  for (const key of keys) {
     const value = record[key];
     if (typeof value === 'string' && value.trim()) {
       return { primary: value.trim(), isPath: PATH_KEYS.has(key) };
@@ -210,7 +240,7 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
   const [fullResult, setFullResult] = useState(false);
   const copiedTimer = useRef<number | null>(null);
   const icon = item.status === 'running' ? '↻' : item.status === 'success' ? '✓' : '✕';
-  const arg = describeArg(item.args);
+  const arg = describeArg(item.args, item.name);
   const argLine = arg.primary;
   const argPath = arg.isPath ? splitPath(argLine) : null;
   const hasDetail = !!argLine || !!item.resultPreview;
@@ -245,7 +275,7 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
         onClick={() => hasDetail && setExpanded((v) => !v)}
       >
         <span className="tc-icon" aria-hidden="true">{icon}</span>
-        <span className="tc-name">{label(item.name)}</span>
+        <span className="tc-name">{label(item.name, item.args)}</span>
         {argLine ? (
           argPath ? (
             <span className="tc-args is-path">

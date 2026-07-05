@@ -1253,6 +1253,27 @@
 .drawer-rail-expand:hover { color: var(--fg); background: var(--bg); }
 .drawer-head { display: flex; align-items: center; gap: 6px; padding: 4px 4px 10px; }
 .drawer-title { flex: 1; color: var(--fg-faint); font-size: 12px; letter-spacing: 0.14em; }
+/* Floating corner close/collapse control (#199): kept out of the header row's normal flow so
+   the SESSIONS title line stays uncluttered; overlaps the top-right corner of the drawer instead. */
+.drawer-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-faint);
+  font-size: 14px;
+  cursor: pointer;
+}
+.drawer-close:hover { background: var(--bg-elev); color: var(--fg); }
+.drawer-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
 .drawer-empty { padding: 18px 8px; color: var(--fg-faint); font-size: 12.5px; text-align: center; }
 /* Docked (desktop) sidebar: themed thin scrollbar instead of the OS default, matching .debug-list. */
@@ -1939,6 +1960,12 @@
 .helm-session .start-mode-toggle button.selected {
   background: var(--accent);
   color: #fff;
+}
+
+.helm-session .start-mode-hint {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--fg-dim);
 }
 
 .helm-session .start-name-field {
