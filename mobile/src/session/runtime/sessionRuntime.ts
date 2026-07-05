@@ -428,6 +428,7 @@ export class SessionRuntime {
       scannedAt: stored.pairing.savedAt ?? stored.addedAt,
       spawnedFromDeviceId: stored.spawnedFromDeviceId,
       spawnedFromDeviceName: stored.spawnedFromDeviceName,
+      transport: stored.pairing.transport?.kind,
     };
     const session = emptySession(channelId, meta);
     session.unread = stored.unread ?? false;
@@ -829,7 +830,7 @@ export class SessionRuntime {
       }
       ctrl.client = null;
       this.registry.dispose(channelId);
-      this.store.dispatch(metaScannedAtSet({ id: channelId, ts: pairing.savedAt ?? this.clock() }));
+      this.store.dispatch(metaScannedAtSet({ id: channelId, ts: pairing.savedAt ?? this.clock(), transport: pairing.transport?.kind }));
       if (opts.activate !== false) this.store.dispatch(sessionActivated(channelId));
       this.attach(channelId, client);
       return channelId;
@@ -856,6 +857,7 @@ export class SessionRuntime {
       scannedAt: opts.scannedAt ?? pairing.savedAt ?? now,
       spawnedFromDeviceId: opts.spawnedFromDeviceId,
       spawnedFromDeviceName: opts.spawnedFromDeviceName,
+      transport: pairing.transport?.kind,
     };
     const session = emptySession(channelId, meta);
     session.connection.status = 'connecting';

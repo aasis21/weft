@@ -13,8 +13,15 @@ import {
   buildPairingPayload,
   listenForPeers,
 } from "@aasis21/helm-shared";
-import { createTransport, resolveTransportDescriptor } from "./transportFactory.mjs";
+import { createTransportFromDescriptor, resolveTransportDescriptor, resolveTransportByName, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
+import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+
+// Names accepted by `/helm <name>` — the sync-resolvable ones (env/config-backed) plus the async,
+// self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
+// transportFactory's own SUPPORTED_TRANSPORT_NAMES because devtunnel isn't a plain descriptor
+// resolution: it spins up a local relay server + a real cloud tunnel on first use.
+const HELM_COMMAND_TRANSPORT_NAMES = [...SUPPORTED_TRANSPORT_NAMES, "devtunnel"];
 
 // Minimal ANSI styling for the pairing banner. The Copilot CLI forwards ANSI straight to the
 // terminal (the QR itself is rendered with ANSI escapes), so truecolor brand accents render in
@@ -72,13 +79,18 @@ const channelId = handedOffIdentity?.channelId ?? (process.env.HELM_CHANNEL_ID |
 // no pre-baked config of its own. A misconfigured transport (e.g. HELM_TRANSPORT=webpubsub
 // without HELM_WEBPUBSUB_NEGOTIATE_URL) is not something pairing can work around, so this fails
 // fast at load with a clear, actionable error rather than surfacing as a confusing retry-loop
-// timeout later.
-const transportDescriptor = resolveTransportDescriptor();
-const pairingPayload = buildPairingPayload({
-  channelId,
-  publicKeyB64: laptopKeys.publicKeyB64,
-  transport: transportDescriptor,
-});
+// timeout later. `let`, not `const` — `/helm <transport>` (see switchTransport) overrides this
+// for just the running session without touching the persisted device-wide default.
+let transportDescriptor = resolveTransportDescriptor();
+let pairingPayload = buildCurrentPairingPayload();
+
+function buildCurrentPairingPayload() {
+  return buildPairingPayload({
+    channelId,
+    publicKeyB64: laptopKeys.publicKeyB64,
+    transport: transportDescriptor,
+  });
+}
 
 let relayHandle = null;
 let permissionRelay = null;
@@ -97,10 +109,49 @@ let pairChain = Promise.resolve();
 // Show the full pairing walk-through (instructions + QR + status) and re-kick the relay listener
 // if it isn't currently live (initial connect gave up, or it was torn down). A live listener
 // already answers re-scans, so we never stack a second transport. Bound to the `/helm` command.
-const showPairing = async () => {
+// `context.args` (the text after `/helm`, e.g. "supabase") optionally overrides the transport for
+// just this session — see switchTransport. No args (or blank) keeps this device's default.
+const showPairing = async (context) => {
+  const requested = context?.args?.trim();
+  if (requested && !(await switchTransport(requested))) return;
   await logPairing(session, JSON.stringify(pairingPayload), { full: true });
   if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
 };
+
+// Rebuild transportDescriptor/pairingPayload for `name` and tear down any live relay so the next
+// connectRelayWithRetry() picks up the new transport. Returns false (after logging a clear error)
+// for an unknown/misconfigured name, leaving the current transport untouched. This only affects
+// the running session — it never writes to the persisted `helm-cli set-transport` config.
+async function switchTransport(name) {
+  const normalized = name.trim().toLowerCase();
+  if (normalized === "devtunnel") {
+    session.log?.("Helm: setting up a devtunnel (first run creates a tunnel; can take ~10-20s)…", {
+      ephemeral: false,
+    });
+  }
+  let descriptor;
+  try {
+    descriptor =
+      normalized === "devtunnel"
+        ? await provisionDevTunnelTransport({ channelId })
+        : resolveTransportByName(normalized);
+  } catch (err) {
+    session.log?.(`Helm: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
+    return false;
+  }
+  if (JSON.stringify(descriptor) === JSON.stringify(transportDescriptor)) {
+    session.log?.(`Helm: already using "${descriptor.kind}" for this session.`, { ephemeral: false });
+    return true;
+  }
+  transportDescriptor = descriptor;
+  pairingPayload = buildCurrentPairingPayload();
+  await teardownRelay("transport-switch");
+  session.log?.(
+    `Helm: switched transport to "${descriptor.kind}" for this session only. Scan the fresh QR below.`,
+    { ephemeral: false },
+  );
+  return true;
+}
 
 const session = await joinSession({
   streaming: true,
@@ -116,7 +167,10 @@ const session = await joinSession({
   commands: [
     {
       name: "helm",
-      description: "Pair your phone with this Copilot session — shows the QR + setup steps.",
+      description:
+        'Pair your phone with this Copilot session (shows the QR + setup steps). Optional arg overrides the transport for this session only: /helm [' +
+        HELM_COMMAND_TRANSPORT_NAMES.join("|") +
+        "].",
       handler: showPairing,
     },
   ],
@@ -150,7 +204,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
   try {
     const maxAttempts = positiveIntFromEnv("HELM_CONNECT_MAX_ATTEMPTS", 6);
     for (let attempt = 1; !shuttingDown; attempt++) {
-      const transport = createTransport({ channelId });
+      const transport = createTransportFromDescriptor(transportDescriptor, { channelId });
       try {
         const listener = await listenForPeers({
           transport,
@@ -212,6 +266,14 @@ function requestReconnect(detail) {
 }
 
 async function reconnectRelay() {
+  await teardownRelay("reconnect");
+  await connectRelayWithRetry({ reconnect: true });
+}
+
+// Shared shutdown of any live relay/listener/transport, used by both a dropped-connection
+// reconnect and a user-requested `/helm <transport>` switch — `reason` is only used for the
+// relay's own stop() bookkeeping/logging.
+async function teardownRelay(reason) {
   const previousRelay = relayHandle;
   const previousStop = pairingStop;
   const previousTransport = activeTransport;
@@ -229,13 +291,12 @@ async function reconnectRelay() {
   }
   if (previousRelay) {
     try {
-      await previousRelay.stop("reconnect", { closeTransport: false });
+      await previousRelay.stop(reason, { closeTransport: false });
     } catch {
       // best-effort; reconnect must continue.
     }
   }
   await closeQuietly(previousTransport);
-  await connectRelayWithRetry({ reconnect: true });
 }
 
 // (Re)attach the encrypted relay for a freshly-paired phone. Serialized through `pairChain` so a
@@ -316,6 +377,7 @@ async function shutdown(reason) {
   } else {
     await closeQuietly(activeTransport);
   }
+  await stopDevTunnel().catch(() => {});
 }
 
 function sleep(ms) {
@@ -362,7 +424,9 @@ function positiveIntFromEnv(name, fallback) {
 
 async function logPairing(session, payload, { full = false } = {}) {
   const qr = (await QRCode.toString(payload, { type: "terminal", small: true })).replace(/\n+$/, "");
-  const transport = process.env.HELM_TRANSPORT || "local";
+  // Reflects whichever descriptor is actually active for THIS session — not just the env var —
+  // so a `/helm <name>` override (see switchTransport) shows correctly after a switch.
+  const transport = transportDescriptor.kind;
   const channelShort = channelId.slice(0, 8);
 
   // Session start prints a light banner — just the QR + one status line. `/helm` prints the full

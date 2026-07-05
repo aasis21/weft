@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
+import { resolveTransportDescriptor, resolveTransportByName, SUPPORTED_TRANSPORT_NAMES } from "../src/transportFactory.mjs";
 import { saveTransportConfig } from "../src/transportConfig.mjs";
 
 const ENV_KEYS = [
@@ -61,4 +61,25 @@ test("HELM_TRANSPORT env var wins over a persisted config", () => {
 test("HELM_TRANSPORT=webpubsub requires HELM_WEBPUBSUB_NEGOTIATE_URL", () => {
   process.env.HELM_TRANSPORT = "webpubsub";
   assert.throws(() => resolveTransportDescriptor({ baseDir: helmHome }), /HELM_WEBPUBSUB_NEGOTIATE_URL/);
+});
+
+test("resolveTransportByName resolves a valid name regardless of persisted config/env", () => {
+  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: helmHome });
+  assert.deepEqual(resolveTransportByName("local"), { kind: "local" });
+});
+
+test("resolveTransportByName is case-insensitive and trims whitespace", () => {
+  assert.deepEqual(resolveTransportByName("  LOCAL "), { kind: "local" });
+});
+
+test("resolveTransportByName rejects an unknown name with the supported list", () => {
+  assert.throws(() => resolveTransportByName("bluetooth"), (err) => {
+    assert.match(err.message, /unknown transport "bluetooth"/);
+    for (const name of SUPPORTED_TRANSPORT_NAMES) assert.match(err.message, new RegExp(name));
+    return true;
+  });
+});
+
+test("resolveTransportByName surfaces the same misconfiguration error as resolveFromEnv", () => {
+  assert.throws(() => resolveTransportByName("webpubsub"), /HELM_WEBPUBSUB_NEGOTIATE_URL/);
 });

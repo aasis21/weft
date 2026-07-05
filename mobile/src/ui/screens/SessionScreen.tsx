@@ -541,6 +541,7 @@ export function SessionScreen({
             channelId: meta.channelId,
             ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
             ...(meta.channelHistory ? { channelHistory: meta.channelHistory } : {}),
+            ...(meta.transport ? { transport: meta.transport } : {}),
             senderId: getStableDeviceId(),
             addedAt: meta.addedAt,
             lastHeartbeat: active.timeline.lastHeartbeat ?? null,

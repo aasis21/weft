@@ -16,6 +16,10 @@ export interface DebugDetail {
   pinned?: boolean;
   /** #163 lifecycle: evicted from the warm pool (no live socket) — "Archived". */
   cold?: boolean;
+  /** Transport kind this session is currently paired over (local/supabase/webpubsub/devtunnel) —
+   *  see SessionMeta.transport / TransportDescriptor in shared/transport.d.ts. Undefined for
+   *  sessions restored before this field existed, until their next re-pair. */
+  transport?: string;
 }
 
 interface DebugPanelProps {
@@ -209,6 +213,8 @@ export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps):
             <dd className="mono">{detail.sessionId ?? '— (not yet reported)'}</dd>
             <dt>Latest channel id</dt>
             <dd className="mono">{detail.channelId}</dd>
+            <dt>Transport</dt>
+            <dd className="mono">{detail.transport ?? '— (rescan to learn)'}</dd>
             <dt>Previous channels</dt>
             <dd className="mono">
               {detail.channelHistory && detail.channelHistory.length > 0

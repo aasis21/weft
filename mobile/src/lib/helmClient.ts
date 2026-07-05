@@ -229,7 +229,14 @@ function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
   const cacheKey = `${url}::${anonKey}`;
   let client = sharedSupabaseClients.get(cacheKey);
   if (!client) {
-    client = createClient(url, anonKey);
+    client = createClient(url, anonKey, {
+      // Helm uses the anon key directly for realtime auth (private-channel RLS); there is no
+      // Supabase user session in play. Disabling persist/auto-refresh prevents the auth module
+      // from firing SIGNED_IN / TOKEN_REFRESHED events that would call realtime.setAuth() with
+      // a stale or wrong token — on Android, localStorage persists across app restarts, making
+      // that race far more likely than it is in a browser session. Mirrors extension/src/transportFactory.mjs.
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
     // Private channels authorize against RLS on realtime.messages; the anon key is the realtime
     // access token. Apply supabase/migrations first or joins are denied.
     client.realtime.setAuth(anonKey);
@@ -266,8 +273,8 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
     });
     return createWebPubSubTransport({ client, channelId });
   }
-  if (descriptor.kind === 'relay') {
-    // A relay/tunnel URL (e.g. a Microsoft Dev Tunnel) is single-use and pairing-scoped, unlike
+  if (descriptor.kind === 'devtunnel') {
+    // A Dev Tunnel (or any self-hosted relay/tunnel) URL is single-use and pairing-scoped, unlike
     // Supabase's shared long-lived anon key — so it needs no per-channel negotiate step, and no
     // caching across sessions. The URL already carries any access token (e.g. as a query param)
     // baked in by the laptop when it minted the descriptor; the phone just connects to it as-is.

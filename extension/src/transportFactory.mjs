@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { createClient } from "@supabase/supabase-js";
 import { WebPubSubClient } from "@azure/web-pubsub-client";
+import WebSocket from "ws";
 import {
   createLocalTransport,
   createSupabaseTransport,
   createWebPubSubTransport,
+  createRelayTransport,
 } from "@aasis21/helm-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
 
@@ -51,6 +53,10 @@ function defaultEnvFiles() {
  * transportConfig.mjs) applies. With neither set, Helm defaults to Supabase — Helm's own relay is
  * the supported out-of-the-box path — reading HELM_SUPABASE_URL/HELM_SUPABASE_ANON_KEY (or the
  * generic SUPABASE_* fallback); `local` is opt-in only, for same-machine testing.
+ *
+ * This is "this device's default" — the one `/helm` (no arguments) pairs with. `/helm <name>`
+ * overrides it for a single running session via resolveTransportByName below, without touching
+ * the persisted device-wide config.
  */
 export function resolveTransportDescriptor({ baseDir } = {}) {
   if (process.env.HELM_TRANSPORT) {
@@ -69,6 +75,24 @@ export function resolveTransportDescriptor({ baseDir } = {}) {
         "relay) to choose one.",
     );
   }
+}
+
+/** Transport kinds `resolveTransportByName` (and therefore `/helm <name>`) accepts. */
+export const SUPPORTED_TRANSPORT_NAMES = ["local", "supabase", "webpubsub"];
+
+/**
+ * Requires a name from SUPPORTED_TRANSPORT_NAMES (case-insensitive); throws a single
+ * user-facing message (listing the valid names) for anything else, so callers like /helm's
+ * handler can surface it directly without re-deriving the allowed list themselves.
+ */
+export function resolveTransportByName(transportName) {
+  const normalized = String(transportName ?? "").trim().toLowerCase();
+  if (!SUPPORTED_TRANSPORT_NAMES.includes(normalized)) {
+    throw new Error(
+      `Helm: unknown transport "${transportName}". Supported: ${SUPPORTED_TRANSPORT_NAMES.join(", ")}.`,
+    );
+  }
+  return resolveFromEnv(normalized);
 }
 
 function resolveFromEnv(transportName) {
@@ -124,6 +148,14 @@ export function createTransportFromDescriptor(descriptor, { channelId }) {
     // setAuth + the RLS policies applied, channel joins are denied.
     client.realtime.setAuth(descriptor.anonKey);
     return createSupabaseTransport({ client, channelId });
+  }
+
+  if (descriptor.kind === "devtunnel") {
+    // descriptor.url already carries ?channelId=… (see devtunnel.mjs) so the relay server on the
+    // other end of the tunnel can room-match this socket with the phone's — createRelayTransport
+    // itself never puts channelId on the wire (see shared/transport-relay.mjs).
+    const socket = new WebSocket(descriptor.url);
+    return createRelayTransport({ socket, channelId });
   }
 
   throw new Error(`Helm: unknown transport descriptor kind "${descriptor.kind}"`);

@@ -7,6 +7,7 @@ import type {
   LogLineMsg,
   PromptAttachment,
   SessionMode,
+  TransportDescriptor,
 } from '@aasis21/helm-shared';
 import type { RegisteredDevice } from '@/lib/devices';
 
@@ -93,6 +94,11 @@ export interface SessionMeta {
   spawnedFromDeviceId?: string;
   /** Display name of the spawning device at spawn time (falls back label if it's since renamed). */
   spawnedFromDeviceName?: string;
+  /** Which transport kind this session is currently paired over (local/supabase/webpubsub/devtunnel)
+   *  — see TransportDescriptor in shared/transport.d.ts. Surfaced in the session debug/detail view
+   *  so a `/helm <transport>` switch (or a devtunnel pairing) is visible from the phone side too.
+   *  Optional: sessions restored before this field existed simply omit it until their next re-pair. */
+  transport?: TransportDescriptor['kind'];
 }
 
 export interface ListenerDeviceState extends RegisteredDevice {

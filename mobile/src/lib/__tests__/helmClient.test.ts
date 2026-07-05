@@ -117,7 +117,7 @@ describe('connectDevice', () => {
   });
 });
 
-describe('pairWithPublicKey with a relay transport descriptor', () => {
+describe('pairWithPublicKey with a devtunnel transport descriptor', () => {
   beforeEach(async () => {
     shared.close.mockResolvedValue(undefined);
     // sayHello is mocked at module scope to resolve, so let it reject early via SecureChannel
@@ -163,7 +163,7 @@ describe('pairWithPublicKey with a relay transport descriptor', () => {
       pairWithPublicKey({
         channelId: 'channel-relay',
         publicKeyB64: 'laptop-public-key',
-        transportDescriptor: { kind: 'relay', url: 'wss://example.devtunnels.ms/?token=abc' },
+        transportDescriptor: { kind: 'devtunnel', url: 'wss://example.devtunnels.ms/?token=abc' },
       }),
     ).rejects.toThrow('connect failed');
 

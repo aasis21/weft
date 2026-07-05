@@ -13,7 +13,7 @@ export type Unsubscribe = () => void;
  * runtime, with zero pre-baked config of its own. Nothing here is a credential: Supabase's
  * anon key is meant to be public (RLS enforces access), and Web PubSub's actual per-connection
  * token is minted separately by the negotiate endpoint, never carried in the descriptor.
- * "relay" is the one exception — its url is a single-use, short-lived, tunnel/room-scoped
+ * "devtunnel" is the one exception — its url is a single-use, short-lived, tunnel/room-scoped
  * endpoint (e.g. a Microsoft Dev Tunnel URL with an access token query param) minted fresh per
  * pairing, not a reusable secret, so carrying it in the QR matches the trust level of a
  * one-time pairing code rather than a durable credential.
@@ -22,7 +22,7 @@ export type TransportDescriptor =
   | { kind: "local" }
   | { kind: "supabase"; url: string; anonKey: string }
   | { kind: "webpubsub"; negotiateUrl: string }
-  | { kind: "relay"; url: string };
+  | { kind: "devtunnel"; url: string };
 
 /** Live connection state of the underlying socket, reported after connect(). */
 export type TransportStatus = "connected" | "disconnected";

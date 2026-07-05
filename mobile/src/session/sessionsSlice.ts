@@ -9,6 +9,7 @@ import type {
   NoticeItem,
   ChannelHistoryEntry,
   Session,
+  SessionMeta,
   SessionStatus,
   UserItem,
 } from './model';
@@ -410,9 +411,15 @@ const sessionsSlice = createSlice({
       const session = state.entities[action.payload.id];
       if (session) session.meta.cwd = action.payload.cwd;
     },
-    metaScannedAtSet(state, action: PayloadAction<{ id: string; ts: number | undefined }>) {
+    metaScannedAtSet(
+      state,
+      action: PayloadAction<{ id: string; ts: number | undefined; transport?: SessionMeta['transport'] }>,
+    ) {
       const session = state.entities[action.payload.id];
-      if (session) session.meta.scannedAt = action.payload.ts;
+      if (session) {
+        session.meta.scannedAt = action.payload.ts;
+        if (action.payload.transport !== undefined) session.meta.transport = action.payload.transport;
+      }
     },
     debugAppended(state, action: PayloadAction<{ id: string; event: DebugEvent }>) {
       const session = state.entities[action.payload.id];

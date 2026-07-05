@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// Generic WebSocket relay Transport — for ANY self-hosted or tunneled ws endpoint (a plain `ws`
-// server you run yourself, a Cloudflare Durable Object, or one reached through a Microsoft Dev
-// Tunnel / ngrok / similar). Unlike Supabase/Web PubSub there is no separate "group" concept to
-// join: the socket itself already terminates at an endpoint scoped to one pairing (the tunnel
-// URL, or a server-side room keyed by channelId before the connection was handed to us), so
-// channelId here is only asserted for parity with the other Transport factories and is never
-// put on the wire.
+// Dev Tunnel / self-hosted WebSocket relay Transport — primarily for a Microsoft Dev Tunnel
+// (devtunnel host) forwarding to a local ws server, but works unmodified for ANY self-hosted or
+// tunneled ws endpoint (a plain `ws` server you run yourself, a Cloudflare Durable Object, ngrok,
+// etc.) since it only ever touches an already-open socket. Unlike Supabase/Web PubSub there is no
+// separate "group" concept to join: the socket itself already terminates at an endpoint scoped to
+// one pairing (the tunnel URL, or a server-side room keyed by channelId before the connection was
+// handed to us), so channelId here is only asserted for parity with the other Transport
+// factories and is never put on the wire.
 //
 // The caller is responsible for constructing an already-open-or-opening, already-authenticated
 // WebSocket (any object exposing the standard addEventListener/removeEventListener/send/close/
 // readyState surface — both the `ws` npm package and the browser/React Native global WebSocket
-// qualify) pointed at the correct relay/tunnel URL (including any access token, e.g. as a query
-// param) *before* calling this factory. This keeps shared/ at zero runtime dependencies and
-// mirrors transport-supabase.mjs / transport-webpubsub.mjs's "caller passes in an
-// already-constructed client" convention — auth/tunnel lifecycle never lives in shared/.
+// qualify) pointed at the tunnel/relay URL (including any access token, e.g. as a query param)
+// *before* calling this factory. This keeps shared/ at zero runtime dependencies and mirrors
+// transport-supabase.mjs / transport-webpubsub.mjs's "caller passes in an already-constructed
+// client" convention — auth/tunnel lifecycle never lives in shared/.
 //
 // Wire format: publish(event, envelope) -> socket.send(JSON.stringify({ event, envelope })),
 // the same {event, envelope} frame transport-webpubsub.mjs uses, so a server-side relay can stay
@@ -27,7 +28,7 @@ function fail(message) {
 
 /**
  * @param {{ socket: unknown, channelId: string }} opts
- *   socket — an already-constructed WebSocket-like object pointed at the relay/tunnel endpoint
+ *   socket — an already-constructed WebSocket-like object pointed at the tunnel/relay endpoint
  *   for this pairing. Not shared across channels; one socket per Transport instance.
  */
 export function createRelayTransport({ socket, channelId } = {}) {
