@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deriveStatus } from './sessionStatus';
-import { deviceLabel, deviceStatus, sortDevices } from '@/ui/screens/deviceDisplay';
+import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 
 interface SessionDrawerProps {
@@ -209,12 +209,19 @@ export function SessionDrawer({
 
   const renderDeviceRow = (device: ListenerDeviceState): JSX.Element => {
     const status = deviceStatus(device);
+    const lastSeen = formatLastSeen(device.lastSeenAt);
+    const projectsLabel = device.projectsLoading
+      ? 'Loading projects…'
+      : device.projects.length > 0
+        ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
+        : 'No projects yet';
     return (
       <div
         key={device.channelId}
         className="session-row device-drawer-row"
         role="button"
         tabIndex={0}
+        aria-label={`Start session on ${deviceLabel(device)}`}
         onClick={() => onStartOnDevice?.(device.channelId)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onStartOnDevice?.(device.channelId);
@@ -230,7 +237,11 @@ export function SessionDrawer({
             {deviceLabel(device)}
             {device.isDefault ? <span className="tag">default</span> : null}
           </span>
-          <span className="session-sub">{status.label}</span>
+          <span className="session-sub">
+            {status.label}
+            {lastSeen ? ` · ${lastSeen}` : ''}
+            {` · ${projectsLabel}`}
+          </span>
         </span>
         <button
           className="icon-btn row-actions"

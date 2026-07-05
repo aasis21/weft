@@ -1887,6 +1887,12 @@
 .helm-session .device-tile {
   position: relative;
   cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.helm-session .device-tile:hover,
+.helm-session .device-tile:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--bg-rule));
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-elev));
 }
 .helm-session .device-tile-head {
   display: flex;
@@ -1976,10 +1982,13 @@
   padding: 14px;
   background: transparent;
   border: none;
+  border-radius: 16px;
   text-align: left;
   cursor: pointer;
   color: inherit;
 }
+.helm-session .device-session-open:hover,
+.helm-session .device-session-open:focus-visible { background: var(--bg); }
 
 .helm-session .device-session-status {
   display: inline-flex;
