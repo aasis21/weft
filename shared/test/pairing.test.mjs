@@ -17,6 +17,16 @@ test("buildPairingPayload / parsePairingPayload round-trip", () => {
   assert.throws(() => parsePairingPayload({ v: 999, channelId: "x", pub: "y", transport: { kind: "local" } }), /invalid pairing/);
 });
 
+test("buildPairingPayload accepts a devtunnel transport descriptor", () => {
+  const payload = buildPairingPayload({
+    channelId: "abc",
+    publicKeyB64: "PUB",
+    transport: { kind: "devtunnel", url: "wss://example.devtunnels.ms?channelId=abc" },
+  });
+  const parsed = parsePairingPayload(JSON.stringify(payload));
+  assert.deepEqual(parsed.transport, { kind: "devtunnel", url: "wss://example.devtunnels.ms?channelId=abc" });
+});
+
 test("buildPairingPayload requires a valid transport descriptor", () => {
   assert.throws(() => buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB" }), /transport descriptor is required/);
   assert.throws(
@@ -25,6 +35,10 @@ test("buildPairingPayload requires a valid transport descriptor", () => {
   );
   assert.throws(
     () => buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB", transport: { kind: "supabase" } }),
+    /transport descriptor is required/,
+  );
+  assert.throws(
+    () => buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB", transport: { kind: "devtunnel" } }),
     /transport descriptor is required/,
   );
 });

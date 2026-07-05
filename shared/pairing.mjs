@@ -36,6 +36,7 @@ function isValidTransportDescriptor(t) {
   if (t.kind === "local") return true;
   if (t.kind === "supabase") return typeof t.url === "string" && typeof t.anonKey === "string";
   if (t.kind === "webpubsub") return typeof t.negotiateUrl === "string";
+  if (t.kind === "devtunnel") return typeof t.url === "string";
   return false;
 }
 
@@ -66,7 +67,7 @@ export function buildPairingPayload({ channelId, publicKeyB64, transport, kind =
   }
   if (!isValidTransportDescriptor(transport)) {
     throw new Error(
-      'helm/pairing: transport descriptor is required (kind: "local" | "supabase" | "webpubsub")',
+      'helm/pairing: transport descriptor is required (kind: "local" | "supabase" | "webpubsub" | "devtunnel")',
     );
   }
   const payload = { v: PAIR_VERSION, channelId, pub: publicKeyB64, transport };
