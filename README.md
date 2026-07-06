@@ -1,8 +1,25 @@
+<div align="center">
+
 # Weft
 
-**Your Copilot command center.** Weft is a secure mobile app that binds to your live
-Copilot CLI sessions: watch the token stream, answer permission prompts, send prompts, and
-switch modes — all from your phone.
+**Your Copilot session, off the desk.**
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)](#quick-start)
+[![Built with](https://img.shields.io/badge/built%20with-Copilot%20CLI-24292e?logo=github)](https://github.com/github/copilot-cli)
+
+Weft mirrors your live GitHub Copilot terminal session to your phone over an end-to-end
+encrypted relay — watch it work, approve its moves, talk back, from anywhere.
+
+**[✨ Live site → aasis21.github.io/weft](https://aasis21.github.io/weft/)** · **[Try the web app → useweft.netlify.app](https://useweft.netlify.app)**
+
+<img src="docs/assets/session-transcript.webp" width="360" alt="A live Copilot session mirrored to a phone, with an inline approval prompt." />
+
+</div>
+
+|  |  |  |
+|---|---|---|
+| <img src="docs/assets/landing-hero.webp" width="220" alt="Onboarding screen" /><br>**Pair in seconds** | <img src="docs/assets/session-chat.webp" width="220" alt="A working session" /><br>**Watch it work** | <img src="docs/assets/session-transcript.webp" width="220" alt="Approval prompt" /><br>**Approve from anywhere** |
 
 > **Try it now (no install):** **<https://useweft.netlify.app>** — open on your phone,
 > scan the pairing QR your terminal prints (or paste it), and you're bound to the session.
@@ -37,6 +54,21 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
 > [`aasis21/anya`](https://github.com/aasis21/anya), and
 > [`aasis21/engram`](https://github.com/aasis21/engram).
+
+---
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `weft start` | Start the Device Station and print a QR to pair from your phone. |
+| `weft add-project <name> <path> [--default]` | Register a project directory Weft can launch sessions in. |
+| `weft remove-project <name>` | Forget a registered project. |
+| `weft list-projects` | List registered projects and which one is default. |
+| `weft set-default <name>` | Choose the project a bare pairing launches into. |
+| `weft set-transport <supabase\|devtunnel\|clear> [--url <url>] [--anon-key <key>]` | Choose (or clear) the pairing transport. |
+| `weft show-transport` | Print the transport currently in effect and where it came from. |
+| `weft help` | Show usage. |
 
 ---
 

@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Weft — your Copilot session, off the desk</title>
+<meta name="description" content="Weft mirrors your live GitHub Copilot terminal session to your phone over an end-to-end encrypted relay — watch it work, approve its moves, talk back, from anywhere." />
+<meta property="og:title" content="Weft — your Copilot session, off the desk" />
+<meta property="og:description" content="Mirror your live GitHub Copilot session to your phone. Watch it work, approve its moves, talk back — end-to-end encrypted." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="https://aasis21.github.io/weft/assets/session-transcript.webp" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="theme-color" content="#0a0c10" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem('weft-theme');
+      var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      document.documentElement.setAttribute('data-theme', saved || (prefersLight ? 'light' : 'dark'));
+    } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+  })();
+</script>
+
+<style>
+:root {
+  --bg: #0a0c10; --bg-elev: #11141a; --bg-elev-2: #161a21; --code-bg: #0d1117;
+  --fg: #e8eef4; --fg-dim: #9aa6b4; --fg-faint: #5c6470;
+  --border: #1e242d; --border-strong: #2a323d;
+  --accent: #4d8dff;
+  --accent-2: #7db5ff; --accent-3: #ffcf6b;
+  --glow: rgba(77, 141, 255, 0.5);
+  --sans: 'Fraunces', Georgia, serif; --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+[data-theme="light"] {
+  --bg: #f4f6f8; --bg-elev: #ffffff; --bg-elev-2: #fbfcfd; --code-bg: #0d1117;
+  --fg: #131720; --fg-dim: #4c5666; --fg-faint: #8a94a2;
+  --border: #e1e6ec; --border-strong: #ccd4de;
+  --accent: #0969da; --accent-2: #2f6fd0; --accent-3: #c0820a;
+  --glow: rgba(9, 105, 218, 0.28);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+html, body { margin: 0; padding: 0; overflow-x: hidden; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 18px;
+  line-height: 1.55; -webkit-font-smoothing: antialiased; font-feature-settings: "ss01","ss02"; }
+::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+a { color: inherit; }
+code { font-family: var(--mono); font-size: .85em; }
+
+.grain { position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: radial-gradient(circle at 1px 1px, var(--fg-faint) 0.5px, transparent 0);
+  background-size: 24px 24px; opacity: 0.04; }
+.aura { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.aura::before, .aura::after { content: ""; position: absolute; border-radius: 50%; filter: blur(120px); }
+.aura::before { width: 620px; height: 620px; top: -220px; left: 50%; transform: translateX(-60%);
+  background: radial-gradient(circle, var(--accent), transparent 70%); opacity: .16; }
+.aura::after { width: 520px; height: 520px; top: 380px; right: -160px;
+  background: radial-gradient(circle, var(--accent-2), transparent 70%); opacity: .12; }
+main { position: relative; z-index: 1; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+
+.nav { display: flex; align-items: center; justify-content: space-between; max-width: 1120px;
+  margin: 0 auto; padding: 26px 32px; position: relative; z-index: 3; }
+.brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--fg);
+  font-weight: 600; font-size: 21px; letter-spacing: -.01em; }
+.brand-mark { position: relative; width: 30px; height: 30px; border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #fff, var(--accent) 46%, var(--accent-2) 100%);
+  box-shadow: 0 0 18px -2px var(--glow); }
+.brand-mark::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  box-shadow: inset 0 -6px 10px rgba(0,0,0,.25); }
+.brand-word { font-style: italic; font-variation-settings: "SOFT" 60, "WONK" 1; }
+.nav-links { display: flex; gap: 22px; align-items: center; }
+.nav-links a { color: var(--fg-dim); text-decoration: none; font-family: var(--mono); font-size: 13px;
+  transition: color .15s; }
+.nav-links a:hover { color: var(--fg); }
+.theme-toggle { background: transparent; border: 1px solid var(--border); color: var(--fg-dim);
+  width: 32px; height: 32px; border-radius: 8px; cursor: pointer; display: inline-grid;
+  place-items: center; transition: all .15s; }
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+[data-theme="dark"] .ic-sun { display: block; } [data-theme="dark"] .ic-moon { display: none; }
+[data-theme="light"] .ic-sun { display: none; } [data-theme="light"] .ic-moon { display: block; }
+
+.hero { max-width: 1120px; margin: 0 auto; padding: 70px 32px 40px; text-align: center; }
+.hero-eyebrow { display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono);
+  font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-dim);
+  border: 1px solid var(--border); border-radius: 100px; padding: 7px 15px; margin: 0 0 30px;
+  animation: fade-up .7s ease-out both; }
+.hero-eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  animation: dotpulse 2.2s infinite; }
+@keyframes dotpulse { 0% { box-shadow: 0 0 0 0 var(--glow); } 70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; } }
+.hero-title { font-size: clamp(46px, 8.2vw, 92px); line-height: 1.0; letter-spacing: -.025em;
+  font-weight: 400; margin: 0 auto 26px; max-width: 15ch; }
+.hero-title .line { display: block; animation: fade-up .9s ease-out both; }
+.hero-title .line-1 { animation-delay: .06s; } .hero-title .line-2 { animation-delay: .16s; }
+.hero-title em { font-style: italic; font-variation-settings: "SOFT" 100, "WONK" 1; }
+.hero-title .accent { color: var(--accent); position: relative; white-space: nowrap; }
+.hero-title .accent::after { content: ""; position: absolute; left: 0; right: 0; bottom: .08em;
+  height: .07em; background: var(--accent); opacity: .35; border-radius: 2px; }
+.hero-sub { font-size: 20px; color: var(--fg-dim); max-width: 620px; margin: 0 auto 34px;
+  animation: fade-up 1s ease-out .3s both; }
+.hero-cta { display: flex; gap: 13px; justify-content: center; flex-wrap: wrap; margin-bottom: 22px;
+  animation: fade-up 1s ease-out .42s both; }
+.btn { display: inline-flex; align-items: center; gap: 9px; padding: 13px 24px; font-family: var(--mono);
+  font-size: 14px; font-weight: 500; text-decoration: none; border-radius: 11px; transition: all .16s;
+  border: 1px solid transparent; cursor: pointer; }
+.btn-primary { background: var(--accent); color: #071018; box-shadow: 0 10px 30px -12px var(--glow); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 38px -12px var(--glow); }
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--border-strong); }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+.hero-install { max-width: 720px; margin: 18px auto 0; text-align: left; background: var(--code-bg);
+  border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  animation: fade-up 1s ease-out .6s both; }
+.hero-install-head { display: flex; align-items: center; gap: 8px; padding: 11px 16px;
+  border-bottom: 1px solid var(--border); background: rgba(255,255,255,.015); }
+.t-dot { width: 11px; height: 11px; border-radius: 50%; background: #2a2f37; }
+.t-dot:nth-child(1) { background: #ff5f57; } .t-dot:nth-child(2) { background: #febc2e; }
+.t-dot:nth-child(3) { background: #28c840; }
+.install-tabs { display: inline-flex; gap: 4px; margin-left: auto; }
+.install-tab { appearance: none; background: transparent; border: 1px solid var(--border);
+  color: var(--fg-faint); font: 500 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  padding: 6px 11px; border-radius: 6px; cursor: pointer; transition: all .15s; }
+.install-tab:hover { color: var(--fg); border-color: var(--border-strong); }
+.install-tab.is-active { color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.hero-install-cmd { margin: 0; padding: 18px 20px; font: 500 14px/1.6 var(--mono); color: #e8eef4;
+  white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
+.hero-install-cmd .prompt { color: var(--accent); margin-right: 10px; user-select: none; }
+.hero-install-cmd .comment { color: #5c6470; } .hero-install-cmd .ok { color: #28c840; }
+.hero-install-cmd .highlight { color: #fff; border-bottom: 1px dotted #5c6470; }
+
+.hero-shot { position: relative; max-width: 420px; margin: 50px auto 0;
+  animation: fade-up 1.1s ease-out .72s both; }
+.shot { position: relative; border: 1px solid var(--border-strong); border-radius: 22px;
+  overflow: hidden; background: var(--bg-elev); box-shadow: 0 40px 90px -50px rgba(0,0,0,.9); }
+.shot-glow { position: absolute; inset: -1px; pointer-events: none; border-radius: 22px;
+  box-shadow: 0 0 80px -10px var(--glow); opacity: .5; }
+.shot img { display: block; width: 100%; height: auto; }
+
+.strip { border-block: 1px solid var(--border); margin-top: 70px; background: rgba(255,255,255,.012); }
+.strip-inner { max-width: 1120px; margin: 0 auto; padding: 20px 32px; display: flex; flex-wrap: wrap;
+  gap: 12px 26px; justify-content: center; }
+.badge { font-family: var(--mono); font-size: 12.5px; color: var(--fg-faint); }
+.badge b { color: var(--fg-dim); font-weight: 500; }
+
+section { max-width: 1120px; margin: 0 auto; padding: 90px 32px; }
+.section-head { max-width: 720px; margin-bottom: 46px; }
+.section-head.center { margin-inline: auto; text-align: center; }
+.kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--accent); }
+h2 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.08; font-weight: 400; letter-spacing: -.02em;
+  margin: 14px 0 0; }
+h2 em { font-style: italic; font-variation-settings: "SOFT" 100, "WONK" 1; color: var(--accent); }
+.section-lede { font-size: 18px; color: var(--fg-dim); margin: 16px 0 0; }
+.section-head.center .section-lede { margin-inline: auto; }
+
+.feature-grid { list-style: none; margin: 0; padding: 0; display: grid;
+  grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.feature-grid li { background: var(--bg); padding: 28px 26px; }
+.feat-num { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.feature-grid h3 { font-size: 21px; font-weight: 500; margin: 14px 0 8px; letter-spacing: -.01em; }
+.feature-grid p { font-size: 15.5px; color: var(--fg-dim); margin: 0; line-height: 1.5; }
+
+.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; max-width: 640px; margin: 0 auto; }
+.shot-fig { margin: 0; }
+.shot-fig figcaption { font-size: 14.5px; color: var(--fg-dim); margin-top: 14px; }
+.shot-fig figcaption b { color: var(--fg); font-weight: 500; }
+
+.states { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.state h4 { font-size: 17px; font-weight: 500; margin: 12px 0 4px; }
+.state p { font-size: 14px; color: var(--fg-dim); margin: 0; }
+.swatch { width: 100%; height: 64px; border-radius: 12px; border: 1px solid var(--border-strong); }
+.s-1 { background: radial-gradient(circle at 40% 35%, #fff, #28c840 60%); }
+.s-2 { background: radial-gradient(circle at 40% 35%, #fff, var(--accent) 60%); }
+.s-3 { background: radial-gradient(circle at 40% 35%, #fff, var(--accent-3) 60%); }
+.s-4 { background: radial-gradient(circle at 40% 35%, #fff, #7f93c9 60%); }
+
+table.cmds { width: 100%; border-collapse: collapse; font-size: 15px; }
+table.cmds td { border-top: 1px solid var(--border); padding: 13px 12px; vertical-align: top; }
+table.cmds td:first-child { font-family: var(--mono); color: var(--accent); white-space: nowrap; width: 1%; }
+table.cmds td:last-child { color: var(--fg-dim); }
+
+.arch { border: 1px solid var(--border); border-radius: 16px; padding: 30px; background: var(--bg-elev);
+  font-family: var(--mono); font-size: 14px; color: var(--fg-dim); line-height: 1.9; overflow-x: auto; }
+.arch b { color: var(--fg); }
+.arch .accentline { color: var(--accent); }
+
+.closing { text-align: center; }
+footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto; padding: 40px 32px;
+  display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+.foot-brand { display: flex; align-items: center; gap: 10px; font-style: italic;
+  font-variation-settings: "SOFT" 60, "WONK" 1; }
+.foot-links { display: flex; gap: 18px; font-family: var(--mono); font-size: 13px; }
+.foot-links a { color: var(--fg-dim); text-decoration: none; } .foot-links a:hover { color: var(--accent); }
+.foot-meta { flex-basis: 100%; font-size: 13px; color: var(--fg-faint); margin: 6px 0 0; }
+.foot-meta a { color: var(--accent); text-decoration: none; }
+
+@keyframes fade-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+.reveal { opacity: 0; transform: translateY(20px); transition: opacity .7s ease-out, transform .7s ease-out; }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; } }
+
+@media (max-width: 860px) {
+  .feature-grid { grid-template-columns: 1fr; } .gallery { grid-template-columns: 1fr; }
+  .states { grid-template-columns: 1fr 1fr; } .nav-links a:not(.nav-cta) { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="aura"></div>
+
+<nav class="nav">
+  <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-word">weft</span></a>
+  <div class="nav-links">
+    <a href="#what">what</a>
+    <a href="#action">see it</a>
+    <a href="#install">install</a>
+    <a class="nav-cta" href="https://github.com/aasis21/weft" target="_blank" rel="noopener">github ↗</a>
+    <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
+      <svg class="ic-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
+      <svg class="ic-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </div>
+</nav>
+
+<main id="top">
+  <header class="hero">
+    <span class="hero-eyebrow"><span class="dot"></span> github copilot, off the desk</span>
+    <h1 class="hero-title">
+      <span class="line line-1">Your Copilot session,</span>
+      <span class="line line-2">now in your <em class="accent">weft</em>.</span>
+    </h1>
+    <p class="hero-sub">Weft mirrors your live GitHub Copilot terminal session to your phone over an
+      end-to-end encrypted relay. See what it's doing, tell it what to do next, and approve its
+      moves — wherever you are.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#install">Install Weft</a>
+      <a class="btn btn-ghost" href="https://github.com/aasis21/weft" target="_blank" rel="noopener">View on GitHub ↗</a>
+    </div>
+
+    <div class="hero-install">
+      <div class="hero-install-head">
+        <span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span>
+        <div class="install-tabs">
+          <button class="install-tab" data-shell="pwsh">PowerShell</button>
+          <button class="install-tab" data-shell="bash">Bash</button>
+        </div>
+      </div>
+      <pre class="hero-install-cmd" data-shell="pwsh"><span class="prompt">PS&gt;</span><span class="highlight">irm https://useweft.netlify.app/install.ps1 | iex</span></pre>
+      <pre class="hero-install-cmd" data-shell="bash" hidden><span class="prompt">$</span><span class="highlight">curl -fsSL https://useweft.netlify.app/install.sh | bash</span></pre>
+    </div>
+
+    <div class="hero-shot">
+      <figure class="shot"><span class="shot-glow" aria-hidden="true"></span>
+        <img src="./assets/session-transcript.webp" width="824" height="1790" alt="A live Copilot session mirrored to a phone, with an inline approval prompt for a shell command." />
+      </figure>
+    </div>
+  </header>
+
+  <div class="strip">
+    <div class="strip-inner">
+      <span class="badge"><b>MIT</b> licensed</span>
+      <span class="badge">Windows · macOS · Linux</span>
+      <span class="badge">End-to-end <b>encrypted</b></span>
+      <span class="badge">One command to install</span>
+    </div>
+  </div>
+
+  <section id="what">
+    <header class="section-head reveal">
+      <span class="kicker">01 · What it does</span>
+      <h2>Your desk keeps working. <em>You</em> don't have to be there.</h2>
+      <p class="section-lede">Weft joins your live `copilot` session as a second client. Your phone
+        sees exactly what your terminal sees, and can act on it.</p>
+    </header>
+    <ol class="feature-grid">
+      <li class="reveal"><span class="feat-num">01</span><h3>Mirror the session.</h3><p>Every message, tool call, and diff streams to your phone in real time, laid out like a real chat.</p></li>
+      <li class="reveal"><span class="feat-num">02</span><h3>Approve from anywhere.</h3><p>Shell commands and edits that need your sign-off show up as an inline card — allow once, always, or deny.</p></li>
+      <li class="reveal"><span class="feat-num">03</span><h3>Talk back.</h3><p>Type or speak a reply and it lands in your terminal session exactly like you'd typed it there.</p></li>
+      <li class="reveal"><span class="feat-num">04</span><h3>End-to-end encrypted.</h3><p>The relay only ever sees opaque envelopes — pairing and every message are encrypted device-to-device.</p></li>
+      <li class="reveal"><span class="feat-num">05</span><h3>Bring your own backend.</h3><p>Pair over Supabase realtime or a Visual Studio dev tunnel — pick the transport, or self-host it.</p></li>
+      <li class="reveal"><span class="feat-num">06</span><h3>One command, zero setup.</h3><p><code>weft start</code> on your desk, scan a QR from your phone. No accounts to create.</p></li>
+    </ol>
+  </section>
+
+  <section id="action">
+    <header class="section-head center reveal">
+      <span class="kicker">02 · See it in action</span>
+      <h2>It <em>looks</em> like your terminal, in your pocket.</h2>
+      <p class="section-lede">The onboarding screen and a live, working session — both real captures of the app.</p>
+    </header>
+    <div class="gallery">
+      <figure class="shot-fig reveal"><div class="shot"><span class="shot-glow" aria-hidden="true"></span>
+        <img src="./assets/landing-hero.webp" width="824" height="1790" alt="Weft's onboarding screen — scan a QR, paste a code, or try the demo." loading="lazy" /></div>
+        <figcaption><b>Pair in seconds.</b> Scan a QR, paste a code, or try a live demo first.</figcaption></figure>
+      <figure class="shot-fig reveal"><div class="shot"><span class="shot-glow" aria-hidden="true"></span>
+        <img src="./assets/session-chat.webp" width="824" height="1790" alt="A working Copilot session mirrored live on the phone." loading="lazy" /></div>
+        <figcaption><b>Watch it work.</b> Tool calls, diffs, and status stream in as they happen.</figcaption></figure>
+    </div>
+    <div class="states" style="margin-top:28px">
+      <div class="state reveal"><div class="swatch s-1" aria-hidden="true"></div><h4>Live</h4><p>Connected and streaming your session.</p></div>
+      <div class="state reveal"><div class="swatch s-2" aria-hidden="true"></div><h4>Working</h4><p>Copilot is actively running a turn.</p></div>
+      <div class="state reveal"><div class="swatch s-3" aria-hidden="true"></div><h4>Needs approval</h4><p>Waiting on you to allow or deny.</p></div>
+      <div class="state reveal"><div class="swatch s-4" aria-hidden="true"></div><h4>Offline</h4><p>Desk session ended or unreachable.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <header class="section-head reveal">
+      <span class="kicker">03 · Install</span>
+      <h2>Up and running in <em>one</em> command.</h2>
+      <p class="section-lede">The installer registers the <code>weft</code> command and the Copilot CLI extension. Tabs default to your shell and remember your choice.</p>
+    </header>
+    <div class="hero-install" style="margin-inline:0">
+      <div class="hero-install-head">
+        <span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span>
+        <div class="install-tabs">
+          <button class="install-tab" data-shell="pwsh">PowerShell</button>
+          <button class="install-tab" data-shell="bash">Bash</button>
+        </div>
+      </div>
+      <pre class="hero-install-cmd" data-shell="pwsh"><span class="comment"># install</span>
+<span class="prompt">PS&gt;</span><span class="highlight">irm https://useweft.netlify.app/install.ps1 | iex</span>
+<span class="ok">✓ installed — run `weft start` from anywhere</span></pre>
+      <pre class="hero-install-cmd" data-shell="bash" hidden><span class="comment"># install</span>
+<span class="prompt">$</span><span class="highlight">curl -fsSL https://useweft.netlify.app/install.sh | bash</span>
+<span class="ok">✓ installed — run `weft start` from anywhere</span></pre>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <header class="section-head reveal">
+      <span class="kicker">04 · Under the hood</span>
+      <h2>Two thin ends, an <em>opaque</em> middle.</h2>
+      <p class="section-lede">The Copilot CLI extension and the mobile app do all the real work; the relay just forwards encrypted envelopes.</p>
+    </header>
+    <div class="arch reveal">
+<b>copilot CLI</b> ── /weft extension ──┐
+                                          <span class="accentline">encrypted envelopes only</span>
+                    device pairing ──►  <b>relay</b>  (Supabase realtime · dev tunnel)
+                                          <span class="accentline">encrypted envelopes only</span>
+                                        └── <b>Weft mobile</b> (web / iOS / Android)
+    </div>
+  </section>
+
+  <section id="commands">
+    <header class="section-head reveal">
+      <span class="kicker">05 · Commands</span>
+      <h2>Everything you can <em>say</em>.</h2>
+    </header>
+    <table class="cmds reveal">
+      <tbody>
+        <tr><td>weft start</td><td>Start the Device Station and print a QR to pair from your phone.</td></tr>
+        <tr><td>weft add-project &lt;name&gt; &lt;path&gt;</td><td>Register a project directory Weft can launch sessions in.</td></tr>
+        <tr><td>weft remove-project &lt;name&gt;</td><td>Forget a registered project.</td></tr>
+        <tr><td>weft list-projects</td><td>List registered projects and which one is default.</td></tr>
+        <tr><td>weft set-default &lt;name&gt;</td><td>Choose the project a bare pairing launches into.</td></tr>
+        <tr><td>weft set-transport &lt;supabase|devtunnel|clear&gt;</td><td>Choose (or clear) the pairing transport.</td></tr>
+        <tr><td>weft show-transport</td><td>Print the transport currently in effect and where it came from.</td></tr>
+        <tr><td>weft help</td><td>Show usage.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="closing reveal">
+    <h2>Your session was never <em>stuck</em> at your desk.</h2>
+    <div class="hero-cta" style="margin-top:24px">
+      <a class="btn btn-primary" href="#install">Install Weft</a>
+      <a class="btn btn-ghost" href="https://github.com/aasis21/weft" target="_blank" rel="noopener">View on GitHub ↗</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="foot-brand"><span class="brand-mark" aria-hidden="true"></span><span>weft</span></div>
+  <div class="foot-links">
+    <a href="https://github.com/aasis21/weft" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://aasis21.github.io/engram/" target="_blank" rel="noopener">Engram ↗</a>
+    <a href="https://aasis21.github.io/Anya/" target="_blank" rel="noopener">Anya ↗</a>
+    <a href="https://aasis21.github.io/vox/" target="_blank" rel="noopener">vox ↗</a>
+  </div>
+  <p class="foot-meta">Built by <a href="https://github.com/aasis21" target="_blank" rel="noopener">@aasis21</a> · MIT · a Copilot CLI extension + mobile app, end-to-end encrypted.</p>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('weft-theme', next); } catch (e) {}
+    });
+  })();
+
+  (function () {
+    var DEFAULT = (navigator.platform || '').toLowerCase().indexOf('win') === 0 ? 'pwsh' : 'bash';
+    var saved; try { saved = localStorage.getItem('weft-shell'); } catch (e) {}
+    function apply(shell) {
+      try { localStorage.setItem('weft-shell', shell); } catch (e) {}
+      document.querySelectorAll('[data-shell]').forEach(function (el) {
+        var matches = el.getAttribute('data-shell') === shell;
+        if (el.classList.contains('install-tab')) {
+          el.classList.toggle('is-active', matches);
+          el.setAttribute('aria-selected', matches ? 'true' : 'false');
+        } else { el.hidden = !matches; }
+      });
+    }
+    document.querySelectorAll('.install-tab').forEach(function (b) {
+      b.addEventListener('click', function () { apply(b.getAttribute('data-shell')); });
+    });
+    apply((saved === 'pwsh' || saved === 'bash') ? saved : DEFAULT);
+  })();
+
+  (function () {
+    var els = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window)) { els.forEach(function (e) { e.classList.add('in'); }); return; }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
+    els.forEach(function (e) { io.observe(e); });
+  })();
+</script>
+</body>
+</html>
