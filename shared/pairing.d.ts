@@ -2,7 +2,7 @@ import type { Transport, TransportDescriptor } from "./transport";
 
 export declare const PAIR_VERSION: 1;
 
-/** Pairing payload kinds: a normal mirrored session vs an ephemeral `weft-cli` listener. */
+/** Pairing payload kinds: a normal mirrored session vs an ephemeral `weft` listener. */
 export type PairKind = "session" | "listener";
 export declare const PAIR_KIND: {
   readonly SESSION: "session";
@@ -15,7 +15,7 @@ export interface PairingPayload {
   pub: string;
   /** Which transport + endpoint the phone should connect with. Laptop-resolved, non-secret. */
   transport: TransportDescriptor;
-  /** Absent for normal sessions; "listener" marks a `weft-cli` spawn-capable device. */
+  /** Absent for normal sessions; "listener" marks a `weft` spawn-capable device. */
   kind?: PairKind;
 }
 

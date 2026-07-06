@@ -263,7 +263,7 @@ export interface PairAckMsg {
 
 // ---- payload shapes: phone-launched sessions (#156) ------------------------
 export type SpawnMode = "default" | "allow-all";
-/** One registered project a `weft-cli` listener can spawn a session in. */
+/** One registered project a `weft` listener can spawn a session in. */
 export interface ListenerProject {
   name: string;
   /** Absolute path (informational for the phone; selection is by `name`). */
@@ -275,7 +275,7 @@ export interface ProjectListMsg {
   projects: ListenerProject[];
   /** The listener machine's display name, or null. */
   deviceName: string | null;
-  /** Stable, non-secret device id persisted across `weft-cli start` restarts, or null. */
+  /** Stable, non-secret device id persisted across `weft start` restarts, or null. */
   deviceId?: string | null;
 }
 export interface SpawnSessionMsg {

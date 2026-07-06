@@ -44,10 +44,10 @@ test("defaults to supabase when nothing is configured and supabase env vars are 
 });
 
 test("throws an actionable error when nothing is configured and no supabase env vars exist", () => {
-  assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), /weft-cli set-transport/);
+  assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), /weft set-transport/);
 });
 
-test("a persisted `weft-cli set-transport` choice wins over the supabase default", () => {
+test("a persisted `weft set-transport` choice wins over the supabase default", () => {
   saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
   assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "local" });
 });

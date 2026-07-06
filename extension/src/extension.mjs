@@ -75,7 +75,7 @@ const identityFileWasPresent = Boolean(handedOffIdentity);
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
 const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
 // Resolved once from this laptop's own env (WEFT_TRANSPORT / WEFT_SUPABASE_* / WEFT_WEBPUBSUB_*)
-// or the persisted `weft-cli set-transport` default, and stamped into the QR below so the phone
+// or the persisted `weft set-transport` default, and stamped into the QR below so the phone
 // builds a matching transport at connect time, with no pre-baked config of its own. A
 // misconfigured transport (e.g. WEFT_TRANSPORT=webpubsub without WEFT_WEBPUBSUB_NEGOTIATE_URL) is
 // not something pairing can work around, so this fails fast at load with a clear, actionable
@@ -125,7 +125,7 @@ const showPairing = async (context) => {
 // Rebuild transportDescriptor/pairingPayload for `name` and tear down any live relay so the next
 // connectRelayWithRetry() picks up the new transport. Returns false (after logging a clear error)
 // for an unknown/misconfigured name, leaving the current transport untouched. This only affects
-// the running session — it never writes to the persisted `weft-cli set-transport` config.
+// the running session — it never writes to the persisted `weft set-transport` config.
 async function switchTransport(name) {
   const normalized = name.trim().toLowerCase();
   if (normalized === "devtunnel") {

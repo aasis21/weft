@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Persisted `weft-cli set-transport` choice, read by resolveTransportDescriptor() in
+// Persisted `weft set-transport` choice, read by resolveTransportDescriptor() in
 // transportFactory.mjs. Mirrors projects.mjs's storage pattern (same ~/.weft home, same
 // atomic-write-then-rename) so both the Copilot CLI extension (extension.mjs) and the
-// device-station CLI (weft-cli.mjs) pick up whatever transport the user configured, without
+// device-station CLI (weft.mjs) pick up whatever transport the user configured, without
 // needing an explicit WEFT_TRANSPORT env var / .env file (which remains a supported override).
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ function ensureDir(baseDir) {
 }
 
 /** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. "local" and
- * "webpubsub" are intentionally no longer offered by any user-facing command (weft-cli
+ * "webpubsub" are intentionally no longer offered by any user-facing command (weft
  * set-transport, /weft <name>) — see transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES — but are
  * still accepted here so existing persisted configs / tests keep working. "devtunnel" persists as
  * a bare marker (no url yet): the actual shared-relay URL is provisioned fresh per channelId at
@@ -52,7 +52,7 @@ export function loadTransportConfig({ baseDir } = {}) {
   }
 }
 
-/** Persist a transport descriptor as the user's chosen default (`weft-cli set-transport`). */
+/** Persist a transport descriptor as the user's chosen default (`weft set-transport`). */
 export function saveTransportConfig(descriptor, { baseDir } = {}) {
   if (!isValidTransportDescriptor(descriptor)) {
     throw new Error(

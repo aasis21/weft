@@ -67,7 +67,7 @@ export const SUBTYPE = Object.freeze({
     RECENT_TURNS: "recent_turns",
     STATE_REQUEST: "state_request",
     STATE_SNAPSHOT: "state_snapshot",
-    // --- phone-launched sessions (#156): talk to a `weft-cli` listener over its paired channel ---
+    // --- phone-launched sessions (#156): talk to a `weft` listener over its paired channel ---
     // phone -> listener: give me your registered projects (sent right after pairing).
     PROJECT_LIST_REQUEST: "project_list_request",
     // listener -> phone: the machine's registered projects + the listener's display name.
@@ -284,7 +284,7 @@ export const projectListRequest = () =>
 /**
  * Listener -> phone: the machine's registered projects + the listener's display name. `projects`
  * is `[{ name, path, isDefault }]` (path is informational for the phone; selection is by name).
- * `deviceId` (optional) is a STABLE, NON-SECRET id the listener persists across `weft-cli start`
+ * `deviceId` (optional) is a STABLE, NON-SECRET id the listener persists across `weft start`
  * restarts (see extension/src/deviceIdentity.mjs) so the phone can recognize "same laptop" even
  * though its ephemeral pairing `channelId`/keypair are freshly minted every run (by design, for
  * forward secrecy — see docs/pairing.md). Never derived from or tied to any cryptographic key.
@@ -317,7 +317,7 @@ export const forgetDevice = () =>
 /**
  * Listener -> phone: proactive liveness beat for the DEVICE channel (distinct from the per-session
  * heartbeat()). Sent on an interval whether or not the phone has asked for anything, so a hung or
- * crashed `weft-cli` process shows as offline even if the underlying transport still reports
+ * crashed `weft` process shows as offline even if the underlying transport still reports
  * "connected". `deviceId` is the same stable, non-secret id carried in projectList().
  */
 export const deviceHeartbeat = (deviceId = null) =>

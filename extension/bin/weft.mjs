@@ -38,19 +38,19 @@ try {
     await start();
   } else if (command === "add-project") {
     const [name, path, ...rest] = args;
-    if (!name || !path) throw new Error("Usage: weft-cli add-project <name> <path> [--default]");
+    if (!name || !path) throw new Error("Usage: weft add-project <name> <path> [--default]");
     const project = addProject(name, path, { makeDefault: rest.includes("--default") });
     console.log(`Added project ${project.name}: ${project.path}${project.default ? " (default)" : ""}`);
   } else if (command === "remove-project") {
     const [name] = args;
-    if (!name) throw new Error("Usage: weft-cli remove-project <name>");
+    if (!name) throw new Error("Usage: weft remove-project <name>");
     removeProject(name);
     console.log(`Removed project ${name}`);
   } else if (command === "list-projects") {
     printProjects(listProjects());
   } else if (command === "set-default") {
     const [name] = args;
-    if (!name) throw new Error("Usage: weft-cli set-default <name>");
+    if (!name) throw new Error("Usage: weft set-default <name>");
     setDefault(name);
     console.log(`Default project set to ${name}`);
   } else if (command === "set-transport") {
@@ -105,7 +105,7 @@ async function start() {
   console.log(`   ${c.dim(`Heartbeat every ${Math.round(listener.heartbeatMs / 1000)}s keeps the pairing alive.`)}\n`);
   console.log(`${c.bold("3.")} Projects available to spawn sessions in:\n`);
   printProjects(listProjects());
-  console.log(c.dim("   Hint: add projects with `weft-cli add-project <name> <path> --default`.\n"));
+  console.log(c.dim("   Hint: add projects with `weft add-project <name> <path> --default`.\n"));
   console.log(`${c.bold("4.")} Waiting for your phone to connect…\n`);
   status.start();
 
@@ -326,7 +326,7 @@ function setTransport(args) {
     const url = flags.url;
     const anonKey = flags["anon-key"];
     if (!url || !anonKey) {
-      throw new Error("Usage: weft-cli set-transport supabase --url <url> --anon-key <key>");
+      throw new Error("Usage: weft set-transport supabase --url <url> --anon-key <key>");
     }
     saveTransportConfig({ kind: "supabase", url, anonKey });
   } else if (kind === "devtunnel") {
@@ -342,7 +342,7 @@ function setTransport(args) {
     console.log("Cleared the configured transport; falling back to env vars / the default (supabase).");
     return;
   } else {
-    throw new Error("Usage: weft-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
+    throw new Error("Usage: weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
   }
   console.log(`Transport set to ${kind}. This is stamped into every pairing QR, so re-pair your phone to pick it up.`);
 }
@@ -352,19 +352,19 @@ function showTransport() {
   const descriptor = resolveTransportDescriptor();
   const source = process.env.WEFT_TRANSPORT
     ? "WEFT_TRANSPORT env var"
-    : "weft-cli set-transport (or the built-in default)";
+    : "weft set-transport (or the built-in default)";
   console.log(`Current transport: ${describeTransport(descriptor)}`);
   console.log(c.dim(`Source: ${source}`));
 }
 
 function usage() {
   console.log(`Usage:
-  weft-cli start
-  weft-cli add-project <name> <path> [--default]
-  weft-cli remove-project <name>
-  weft-cli list-projects
-  weft-cli set-default <name>
-  weft-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
-  weft-cli show-transport
-  weft-cli help`);
+  weft start
+  weft add-project <name> <path> [--default]
+  weft remove-project <name>
+  weft list-projects
+  weft set-default <name>
+  weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
+  weft show-transport
+  weft help`);
 }

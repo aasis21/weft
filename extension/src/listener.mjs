@@ -77,7 +77,7 @@ export function createListener({
   // ~/.weft by default (see projects.mjs's weftHome()) — overridable so tests don't touch a real
   // user's Weft home when exercising the connections.json registry.
   connectionsHome = undefined,
-  // Optional UI hooks so a host (e.g. weft-cli) can render a live connection/heartbeat indicator
+  // Optional UI hooks so a host (e.g. weft) can render a live connection/heartbeat indicator
   // without this module knowing anything about terminals or rendering.
   onDeviceConnected = null,
   onDeviceDisconnected = null,
@@ -348,7 +348,7 @@ export function createListener({
       return defaultProject;
     }
     // No project registered/selected as default yet (e.g. a fresh install with no
-    // `weft-cli add-project` run) — rather than erroring out, fall back to the user's home
+    // `weft add-project` run) — rather than erroring out, fall back to the user's home
     // directory so the phone can still spawn a working session immediately.
     return { name: "home", path: homedir() };
   }

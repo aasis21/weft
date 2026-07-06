@@ -917,7 +917,7 @@ export class SessionRuntime {
     const channelId = parsed.channelId;
     const prior = this.device(channelId);
     // Only a genuinely NEW device counts against the cap — re-scanning an already-registered
-    // listener (e.g. after `weft-cli start` was restarted and minted a fresh channelId, before
+    // listener (e.g. after `weft start` was restarted and minted a fresh channelId, before
     // reconcileDevice folds it in) must never be blocked by its own prior entry.
     if (!prior && this.store.getState().sessions.devices.length >= MAX_DEVICES) {
       throw new Error(
@@ -1124,7 +1124,7 @@ export class SessionRuntime {
       const msg = message.msg as ProjectListMsg;
       this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
-      // The listener's deviceId is stable across `weft-cli start` restarts even though this
+      // The listener's deviceId is stable across `weft start` restarts even though this
       // channelId is a fresh ephemeral pairing channel (forward secrecy). Fold any stale entry
       // for the same physical laptop into this one instead of leaving a dead duplicate around.
       if (msg.deviceId) void this.reconcileDevice(channelId, msg.deviceId);
@@ -1642,7 +1642,7 @@ export class SessionRuntime {
       }
       // Device (listener) channels: flip the Online dot to Offline once its heartbeat/lastSeenAt
       // goes stale, rather than trusting the transport's own connect state alone (a hung/crashed
-      // `weft-cli` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
+      // `weft` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
       for (const device of this.store.getState().sessions.devices) {
         if (!device.connected || !device.lastSeenAt) continue;
         if (now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {

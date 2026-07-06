@@ -89,7 +89,7 @@ export interface SessionMeta {
   scannedAt?: number;
   /** Stable, non-secret `deviceId` (see extension/src/deviceIdentity.mjs) of the listener that
    *  spawned this session via "Start session", if any — lets the Device details screen list every
-   *  session launched from a given laptop even across `weft-cli start` restarts. Undefined for
+   *  session launched from a given laptop even across `weft start` restarts. Undefined for
    *  sessions joined by scanning a session QR directly. */
   spawnedFromDeviceId?: string;
   /** Display name of the spawning device at spawn time (falls back label if it's since renamed). */

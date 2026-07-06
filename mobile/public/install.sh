@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://useweft.netlify.app/install.sh | bash
 #
-# Downloads the prebuilt Weft Copilot CLI extension (+ the standalone `weft-cli`
+# Downloads the prebuilt Weft Copilot CLI extension (+ the standalone `weft`
 # Device Station command) and drops them where `copilot` auto-discovers extensions
 # (~/.copilot/extensions/weft), wired to your chosen relay transport.
 # No git clone, no Node build required on your machine.
@@ -73,8 +73,8 @@ ok "extension.mjs -> $INSTALL_DIR  (the Copilot CLI extension itself)"
 # session - must always be installed alongside extension.mjs, not just on first install.
 curl -fsSL "$BASE/relayServerProcess.mjs" -o "$INSTALL_DIR/relayServerProcess.mjs"
 ok "relayServerProcess.mjs -> $INSTALL_DIR  (shared devtunnel relay, only spawned if you use devtunnel)"
-curl -fsSL "$BASE/weft-cli.mjs" -o "$INSTALL_DIR/weft-cli.mjs"
-ok "weft-cli.mjs -> $INSTALL_DIR  (standalone Device Station CLI)"
+curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"
+ok "weft.mjs -> $INSTALL_DIR  (standalone Device Station CLI)"
 
 # ---------------------------------------------------------------------------
 step 3 "Writing relay config"
@@ -96,7 +96,7 @@ if [ -f "$ENV_PATH" ] && [ "${WEFT_FORCE:-0}" != "1" ]; then
   if [ -n "$added" ]; then
     ok "migrated your .env to namespaced vars (+$added)"
   else
-    ok "kept your existing .env (set WEFT_FORCE=1 to overwrite, or run: weft-cli set-transport $TRANSPORT)"
+    ok "kept your existing .env (set WEFT_FORCE=1 to overwrite, or run: weft set-transport $TRANSPORT)"
   fi
 else
   cat > "$ENV_PATH" <<EOF
@@ -107,7 +107,7 @@ else
 # Names are Weft-namespaced on purpose: a generic SUPABASE_URL / SUPABASE_ANON_KEY
 # exported globally for another Supabase project would otherwise hijack the relay.
 #
-# Change your default any time with: weft-cli set-transport <supabase|devtunnel>
+# Change your default any time with: weft set-transport <supabase|devtunnel>
 WEFT_TRANSPORT=$TRANSPORT
 WEFT_SUPABASE_URL=$RELAY_URL
 WEFT_SUPABASE_ANON_KEY=$RELAY_KEY
@@ -117,15 +117,15 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-step 4 'Registering the `weft-cli` command'
+step 4 'Registering the `weft` command'
 mkdir -p "$BIN_DIR"
-SHIM_PATH="$BIN_DIR/weft-cli"
+SHIM_PATH="$BIN_DIR/weft"
 cat > "$SHIM_PATH" <<EOF
 #!/usr/bin/env bash
-exec node "$INSTALL_DIR/weft-cli.mjs" "\$@"
+exec node "$INSTALL_DIR/weft.mjs" "\$@"
 EOF
 chmod +x "$SHIM_PATH"
-ok "weft-cli -> $SHIM_PATH"
+ok "weft -> $SHIM_PATH"
 case ":$PATH:" in
   *":$BIN_DIR:"*)
     ok "$BIN_DIR is already on your PATH"
@@ -143,7 +143,7 @@ case ":$PATH:" in
       fi
     done
     warn "Added $BIN_DIR to PATH in your shell rc file(s)."
-    warn "Open a NEW terminal (or 'source ~/.profile') for \`weft-cli\` to be found."
+    warn "Open a NEW terminal (or 'source ~/.profile') for \`weft\` to be found."
     ;;
 esac
 
@@ -155,6 +155,6 @@ echo "  $(bold '2.') Open $(cyan 'https://useweft.netlify.app') on your phone an
 echo "  $(bold '3.') Trigger a Copilot action and approve / deny from your phone."
 echo ""
 echo "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
-echo "  (no Copilot CLI open, just this)? Open a new terminal and run: $(cyan 'weft-cli start')"
+echo "  (no Copilot CLI open, just this)? Open a new terminal and run: $(cyan 'weft start')"
 echo ""
 printf '%s\n' "$(dim "Uninstall: rm -rf \"$INSTALL_DIR\" \"$SHIM_PATH\"")"

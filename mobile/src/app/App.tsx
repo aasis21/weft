@@ -210,7 +210,7 @@ export default function App(): JSX.Element {
   }
 
   // Single-device drill-down: live status, event log, and every session ever spawned from this
-  // device (matched by its stable deviceId, so it survives weft-cli restarts).
+  // device (matched by its stable deviceId, so it survives weft restarts).
   if (deviceDetailsChannelId) {
     const device = snapshot.devices.find((d) => d.channelId === deviceDetailsChannelId);
     if (device) {

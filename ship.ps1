@@ -57,7 +57,7 @@ function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
     $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
-    $weftCliBundle = Join-Path $root 'extension\dist\weft-cli.mjs'
+    $weftCliBundle = Join-Path $root 'extension\dist\weft.mjs'
     $publicBundle = Join-Path $root 'mobile\public\extension.mjs'
     $distDir      = Join-Path $root 'mobile\dist'
 
@@ -75,7 +75,7 @@ try {
         if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
         Ok 'extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)'
         if (-not (Test-Path $weftCliBundle)) { throw "extension build did not produce $weftCliBundle" }
-        Ok 'extension/dist/weft-cli.mjs  (standalone Device Station CLI, no repo checkout needed)'
+        Ok 'extension/dist/weft.mjs  (standalone Device Station CLI, no repo checkout needed)'
 
         Step 'Refreshing site bits (extension bundle -> mobile/public)'
         Copy-Item $extBundle $publicBundle -Force
@@ -83,9 +83,9 @@ try {
         $publicRelayBundle = Join-Path $root 'mobile\public\relayServerProcess.mjs'
         Copy-Item $relayBundle $publicRelayBundle -Force
         Ok 'mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)'
-        $publicWeftCliBundle = Join-Path $root 'mobile\public\weft-cli.mjs'
+        $publicWeftCliBundle = Join-Path $root 'mobile\public\weft.mjs'
         Copy-Item $weftCliBundle $publicWeftCliBundle -Force
-        Ok 'mobile/public/weft-cli.mjs  (served as /weft-cli.mjs by the installer)'
+        Ok 'mobile/public/weft.mjs  (served as /weft.mjs by the installer)'
 
         Step 'Building mobile web app (Vite)'
         npm run build -w '@aasis21/weft-mobile' | Out-Null
@@ -139,24 +139,24 @@ try {
             Warn "no $relayBundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
         }
         if (Test-Path $weftCliBundle) {
-            Copy-Item $weftCliBundle (Join-Path $dest 'weft-cli.mjs') -Force
-            Ok "weft-cli.mjs -> $dest  (standalone Device Station CLI)"
-            $shimPath = Join-Path $dest 'weft-cli.cmd'
+            Copy-Item $weftCliBundle (Join-Path $dest 'weft.mjs') -Force
+            Ok "weft.mjs -> $dest  (standalone Device Station CLI)"
+            $shimPath = Join-Path $dest 'weft.cmd'
             @"
 @echo off
-node "%~dp0weft-cli.mjs" %*
+node "%~dp0weft.mjs" %*
 "@ | Set-Content -Path $shimPath -Encoding ascii
             $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
             $pathEntries = @()
             if ($userPath) { $pathEntries = $userPath -split ';' | Where-Object { $_ } }
             if ($pathEntries -notcontains $dest) {
                 [Environment]::SetEnvironmentVariable('Path', (($pathEntries + $dest) -join ';'), 'User')
-                Ok "weft-cli.cmd -> $dest  (added $dest to your User PATH - open a NEW terminal for it to take effect)"
+                Ok "weft.cmd -> $dest  (added $dest to your User PATH - open a NEW terminal for it to take effect)"
             } else {
-                Ok "weft-cli.cmd -> $dest  (already on your PATH)"
+                Ok "weft.cmd -> $dest  (already on your PATH)"
             }
         } else {
-            Warn "no $weftCliBundle - the standalone \`weft-cli\` command was not (re)installed"
+            Warn "no $weftCliBundle - the standalone \`weft\` command was not (re)installed"
         }
         $envFile = Join-Path $root '.env'
         if (Test-Path $envFile) {

@@ -130,7 +130,7 @@ interface ReconnectMaterial {
 
 /**
  * Reconnect using a previously-derived ECDH keypair instead of minting a new one. Critical for
- * listener devices (#device-reconnect): the laptop's `weft-cli` listener locks onto the FIRST
+ * listener devices (#device-reconnect): the laptop's `weft` listener locks onto the FIRST
  * phone public key it sees per run (`boundPeerPub` in listener.mjs) and silently ignores any hello
  * from a different key ("ignoring pairing from a different phone"). Generating a fresh keypair on
  * every reconnect (as a first-time pairing does) would make the SAME phone look like an intruder

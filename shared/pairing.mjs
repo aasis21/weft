@@ -23,7 +23,7 @@ import { EVENT_TYPE, SUBTYPE } from "./messages.mjs";
 
 export const PAIR_VERSION = 1;
 
-/** Pairing payload kinds: a normal mirrored-session QR vs an ephemeral `weft-cli` listener QR. */
+/** Pairing payload kinds: a normal mirrored-session QR vs an ephemeral `weft` listener QR. */
 export const PAIR_KIND = Object.freeze({ SESSION: "session", LISTENER: "listener" });
 
 /**
@@ -58,7 +58,7 @@ function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {
  * descriptor (kind + non-secret endpoint) the laptop resolved from its own env — the laptop is
  * the single source of truth for transport selection; the phone builds its transport straight
  * from this, with no pre-baked config of its own. `kind` marks whether this is a normal mirrored
- * session ("session", default) or a `weft-cli` listener ("listener") the phone should register as
+ * session ("session", default) or a `weft` listener ("listener") the phone should register as
  * a spawn-capable device rather than open as a session.
  */
 export function buildPairingPayload({ channelId, publicKeyB64, transport, kind = PAIR_KIND.SESSION }) {

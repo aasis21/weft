@@ -50,7 +50,7 @@ function defaultEnvFiles() {
  * per-connection token is minted separately by that endpoint, never carried here.
  *
  * Precedence: an explicit WEFT_TRANSPORT env var (e.g. from a repo-root .env, for CI/power-user
- * overrides) wins outright. Otherwise, the persisted choice from `weft-cli set-transport` (see
+ * overrides) wins outright. Otherwise, the persisted choice from `weft set-transport` (see
  * transportConfig.mjs) applies. With neither set, Weft defaults to Supabase — Weft's own relay is
  * the supported out-of-the-box path — reading WEFT_SUPABASE_URL/WEFT_SUPABASE_ANON_KEY (or the
  * generic SUPABASE_* fallback); `local` is opt-in only, for same-machine testing.
@@ -71,15 +71,15 @@ export function resolveTransportDescriptor({ baseDir } = {}) {
     return resolveFromEnv("supabase");
   } catch (err) {
     throw new Error(
-      `${err.message}\nWeft: no transport configured. Run \`weft-cli set-transport supabase ` +
-        "--url <url> --anon-key <key>\` (or `weft-cli set-transport local` to test without a " +
+      `${err.message}\nWeft: no transport configured. Run \`weft set-transport supabase ` +
+        "--url <url> --anon-key <key>\` (or `weft set-transport local` to test without a " +
         "relay) to choose one.",
     );
   }
 }
 
 /**
- * Transport kinds a user can pick via a user-facing command (`weft-cli set-transport`, `/weft
+ * Transport kinds a user can pick via a user-facing command (`weft set-transport`, `/weft
  * <name>`). Only the two "supported" transports Weft documents/installs are listed here:
  * Supabase (hosted, zero-config) and devtunnel (self-hosted local relay, no cloud account) — see
  * WEFT_COMMAND_TRANSPORT_NAMES in extension.mjs, which adds "devtunnel" back in for the /weft
@@ -181,7 +181,7 @@ export function createTransport({ channelId }) {
  * connectable descriptor (spawning/reusing the shared relay+tunnel — see devtunnel.mjs) since that
  * requires a channelId up front and can't happen inside the plain synchronous resolver. Every
  * caller that needs a descriptor it can actually connect with (as opposed to just displaying the
- * configured kind, e.g. `weft-cli show-transport`) should call this instead of
+ * configured kind, e.g. `weft show-transport`) should call this instead of
  * resolveTransportDescriptor() directly.
  */
 export async function resolveTransportForChannel({ baseDir, channelId } = {}) {

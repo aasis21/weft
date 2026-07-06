@@ -21,6 +21,6 @@
     "esbuild": "^0.25.12"
   },
   "bin": {
-    "weft-cli": "bin/weft-cli.mjs"
+    "weft": "bin/weft.mjs"
   }
 }

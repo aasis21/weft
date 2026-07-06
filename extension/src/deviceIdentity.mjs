@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// A STABLE, NON-SECRET device id for the `weft-cli` listener, persisted at ~/.weft/device-id.
+// A STABLE, NON-SECRET device id for the `weft` listener, persisted at ~/.weft/device-id.
 //
-// Deliberately separate from pairing crypto: `weft-cli start` still mints a FRESH keypair +
+// Deliberately separate from pairing crypto: `weft start` still mints a FRESH keypair +
 // channelId every run (see listener.mjs) so the encrypted session key never survives a restart —
 // that's what keeps every relayed conversation forward-secret. This id carries no cryptographic
 // weight at all; it is just an opaque random tag so the phone can recognize "this is the same

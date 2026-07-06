@@ -205,7 +205,7 @@ const sessionsSlice = createSlice({
       }
     },
     // Folds a stale duplicate device (same physical laptop, an OLDER ephemeral channelId from a
-    // prior `weft-cli start` run) into the surviving `channelId` entry. See devices.ts
+    // prior `weft start` run) into the surviving `channelId` entry. See devices.ts
     // reconcileDeviceId — this reducer mirrors that persisted merge into redux state.
     deviceReconciled(
       state,

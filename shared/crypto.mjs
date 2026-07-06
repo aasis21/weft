@@ -155,7 +155,7 @@ export async function generateKeyPair() {
 }
 
 /**
- * Export an ECDH keypair to a portable, JSON-serializable identity. Used by the `weft-cli`
+ * Export an ECDH keypair to a portable, JSON-serializable identity. Used by the `weft`
  * listener to pre-mint a session's identity and hand it to the spawned Copilot process via a
  * short-lived 0600 temp file (never on argv/env). The private key is exported as a JWK; keys are
  * generated extractable, so this is always possible.

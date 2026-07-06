@@ -44,15 +44,15 @@ await build({
   logLevel: "info",
 });
 
-// weft-cli.mjs (the "Device Station" CLI) imports relative ../src/*.mjs files today, so it only
+// weft.mjs (the "Device Station" CLI) imports relative ../src/*.mjs files today, so it only
 // works when the FULL repo is checked out — it can't be copied standalone onto a machine that
-// just needs to run `weft-cli start` (e.g. a headless "device station" box with no Copilot CLI /
+// just needs to run `weft start` (e.g. a headless "device station" box with no Copilot CLI /
 // extension installed at all). Bundle it the same way as the other two entry points so
-// dist/weft-cli.mjs is fully self-contained (only real Node built-ins + npm deps inlined) and can
+// dist/weft.mjs is fully self-contained (only real Node built-ins + npm deps inlined) and can
 // be installed as a single file + a tiny PATH shim — see ship.ps1 / install.ps1 / install.sh.
 await build({
-  entryPoints: ["bin/weft-cli.mjs"],
-  outfile: "dist/weft-cli.mjs",
+  entryPoints: ["bin/weft.mjs"],
+  outfile: "dist/weft.mjs",
   bundle: true,
   platform: "node",
   target: "node18",

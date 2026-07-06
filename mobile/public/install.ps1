@@ -4,9 +4,9 @@
 
 .DESCRIPTION
   Downloads the prebuilt Weft Copilot CLI extension (+ its two standalone companion bundles:
-  relayServerProcess.mjs for the shared devtunnel relay, and weft-cli.mjs — the "Device Station"
+  relayServerProcess.mjs for the shared devtunnel relay, and weft.mjs — the "Device Station"
   CLI you can run on any machine, extension or no extension) and drops them where `copilot`
-  auto-discovers extensions (~/.copilot/extensions/weft). Also registers a `weft-cli` command on
+  auto-discovers extensions (~/.copilot/extensions/weft). Also registers a `weft` command on
   your PATH. No git clone, no Node build required — just Node itself.
 
   Designed to be run with:
@@ -17,7 +17,7 @@
     & ([scriptblock]::Create((irm https://useweft.netlify.app/install.ps1))) -SupabaseUrl https://xxx.supabase.co -SupabaseKey sb_publishable_xxx
 
 .PARAMETER InstallDir
-  Where to install the extension + weft-cli. Default: ~/.copilot/extensions/weft
+  Where to install the extension + weft. Default: ~/.copilot/extensions/weft
 
 .PARAMETER Transport
   Your default transport: "supabase" (hosted, zero-config — the default) or "devtunnel"
@@ -112,11 +112,11 @@ Ok "extension.mjs -> $InstallDir  $(Dim '(the Copilot CLI extension itself)')"
 # session — must always be installed alongside extension.mjs, not just on first install.
 Invoke-WebRequest -Uri "$base/relayServerProcess.mjs" -OutFile (Join-Path $InstallDir 'relayServerProcess.mjs') -UseBasicParsing
 Ok "relayServerProcess.mjs -> $InstallDir  $(Dim '(shared devtunnel relay, only spawned if you use devtunnel)')"
-# weft-cli.mjs is a fully standalone bundle (no dependency on the rest of this repo/extension) —
+# weft.mjs is a fully standalone bundle (no dependency on the rest of this repo/extension) —
 # it's the "Device Station" you can run on ANY machine (with or without the Copilot CLI/extension
 # installed) to let your phone spawn Copilot sessions there.
-Invoke-WebRequest -Uri "$base/weft-cli.mjs" -OutFile (Join-Path $InstallDir 'weft-cli.mjs') -UseBasicParsing
-Ok "weft-cli.mjs -> $InstallDir  $(Dim '(standalone Device Station CLI)')"
+Invoke-WebRequest -Uri "$base/weft.mjs" -OutFile (Join-Path $InstallDir 'weft.mjs') -UseBasicParsing
+Ok "weft.mjs -> $InstallDir  $(Dim '(standalone Device Station CLI)')"
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: write / migrate the .env relay config.
@@ -133,8 +133,8 @@ $envTemplate = @"
 #
 # WEFT_TRANSPORT picks the default: "supabase" (hosted) or "devtunnel" (self-hosted, no cloud
 # account, needs the `devtunnel` CLI logged in). Change any time with:
-#   weft-cli set-transport supabase --url <url> --anon-key <key>
-#   weft-cli set-transport devtunnel
+#   weft set-transport supabase --url <url> --anon-key <key>
+#   weft set-transport devtunnel
 WEFT_TRANSPORT=$Transport
 WEFT_SUPABASE_URL=$SupabaseUrl
 WEFT_SUPABASE_ANON_KEY=$SupabaseKey
@@ -161,7 +161,7 @@ if ((Test-Path $envPath) -and -not $Force) {
     if ($added.Count -gt 0) {
         Ok ("migrated your .env to namespaced vars (+{0})" -f ($added -join ', '))
     } else {
-        Ok 'kept your existing .env (use -Force to overwrite, or `weft-cli set-transport` to switch)'
+        Ok 'kept your existing .env (use -Force to overwrite, or `weft set-transport` to switch)'
     }
 } else {
     $envTemplate | Set-Content -Path $envPath -Encoding utf8
@@ -169,15 +169,15 @@ if ((Test-Path $envPath) -and -not $Force) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Step 4: register a `weft-cli` command on PATH (a tiny .cmd shim next to the standalone bundle).
+# Step 4: register a `weft` command on PATH (a tiny .cmd shim next to the standalone bundle).
 # ---------------------------------------------------------------------------------------------
-StepHeader 4 $TOTAL_STEPS 'Registering the `weft-cli` command'
-$shimPath = Join-Path $InstallDir 'weft-cli.cmd'
+StepHeader 4 $TOTAL_STEPS 'Registering the `weft` command'
+$shimPath = Join-Path $InstallDir 'weft.cmd'
 @"
 @echo off
-node "%~dp0weft-cli.mjs" %*
+node "%~dp0weft.mjs" %*
 "@ | Set-Content -Path $shimPath -Encoding ascii
-Ok "weft-cli.cmd -> $InstallDir"
+Ok "weft.cmd -> $InstallDir"
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $pathEntries = @()
@@ -185,7 +185,7 @@ if ($userPath) { $pathEntries = $userPath -split ';' | Where-Object { $_ } }
 if ($pathEntries -notcontains $InstallDir) {
     [Environment]::SetEnvironmentVariable('Path', (($pathEntries + $InstallDir) -join ';'), 'User')
     Ok 'Added to your User PATH.'
-    Warn 'Open a NEW terminal window for `weft-cli` to be found on PATH.'
+    Warn 'Open a NEW terminal window for `weft` to be found on PATH.'
 } else {
     Ok 'Already on your PATH.'
 }
@@ -200,6 +200,6 @@ Write-Host "  $(Bold '2.') Open $(Cyan 'https://useweft.netlify.app') on your ph
 Write-Host "  $(Bold '3.') Trigger a Copilot action and approve / deny from your phone."
 Write-Host ''
 Write-Host "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
-Write-Host "  (no Copilot CLI open, just this)? Open a new terminal and run: $(Cyan 'weft-cli start')"
+Write-Host "  (no Copilot CLI open, just this)? Open a new terminal and run: $(Cyan 'weft start')"
 Write-Host ''
 Write-Host (Dim "Uninstall: Remove-Item -Recurse -Force `"$InstallDir`"")

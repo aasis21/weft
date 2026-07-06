@@ -19,7 +19,7 @@ coverage/
 # deploy-time artifact: prebuilt extension bundle copied into public/ for hosting
 mobile/public/extension.mjs
 mobile/public/relayServerProcess.mjs
-mobile/public/weft-cli.mjs
+mobile/public/weft.mjs
 
 # env & secrets
 .env
