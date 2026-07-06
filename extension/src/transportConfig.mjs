@@ -26,10 +26,16 @@ function ensureDir(baseDir) {
   return dir;
 }
 
-/** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. */
+/** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. "local" and
+ * "webpubsub" are intentionally no longer offered by any user-facing command (helm-cli
+ * set-transport, /helm <name>) — see transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES — but are
+ * still accepted here so existing persisted configs / tests keep working. "devtunnel" persists as
+ * a bare marker (no url yet): the actual shared-relay URL is provisioned fresh per channelId at
+ * resolve time by resolveTransportForChannel(), never stored. */
 function isValidTransportDescriptor(t) {
   if (!t || typeof t !== "object") return false;
   if (t.kind === "local") return true;
+  if (t.kind === "devtunnel") return true;
   if (t.kind === "supabase") return typeof t.url === "string" && typeof t.anonKey === "string";
   if (t.kind === "webpubsub") return typeof t.negotiateUrl === "string";
   return false;
@@ -50,8 +56,8 @@ export function loadTransportConfig({ baseDir } = {}) {
 export function saveTransportConfig(descriptor, { baseDir } = {}) {
   if (!isValidTransportDescriptor(descriptor)) {
     throw new Error(
-      'Helm: invalid transport descriptor (kind must be "local", "supabase", or "webpubsub", ' +
-        "with the fields that kind requires)",
+      'Helm: invalid transport descriptor (kind must be "supabase" or "devtunnel" — or, for ' +
+        'internal/testing use, "local"/"webpubsub" — with the fields that kind requires)',
     );
   }
   const dir = ensureDir(baseDir);

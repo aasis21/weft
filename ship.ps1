@@ -57,6 +57,7 @@ function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
     $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
+    $helmCliBundle = Join-Path $root 'extension\dist\helm-cli.mjs'
     $publicBundle = Join-Path $root 'mobile\public\extension.mjs'
     $distDir      = Join-Path $root 'mobile\dist'
 
@@ -73,6 +74,8 @@ try {
         Ok 'extension/dist/extension.mjs'
         if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
         Ok 'extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)'
+        if (-not (Test-Path $helmCliBundle)) { throw "extension build did not produce $helmCliBundle" }
+        Ok 'extension/dist/helm-cli.mjs  (standalone Device Station CLI, no repo checkout needed)'
 
         Step 'Refreshing site bits (extension bundle -> mobile/public)'
         Copy-Item $extBundle $publicBundle -Force
@@ -80,6 +83,9 @@ try {
         $publicRelayBundle = Join-Path $root 'mobile\public\relayServerProcess.mjs'
         Copy-Item $relayBundle $publicRelayBundle -Force
         Ok 'mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)'
+        $publicHelmCliBundle = Join-Path $root 'mobile\public\helm-cli.mjs'
+        Copy-Item $helmCliBundle $publicHelmCliBundle -Force
+        Ok 'mobile/public/helm-cli.mjs  (served as /helm-cli.mjs by the installer)'
 
         Step 'Building mobile web app (Vite)'
         npm run build -w '@aasis21/helm-mobile' | Out-Null
@@ -100,6 +106,7 @@ try {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $relayBundle)) { throw "no $relayBundle - run once without -SkipBuild first" }
+        if (-not (Test-Path $helmCliBundle)) { throw "no $helmCliBundle - run once without -SkipBuild first" }
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "no $distDir - run once without -SkipBuild first" }
     }
 
@@ -130,6 +137,26 @@ try {
             Ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
         } else {
             Warn "no $relayBundle - /helm devtunnel will fail to spawn the shared relay until rebuilt"
+        }
+        if (Test-Path $helmCliBundle) {
+            Copy-Item $helmCliBundle (Join-Path $dest 'helm-cli.mjs') -Force
+            Ok "helm-cli.mjs -> $dest  (standalone Device Station CLI)"
+            $shimPath = Join-Path $dest 'helm-cli.cmd'
+            @"
+@echo off
+node "%~dp0helm-cli.mjs" %*
+"@ | Set-Content -Path $shimPath -Encoding ascii
+            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+            $pathEntries = @()
+            if ($userPath) { $pathEntries = $userPath -split ';' | Where-Object { $_ } }
+            if ($pathEntries -notcontains $dest) {
+                [Environment]::SetEnvironmentVariable('Path', (($pathEntries + $dest) -join ';'), 'User')
+                Ok "helm-cli.cmd -> $dest  (added $dest to your User PATH - open a NEW terminal for it to take effect)"
+            } else {
+                Ok "helm-cli.cmd -> $dest  (already on your PATH)"
+            }
+        } else {
+            Warn "no $helmCliBundle - the standalone \`helm-cli\` command was not (re)installed"
         }
         $envFile = Join-Path $root '.env'
         if (Test-Path $envFile) {

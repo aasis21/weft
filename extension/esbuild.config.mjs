@@ -44,6 +44,26 @@ await build({
   logLevel: "info",
 });
 
+// helm-cli.mjs (the "Device Station" CLI) imports relative ../src/*.mjs files today, so it only
+// works when the FULL repo is checked out — it can't be copied standalone onto a machine that
+// just needs to run `helm-cli start` (e.g. a headless "device station" box with no Copilot CLI /
+// extension installed at all). Bundle it the same way as the other two entry points so
+// dist/helm-cli.mjs is fully self-contained (only real Node built-ins + npm deps inlined) and can
+// be installed as a single file + a tiny PATH shim — see ship.ps1 / install.ps1 / install.sh.
+await build({
+  entryPoints: ["bin/helm-cli.mjs"],
+  outfile: "dist/helm-cli.mjs",
+  bundle: true,
+  platform: "node",
+  target: "node18",
+  format: "esm",
+  sourcemap: true,
+  banner: {
+    js: "import { createRequire as __helmCreateRequire } from 'node:module'; const require = __helmCreateRequire(import.meta.url);",
+  },
+  logLevel: "info",
+});
+
 // Post-build smoke check: import the freshly built bundle with the host SDK stubbed.
 // Reaching the stub means all top-level CJS requires initialized — i.e. the bundle is
 // actually loadable by the CLI. Fails the build otherwise (don't ship a dead extension).

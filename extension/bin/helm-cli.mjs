@@ -305,39 +305,44 @@ function parseFlags(args) {
 }
 
 function describeTransport(descriptor) {
-  if (descriptor.kind === "local") return "local (same-machine, no relay)";
   if (descriptor.kind === "supabase") return `supabase (${descriptor.url})`;
+  if (descriptor.kind === "devtunnel") return "devtunnel (shared local relay via Microsoft Dev Tunnels — no cloud account)";
+  // "local"/"webpubsub" are internal/testing-only kinds, kept working but never offered by this
+  // CLI's own set-transport command — still describe them plainly if somehow configured directly.
+  if (descriptor.kind === "local") return "local (same-machine, no relay)";
   if (descriptor.kind === "webpubsub") return `webpubsub (${descriptor.negotiateUrl})`;
   return descriptor.kind;
 }
 
+// Only "supabase" and "devtunnel" are offered here — Helm's two supported, documented transports.
+// "local"/"webpubsub" remain fully implemented (transportConfig.mjs, transportFactory.mjs) for
+// internal testing / advanced HELM_TRANSPORT env overrides, just no longer surfaced by this
+// command's usage text or accepted kinds, so users are never offered an option Helm doesn't
+// actually support end-to-end.
 function setTransport(args) {
   const [kind, ...rest] = args;
   const flags = parseFlags(rest);
-  if (kind === "local") {
-    saveTransportConfig({ kind: "local" });
-  } else if (kind === "supabase") {
+  if (kind === "supabase") {
     const url = flags.url;
     const anonKey = flags["anon-key"];
     if (!url || !anonKey) {
       throw new Error("Usage: helm-cli set-transport supabase --url <url> --anon-key <key>");
     }
     saveTransportConfig({ kind: "supabase", url, anonKey });
-  } else if (kind === "webpubsub") {
-    const negotiateUrl = flags["negotiate-url"];
-    if (!negotiateUrl) {
-      throw new Error("Usage: helm-cli set-transport webpubsub --negotiate-url <url>");
-    }
-    saveTransportConfig({ kind: "webpubsub", negotiateUrl });
+  } else if (kind === "devtunnel") {
+    saveTransportConfig({ kind: "devtunnel" });
+    console.log(
+      c.dim(
+        "Note: requires the `devtunnel` CLI installed and logged in (`devtunnel user login -g`). " +
+          "The shared relay/tunnel is provisioned lazily on first pair, not right now.",
+      ),
+    );
   } else if (kind === "clear") {
     clearTransportConfig();
     console.log("Cleared the configured transport; falling back to env vars / the default (supabase).");
     return;
   } else {
-    throw new Error(
-      "Usage: helm-cli set-transport <local|supabase|webpubsub|clear> [--url <url>] " +
-        "[--anon-key <key>] [--negotiate-url <url>]",
-    );
+    throw new Error("Usage: helm-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
   }
   console.log(`Transport set to ${kind}. This is stamped into every pairing QR, so re-pair your phone to pick it up.`);
 }
@@ -359,7 +364,7 @@ function usage() {
   helm-cli remove-project <name>
   helm-cli list-projects
   helm-cli set-default <name>
-  helm-cli set-transport <local|supabase|webpubsub|clear> [--url <url>] [--anon-key <key>] [--negotiate-url <url>]
+  helm-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
   helm-cli show-transport
   helm-cli help`);
 }

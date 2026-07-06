@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, statSync } from "node:fs";
-import { hostname } from "node:os";
+import { hostname, homedir } from "node:os";
 import { randomInt } from "node:crypto";
 import {
   EVENT_TYPE,
@@ -17,7 +17,7 @@ import {
   spawnPairing,
   spawnResult,
 } from "@aasis21/helm-shared";
-import { createTransport, resolveTransportDescriptor } from "./transportFactory.mjs";
+import { createTransportFromDescriptor, resolveTransportForChannel } from "./transportFactory.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
@@ -112,8 +112,12 @@ export function createListener({
     stopped = false;
     listenerKeyPair ??= await generateKeyPair();
     listenerChannelId ??= randomChannelId();
-    listenerTransport ??= createTransport({ channelId: listenerChannelId });
-    listenerTransportDescriptor ??= resolveTransportDescriptor();
+    // Resolve the descriptor BEFORE building the transport (not the other way around) so a
+    // persisted "devtunnel" default is expanded into a real, connectable URL exactly once here —
+    // createTransportFromDescriptor then builds off that same resolved value instead of each
+    // re-resolving independently (which used to risk two separate devtunnel provisions).
+    listenerTransportDescriptor ??= await resolveTransportForChannel({ channelId: listenerChannelId });
+    listenerTransport ??= createTransportFromDescriptor(listenerTransportDescriptor, { channelId: listenerChannelId });
     pairingPayload = buildPairingPayload({
       channelId: listenerChannelId,
       publicKeyB64: listenerKeyPair.publicKeyB64,
@@ -301,7 +305,7 @@ export function createListener({
           buildPairingPayload({
             channelId: newChannelId,
             publicKeyB64,
-            transport: listenerTransportDescriptor ?? resolveTransportDescriptor(),
+            transport: listenerTransportDescriptor ?? (await resolveTransportForChannel({ channelId: newChannelId })),
             kind: PAIR_KIND.SESSION,
           }),
           sessionName,
@@ -328,14 +332,25 @@ export function createListener({
   async function resolveProject(projectName) {
     const projects = await Promise.resolve(projectsApi.listProjects());
     const requested = cleanSessionName(projectName);
-    const project = requested
-      ? projects.find((p) => p.name === requested)
-      : projects.find((p) => p.default === true || p.isDefault === true);
-    if (!project) throw new Error(requested ? `Unknown project: ${requested}` : "No project selected");
-    if (!existsSync(project.path) || !statSync(project.path).isDirectory()) {
-      throw new Error(`Project path is missing or not a directory: ${project.path}`);
+    if (requested) {
+      const project = projects.find((p) => p.name === requested);
+      if (!project) throw new Error(`Unknown project: ${requested}`);
+      if (!existsSync(project.path) || !statSync(project.path).isDirectory()) {
+        throw new Error(`Project path is missing or not a directory: ${project.path}`);
+      }
+      return project;
     }
-    return project;
+    const defaultProject = projects.find((p) => p.default === true || p.isDefault === true);
+    if (defaultProject) {
+      if (!existsSync(defaultProject.path) || !statSync(defaultProject.path).isDirectory()) {
+        throw new Error(`Project path is missing or not a directory: ${defaultProject.path}`);
+      }
+      return defaultProject;
+    }
+    // No project registered/selected as default yet (e.g. a fresh install with no
+    // `helm-cli add-project` run) — rather than erroring out, fall back to the user's home
+    // directory so the phone can still spawn a working session immediately.
+    return { name: "home", path: homedir() };
   }
 
   const api = {

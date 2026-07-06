@@ -13,6 +13,7 @@ import {
   createRelayTransport,
 } from "@aasis21/helm-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
+import { provisionDevTunnelTransport } from "./devtunnel.mjs";
 
 export function loadLocalEnv({ files } = {}) {
   if (typeof parseEnv !== "function") return;
@@ -77,8 +78,17 @@ export function resolveTransportDescriptor({ baseDir } = {}) {
   }
 }
 
-/** Transport kinds `resolveTransportByName` (and therefore `/helm <name>`) accepts. */
-export const SUPPORTED_TRANSPORT_NAMES = ["local", "supabase", "webpubsub"];
+/**
+ * Transport kinds a user can pick via a user-facing command (`helm-cli set-transport`, `/helm
+ * <name>`). Only the two "supported" transports Helm documents/installs are listed here:
+ * Supabase (hosted, zero-config) and devtunnel (self-hosted local relay, no cloud account) — see
+ * HELM_COMMAND_TRANSPORT_NAMES in extension.mjs, which adds "devtunnel" back in for the /helm
+ * command specifically since it needs a channelId to provision and can't go through the plain
+ * resolveTransportByName() below. "local" and "webpubsub" remain fully implemented (resolveFromEnv
+ * below, createTransportFromDescriptor) for internal testing / advanced HELM_TRANSPORT env
+ * overrides — they're just no longer offered or documented anywhere a user would see them.
+ */
+export const SUPPORTED_TRANSPORT_NAMES = ["supabase"];
 
 /**
  * Requires a name from SUPPORTED_TRANSPORT_NAMES (case-insensitive); throws a single
@@ -97,6 +107,7 @@ export function resolveTransportByName(transportName) {
 
 function resolveFromEnv(transportName) {
   if (transportName === "local") return { kind: "local" };
+  if (transportName === "devtunnel") return { kind: "devtunnel" };
 
   if (transportName === "webpubsub") {
     const negotiateUrl = process.env.HELM_WEBPUBSUB_NEGOTIATE_URL;
@@ -163,6 +174,22 @@ export function createTransportFromDescriptor(descriptor, { channelId }) {
 
 export function createTransport({ channelId }) {
   return createTransportFromDescriptor(resolveTransportDescriptor(), { channelId });
+}
+
+/**
+ * Like resolveTransportDescriptor, but expands a persisted/env "devtunnel" choice into a real,
+ * connectable descriptor (spawning/reusing the shared relay+tunnel — see devtunnel.mjs) since that
+ * requires a channelId up front and can't happen inside the plain synchronous resolver. Every
+ * caller that needs a descriptor it can actually connect with (as opposed to just displaying the
+ * configured kind, e.g. `helm-cli show-transport`) should call this instead of
+ * resolveTransportDescriptor() directly.
+ */
+export async function resolveTransportForChannel({ baseDir, channelId } = {}) {
+  const descriptor = resolveTransportDescriptor({ baseDir });
+  if (descriptor.kind === "devtunnel") {
+    return provisionDevTunnelTransport({ channelId, baseDir });
+  }
+  return descriptor;
 }
 
 function safeHost(url) {

@@ -13,7 +13,7 @@ import {
   buildPairingPayload,
   listenForPeers,
 } from "@aasis21/helm-shared";
-import { createTransportFromDescriptor, resolveTransportDescriptor, resolveTransportByName, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
+import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 
@@ -75,13 +75,17 @@ const identityFileWasPresent = Boolean(handedOffIdentity);
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
 const channelId = handedOffIdentity?.channelId ?? (process.env.HELM_CHANNEL_ID || randomChannelId());
 // Resolved once from this laptop's own env (HELM_TRANSPORT / HELM_SUPABASE_* / HELM_WEBPUBSUB_*)
-// and stamped into the QR below so the phone builds a matching transport at connect time, with
-// no pre-baked config of its own. A misconfigured transport (e.g. HELM_TRANSPORT=webpubsub
-// without HELM_WEBPUBSUB_NEGOTIATE_URL) is not something pairing can work around, so this fails
-// fast at load with a clear, actionable error rather than surfacing as a confusing retry-loop
-// timeout later. `let`, not `const` — `/helm <transport>` (see switchTransport) overrides this
-// for just the running session without touching the persisted device-wide default.
-let transportDescriptor = resolveTransportDescriptor();
+// or the persisted `helm-cli set-transport` default, and stamped into the QR below so the phone
+// builds a matching transport at connect time, with no pre-baked config of its own. A
+// misconfigured transport (e.g. HELM_TRANSPORT=webpubsub without HELM_WEBPUBSUB_NEGOTIATE_URL) is
+// not something pairing can work around, so this fails fast at load with a clear, actionable
+// error rather than surfacing as a confusing retry-loop timeout later. resolveTransportForChannel
+// (not the plain resolveTransportDescriptor) so a persisted default of "devtunnel" gets expanded
+// into a real, connectable descriptor (spawns/reuses the shared relay — see devtunnel.mjs) right
+// here at boot, not just when a user explicitly runs `/helm devtunnel` for the session.
+// `let`, not `const` — `/helm <transport>` (see switchTransport) overrides this for just the
+// running session without touching the persisted device-wide default.
+let transportDescriptor = await resolveTransportForChannel({ channelId });
 let pairingPayload = buildCurrentPairingPayload();
 
 function buildCurrentPairingPayload() {
