@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { getOrCreateDeviceId } from "../src/deviceIdentity.mjs";
 
 test("getOrCreateDeviceId persists a stable, non-secret id across calls (restarts)", async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-device-id-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-device-id-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   const first = getOrCreateDeviceId({ baseDir: dir });
@@ -21,8 +21,8 @@ test("getOrCreateDeviceId persists a stable, non-secret id across calls (restart
 });
 
 test("getOrCreateDeviceId mints independent ids for independent homes", async (t) => {
-  const dirA = mkdtempSync(join(tmpdir(), "helm-device-id-a-"));
-  const dirB = mkdtempSync(join(tmpdir(), "helm-device-id-b-"));
+  const dirA = mkdtempSync(join(tmpdir(), "weft-device-id-a-"));
+  const dirB = mkdtempSync(join(tmpdir(), "weft-device-id-b-"));
   t.after(() => {
     rmSync(dirA, { recursive: true, force: true });
     rmSync(dirB, { recursive: true, force: true });

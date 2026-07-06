@@ -20,12 +20,12 @@ function Harness({
 describe('usePairing', () => {
   it('maps known pairing failures to friendly messages', () => {
     expect(pairingErrorMessage(new SyntaxError('Unexpected token'))).toBe(
-      "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.",
+      "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.",
     );
-    expect(pairingErrorMessage(new Error('wrapped: helm/pairing: invalid pairing payload'))).toBe(
-      "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.",
+    expect(pairingErrorMessage(new Error('wrapped: weft/pairing: invalid pairing payload'))).toBe(
+      "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.",
     );
-    expect(pairingErrorMessage(new Error('helm/pairing: no ack from laptop'))).toBe(
+    expect(pairingErrorMessage(new Error('weft/pairing: no ack from laptop'))).toBe(
       "Couldn't reach your laptop — make sure the terminal shows the QR and try again.",
     );
   });
@@ -38,7 +38,7 @@ describe('usePairing', () => {
 
     await waitFor(() =>
       expect(onError).toHaveBeenLastCalledWith(
-        "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.",
+        "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.",
       ),
     );
   });
@@ -46,11 +46,11 @@ describe('usePairing', () => {
   it('maps pairing validation and no-ack errors while preserving unknown messages', async () => {
     const cases = [
       {
-        err: new Error('helm/pairing: invalid pairing payload'),
-        message: "That doesn't look like a valid Helm pairing code — re-copy it from the terminal.",
+        err: new Error('weft/pairing: invalid pairing payload'),
+        message: "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.",
       },
       {
-        err: new Error('helm/pairing: no ack from laptop'),
+        err: new Error('weft/pairing: no ack from laptop'),
         message: "Couldn't reach your laptop — make sure the terminal shows the QR and try again.",
       },
       {

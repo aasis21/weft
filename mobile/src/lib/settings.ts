@@ -2,27 +2,27 @@ import { Preferences } from '@capacitor/preferences';
 
 export type ThemeSetting = 'system' | 'light' | 'dark';
 
-export interface HelmSettings {
+export interface WeftSettings {
   voiceAutoRelisten: boolean;
   voiceSpeakStreaming: boolean;
   theme: ThemeSetting;
 }
 
-const SETTINGS_KEY = 'helm.settings.v1';
-const DEFAULT_SETTINGS: HelmSettings = {
+const SETTINGS_KEY = 'weft.settings.v1';
+const DEFAULT_SETTINGS: WeftSettings = {
   voiceAutoRelisten: false,
   voiceSpeakStreaming: false,
   theme: 'system',
 };
-const SETTINGS_EVENT = 'helm-settings-change';
+const SETTINGS_EVENT = 'weft-settings-change';
 
-function parseSettings(raw: string | null | undefined): Partial<HelmSettings> {
+function parseSettings(raw: string | null | undefined): Partial<WeftSettings> {
   if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return {};
     const record = parsed as Record<string, unknown>;
-    const out: Partial<HelmSettings> = {};
+    const out: Partial<WeftSettings> = {};
     if (typeof record.voiceAutoRelisten === 'boolean') out.voiceAutoRelisten = record.voiceAutoRelisten;
     if (typeof record.voiceSpeakStreaming === 'boolean') out.voiceSpeakStreaming = record.voiceSpeakStreaming;
     if (record.theme === 'light' || record.theme === 'dark' || record.theme === 'system') out.theme = record.theme;
@@ -32,7 +32,7 @@ function parseSettings(raw: string | null | undefined): Partial<HelmSettings> {
   }
 }
 
-function normalize(settings: Partial<HelmSettings>): HelmSettings {
+function normalize(settings: Partial<WeftSettings>): WeftSettings {
   return {
     voiceAutoRelisten: settings.voiceAutoRelisten ?? DEFAULT_SETTINGS.voiceAutoRelisten,
     voiceSpeakStreaming: settings.voiceSpeakStreaming ?? DEFAULT_SETTINGS.voiceSpeakStreaming,
@@ -40,7 +40,7 @@ function normalize(settings: Partial<HelmSettings>): HelmSettings {
   };
 }
 
-async function readRawSettings(): Promise<Partial<HelmSettings>> {
+async function readRawSettings(): Promise<Partial<WeftSettings>> {
   try {
     const { value } = await Preferences.get({ key: SETTINGS_KEY });
     if (value != null) return parseSettings(value);
@@ -54,7 +54,7 @@ async function readRawSettings(): Promise<Partial<HelmSettings>> {
   }
 }
 
-async function writeSettings(settings: HelmSettings): Promise<void> {
+async function writeSettings(settings: WeftSettings): Promise<void> {
   const value = JSON.stringify(settings);
   try {
     await Preferences.set({ key: SETTINGS_KEY, value });
@@ -66,14 +66,14 @@ async function writeSettings(settings: HelmSettings): Promise<void> {
   } catch {
     // localStorage can be unavailable; the in-memory UI still updates.
   }
-  globalThis.dispatchEvent?.(new CustomEvent<HelmSettings>(SETTINGS_EVENT, { detail: settings }));
+  globalThis.dispatchEvent?.(new CustomEvent<WeftSettings>(SETTINGS_EVENT, { detail: settings }));
 }
 
-export async function getSettings(): Promise<HelmSettings> {
+export async function getSettings(): Promise<WeftSettings> {
   return normalize(await readRawSettings());
 }
 
-export async function setSettings(next: HelmSettings): Promise<void> {
+export async function setSettings(next: WeftSettings): Promise<void> {
   await writeSettings(normalize(next));
 }
 
@@ -117,9 +117,9 @@ export async function initTheme(): Promise<void> {
   applyTheme(await getTheme());
 }
 
-export function subscribeSettings(listener: (settings: HelmSettings) => void): () => void {
+export function subscribeSettings(listener: (settings: WeftSettings) => void): () => void {
   const onChange = (event: Event): void => {
-    const detail = (event as CustomEvent<HelmSettings>).detail;
+    const detail = (event as CustomEvent<WeftSettings>).detail;
     if (detail) listener(detail);
   };
   globalThis.addEventListener?.(SETTINGS_EVENT, onChange);

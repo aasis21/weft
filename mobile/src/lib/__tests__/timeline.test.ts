@@ -1,4 +1,4 @@
-import type { EnvelopeBase, EventEnvelope, PromptAttachment } from '@aasis21/helm-shared';
+import type { EnvelopeBase, EventEnvelope, PromptAttachment } from '@aasis21/weft-shared';
 import {
   appendNotice,
   appendUser,

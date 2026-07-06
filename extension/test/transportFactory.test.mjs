@@ -8,25 +8,25 @@ import { resolveTransportDescriptor, resolveTransportByName, resolveTransportFor
 import { saveTransportConfig } from "../src/transportConfig.mjs";
 
 const ENV_KEYS = [
-  "HELM_TRANSPORT",
-  "HELM_SUPABASE_URL",
-  "HELM_SUPABASE_ANON_KEY",
+  "WEFT_TRANSPORT",
+  "WEFT_SUPABASE_URL",
+  "WEFT_SUPABASE_ANON_KEY",
   "SUPABASE_URL",
   "SUPABASE_ANON_KEY",
-  "HELM_WEBPUBSUB_NEGOTIATE_URL",
+  "WEFT_WEBPUBSUB_NEGOTIATE_URL",
 ];
 
-let helmHome;
+let weftHome;
 let savedEnv;
 
 beforeEach(() => {
-  helmHome = mkdtempSync(join(tmpdir(), "helm-home-"));
+  weftHome = mkdtempSync(join(tmpdir(), "weft-home-"));
   savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of ENV_KEYS) delete process.env[k];
 });
 
 afterEach(() => {
-  rmSync(helmHome, { recursive: true, force: true });
+  rmSync(weftHome, { recursive: true, force: true });
   for (const k of ENV_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
@@ -34,9 +34,9 @@ afterEach(() => {
 });
 
 test("defaults to supabase when nothing is configured and supabase env vars are present", () => {
-  process.env.HELM_SUPABASE_URL = "https://default.supabase.co";
-  process.env.HELM_SUPABASE_ANON_KEY = "default-anon";
-  assert.deepEqual(resolveTransportDescriptor({ baseDir: helmHome }), {
+  process.env.WEFT_SUPABASE_URL = "https://default.supabase.co";
+  process.env.WEFT_SUPABASE_ANON_KEY = "default-anon";
+  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), {
     kind: "supabase",
     url: "https://default.supabase.co",
     anonKey: "default-anon",
@@ -44,28 +44,28 @@ test("defaults to supabase when nothing is configured and supabase env vars are 
 });
 
 test("throws an actionable error when nothing is configured and no supabase env vars exist", () => {
-  assert.throws(() => resolveTransportDescriptor({ baseDir: helmHome }), /helm-cli set-transport/);
+  assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), /weft-cli set-transport/);
 });
 
-test("a persisted `helm-cli set-transport` choice wins over the supabase default", () => {
-  saveTransportConfig({ kind: "local" }, { baseDir: helmHome });
-  assert.deepEqual(resolveTransportDescriptor({ baseDir: helmHome }), { kind: "local" });
+test("a persisted `weft-cli set-transport` choice wins over the supabase default", () => {
+  saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
+  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "local" });
 });
 
 test("a persisted devtunnel choice is stored as a bare marker (url is provisioned later per channel)", () => {
-  saveTransportConfig({ kind: "devtunnel" }, { baseDir: helmHome });
-  assert.deepEqual(resolveTransportDescriptor({ baseDir: helmHome }), { kind: "devtunnel" });
+  saveTransportConfig({ kind: "devtunnel" }, { baseDir: weftHome });
+  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "devtunnel" });
 });
 
-test("HELM_TRANSPORT env var wins over a persisted config", () => {
-  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: helmHome });
-  process.env.HELM_TRANSPORT = "local";
-  assert.deepEqual(resolveTransportDescriptor({ baseDir: helmHome }), { kind: "local" });
+test("WEFT_TRANSPORT env var wins over a persisted config", () => {
+  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: weftHome });
+  process.env.WEFT_TRANSPORT = "local";
+  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "local" });
 });
 
-test("HELM_TRANSPORT=webpubsub requires HELM_WEBPUBSUB_NEGOTIATE_URL", () => {
-  process.env.HELM_TRANSPORT = "webpubsub";
-  assert.throws(() => resolveTransportDescriptor({ baseDir: helmHome }), /HELM_WEBPUBSUB_NEGOTIATE_URL/);
+test("WEFT_TRANSPORT=webpubsub requires WEFT_WEBPUBSUB_NEGOTIATE_URL", () => {
+  process.env.WEFT_TRANSPORT = "webpubsub";
+  assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), /WEFT_WEBPUBSUB_NEGOTIATE_URL/);
 });
 
 test("resolveTransportByName only offers the user-facing transports (supabase)", () => {
@@ -73,9 +73,9 @@ test("resolveTransportByName only offers the user-facing transports (supabase)",
 });
 
 test("resolveTransportByName resolves supabase regardless of persisted config/env", () => {
-  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: helmHome });
-  process.env.HELM_SUPABASE_URL = "https://x.supabase.co";
-  process.env.HELM_SUPABASE_ANON_KEY = "anon";
+  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: weftHome });
+  process.env.WEFT_SUPABASE_URL = "https://x.supabase.co";
+  process.env.WEFT_SUPABASE_ANON_KEY = "anon";
   assert.deepEqual(resolveTransportByName("supabase"), {
     kind: "supabase",
     url: "https://x.supabase.co",
@@ -84,8 +84,8 @@ test("resolveTransportByName resolves supabase regardless of persisted config/en
 });
 
 test("resolveTransportByName is case-insensitive and trims whitespace", () => {
-  process.env.HELM_SUPABASE_URL = "https://x.supabase.co";
-  process.env.HELM_SUPABASE_ANON_KEY = "anon";
+  process.env.WEFT_SUPABASE_URL = "https://x.supabase.co";
+  process.env.WEFT_SUPABASE_ANON_KEY = "anon";
   assert.deepEqual(resolveTransportByName("  SUPABASE "), {
     kind: "supabase",
     url: "https://x.supabase.co",
@@ -104,14 +104,14 @@ test("resolveTransportByName rejects local/webpubsub/devtunnel — hidden from t
 });
 
 test("resolveTransportForChannel passes non-devtunnel descriptors through unchanged", async () => {
-  process.env.HELM_SUPABASE_URL = "https://x.supabase.co";
-  process.env.HELM_SUPABASE_ANON_KEY = "anon";
-  const descriptor = await resolveTransportForChannel({ baseDir: helmHome, channelId: "chan-1" });
+  process.env.WEFT_SUPABASE_URL = "https://x.supabase.co";
+  process.env.WEFT_SUPABASE_ANON_KEY = "anon";
+  const descriptor = await resolveTransportForChannel({ baseDir: weftHome, channelId: "chan-1" });
   assert.deepEqual(descriptor, { kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" });
 });
 
 test("resolveTransportForChannel expands a persisted devtunnel marker into a real, provisioned descriptor", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-devtunnel-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const FAKE_CLI_SCRIPT = `
 const args = process.argv.slice(2);
 const [cmd] = args;
@@ -139,18 +139,18 @@ if (cmd === "host") {
     writeFileSync(shimPath, `#!/bin/sh\nexec node "${scriptPath}" "$@"\n`);
     chmodSync(shimPath, 0o755);
   }
-  process.env.HELM_DEVTUNNEL_BIN = shimPath;
-  process.env.HELM_DEVTUNNEL_IDLE_MS = "300";
-  process.env.HELM_DEVTUNNEL_CHECK_MS = "100";
-  saveTransportConfig({ kind: "devtunnel" }, { baseDir: helmHome });
+  process.env.WEFT_DEVTUNNEL_BIN = shimPath;
+  process.env.WEFT_DEVTUNNEL_IDLE_MS = "300";
+  process.env.WEFT_DEVTUNNEL_CHECK_MS = "100";
+  saveTransportConfig({ kind: "devtunnel" }, { baseDir: weftHome });
   try {
-    const descriptor = await resolveTransportForChannel({ baseDir: helmHome, channelId: "chan-1" });
+    const descriptor = await resolveTransportForChannel({ baseDir: weftHome, channelId: "chan-1" });
     assert.equal(descriptor.kind, "devtunnel");
     assert.equal(descriptor.url, "wss://fake-abc123-9999.usw2.devtunnels.ms?channelId=chan-1");
   } finally {
-    delete process.env.HELM_DEVTUNNEL_BIN;
-    delete process.env.HELM_DEVTUNNEL_IDLE_MS;
-    delete process.env.HELM_DEVTUNNEL_CHECK_MS;
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.WEFT_DEVTUNNEL_IDLE_MS;
+    delete process.env.WEFT_DEVTUNNEL_CHECK_MS;
     rmSync(dir, { recursive: true, force: true });
   }
 });

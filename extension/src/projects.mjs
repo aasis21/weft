@@ -14,16 +14,16 @@ import { randomUUID } from "node:crypto";
 
 const STORE_FILE = "projects.json";
 
-export function helmHome(baseDir = process.env.HELM_HOME) {
-  return baseDir || join(homedir(), ".helm");
+export function weftHome(baseDir = process.env.WEFT_HOME) {
+  return baseDir || join(homedir(), ".weft");
 }
 
 function storePath(baseDir) {
-  return join(helmHome(baseDir), STORE_FILE);
+  return join(weftHome(baseDir), STORE_FILE);
 }
 
 function ensureDir(baseDir) {
-  const dir = helmHome(baseDir);
+  const dir = weftHome(baseDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     chmodSync(dir, 0o700);
@@ -56,7 +56,7 @@ export function loadProjects({ baseDir } = {}) {
     return normalizeStore(JSON.parse(readFileSync(file, "utf8")));
   } catch (err) {
     if (err?.code === "ENOENT") return { projects: [] };
-    throw new Error(`Helm projects: failed to read ${file}: ${err?.message ?? err}`);
+    throw new Error(`Weft projects: failed to read ${file}: ${err?.message ?? err}`);
   }
 }
 

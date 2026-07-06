@@ -22,13 +22,13 @@ import {
   toolStart,
   userMessage,
   waitForPeer,
-} from '@aasis21/helm-shared';
-import type { ApprovalDecision, ElicitationResponse, ModeChange, PromptMessage } from '@aasis21/helm-shared';
-import { pairSession } from './helmClient';
-import type { HelmClient } from './helmClient';
+} from '@aasis21/weft-shared';
+import type { ApprovalDecision, ElicitationResponse, ModeChange, PromptMessage } from '@aasis21/weft-shared';
+import { pairSession } from './weftClient';
+import type { WeftClient } from './weftClient';
 
 export interface DemoSession {
-  client: HelmClient;
+  client: WeftClient;
   channelId: string;
   pairingJson: string;
   stop(): Promise<void>;
@@ -51,7 +51,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   });
   // The Demo/Simulator runs entirely in-process: force the phone side onto the same
   // in-memory LocalTransport bus as the simulated laptop, regardless of the build's
-  // VITE_HELM_TRANSPORT (which may be `supabase` for real pairing).
+  // VITE_WEFT_TRANSPORT (which may be `supabase` for real pairing).
   const phoneTransport = createLocalTransport({ channelId });
   const { client } = await pairSession(JSON.stringify(pairingPayload), { transport: phoneTransport });
   const { key: laptopKey } = await laptopPeer;
@@ -126,11 +126,11 @@ export async function startDemoSession(): Promise<DemoSession> {
     extension.send(
       history(
         [
-          { turnIndex: 0, role: 'user', text: 'Earlier: what is Helm again?', ts: Date.now() - 600_000 },
+          { turnIndex: 0, role: 'user', text: 'Earlier: what is Weft again?', ts: Date.now() - 600_000 },
           {
             turnIndex: 0,
             role: 'assistant',
-            text: 'Helm mirrors your live `copilot` terminal session to your phone over an E2E-encrypted relay.',
+            text: 'Weft mirrors your live `copilot` terminal session to your phone over an E2E-encrypted relay.',
             ts: Date.now() - 599_000,
           },
         ],
@@ -153,7 +153,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   );
   push(1_700, () => {
     runningToolId = 'tool-1';
-    void extension.send(toolStart('tool-1', 'powershell', { command: 'npm run build -w @aasis21/helm-mobile' }));
+    void extension.send(toolStart('tool-1', 'powershell', { command: 'npm run build -w @aasis21/weft-mobile' }));
   });
   // A prompt typed at the LAPTOP terminal (origin 'terminal'), relayed so the phone's
   // transcript isn't missing the user side of terminal-driven turns. Shows a "Laptop" chip.
@@ -168,7 +168,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   push(3_900, () =>
     extension.send(
       assistantMessage(
-        "Build is green. Here's the gist of what changed:\n\n- Ported the **Anya** chat skin into Helm\n- Tool calls now render **inline**, collapsed by default\n- User prompts sit on the right, like a real chat\n\n```ts\nexport const shipped = true;\n```",
+        "Build is green. Here's the gist of what changed:\n\n- Ported the **Anya** chat skin into Weft\n- Tool calls now render **inline**, collapsed by default\n- User prompts sit on the right, like a real chat\n\n```ts\nexport const shipped = true;\n```",
         'demo-2',
       ),
     ),

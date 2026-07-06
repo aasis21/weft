@@ -282,7 +282,7 @@ export function VoiceModeOverlay({
             <span className="voice-brandmark-bar" />
           </span>
           <span className="voice-title">Vox</span>
-          <span className="voice-sub">Hands-free conversation in Helm</span>
+          <span className="voice-sub">Hands-free conversation in Weft</span>
         </header>
 
         <button type="button" className="voice-orb" onClick={handleOrb} disabled={disabled && state !== 'speaking'} aria-label={status}>

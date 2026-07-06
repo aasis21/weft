@@ -128,7 +128,7 @@ test("publish after close throws", async () => {
 
   await assert.rejects(
     () => transport.publish("stream", envelope),
-    /helm\/transport-relay: publish: transport is closed/
+    /weft\/transport-relay: publish: transport is closed/
   );
 });
 
@@ -186,17 +186,17 @@ test("connect rejects if the socket errors before opening", async () => {
 
   await assert.rejects(
     () => connectPromise,
-    /helm\/transport-relay: connect failed: ECONNREFUSED/
+    /weft\/transport-relay: connect failed: ECONNREFUSED/
   );
 });
 
 test("throws when constructed without a valid socket", () => {
   assert.throws(
     () => createRelayTransport({ socket: {}, channelId: "pair-bad" }),
-    /helm\/transport-relay: socket with send\(\)\/addEventListener\(\) is required/
+    /weft\/transport-relay: socket with send\(\)\/addEventListener\(\) is required/
   );
   assert.throws(
     () => createRelayTransport({ socket: { send() {}, addEventListener() {} } }),
-    /helm\/transport-relay: channelId is required/
+    /weft\/transport-relay: channelId is required/
   );
 });

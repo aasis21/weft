@@ -4,7 +4,7 @@ vi.mock('@capacitor/app', () => ({
   App: { addListener: vi.fn().mockResolvedValue({ remove: vi.fn() }) },
 }));
 import { loadSessions, setLastActiveSessionId, upsertSession } from '@/lib/sessions';
-import { fakePairing } from '@/test/helpers/fakeHelmClient';
+import { fakePairing } from '@/test/helpers/fakeWeftClient';
 import { App } from '@capacitor/app';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';

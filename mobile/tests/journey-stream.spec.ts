@@ -16,7 +16,7 @@ import type { Page } from '@playwright/test';
 async function startDemo(page: Page): Promise<void> {
   await page.goto('/');
   await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
-  await expect(page.locator('.helm-session')).toBeVisible();
+  await expect(page.locator('.weft-session')).toBeVisible();
   await expect(page.locator('.status-bar')).toBeVisible();
 }
 
@@ -54,7 +54,7 @@ test.describe('Journey: live streaming turn', () => {
     const divider = page.locator('.history-divider');
     await expect(divider).toBeVisible({ timeout: 15_000 });
     await expect(divider).toContainText('Earlier in this session');
-    await expect(page.locator('.row.history').first()).toContainText('what is Helm again?');
+    await expect(page.locator('.row.history').first()).toContainText('what is Weft again?');
   });
 
   test('a terminal-typed prompt is tagged with a "Laptop" device chip', async ({ page }) => {

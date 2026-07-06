@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test';
 
-const SITE = process.env.HELM_URL || 'https://usehelm.netlify.app/';
-const OUT = 'C:\\Users\\akash\\helm\\design\\assets';
+const SITE = process.env.WEFT_URL || 'https://useweft.netlify.app/';
+const OUT = 'C:\\Users\\akash\\weft\\design\\assets';
 
 const browser = await chromium.launch();
 const shot = async (fn, file) => {
@@ -21,7 +21,7 @@ const shot = async (fn, file) => {
 
 const startDemo = async (page) => {
   await page.getByText('Demo / Simulator').click();
-  await page.waitForSelector('.helm-session', { timeout: 15000 });
+  await page.waitForSelector('.weft-session', { timeout: 15000 });
 };
 
 // 1) Pairing / onboarding screen (fresh load)

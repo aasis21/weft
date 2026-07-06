@@ -1,6 +1,6 @@
-# Helm security model
+# Weft security model
 
-Helm's promise: **the relay never sees your session.** Supabase (or any relay) only
+Weft's promise: **the relay never sees your session.** Supabase (or any relay) only
 ever transports opaque ciphertext. Confidentiality and integrity live entirely on the
 two paired devices.
 
@@ -17,13 +17,13 @@ two paired devices.
 
 - **Key agreement:** ECDH on **P-256** (universal Web Crypto support in Node ≥18 and
   browsers/WebViews). Each device generates an ephemeral keypair per session.
-- **Key derivation:** ECDH shared secret → **HKDF-SHA256** (salt `"helm-v1"`, info
-  `"helm-session-key"`) → a 256-bit AES key.
+- **Key derivation:** ECDH shared secret → **HKDF-SHA256** (salt `"weft-v1"`, info
+  `"weft-session-key"`) → a 256-bit AES key.
 - **Payload encryption:** **AES-256-GCM** with a fresh **random 96-bit IV per
   message**. GCM provides confidentiality *and* integrity (tampered ciphertext is
   rejected on decrypt — see `shared/test/crypto.test.mjs`).
 - **Channel id:** 128 bits of CSPRNG entropy, hex. Namespaces the relay channel as
-  `private:helm:<channelId>`.
+  `private:weft:<channelId>`.
 
 Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing else
 — no plaintext metadata, no tool names, no prompts.
@@ -32,7 +32,7 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 
 - Use **Realtime Broadcast** with **zero database persistence** in v1.
 - Enable **Realtime Authorization** and add **RLS** policies on `realtime.messages`
-  so only authorized clients may join `private:helm:*` channels.
+  so only authorized clients may join `private:weft:*` channels.
 - Channel config uses `broadcast: { self: false, ack: true }`.
 - The **anon key is shippable**: it grants only the ability to attempt a join.
   Confidentiality does **not** depend on it — it rests on (a) the unguessable
@@ -49,7 +49,7 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 | Message tampering / replay garbage | GCM auth tag rejects modified ciphertext | replay of *valid* old envelopes not yet sequence-checked → **see below** |
 | **QR shoulder-surf / screenshot** | QR shown briefly; contains only a public key + channelId | **anyone who reads the QR can pair** — accepted in v1 |
 | **Pairing race / impersonation** | `waitForPeer` resolves on the first `pair.hello` | an attacker who saw the QR could pair first — accepted in v1 |
-| Approval prompt hangs the agent | `onPermissionRequest` has a **timeout → deny** safety net (`HELM_APPROVAL_TIMEOUT_MS`, default 120s) | a slow phone denies a tool it might have approved |
+| Approval prompt hangs the agent | `onPermissionRequest` has a **timeout → deny** safety net (`WEFT_APPROVAL_TIMEOUT_MS`, default 120s) | a slow phone denies a tool it might have approved |
 | Lost/stolen phone | session key is ephemeral and dies with the session | a live, unlocked paired phone can drive the session |
 
 ### The QR is a bearer credential

@@ -1,7 +1,7 @@
 // makeManager — the L2 scenario harness.
 //
 // Spins up a FRESH `SessionManager` (never the shared singleton, so tests don't bleed into each
-// other) wired to the FakeHelmClient transport. It records every emitted snapshot and gives terse
+// other) wired to the FakeWeftClient transport. It records every emitted snapshot and gives terse
 // accessors so a scenario reads like a story:
 //
 //   const h = makeManager();
@@ -12,8 +12,8 @@
 //   expect(client.sentOfKind('control.state_request')).toHaveLength(1);
 import { createSessionRuntime, type SessionRuntime } from '@/session/runtime/sessionRuntime';
 import type { ManagerSnapshot, SessionView } from '@/session/view';
-import { registry } from './fakeHelmClient';
-import type { FakeHelmClient } from './fakeHelmClient';
+import { registry } from './fakeWeftClient';
+import type { FakeWeftClient } from './fakeWeftClient';
 
 export interface ManagerHarness {
   manager: SessionRuntime;
@@ -30,13 +30,13 @@ export interface ManagerHarness {
   /** Restore stored sessions from Preferences (call after seeding, for restart scenarios). */
   init(): Promise<void>;
   /**
-   * Join a session via QR. Returns its channelId and the FakeHelmClient the manager bound, so the
+   * Join a session via QR. Returns its channelId and the FakeWeftClient the manager bound, so the
    * test can `client.emit(...)` inbound and read `client.sent`. The QR string is used verbatim as the
    * channelId (real code parses a pairing payload).
    */
   pair(arg?: string | { channelId?: string; qr?: string }): Promise<PairResult>;
-  /** The freshest FakeHelmClient bound to a channel (a rescan/reconnect makes a new one). */
-  client(channelId: string): FakeHelmClient;
+  /** The freshest FakeWeftClient bound to a channel (a rescan/reconnect makes a new one). */
+  client(channelId: string): FakeWeftClient;
   /** Settle the microtasks that attach()/persist scheduling kick off. */
   flush(): Promise<void>;
   /** Stop listening. */
@@ -45,7 +45,7 @@ export interface ManagerHarness {
 
 export interface PairResult {
   channelId: string;
-  client: FakeHelmClient;
+  client: FakeWeftClient;
 }
 
 let channelCounter = 0;
@@ -64,9 +64,9 @@ export function makeManager(): ManagerHarness {
     await Promise.resolve();
   };
 
-  const client = (channelId: string): FakeHelmClient => {
+  const client = (channelId: string): FakeWeftClient => {
     const c = registry.get(channelId);
-    if (!c) throw new Error(`makeManager: no FakeHelmClient bound for channel "${channelId}"`);
+    if (!c) throw new Error(`makeManager: no FakeWeftClient bound for channel "${channelId}"`);
     return c;
   };
 

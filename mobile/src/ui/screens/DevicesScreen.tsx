@@ -27,7 +27,7 @@ interface DevicesScreenProps {
 }
 
 /**
- * Full "connected devices" management screen (#186): every registered `helm-cli` listener, its
+ * Full "connected devices" management screen (#186): every registered `weft-cli` listener, its
  * live status + last-seen time, and per-device actions — separate from StartSessionScreen (which
  * is scoped to launching ONE new session on ONE device). Reached from the sessions drawer/menu
  * as "Devices", distinct from "Join another session" (mirror an existing session by its QR) and
@@ -182,7 +182,7 @@ export function DevicesScreen({
   };
 
   return (
-    <main className="helm-session join-session devices-screen">
+    <main className="weft-session join-session devices-screen">
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -207,7 +207,7 @@ export function DevicesScreen({
 
       <div className="session-join-inner">
         <p className="session-join-hint">
-          Each is a laptop running <code>helm-cli start</code>. Tap a card to view its details,
+          Each is a laptop running <code>weft-cli start</code>. Tap a card to view its details,
           projects, and event log.
         </p>
 

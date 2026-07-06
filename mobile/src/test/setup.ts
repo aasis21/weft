@@ -10,14 +10,14 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { resetPreferences } from './helpers/mockPreferences';
-import { registry } from './helpers/fakeHelmClient';
+import { registry } from './helpers/fakeWeftClient';
 
-// --- Transport: FakeHelmClient replaces the real Supabase/WebCrypto client -----------------------
+// --- Transport: FakeWeftClient replaces the real Supabase/WebCrypto client -----------------------
 // SessionManager and demoSimulator import pairSession/connectSession from here; the fake records
 // outbound sends and lets tests push inbound messages, with zero crypto or network.
-vi.mock('../lib/helmClient', async () => {
-  const { helmClientMock } = await import('./helpers/fakeHelmClient');
-  return helmClientMock;
+vi.mock('../lib/weftClient', async () => {
+  const { weftClientMock } = await import('./helpers/fakeWeftClient');
+  return weftClientMock;
 });
 
 // --- Capacitor Preferences: real behaviour, in-memory store -------------------------------------

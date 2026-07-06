@@ -5,7 +5,7 @@ import type { PersistedTimeline } from './timeline';
 // RESTORES it on refresh, so a reload shows the conversation instantly from the device
 // without re-pulling from the laptop. Mirrors sessions.ts: Preferences is the source of
 // truth, with a localStorage mirror so a browser refresh (web build) restores too.
-const PREFIX = 'helm.transcript.v1.';
+const PREFIX = 'weft.transcript.v1.';
 const VERSION = 1 as const;
 const discarded = new Set<string>();
 

@@ -1,4 +1,4 @@
-// Helm transport abstraction.
+// Weft transport abstraction.
 //
 // A Transport delivers opaque, already-encrypted envelopes for ONE pairing channel
 // (identified by channelId), multiplexed by logical event name (see EVENTS in messages.mjs).

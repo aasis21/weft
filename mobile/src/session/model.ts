@@ -1,4 +1,4 @@
-import { MODES } from '@aasis21/helm-shared';
+import { MODES } from '@aasis21/weft-shared';
 import type {
   ApprovalRequestMsg,
   ElicitationRequestMsg,
@@ -8,7 +8,7 @@ import type {
   PromptAttachment,
   SessionMode,
   TransportDescriptor,
-} from '@aasis21/helm-shared';
+} from '@aasis21/weft-shared';
 import type { RegisteredDevice } from '@/lib/devices';
 
 export type SessionStatus = 'initializing' | 'connecting' | 'live' | 'idle' | 'ended' | 'error';
@@ -89,14 +89,14 @@ export interface SessionMeta {
   scannedAt?: number;
   /** Stable, non-secret `deviceId` (see extension/src/deviceIdentity.mjs) of the listener that
    *  spawned this session via "Start session", if any — lets the Device details screen list every
-   *  session launched from a given laptop even across `helm-cli start` restarts. Undefined for
+   *  session launched from a given laptop even across `weft-cli start` restarts. Undefined for
    *  sessions joined by scanning a session QR directly. */
   spawnedFromDeviceId?: string;
   /** Display name of the spawning device at spawn time (falls back label if it's since renamed). */
   spawnedFromDeviceName?: string;
   /** Which transport kind this session is currently paired over (local/supabase/webpubsub/devtunnel)
    *  — see TransportDescriptor in shared/transport.d.ts. Surfaced in the session debug/detail view
-   *  so a `/helm <transport>` switch (or a devtunnel pairing) is visible from the phone side too.
+   *  so a `/weft <transport>` switch (or a devtunnel pairing) is visible from the phone side too.
    *  Optional: sessions restored before this field existed simply omit it until their next re-pair. */
   transport?: TransportDescriptor['kind'];
 }

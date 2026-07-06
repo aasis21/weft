@@ -80,25 +80,25 @@ async function forceKill(pid) {
   }
 }
 
-test("findDevTunnelBinary resolves HELM_DEVTUNNEL_BIN when it runs successfully", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-devtunnel-"));
+test("findDevTunnelBinary resolves WEFT_DEVTUNNEL_BIN when it runs successfully", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   try {
     const bin = makeFakeCli(dir);
-    process.env.HELM_DEVTUNNEL_BIN = bin;
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
     const { findDevTunnelBinary } = await freshModule();
     assert.equal(await findDevTunnelBinary(), bin);
   } finally {
-    delete process.env.HELM_DEVTUNNEL_BIN;
+    delete process.env.WEFT_DEVTUNNEL_BIN;
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test("provisionDevTunnelTransport throws an actionable error when not logged in", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-devtunnel-"));
-  const homeDir = mkdtempSync(join(tmpdir(), "helm-home-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
     const bin = makeFakeCli(dir);
-    process.env.HELM_DEVTUNNEL_BIN = bin;
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
     const { provisionDevTunnelTransport } = await freshModule();
     await assert.rejects(
@@ -106,18 +106,18 @@ test("provisionDevTunnelTransport throws an actionable error when not logged in"
       /devtunnel user login/,
     );
   } finally {
-    delete process.env.HELM_DEVTUNNEL_BIN;
+    delete process.env.WEFT_DEVTUNNEL_BIN;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
 });
 
 test("provisionDevTunnelTransport spawns the shared relay, publishes a registry entry, and reuses it on a second call", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-devtunnel-"));
-  const homeDir = mkdtempSync(join(tmpdir(), "helm-home-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
     const bin = makeFakeCli(dir);
-    process.env.HELM_DEVTUNNEL_BIN = bin;
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
     const { provisionDevTunnelTransport } = await freshModule();
 
@@ -132,7 +132,7 @@ test("provisionDevTunnelTransport spawns the shared relay, publishes a registry 
     assert.ok(entry.relayPort);
     assert.equal(entry.baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
 
-    // Second call (different channelId, same "machine"/HELM_HOME) should discover + reuse the
+    // Second call (different channelId, same "machine"/WEFT_HOME) should discover + reuse the
     // already-published registry entry rather than spawning a second relay process.
     const second = await provisionDevTunnelTransport({ channelId: "chan-b", baseDir: homeDir });
     assert.equal(second.url, "wss://fake-abc123-9999.usw2.devtunnels.ms?channelId=chan-b");
@@ -149,7 +149,7 @@ test("provisionDevTunnelTransport spawns the shared relay, publishes a registry 
     await forceKill(entry.pid);
     rmSync(registryPath, { force: true });
   } finally {
-    delete process.env.HELM_DEVTUNNEL_BIN;
+    delete process.env.WEFT_DEVTUNNEL_BIN;
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
@@ -157,14 +157,14 @@ test("provisionDevTunnelTransport spawns the shared relay, publishes a registry 
 });
 
 test("the shared relay self-tears-down after its idle timeout with no connections", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-devtunnel-"));
-  const homeDir = mkdtempSync(join(tmpdir(), "helm-home-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
     const bin = makeFakeCli(dir);
-    process.env.HELM_DEVTUNNEL_BIN = bin;
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
-    process.env.HELM_DEVTUNNEL_IDLE_MS = "300";
-    process.env.HELM_DEVTUNNEL_CHECK_MS = "100";
+    process.env.WEFT_DEVTUNNEL_IDLE_MS = "300";
+    process.env.WEFT_DEVTUNNEL_CHECK_MS = "100";
     const { provisionDevTunnelTransport } = await freshModule();
 
     await provisionDevTunnelTransport({ channelId: "chan-a", baseDir: homeDir });
@@ -175,10 +175,10 @@ test("the shared relay self-tears-down after its idle timeout with no connection
     // its own registry entry without any external teardown call.
     await waitFor(() => !existsSync(registryPath), "registry file to be cleared by self idle-teardown", 10_000);
   } finally {
-    delete process.env.HELM_DEVTUNNEL_BIN;
+    delete process.env.WEFT_DEVTUNNEL_BIN;
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
-    delete process.env.HELM_DEVTUNNEL_IDLE_MS;
-    delete process.env.HELM_DEVTUNNEL_CHECK_MS;
+    delete process.env.WEFT_DEVTUNNEL_IDLE_MS;
+    delete process.env.WEFT_DEVTUNNEL_CHECK_MS;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }

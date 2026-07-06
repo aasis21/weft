@@ -19,7 +19,7 @@ const iso = (n) => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString();
 
 before(async () => {
   const { DatabaseSync } = await import("node:sqlite");
-  dir = mkdtempSync(join(tmpdir(), "helm-store-"));
+  dir = mkdtempSync(join(tmpdir(), "weft-store-"));
   dbPath = join(dir, "session-store.db");
   const db = new DatabaseSync(dbPath); // writable for setup
   db.exec(

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Remove the installed Helm Copilot CLI extension.
+# Remove the installed Weft Copilot CLI extension.
 set -euo pipefail
-dest="$HOME/.copilot/extensions/helm"
+dest="$HOME/.copilot/extensions/weft"
 if [ -d "$dest" ]; then
   rm -rf "$dest"
   echo "Removed $dest"

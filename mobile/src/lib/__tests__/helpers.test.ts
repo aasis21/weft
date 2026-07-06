@@ -1,5 +1,5 @@
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc } from '@/lib/imageAttachments';
-import { clipText, compareHistory, historyItemId } from '@aasis21/helm-shared';
+import { clipText, compareHistory, historyItemId } from '@aasis21/weft-shared';
 import * as B from '@/test/helpers/builders';
 
 describe('shared history helpers', () => {

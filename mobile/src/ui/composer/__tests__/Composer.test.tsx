@@ -2,7 +2,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
-import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
 import { Composer } from '@/ui/composer/Composer';
 
 const mockAttachment: PromptAttachment = {
@@ -49,7 +49,7 @@ function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
     disabled: false,
     busy: false,
     mode: 'interactive' as SessionMode,
-    cwd: 'C:\\Users\\akash\\helm',
+    cwd: 'C:\\Users\\akash\\weft',
     onPrompt: vi.fn(),
     onInterrupt: vi.fn(),
     onModeChange: vi.fn(),
@@ -77,7 +77,7 @@ describe('Composer', () => {
     expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attach image' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Interactive' })).toHaveClass('mode-pill');
-    expect(screen.getByText('📁 helm')).toHaveClass('cwd-chip');
+    expect(screen.getByText('📁 weft')).toHaveClass('cwd-chip');
     expect(screen.getByRole('button', { name: 'Open Vox' })).toBeEnabled();
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
   });
@@ -108,12 +108,12 @@ describe('Composer', () => {
     renderComposer({ onPrompt });
     const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
 
-    await user.type(textbox, 'hello helm');
+    await user.type(textbox, 'hello weft');
     fireEvent.keyDown(textbox, { key: 'Enter' });
     expect(onPrompt).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Send' }));
-    expect(onPrompt).toHaveBeenCalledWith('hello helm', undefined);
+    expect(onPrompt).toHaveBeenCalledWith('hello weft', undefined);
     expect(textbox).toHaveValue('');
 
     await user.type(textbox, 'hardware shortcut');
@@ -213,7 +213,7 @@ describe('Composer', () => {
 
     await user.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(onPrompt).toHaveBeenCalledWith('', [mockAttachment]));
-    expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toBeNull();
+    expect(localStorage.getItem('weft.draft-attachments.v1.session-a')).toBeNull();
   });
 
   it('attaches an image pasted into the textbox (desktop Ctrl+V) without affecting text paste', async () => {
@@ -254,7 +254,7 @@ describe('Composer', () => {
     const first = deferred<PromptAttachment>();
     const second = deferred<PromptAttachment>();
     fileToAttachment.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    localStorage.setItem('helm.draft-attachments.v1.session-a', JSON.stringify([mockAttachment]));
+    localStorage.setItem('weft.draft-attachments.v1.session-a', JSON.stringify([mockAttachment]));
     const { container } = renderComposer();
     const input = container.querySelector<HTMLInputElement>('input[type="file"].composer-file-input');
 
@@ -311,8 +311,8 @@ describe('Composer', () => {
     await Promise.resolve();
 
     expect(screen.queryByRole('img', { name: 'picked.jpg' })).not.toBeInTheDocument();
-    expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toBeNull();
-    expect(localStorage.getItem('helm.draft-attachments.v1.session-b')).toBeNull();
+    expect(localStorage.getItem('weft.draft-attachments.v1.session-a')).toBeNull();
+    expect(localStorage.getItem('weft.draft-attachments.v1.session-b')).toBeNull();
   });
 
   it('restores attached images per session', async () => {
@@ -322,7 +322,7 @@ describe('Composer', () => {
 
     fireEvent.change(input!, { target: { files: [file] } });
     expect(await screen.findByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
-    expect(localStorage.getItem('helm.draft-attachments.v1.session-a')).toContain('picked.jpg');
+    expect(localStorage.getItem('weft.draft-attachments.v1.session-a')).toContain('picked.jpg');
 
     rendered.rerender(<Composer {...rendered.props} sessionId="session-b" />);
     expect(screen.queryByRole('img', { name: 'picked.jpg' })).not.toBeInTheDocument();
@@ -350,8 +350,8 @@ describe('Composer', () => {
     onSpeech?.('wrong session words', true);
 
     expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toHaveValue('');
-    expect(localStorage.getItem('helm.draft.v1.session-a')).toBeNull();
-    expect(localStorage.getItem('helm.draft.v1.session-b')).toBeNull();
+    expect(localStorage.getItem('weft.draft.v1.session-a')).toBeNull();
+    expect(localStorage.getItem('weft.draft.v1.session-b')).toBeNull();
   });
 
   it('appends fresh speech phrases without duplicating committed text', async () => {

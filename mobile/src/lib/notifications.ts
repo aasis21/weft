@@ -1,4 +1,4 @@
-// On-device alerting for Helm.
+// On-device alerting for Weft.
 //
 // The product promise is "walk away from your desk" — so when Copilot pauses for a
 // permission decision, the phone must surface it even when the app isn't in focus.
@@ -15,9 +15,9 @@
 // planned follow-up; this layer covers the common "phone in hand / app recent" case.
 
 import { Capacitor } from '@capacitor/core';
-import type { ApprovalRequestMsg, ElicitationRequestMsg } from '@aasis21/helm-shared';
+import type { ApprovalRequestMsg, ElicitationRequestMsg } from '@aasis21/weft-shared';
 
-const APPROVAL_CHANNEL = 'helm-approvals';
+const APPROVAL_CHANNEL = 'weft-approvals';
 
 interface LocalNotificationsApi {
   checkPermissions(): Promise<{ display: string }>;
@@ -151,7 +151,7 @@ export async function notifyApprovalRequest(req: ApprovalRequestMsg): Promise<vo
         ],
       });
     } else if (typeof Notification !== 'undefined') {
-      const note = new Notification(title, { body, tag: `helm-approval-${req.requestId}` });
+      const note = new Notification(title, { body, tag: `weft-approval-${req.requestId}` });
       note.onclick = () => {
         try {
           window.focus();
@@ -176,7 +176,7 @@ export async function notifyElicitationRequest(req: ElicitationRequestMsg): Prom
   if (!appIsHidden()) return;
   if (!(await ensureNotificationPermission())) return;
   const title = 'Copilot has a question';
-  const body = 'Open Helm to answer.';
+  const body = 'Open Weft to answer.';
   try {
     if (isNative()) {
       const plugin = await loadNative();
@@ -192,7 +192,7 @@ export async function notifyElicitationRequest(req: ElicitationRequestMsg): Prom
         ],
       });
     } else if (typeof Notification !== 'undefined') {
-      const note = new Notification(title, { body, tag: `helm-elicit-${req.requestId}` });
+      const note = new Notification(title, { body, tag: `weft-elicit-${req.requestId}` });
       note.onclick = () => {
         try {
           window.focus();
@@ -210,7 +210,7 @@ export async function notifyElicitationRequest(req: ElicitationRequestMsg): Prom
 /** Lower-priority heads-up that the bound session ended while you were away. */
 export async function notifySessionEnded(reason?: string): Promise<void> {  if (!appIsHidden()) return;
   if (!(await ensureNotificationPermission())) return;
-  const title = 'Helm session ended';
+  const title = 'Weft session ended';
   const body = reason?.trim() || 'Your Copilot session disconnected.';
   try {
     if (isNative()) {
@@ -219,7 +219,7 @@ export async function notifySessionEnded(reason?: string): Promise<void> {  if (
         notifications: [{ id: notificationIdFor(`end-${reason ?? ''}`), title, body }],
       });
     } else if (typeof Notification !== 'undefined') {
-      new Notification(title, { body, tag: 'helm-session-ended' });
+      new Notification(title, { body, tag: 'weft-session-ended' });
     }
   } catch {
     /* best-effort */

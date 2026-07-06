@@ -5,7 +5,7 @@ vi.mock('@capacitor/app', () => ({
 }));
 import { App } from '@capacitor/app';
 import { makeManager } from '@/test/helpers/makeManager';
-import { registry } from '@/test/helpers/fakeHelmClient';
+import { registry } from '@/test/helpers/fakeWeftClient';
 import * as B from '@/test/helpers/builders';
 
 function listenerQr(channelId: string): string {
@@ -39,7 +39,7 @@ describe('scenario: device (listener) heartbeat watchdog', () => {
     await h!.flush();
     const listener = registry.get('listener-1')!;
 
-    listener.emit(B.projectList([{ name: 'helm', path: '/repo', isDefault: true }], 'Akash Laptop'));
+    listener.emit(B.projectList([{ name: 'weft', path: '/repo', isDefault: true }], 'Akash Laptop'));
     await h!.flush();
     expect(h!.snapshot().devices[0]).toMatchObject({ channelId: 'listener-1', connected: true });
 

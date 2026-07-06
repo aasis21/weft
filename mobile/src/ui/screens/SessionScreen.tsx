@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { ChatThread } from '@/ui/thread/ChatThread';
@@ -11,7 +11,7 @@ import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
-import { getStableDeviceId } from '@/lib/helmClient';
+import { getStableDeviceId } from '@/lib/weftClient';
 import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
 
 function pickString(value: unknown): string | null {
@@ -111,7 +111,7 @@ function readRecord(value: unknown): Record<string, unknown> {
 }
 
 /** Persisted across sessions: whether the user collapsed the desktop docked sidebar (#183). */
-const SIDEBAR_COLLAPSED_KEY = 'helm.desktop-sidebar-collapsed';
+const SIDEBAR_COLLAPSED_KEY = 'weft.desktop-sidebar-collapsed';
 
 function loadSidebarCollapsed(): boolean {
   try {
@@ -424,7 +424,7 @@ export function SessionScreen({
   // Keep the composer above the iOS/Android soft keyboard. The session surface is
   // position:fixed, so the layout viewport doesn't shrink when the keyboard opens and
   // the composer gets hidden behind it. Track the visual viewport and lift the surface
-  // by the keyboard's height via the --helm-kb custom property (#59).
+  // by the keyboard's height via the --weft-kb custom property (#59).
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return undefined;
@@ -449,7 +449,7 @@ export function SessionScreen({
       const raw = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       const keyboardThreshold = Math.max(MIN_KEYBOARD_INSET, Math.round(window.innerHeight * 0.18));
       const inset = isTextEntryFocused() && raw >= keyboardThreshold ? raw : 0;
-      el.style.setProperty('--helm-kb', `${inset}px`);
+      el.style.setProperty('--weft-kb', `${inset}px`);
     };
     apply();
     vv.addEventListener('resize', apply);
@@ -481,7 +481,7 @@ export function SessionScreen({
   }, []);
 
   return (
-    <div className={`helm-session${isDesktopWide ? ' desktop-docked' : ''}`} ref={rootRef}>
+    <div className={`weft-session${isDesktopWide ? ' desktop-docked' : ''}`} ref={rootRef}>
       {isDesktopWide ? (
         sidebarCollapsed ? (
           <button
@@ -514,7 +514,7 @@ export function SessionScreen({
           />
         )
       ) : null}
-      <div className="helm-content-col">
+      <div className="weft-content-col">
       <StatusBar
         title={meta.title}
         cwd={meta.cwd}

@@ -1,12 +1,12 @@
 /* =====================================================================
-   Helm chat UI — full-screen, single-column Copilot-style session view.
+   Weft chat UI — full-screen, single-column Copilot-style session view.
    Mobile-first: fixed viewport, vertical-only scroll, no horizontal pan.
    - Right-aligned user bubbles, left-aligned assistant turns (Claude style)
    - Inline tool cards, collapsed by default (VS Code / Copilot style)
    - Compact top status bar + Anya-style bottom composer
    - Slide-in multi-session drawer
-   Everything is scoped under .helm-session (a dark Copilot surface) so it
-   never touches Helm's green pairing/landing theme.
+   Everything is scoped under .weft-session (a dark Copilot surface) so it
+   never touches Weft's green pairing/landing theme.
    ===================================================================== */
 
 .boot {
@@ -28,13 +28,13 @@
   background: #2f81f7;
   color: #fff;
   font: 700 26px/1 Georgia, "Times New Roman", serif;
-  animation: helm-pulse 1.6s ease-in-out infinite;
+  animation: weft-pulse 1.6s ease-in-out infinite;
 }
-@keyframes helm-pulse {
+@keyframes weft-pulse {
   50% { opacity: 0.55; transform: scale(0.96); }
 }
 
-.helm-session {
+.weft-session {
   --bg: #0d1117;
   --bg-elev: #161b22;
   --bg-rule: #30363d;
@@ -66,10 +66,10 @@
   font-size: 14px;
   line-height: 1.5;
 }
-.helm-session * { box-sizing: border-box; }
+.weft-session * { box-sizing: border-box; }
 
 /* #57: Agent A only mutates :root[data-theme]; chat tokens react here. */
-:root[data-theme='dark'] .helm-session {
+:root[data-theme='dark'] .weft-session {
   --bg: #0d1117;
   --bg-elev: #161b22;
   --bg-rule: #30363d;
@@ -88,7 +88,7 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) .helm-session {
+  :root:not([data-theme='dark']) .weft-session {
     --bg: #ffffff;
     --bg-elev: #f6f8fa;
     --bg-rule: #d0d7de;
@@ -107,7 +107,7 @@
   }
 }
 
-:root[data-theme='light'] .helm-session {
+:root[data-theme='light'] .weft-session {
   --bg: #ffffff;
   --bg-elev: #f6f8fa;
   --bg-rule: #d0d7de;
@@ -126,7 +126,7 @@
 }
 
 /* ---- shared buttons ---- */
-.helm-session .icon-btn {
+.weft-session .icon-btn {
   display: inline-flex;
   position: relative;
   flex: 0 0 auto;
@@ -140,39 +140,39 @@
   color: var(--fg-dim);
   font-size: 17px;
 }
-.helm-session .icon-btn:hover { background: var(--bg-elev); color: var(--fg); }
+.weft-session .icon-btn:hover { background: var(--bg-elev); color: var(--fg); }
 
 /* --- Focus-visible rings (a11y, WCAG 2.4.7) --- */
-.helm-session .icon-btn:focus-visible,
-.helm-session .bar-menu-item:focus-visible,
-.helm-session .tc-head:focus-visible,
-.helm-session .pill:focus-visible,
-.helm-session .mode-menu-item:focus-visible,
-.helm-session .send-btn:focus-visible,
-.helm-session .stop-btn:focus-visible,
-.helm-session details > summary:focus-visible,
-.helm-session .approval-args > summary:focus-visible,
-.helm-session .approval-btn:focus-visible,
-.helm-session .elicit-input:focus-visible,
-.helm-session .elicit-toggle input:focus-visible,
-.helm-session .elicit-check input:focus-visible,
-.helm-session .elicit-dot:focus-visible,
-.helm-session .elicit-nav-btn:focus-visible,
-.helm-session .elicit-btn:focus-visible,
-.helm-session .reconnect-btn:focus-visible,
-.helm-session .session-row:focus-visible,
-.helm-session .drawer-add:focus-visible,
-.helm-session .session-pair-back:focus-visible,
-.helm-session .session-link-btn:focus-visible,
-.helm-session .session-primary-action:focus-visible,
-.helm-session .session-secondary-action:focus-visible,
-.helm-session .session-manual-input:focus-visible {
+.weft-session .icon-btn:focus-visible,
+.weft-session .bar-menu-item:focus-visible,
+.weft-session .tc-head:focus-visible,
+.weft-session .pill:focus-visible,
+.weft-session .mode-menu-item:focus-visible,
+.weft-session .send-btn:focus-visible,
+.weft-session .stop-btn:focus-visible,
+.weft-session details > summary:focus-visible,
+.weft-session .approval-args > summary:focus-visible,
+.weft-session .approval-btn:focus-visible,
+.weft-session .elicit-input:focus-visible,
+.weft-session .elicit-toggle input:focus-visible,
+.weft-session .elicit-check input:focus-visible,
+.weft-session .elicit-dot:focus-visible,
+.weft-session .elicit-nav-btn:focus-visible,
+.weft-session .elicit-btn:focus-visible,
+.weft-session .reconnect-btn:focus-visible,
+.weft-session .session-row:focus-visible,
+.weft-session .drawer-add:focus-visible,
+.weft-session .session-pair-back:focus-visible,
+.weft-session .session-link-btn:focus-visible,
+.weft-session .session-primary-action:focus-visible,
+.weft-session .session-secondary-action:focus-visible,
+.weft-session .session-manual-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 42%, transparent);
 }
 
-.helm-session .tc-head:focus-visible {
+.weft-session .tc-head:focus-visible {
   outline-offset: -3px;
 }
 
@@ -208,7 +208,7 @@
   border-radius: 2px;
   background: currentColor;
 }
-.helm-mark-btn .helm-mark {
+.weft-mark-btn .weft-mark {
   font-size: 19px;
   line-height: 1;
 }
@@ -271,23 +271,23 @@
 .status-dot.live {
   background: var(--success);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
-  animation: helm-beat 2s ease-in-out infinite;
+  animation: weft-beat 2s ease-in-out infinite;
 }
 .status-line.busy { color: var(--accent); }
 .status-line.busy .status-dot {
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-  animation: helm-beat 1s ease-in-out infinite;
+  animation: weft-beat 1s ease-in-out infinite;
 }
 .status-line.connecting .status-dot,
-.status-dot.connecting { background: var(--accent); animation: helm-beat 1.2s ease-in-out infinite; }
+.status-dot.connecting { background: var(--accent); animation: weft-beat 1.2s ease-in-out infinite; }
 .status-line.idle .status-dot,
 .status-dot.idle { background: var(--warning); }
 .status-line.ended .status-dot,
 .status-dot.ended { background: var(--fg-faint); }
 .status-line.error .status-dot,
 .status-dot.error { background: var(--error); }
-@keyframes helm-beat {
+@keyframes weft-beat {
   50% { opacity: 0.45; }
 }
 
@@ -303,7 +303,7 @@
   border-radius: 14px;
   background: var(--bg-elev);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  animation: helm-pop 140ms ease;
+  animation: weft-pop 140ms ease;
 }
 .bar-menu-item {
   display: block;
@@ -318,7 +318,7 @@
 }
 .bar-menu-item:hover { background: var(--bg); }
 .bar-menu-item.danger { color: var(--error); }
-@keyframes helm-pop {
+@keyframes weft-pop {
   from { opacity: 0; transform: translateY(-4px); }
 }
 
@@ -350,10 +350,10 @@
   text-align: center;
 }
 
-.row { padding: 0; animation: helm-slide 240ms cubic-bezier(0.16, 1, 0.3, 1); }
+.row { padding: 0; animation: weft-slide 240ms cubic-bezier(0.16, 1, 0.3, 1); }
 .row + .row { margin-top: 3px; }
 .row.turn-start { margin-top: 12px; }
-@keyframes helm-slide {
+@keyframes weft-slide {
   from { opacity: 0; transform: translateY(5px); }
 }
 
@@ -496,9 +496,9 @@
   margin-left: 1px;
   vertical-align: -2px;
   background: var(--accent);
-  animation: helm-blink 1s steps(2, start) infinite;
+  animation: weft-blink 1s steps(2, start) infinite;
 }
-@keyframes helm-blink { 50% { opacity: 0; } }
+@keyframes weft-blink { 50% { opacity: 0; } }
 .thinking { display: flex; align-items: center; gap: 8px; color: var(--fg-dim); font-size: 12.5px; }
 .thinking-dots { display: inline-flex; gap: 3px; align-items: center; }
 .thinking-dots span {
@@ -506,11 +506,11 @@
   height: 5px;
   border-radius: 50%;
   background: var(--fg-dim);
-  animation: helm-bounce 1.4s ease-in-out infinite;
+  animation: weft-bounce 1.4s ease-in-out infinite;
 }
 .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
 .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes helm-bounce {
+@keyframes weft-bounce {
   0%, 80%, 100% { opacity: 0.25; transform: scale(1); }
   40% { opacity: 1; transform: scale(1.35); }
 }
@@ -541,10 +541,10 @@
   cursor: pointer;
 }
 .tc-icon { flex: 0 0 auto; width: 14px; color: var(--fg-dim); font-size: 12px; text-align: center; }
-.tool-card.running .tc-icon { color: var(--accent); animation: helm-spin 1.1s linear infinite; }
+.tool-card.running .tc-icon { color: var(--accent); animation: weft-spin 1.1s linear infinite; }
 .tool-card.success .tc-icon { color: var(--success); }
 .tool-card.error .tc-icon { color: var(--error); }
-@keyframes helm-spin { to { transform: rotate(360deg); } }
+@keyframes weft-spin { to { transform: rotate(360deg); } }
 .tc-name { flex: 0 0 auto; font-weight: 700; font-size: 12.5px; }
 .tc-args {
   flex: 1 1 auto;
@@ -799,7 +799,7 @@
   border-radius: 12px;
   background: var(--bg-elev);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  animation: helm-pop 140ms ease;
+  animation: weft-pop 140ms ease;
 }
 .mode-menu-item {
   display: flex;
@@ -1190,9 +1190,9 @@
   inset: 0;
   z-index: 55;
   background: rgba(1, 4, 9, 0.55);
-  animation: helm-fade 180ms ease;
+  animation: weft-fade 180ms ease;
 }
-@keyframes helm-fade { from { opacity: 0; } }
+@keyframes weft-fade { from { opacity: 0; } }
 .drawer {
   position: fixed;
   top: 0;
@@ -1207,19 +1207,19 @@
   border-right: 1px solid var(--bg-rule);
   background: var(--bg-elev);
   box-shadow: 24px 0 60px rgba(0, 0, 0, 0.5);
-  animation: helm-drawer-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: weft-drawer-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes helm-drawer-in { from { transform: translateX(-100%); } }
+@keyframes weft-drawer-in { from { transform: translateX(-100%); } }
 /* ===================== desktop docked sidebar (#183) =====================
    Wide viewports get a persistent, in-flow sidebar instead of the mobile overlay
-   drawer above: .helm-session switches to a row layout and .drawer gets a `docked`
+   drawer above: .weft-session switches to a row layout and .drawer gets a `docked`
    variant that drops the fixed positioning/scrim/slide-in animation. Narrow
    viewports never receive the `desktop-docked` class, so the mobile layout and the
    plain `.drawer` overlay rules above are completely unaffected. */
-.helm-session.desktop-docked {
+.weft-session.desktop-docked {
   flex-direction: row;
 }
-.helm-content-col {
+.weft-content-col {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1384,11 +1384,11 @@
 .session-pill.live { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
 .session-pill.live .pill-dot { background: var(--success); }
 .session-pill.busy { color: var(--accent); background: var(--accent-soft); }
-.session-pill.busy .pill-dot { background: var(--accent); animation: helm-beat 1.2s ease-in-out infinite; }
+.session-pill.busy .pill-dot { background: var(--accent); animation: weft-beat 1.2s ease-in-out infinite; }
 .session-pill.idle { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
 .session-pill.idle .pill-dot { background: var(--warning); }
 .session-pill.connecting { color: var(--accent); }
-.session-pill.connecting .pill-dot { background: var(--accent); animation: helm-beat 1.2s ease-in-out infinite; }
+.session-pill.connecting .pill-dot { background: var(--accent); animation: weft-beat 1.2s ease-in-out infinite; }
 .session-pill.archived { color: var(--fg-dim); }
 .session-pill.archived .pill-dot { background: var(--fg-faint); }
 .session-pill.error { color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent); }
@@ -1548,13 +1548,13 @@
 .drawer-home:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
 
 /* ---- In-app join screen --------------------------------------------------- */
-.helm-session.join-session {
+.weft-session.join-session {
   align-items: stretch;
   padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 
-.helm-session .session-join-inner {
+.weft-session .session-join-inner {
   display: flex;
   flex: 1 0 auto;
   flex-direction: column;
@@ -1563,13 +1563,13 @@
   margin: 0 auto;
 }
 
-.helm-session .session-join-head {
+.weft-session .session-join-head {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.helm-session .session-pair-back {
+.weft-session .session-pair-back {
   align-self: flex-start;
   min-height: 44px;
   padding: 8px 13px;
@@ -1581,11 +1581,11 @@
   font-weight: 700;
 }
 
-.helm-session .session-pair-back:hover {
+.weft-session .session-pair-back:hover {
   background: var(--bg-elev);
 }
 
-.helm-session .session-join-kicker {
+.weft-session .session-join-kicker {
   margin: 0;
   color: var(--accent);
   font-size: 11px;
@@ -1594,7 +1594,7 @@
   text-transform: uppercase;
 }
 
-.helm-session .session-join-head h2 {
+.weft-session .session-join-head h2 {
   margin: 0;
   color: var(--fg);
   font-size: 20px;
@@ -1602,13 +1602,13 @@
   letter-spacing: -0.02em;
 }
 
-.helm-session .session-join-hint {
+.weft-session .session-join-hint {
   margin: 0;
   color: var(--fg-dim);
   line-height: 1.5;
 }
 
-.helm-session .session-join-hint code {
+.weft-session .session-join-hint code {
   padding: 1px 6px;
   border: 1px solid var(--bg-rule);
   border-radius: 7px;
@@ -1618,26 +1618,26 @@
   font-size: 0.85em;
 }
 
-.helm-session .session-join-scanner {
+.weft-session .session-join-scanner {
   overflow: hidden;
   border: 1px solid var(--bg-rule);
   border-radius: 22px;
   background: var(--bg-elev);
 }
 
-.helm-session .session-join-fallback {
+.weft-session .session-join-fallback {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.helm-session .error-banner-wrap {
+.weft-session .error-banner-wrap {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.helm-session .error-banner {
+.weft-session .error-banner {
   margin: 0;
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--error) 36%, transparent);
@@ -1646,7 +1646,7 @@
   color: var(--error);
 }
 
-.helm-session .error-debug-detail {
+.weft-session .error-debug-detail {
   margin: 0;
   padding: 10px 12px;
   border: 1px dashed color-mix(in srgb, var(--error) 32%, transparent);
@@ -1656,14 +1656,14 @@
   font-size: 12px;
 }
 
-.helm-session .error-debug-detail pre {
+.weft-session .error-debug-detail pre {
   margin: 8px 0 0;
   color: var(--fg);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.helm-session .session-link-btn {
+.weft-session .session-link-btn {
   align-self: flex-start;
   min-height: 44px;
   padding: 8px 2px;
@@ -1675,9 +1675,9 @@
   text-decoration: underline;
 }
 
-.helm-session .session-primary-action,
-.helm-session .session-secondary-action,
-.helm-session .scanner-inline .secondary-action {
+.weft-session .session-primary-action,
+.weft-session .session-secondary-action,
+.weft-session .scanner-inline .secondary-action {
   width: 100%;
   min-height: 48px;
   border: 1px solid var(--bg-rule);
@@ -1686,24 +1686,24 @@
   font-weight: 700;
 }
 
-.helm-session .session-primary-action {
+.weft-session .session-primary-action {
   border-color: transparent;
   background: var(--accent);
   color: #fff;
 }
 
-.helm-session .session-secondary-action,
-.helm-session .scanner-inline .secondary-action {
+.weft-session .session-secondary-action,
+.weft-session .scanner-inline .secondary-action {
   background: transparent;
   color: var(--fg);
 }
 
-.helm-session .session-secondary-action:hover,
-.helm-session .scanner-inline .secondary-action:hover {
+.weft-session .session-secondary-action:hover,
+.weft-session .scanner-inline .secondary-action:hover {
   background: var(--bg-elev);
 }
 
-.helm-session .session-manual-input {
+.weft-session .session-manual-input {
   width: 100%;
   min-height: 136px;
   padding: 12px;
@@ -1715,50 +1715,50 @@
   resize: vertical;
 }
 
-.helm-session .session-manual-input:focus,
-.helm-session .session-manual-input:focus-visible {
+.weft-session .session-manual-input:focus,
+.weft-session .session-manual-input:focus-visible {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-.helm-session .scanner-inline .link-btn {
+.weft-session .scanner-inline .link-btn {
   color: var(--accent);
 }
 
 /* ---- Voice Mode orb state colors ---------------------------------------- */
-.helm-session .voice-panel {
+.weft-session .voice-panel {
   --voice-orb-color: var(--fg-faint);
   --voice-orb-glow: color-mix(in srgb, var(--fg-faint) 26%, transparent);
 }
 
-.helm-session .voice-panel[data-state='idle'],
-.helm-session .voice-panel[data-state='ready'] {
+.weft-session .voice-panel[data-state='idle'],
+.weft-session .voice-panel[data-state='ready'] {
   --voice-orb-color: var(--fg-dim);
   --voice-orb-glow: color-mix(in srgb, var(--fg-dim) 20%, transparent);
 }
 
-.helm-session .voice-panel[data-state='listening'] {
+.weft-session .voice-panel[data-state='listening'] {
   --voice-orb-color: var(--warning);
   --voice-orb-glow: color-mix(in srgb, var(--warning) 44%, transparent);
 }
 
-.helm-session .voice-panel[data-state='thinking'] {
+.weft-session .voice-panel[data-state='thinking'] {
   --voice-orb-color: var(--fg);
   --voice-orb-glow: color-mix(in srgb, var(--fg-dim) 34%, transparent);
 }
 
-.helm-session .voice-panel[data-state='working'] {
+.weft-session .voice-panel[data-state='working'] {
   --voice-orb-color: var(--accent);
   --voice-orb-glow: color-mix(in srgb, var(--accent) 44%, transparent);
 }
 
-.helm-session .voice-panel[data-state='speaking'] {
+.weft-session .voice-panel[data-state='speaking'] {
   --voice-orb-color: var(--success);
   --voice-orb-glow: color-mix(in srgb, var(--success) 42%, transparent);
 }
 
-.helm-session .voice-orb {
+.weft-session .voice-orb {
   background:
     radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--voice-orb-color) 38%, var(--bg-elev)), transparent 62%),
     radial-gradient(circle, color-mix(in srgb, var(--voice-orb-color) 18%, var(--bg-elev)), var(--bg));
@@ -1767,35 +1767,35 @@
   transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
 }
 
-.helm-session .voice-orb-ring {
+.weft-session .voice-orb-ring {
   border-color: color-mix(in srgb, var(--voice-orb-color) 48%, transparent);
   box-shadow: 0 0 42px var(--voice-orb-glow);
   animation: none;
 }
 
-.helm-session .voice-orb-core {
+.weft-session .voice-orb-core {
   filter: drop-shadow(0 10px 30px var(--voice-orb-glow));
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .helm-session .voice-panel[data-state='listening'] .voice-orb-ring {
+  .weft-session .voice-panel[data-state='listening'] .voice-orb-ring {
     animation: voice-ring 1.15s ease-in-out infinite;
   }
 
-  .helm-session .voice-panel[data-state='thinking'] .voice-orb-ring {
+  .weft-session .voice-panel[data-state='thinking'] .voice-orb-ring {
     animation: voice-ring 1.8s ease-in-out infinite;
   }
 
-  .helm-session .voice-panel[data-state='working'] .voice-orb-ring {
+  .weft-session .voice-panel[data-state='working'] .voice-orb-ring {
     animation: voice-ring 1.3s ease-in-out infinite;
   }
 
-  .helm-session .voice-panel[data-state='speaking'] .voice-orb-ring {
+  .weft-session .voice-panel[data-state='speaking'] .voice-orb-ring {
     animation: voice-ring 1s ease-in-out infinite;
   }
 }
 
-.helm-session .start-empty {
+.weft-session .start-empty {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1804,7 +1804,7 @@
 }
 
 /* ---- Redesigned "start a session" flow (numbered card sections) --------- */
-.helm-session .start-section {
+.weft-session .start-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1814,7 +1814,7 @@
   background: var(--bg-elev);
 }
 
-.helm-session .start-section-title {
+.weft-session .start-section-title {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1826,7 +1826,7 @@
   text-transform: uppercase;
 }
 
-.helm-session .start-section-count {
+.weft-session .start-section-count {
   padding: 1px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--fg) 10%, transparent);
@@ -1837,13 +1837,13 @@
   letter-spacing: normal;
 }
 
-.helm-session .start-device-list {
+.weft-session .start-device-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.helm-session .start-device-card {
+.weft-session .start-device-card {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1858,22 +1858,22 @@
   cursor: pointer;
 }
 
-.helm-session .start-device-card:hover {
+.weft-session .start-device-card:hover {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--bg-rule));
 }
 
-.helm-session .start-device-card.selected {
+.weft-session .start-device-card.selected {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-.helm-session .start-device-card:focus-visible {
+.weft-session .start-device-card:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.helm-session .start-device-info {
+.weft-session .start-device-info {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -1881,7 +1881,7 @@
   min-width: 0;
 }
 
-.helm-session .start-device-name {
+.weft-session .start-device-name {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1891,7 +1891,7 @@
   white-space: nowrap;
 }
 
-.helm-session .start-device-default {
+.weft-session .start-device-default {
   padding: 1px 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -1902,7 +1902,7 @@
   letter-spacing: 0.04em;
 }
 
-.helm-session .start-device-status {
+.weft-session .start-device-status {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1911,7 +1911,7 @@
   font-weight: 600;
 }
 
-.helm-session .start-device-check {
+.weft-session .start-device-check {
   flex: none;
   color: var(--accent);
   font-weight: 800;
@@ -1919,24 +1919,24 @@
   transition: opacity 120ms ease;
 }
 
-.helm-session .start-device-card.selected .start-device-check {
+.weft-session .start-device-card.selected .start-device-check {
   opacity: 1;
 }
 
-.helm-session .start-device-actions {
+.weft-session .start-device-actions {
   padding-top: 2px;
   border-top: 1px solid var(--bg-rule);
 }
 
-.helm-session .start-project-field select {
+.weft-session .start-project-field select {
   width: 100%;
 }
 
-.helm-session .start-loading {
+.weft-session .start-loading {
   margin: 0;
 }
 
-.helm-session .start-mode-toggle {
+.weft-session .start-mode-toggle {
   display: flex;
   gap: 4px;
   padding: 4px;
@@ -1945,7 +1945,7 @@
   background: var(--bg);
 }
 
-.helm-session .start-mode-toggle button {
+.weft-session .start-mode-toggle button {
   flex: 1 1 0;
   min-height: 38px;
   border: 0;
@@ -1957,22 +1957,22 @@
   font-size: 13px;
 }
 
-.helm-session .start-mode-toggle button.selected {
+.weft-session .start-mode-toggle button.selected {
   background: var(--accent);
   color: #fff;
 }
 
-.helm-session .start-mode-hint {
+.weft-session .start-mode-hint {
   margin: 6px 2px 0;
   font-size: 12px;
   color: var(--fg-dim);
 }
 
-.helm-session .start-name-field {
+.weft-session .start-name-field {
   margin-top: 2px;
 }
 
-.helm-session .start-footer {
+.weft-session .start-footer {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1981,29 +1981,29 @@
   padding-top: 4px;
 }
 
-.helm-session .start-footer-links {
+.weft-session .start-footer-links {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
   justify-content: center;
 }
 
-.helm-session .start-form,
-.helm-session .session-field {
+.weft-session .start-form,
+.weft-session .session-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.helm-session .session-field {
+.weft-session .session-field {
   color: var(--fg-dim);
   font-size: 13px;
   font-weight: 700;
 }
 
-.helm-session .session-field input[type='text'],
-.helm-session .session-field input:not([type]),
-.helm-session .session-field select {
+.weft-session .session-field input[type='text'],
+.weft-session .session-field input:not([type]),
+.weft-session .session-field select {
   min-height: 46px;
   padding: 10px 12px;
   border: 1px solid var(--bg-rule);
@@ -2013,29 +2013,29 @@
   font: inherit;
 }
 
-.helm-session .mode-field {
+.weft-session .mode-field {
   margin: 0;
   padding: 12px;
   border: 1px solid var(--bg-rule);
   border-radius: 16px;
 }
 
-.helm-session .mode-field label,
-.helm-session .device-actions {
+.weft-session .mode-field label,
+.weft-session .device-actions {
   display: flex;
   gap: 10px;
   align-items: center;
 }
 
-.helm-session .device-actions {
+.weft-session .device-actions {
   flex-wrap: wrap;
 }
 
-.helm-session .session-link-btn.danger {
+.weft-session .session-link-btn.danger {
   color: var(--error);
 }
 
-.helm-session .device-status {
+.weft-session .device-status {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2044,7 +2044,7 @@
   color: var(--fg-dim);
 }
 
-.helm-session .device-status-dot {
+.weft-session .device-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -2052,44 +2052,44 @@
   flex: none;
 }
 
-.helm-session .device-status-online .device-status-dot {
+.weft-session .device-status-online .device-status-dot {
   background: #3fe0ce;
   box-shadow: 0 0 0 3px rgba(63, 224, 206, 0.18);
 }
 
-.helm-session .device-status-online {
+.weft-session .device-status-online {
   color: #2fae9f;
 }
 
-.helm-session .device-status-loading .device-status-dot {
+.weft-session .device-status-loading .device-status-dot {
   background: #e0b23f;
   animation: device-status-pulse 1.2s ease-in-out infinite;
 }
 
-.helm-session .device-status-offline .device-status-dot {
+.weft-session .device-status-offline .device-status-dot {
   background: var(--fg-dim);
   opacity: 0.5;
 }
 
-.helm-session .device-status-seen {
+.weft-session .device-status-seen {
   opacity: 0.7;
   font-weight: 400;
 }
 
-.helm-session .device-id-list {
+.weft-session .device-id-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin: 0 0 10px;
 }
 
-.helm-session .device-id-row {
+.weft-session .device-id-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
 }
 
-.helm-session .device-id-row dt {
+.weft-session .device-id-row dt {
   flex: 0 0 auto;
   min-width: 120px;
   color: var(--fg-dim);
@@ -2097,12 +2097,12 @@
   font-weight: 600;
 }
 
-.helm-session .device-id-row dd {
+.weft-session .device-id-row dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.helm-session .device-id-row dd.mono {
+.weft-session .device-id-row dd.mono {
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 12px;
 }
@@ -2112,13 +2112,13 @@
   50% { opacity: 0.35; }
 }
 
-.helm-session .devices-list {
+.weft-session .devices-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.helm-session .device-card {
+.weft-session .device-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2131,29 +2131,29 @@
 /* Devices-list card (#186 "Manage devices" restyle): the whole card is tappable (opens details),
    with a baked-in primary "Start session" button and a `⋯` overflow menu for the secondary,
    less-common actions (default/refresh/forget) so the card face stays uncluttered. */
-.helm-session .device-tile {
+.weft-session .device-tile {
   position: relative;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
 }
-.helm-session .device-tile:hover,
-.helm-session .device-tile:focus-visible {
+.weft-session .device-tile:hover,
+.weft-session .device-tile:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--bg-rule));
   background: color-mix(in srgb, var(--accent) 4%, var(--bg-elev));
 }
-.helm-session .device-tile-head {
+.weft-session .device-tile-head {
   display: flex;
   align-items: flex-start;
   gap: 10px;
 }
-.helm-session .device-tile-head .session-info { min-width: 0; }
-.helm-session .device-tile-head .session-sub { white-space: normal; }
-.helm-session .device-menu-btn {
+.weft-session .device-tile-head .session-info { min-width: 0; }
+.weft-session .device-tile-head .session-sub { white-space: normal; }
+.weft-session .device-menu-btn {
   flex: 0 0 auto;
   margin-left: auto;
 }
-.helm-session .device-start-btn { margin-top: 2px; }
-.helm-session .device-menu {
+.weft-session .device-start-btn { margin-top: 2px; }
+.weft-session .device-menu {
   position: absolute;
   top: 100%;
   right: 14px;
@@ -2168,7 +2168,7 @@
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
-.helm-session .device-menu-item {
+.weft-session .device-menu-item {
   padding: 9px 10px;
   font: inherit;
   font-size: 13px;
@@ -2179,11 +2179,11 @@
   color: inherit;
   cursor: pointer;
 }
-.helm-session .device-menu-item:hover,
-.helm-session .device-menu-item:focus-visible { background: var(--bg); }
-.helm-session .device-menu-item.danger { color: var(--error); }
+.weft-session .device-menu-item:hover,
+.weft-session .device-menu-item:focus-visible { background: var(--bg); }
+.weft-session .device-menu-item.danger { color: var(--error); }
 
-.helm-session .device-card-head {
+.weft-session .device-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2191,36 +2191,36 @@
   flex-wrap: wrap;
 }
 
-.helm-session .device-card-name {
+.weft-session .device-card-name {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 700;
 }
 
-.helm-session .device-card-sub {
+.weft-session .device-card-sub {
   margin: 0;
   font-size: 13px;
   color: var(--fg-dim);
 }
 
-.helm-session .device-start-btn {
+.weft-session .device-start-btn {
   min-height: 38px;
   padding: 8px 14px;
   width: auto;
 }
 
-.helm-session .device-sessions h3 {
+.weft-session .device-sessions h3 {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 700;
 }
 
-.helm-session .device-session-row {
+.weft-session .device-session-row {
   padding: 0;
 }
 
-.helm-session .device-session-open {
+.weft-session .device-session-open {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2234,36 +2234,36 @@
   cursor: pointer;
   color: inherit;
 }
-.helm-session .device-session-open:hover,
-.helm-session .device-session-open:focus-visible { background: var(--bg); }
+.weft-session .device-session-open:hover,
+.weft-session .device-session-open:focus-visible { background: var(--bg); }
 
-.helm-session .device-session-status {
+.weft-session .device-session-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 12.5px;
   font-weight: 600;
 }
-.helm-session .device-session-status .status-dot { width: 8px; height: 8px; }
+.weft-session .device-session-status .status-dot { width: 8px; height: 8px; }
 
 /* Advanced/comms-identifiers collapses behind a <details> (moved out of the main flow so the
    details page leads with "Start session" + projects, not raw device/channel IDs). */
-.helm-session .device-advanced summary {
+.weft-session .device-advanced summary {
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
   color: var(--fg-dim);
   list-style: none;
 }
-.helm-session .device-advanced summary::-webkit-details-marker { display: none; }
-.helm-session .device-advanced summary::before {
+.weft-session .device-advanced summary::-webkit-details-marker { display: none; }
+.weft-session .device-advanced summary::before {
   content: '›';
   display: inline-block;
   margin-right: 6px;
   transition: transform 0.15s ease;
 }
-.helm-session .device-advanced[open] summary::before { transform: rotate(90deg); }
-.helm-session .device-advanced .device-id-list { margin-top: 12px; }
+.weft-session .device-advanced[open] summary::before { transform: rotate(90deg); }
+.weft-session .device-advanced .device-id-list { margin-top: 12px; }
 
 
 /* #56: widen the shared chat column only at tablet/desktop widths; phones stay unchanged. */
@@ -2283,7 +2283,7 @@
     padding: 18px 18px 24px;
   }
 
-  .helm-session .scroll-latest {
+  .weft-session .scroll-latest {
     right: max(18px, calc((100vw - 900px) / 2 + 18px));
   }
 }
@@ -2309,7 +2309,7 @@
     max-width: 72%;
   }
 
-  .helm-session .scroll-latest {
+  .weft-session .scroll-latest {
     right: max(24px, calc((100vw - 1040px) / 2 + 24px));
   }
 }
@@ -2342,38 +2342,38 @@
   border: 0 !important;
 }
 
-.helm-session .icon-btn,
-.helm-session .send-btn,
-.helm-session .stop-btn,
-.helm-session .mode-menu-item {
+.weft-session .icon-btn,
+.weft-session .send-btn,
+.weft-session .stop-btn,
+.weft-session .mode-menu-item {
   min-width: 44px;
   min-height: 44px;
 }
 
 /* Drawer menu buttons run down a dense list; keep them comfortably tappable but
    more compact than the 44px minimum used for standalone icon controls. */
-.helm-session .drawer-add,
-.helm-session .drawer-home {
+.weft-session .drawer-add,
+.weft-session .drawer-home {
   min-width: 44px;
   min-height: 38px;
 }
 
-.helm-session .pill,
-.helm-session .mode-pill {
+.weft-session .pill,
+.weft-session .mode-pill {
   min-height: 44px;
   padding-inline: 12px;
 }
 
-.helm-session .session-row .row-x {
+.weft-session .session-row .row-x {
   min-width: 44px;
   min-height: 44px;
   margin: -7px -7px -7px 0;
 }
 
-.helm-session .scroll-latest {
+.weft-session .scroll-latest {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
-  bottom: calc(var(--helm-kb, 0px) + var(--composer-h, 132px) + 14px);
+  bottom: calc(var(--weft-kb, 0px) + var(--composer-h, 132px) + 14px);
   z-index: 25;
   display: inline-flex;
   align-items: center;
@@ -2395,22 +2395,22 @@
   transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, color 160ms ease, background 160ms ease;
 }
 
-.helm-session .scroll-latest-icon {
+.weft-session .scroll-latest-icon {
   display: block;
   width: 20px;
   height: 20px;
 }
 
-.helm-session .scroll-latest:hover,
-.helm-session .scroll-latest:active {
+.weft-session .scroll-latest:hover,
+.weft-session .scroll-latest:active {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--bg-rule));
   background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
   color: var(--accent);
   transform: translateY(-1px) scale(1.02);
 }
 
-.helm-session .scroll-latest .new,
-.helm-session .scroll-latest .badge {
+.weft-session .scroll-latest .new,
+.weft-session .scroll-latest .badge {
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--accent);
@@ -2420,11 +2420,11 @@
   line-height: 1.4;
 }
 
-.helm-session .row.assistant {
+.weft-session .row.assistant {
   position: relative;
 }
 
-.helm-session .tc-copy {
+.weft-session .tc-copy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2438,14 +2438,14 @@
   opacity: 0.45;
 }
 
-.helm-session .tc-copy:hover,
-.helm-session .tc-copy:focus-visible {
+.weft-session .tc-copy:hover,
+.weft-session .tc-copy:focus-visible {
   background: var(--bg-elev);
   color: var(--fg);
   opacity: 1;
 }
 
-.helm-session .user-ts {
+.weft-session .user-ts {
   align-self: flex-end;
   margin: 3px 2px 0 0;
   color: var(--fg-faint);
@@ -2453,7 +2453,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.helm-session .msg-menu {
+.weft-session .msg-menu {
   position: absolute;
   z-index: 30;
   min-width: 174px;
@@ -2462,10 +2462,10 @@
   border-radius: 14px;
   background: var(--bg-elev);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  animation: helm-pop 140ms ease;
+  animation: weft-pop 140ms ease;
 }
 
-.helm-session .msg-menu-item {
+.weft-session .msg-menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2480,12 +2480,12 @@
   text-align: left;
 }
 
-.helm-session .msg-menu-item:hover,
-.helm-session .msg-menu-item:focus-visible {
+.weft-session .msg-menu-item:hover,
+.weft-session .msg-menu-item:focus-visible {
   background: var(--bg);
 }
 
-.helm-session .tool-run-group {
+.weft-session .tool-run-group {
   margin: 6px 0;
   padding: 6px 6px 6px 10px;
   border-left: 2px solid color-mix(in srgb, var(--accent) 48%, transparent);
@@ -2493,7 +2493,7 @@
   background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
-.helm-session .tool-run-toggle {
+.weft-session .tool-run-toggle {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -2508,13 +2508,13 @@
   font-weight: 650;
 }
 
-.helm-session .tool-run-toggle:hover,
-.helm-session .tool-run-toggle:focus-visible {
+.weft-session .tool-run-toggle:hover,
+.weft-session .tool-run-toggle:focus-visible {
   background: var(--bg-elev);
   color: var(--fg);
 }
 
-.helm-session .thread-empty-rich {
+.weft-session .thread-empty-rich {
   display: grid;
   place-items: center;
   gap: 12px;
@@ -2524,7 +2524,7 @@
   text-align: center;
 }
 
-.helm-session .thread-empty-rich .empty-icon {
+.weft-session .thread-empty-rich .empty-icon {
   display: grid;
   width: 54px;
   height: 54px;
@@ -2536,20 +2536,20 @@
   font-size: 24px;
 }
 
-.helm-session .thread-empty-rich h2,
-.helm-session .thread-empty-rich h3,
-.helm-session .thread-empty-rich p {
+.weft-session .thread-empty-rich h2,
+.weft-session .thread-empty-rich h3,
+.weft-session .thread-empty-rich p {
   margin: 0;
 }
 
-.helm-session .thread-empty-rich h2,
-.helm-session .thread-empty-rich h3 {
+.weft-session .thread-empty-rich h2,
+.weft-session .thread-empty-rich h3 {
   color: var(--fg);
   font-size: 18px;
   letter-spacing: -0.01em;
 }
 
-.helm-session .empty-suggest {
+.weft-session .empty-suggest {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
@@ -2561,8 +2561,8 @@
   font-size: 12px;
 }
 
-.helm-session .thread-empty-rich .empty-suggests,
-.helm-session .thread-empty-rich .empty-chips {
+.weft-session .thread-empty-rich .empty-suggests,
+.weft-session .thread-empty-rich .empty-chips {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -2570,40 +2570,40 @@
   margin-top: 4px;
 }
 
-.helm-session .thread-skeleton {
+.weft-session .thread-skeleton {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 10px 2px;
 }
 
-.helm-session .skeleton-line {
+.weft-session .skeleton-line {
   width: 100%;
   height: 13px;
   overflow: hidden;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--bg-elev), color-mix(in srgb, var(--fg-faint) 16%, var(--bg-elev)), var(--bg-elev));
   background-size: 220% 100%;
-  animation: helm-skeleton 1.4s ease-in-out infinite;
+  animation: weft-skeleton 1.4s ease-in-out infinite;
 }
 
-.helm-session .skeleton-line:nth-child(2n) { width: 82%; }
-.helm-session .skeleton-line:nth-child(3n) { width: 58%; }
-.helm-session .skeleton-line:nth-child(4n) { width: 70%; }
+.weft-session .skeleton-line:nth-child(2n) { width: 82%; }
+.weft-session .skeleton-line:nth-child(3n) { width: 58%; }
+.weft-session .skeleton-line:nth-child(4n) { width: 70%; }
 
-@keyframes helm-skeleton {
+@keyframes weft-skeleton {
   from { background-position: 100% 0; }
   to { background-position: -120% 0; }
 }
 
-.helm-session .tc-section {
+.weft-session .tc-section {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.helm-session .tc-viewfull {
+.weft-session .tc-viewfull {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -2618,31 +2618,31 @@
   font-weight: 650;
 }
 
-.helm-session .tc-viewfull:hover,
-.helm-session .tc-viewfull:focus-visible {
+.weft-session .tc-viewfull:hover,
+.weft-session .tc-viewfull:focus-visible {
   background: var(--accent-soft);
 }
 
-.helm-session .tc-pre {
+.weft-session .tc-pre {
   max-height: min(240px, 42vh);
   overflow: auto;
   overscroll-behavior: contain;
 }
 
-.helm-session .tc-pre.full {
+.weft-session .tc-pre.full {
   max-height: none;
 }
 
-.helm-session .drawer-head {
+.weft-session .drawer-head {
   flex-wrap: nowrap;
 }
 
-.helm-session .session-row {
+.weft-session .session-row {
   position: relative;
   min-height: 44px;
 }
 
-.helm-session .unread-badge {
+.weft-session .unread-badge {
   position: absolute;
   top: 0;
   right: 0;
@@ -2659,7 +2659,7 @@
   text-align: center;
 }
 
-.helm-session .approval-countdown {
+.weft-session .approval-countdown {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -2668,7 +2668,7 @@
   line-height: 1.3;
 }
 
-.helm-session .approval-countdown-bar {
+.weft-session .approval-countdown-bar {
   position: relative;
   height: 4px;
   overflow: hidden;
@@ -2676,9 +2676,9 @@
   background: color-mix(in srgb, var(--fg-faint) 22%, transparent);
 }
 
-.helm-session .approval-countdown-bar > span,
-.helm-session .approval-countdown-bar .fill,
-.helm-session .approval-countdown-bar [data-fill] {
+.weft-session .approval-countdown-bar > span,
+.weft-session .approval-countdown-bar .fill,
+.weft-session .approval-countdown-bar [data-fill] {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -2687,38 +2687,38 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .helm-session .scroll-latest,
-  .helm-session .approval-countdown-bar > span,
-  .helm-session .approval-countdown-bar .fill,
-  .helm-session .approval-countdown-bar [data-fill] {
+  .weft-session .scroll-latest,
+  .weft-session .approval-countdown-bar > span,
+  .weft-session .approval-countdown-bar .fill,
+  .weft-session .approval-countdown-bar [data-fill] {
     transition: none;
   }
 
-  .helm-session .skeleton-line {
+  .weft-session .skeleton-line {
     animation: none;
     background-size: 100% 100%;
   }
 }
 
 /* ---- Debug event panel (per-session raw wire log, newest-first) ---------------------------- */
-.helm-session .debug-btn .debug-glyph {
+.weft-session .debug-btn .debug-glyph {
   font-family: var(--mono);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.04em;
 }
 
-.helm-session .debug-overlay {
+.weft-session .debug-overlay {
   position: fixed;
   inset: 0;
-  bottom: var(--helm-kb, 0px);
+  bottom: var(--weft-kb, 0px);
   z-index: 70;
   display: flex;
   flex-direction: column;
   background: rgba(1, 4, 9, 0.62);
-  animation: helm-fade 160ms ease;
+  animation: weft-fade 160ms ease;
 }
-.helm-session .debug-panel {
+.weft-session .debug-panel {
   position: absolute;
   inset: 0;
   display: flex;
@@ -2726,35 +2726,35 @@
   padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
   background: var(--bg);
 }
-.helm-session .debug-head {
+.weft-session .debug-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 2px 2px 10px;
   border-bottom: 1px solid var(--bg-rule);
 }
-.helm-session .debug-head-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; }
-.helm-session .debug-title {
+.weft-session .debug-head-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 2px; }
+.weft-session .debug-title {
   color: var(--fg-faint);
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
-.helm-session .debug-sub {
+.weft-session .debug-sub {
   color: var(--fg-dim);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.helm-session .debug-empty { color: var(--fg-dim); font-size: 13px; padding: 20px 4px; }
-.helm-session .debug-tabs {
+.weft-session .debug-empty { color: var(--fg-dim); font-size: 13px; padding: 20px 4px; }
+.weft-session .debug-tabs {
   display: flex;
   gap: 4px;
   padding: 4px 0 8px;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
 }
-.helm-session .debug-tab {
+.weft-session .debug-tab {
   appearance: none;
   border: none;
   background: transparent;
@@ -2766,8 +2766,8 @@
   border-radius: 6px 6px 0 0;
   cursor: pointer;
 }
-.helm-session .debug-tab.active { color: var(--fg); background: var(--bg-elev, rgba(255, 255, 255, 0.06)); }
-.helm-session .debug-detail {
+.weft-session .debug-tab.active { color: var(--fg); background: var(--bg-elev, rgba(255, 255, 255, 0.06)); }
+.weft-session .debug-detail {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2779,10 +2779,10 @@
   align-content: start;
   font-size: 12.5px;
 }
-.helm-session .debug-detail dt { color: var(--fg-dim); font-weight: 600; }
-.helm-session .debug-detail dd { margin: 0; color: var(--fg); word-break: break-all; }
-.helm-session .debug-detail dd.mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
-.helm-session .debug-list {
+.weft-session .debug-detail dt { color: var(--fg-dim); font-weight: 600; }
+.weft-session .debug-detail dd { margin: 0; color: var(--fg); word-break: break-all; }
+.weft-session .debug-detail dd.mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
+.weft-session .debug-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2797,18 +2797,18 @@
   scrollbar-width: thin;
   scrollbar-color: var(--bg-rule) transparent;
 }
-.helm-session .debug-list::-webkit-scrollbar { width: 8px; }
-.helm-session .debug-list::-webkit-scrollbar-thumb { background: var(--bg-rule); border-radius: 8px; }
-.helm-session .debug-row {
+.weft-session .debug-list::-webkit-scrollbar { width: 8px; }
+.weft-session .debug-list::-webkit-scrollbar-thumb { background: var(--bg-rule); border-radius: 8px; }
+.weft-session .debug-row {
   flex: none;
   border: 1px solid var(--bg-rule);
   border-radius: 8px;
   background: var(--bg-elev);
   overflow: hidden;
 }
-.helm-session .debug-row.out { border-left: 2px solid color-mix(in srgb, var(--accent) 60%, var(--bg-rule)); }
-.helm-session .debug-row.in { border-left: 2px solid color-mix(in srgb, var(--success) 55%, var(--bg-rule)); }
-.helm-session .debug-row-head {
+.weft-session .debug-row.out { border-left: 2px solid color-mix(in srgb, var(--accent) 60%, var(--bg-rule)); }
+.weft-session .debug-row.in { border-left: 2px solid color-mix(in srgb, var(--success) 55%, var(--bg-rule)); }
+.weft-session .debug-row-head {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2822,14 +2822,14 @@
   text-align: left;
   cursor: pointer;
 }
-.helm-session .debug-row-head:hover { background: var(--bg); }
-.helm-session .debug-dir { font-weight: 700; width: 12px; flex: none; }
-.helm-session .debug-dir.in { color: var(--success); }
-.helm-session .debug-dir.out { color: var(--accent); }
-.helm-session .debug-kind { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.helm-session .debug-sender { color: var(--fg-dim); flex: none; }
-.helm-session .debug-time { color: var(--fg-faint); flex: none; font-size: 11px; }
-.helm-session .debug-msg {
+.weft-session .debug-row-head:hover { background: var(--bg); }
+.weft-session .debug-dir { font-weight: 700; width: 12px; flex: none; }
+.weft-session .debug-dir.in { color: var(--success); }
+.weft-session .debug-dir.out { color: var(--accent); }
+.weft-session .debug-kind { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weft-session .debug-sender { color: var(--fg-dim); flex: none; }
+.weft-session .debug-time { color: var(--fg-faint); flex: none; font-size: 11px; }
+.weft-session .debug-msg {
   margin: 0;
   padding: 8px 10px 10px;
   border-top: 1px dashed var(--bg-rule);

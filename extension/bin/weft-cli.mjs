@@ -7,7 +7,7 @@ import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
 import { loadLocalEnv, resolveTransportDescriptor } from "../src/transportFactory.mjs";
 import { clearTransportConfig, saveTransportConfig } from "../src/transportConfig.mjs";
-import { addProject, helmHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
+import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -38,19 +38,19 @@ try {
     await start();
   } else if (command === "add-project") {
     const [name, path, ...rest] = args;
-    if (!name || !path) throw new Error("Usage: helm-cli add-project <name> <path> [--default]");
+    if (!name || !path) throw new Error("Usage: weft-cli add-project <name> <path> [--default]");
     const project = addProject(name, path, { makeDefault: rest.includes("--default") });
     console.log(`Added project ${project.name}: ${project.path}${project.default ? " (default)" : ""}`);
   } else if (command === "remove-project") {
     const [name] = args;
-    if (!name) throw new Error("Usage: helm-cli remove-project <name>");
+    if (!name) throw new Error("Usage: weft-cli remove-project <name>");
     removeProject(name);
     console.log(`Removed project ${name}`);
   } else if (command === "list-projects") {
     printProjects(listProjects());
   } else if (command === "set-default") {
     const [name] = args;
-    if (!name) throw new Error("Usage: helm-cli set-default <name>");
+    if (!name) throw new Error("Usage: weft-cli set-default <name>");
     setDefault(name);
     console.log(`Default project set to ${name}`);
   } else if (command === "set-transport") {
@@ -90,12 +90,12 @@ async function start() {
       ),
   });
 
-  printHeader(`HELM DEVICE STATION — ${hostname()}`);
+  printHeader(`WEFT DEVICE STATION — ${hostname()}`);
   console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions.\n"));
 
   await listener.start();
 
-  console.log(`${c.bold("1.")} Scan the QR code below with the Helm app to pair your phone:\n`);
+  console.log(`${c.bold("1.")} Scan the QR code below with the Weft app to pair your phone:\n`);
   const qr = (await QRCode.toString(JSON.stringify(listener.pairingPayload), { type: "terminal", small: true })).replace(/\n+$/, "");
   console.log(qr);
   console.log();
@@ -105,7 +105,7 @@ async function start() {
   console.log(`   ${c.dim(`Heartbeat every ${Math.round(listener.heartbeatMs / 1000)}s keeps the pairing alive.`)}\n`);
   console.log(`${c.bold("3.")} Projects available to spawn sessions in:\n`);
   printProjects(listProjects());
-  console.log(c.dim("   Hint: add projects with `helm-cli add-project <name> <path> --default`.\n"));
+  console.log(c.dim("   Hint: add projects with `weft-cli add-project <name> <path> --default`.\n"));
   console.log(`${c.bold("4.")} Waiting for your phone to connect…\n`);
   status.start();
 
@@ -122,7 +122,7 @@ async function start() {
 }
 
 function acquireLock() {
-  const dir = helmHome();
+  const dir = weftHome();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     chmodSync(dir, 0o700);
@@ -137,7 +137,7 @@ function acquireLock() {
     // no lock
   }
   if (existing && isProcessAlive(existing)) {
-    throw new Error(`A Helm Device Station is already running (pid ${existing}).`);
+    throw new Error(`A Weft Device Station is already running (pid ${existing}).`);
   }
   writeFileSync(file, String(process.pid), { mode: 0o600 });
   try {
@@ -314,10 +314,10 @@ function describeTransport(descriptor) {
   return descriptor.kind;
 }
 
-// Only "supabase" and "devtunnel" are offered here — Helm's two supported, documented transports.
+// Only "supabase" and "devtunnel" are offered here — Weft's two supported, documented transports.
 // "local"/"webpubsub" remain fully implemented (transportConfig.mjs, transportFactory.mjs) for
-// internal testing / advanced HELM_TRANSPORT env overrides, just no longer surfaced by this
-// command's usage text or accepted kinds, so users are never offered an option Helm doesn't
+// internal testing / advanced WEFT_TRANSPORT env overrides, just no longer surfaced by this
+// command's usage text or accepted kinds, so users are never offered an option Weft doesn't
 // actually support end-to-end.
 function setTransport(args) {
   const [kind, ...rest] = args;
@@ -326,7 +326,7 @@ function setTransport(args) {
     const url = flags.url;
     const anonKey = flags["anon-key"];
     if (!url || !anonKey) {
-      throw new Error("Usage: helm-cli set-transport supabase --url <url> --anon-key <key>");
+      throw new Error("Usage: weft-cli set-transport supabase --url <url> --anon-key <key>");
     }
     saveTransportConfig({ kind: "supabase", url, anonKey });
   } else if (kind === "devtunnel") {
@@ -342,7 +342,7 @@ function setTransport(args) {
     console.log("Cleared the configured transport; falling back to env vars / the default (supabase).");
     return;
   } else {
-    throw new Error("Usage: helm-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
+    throw new Error("Usage: weft-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
   }
   console.log(`Transport set to ${kind}. This is stamped into every pairing QR, so re-pair your phone to pick it up.`);
 }
@@ -350,21 +350,21 @@ function setTransport(args) {
 function showTransport() {
   loadLocalEnv();
   const descriptor = resolveTransportDescriptor();
-  const source = process.env.HELM_TRANSPORT
-    ? "HELM_TRANSPORT env var"
-    : "helm-cli set-transport (or the built-in default)";
+  const source = process.env.WEFT_TRANSPORT
+    ? "WEFT_TRANSPORT env var"
+    : "weft-cli set-transport (or the built-in default)";
   console.log(`Current transport: ${describeTransport(descriptor)}`);
   console.log(c.dim(`Source: ${source}`));
 }
 
 function usage() {
   console.log(`Usage:
-  helm-cli start
-  helm-cli add-project <name> <path> [--default]
-  helm-cli remove-project <name>
-  helm-cli list-projects
-  helm-cli set-default <name>
-  helm-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
-  helm-cli show-transport
-  helm-cli help`);
+  weft-cli start
+  weft-cli add-project <name> <path> [--default]
+  weft-cli remove-project <name>
+  weft-cli list-projects
+  weft-cli set-default <name>
+  weft-cli set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
+  weft-cli show-transport
+  weft-cli help`);
 }

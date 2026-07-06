@@ -43,7 +43,7 @@ function makeSession(status: 'live' | 'connecting' | 'idle' | 'ended' = 'live') 
     status,
     settling: false,
     error: null,
-    meta: { kind: 'paired', title: 'Helm', cwd: 'C:\\Users\\akash\\helm' },
+    meta: { kind: 'paired', title: 'Weft', cwd: 'C:\\Users\\akash\\weft' },
     timeline: {
       items: [],
       history: [],
@@ -165,7 +165,7 @@ describe('SessionScreen desktop docked sidebar (#183)', () => {
       const { container, unmount } = renderActive(makeSession('live'));
       // Wide viewport: docked layout class applied and the session list renders inline —
       // it must not depend on the mobile `drawerOpen` state (which starts false).
-      expect(container.querySelector('.helm-session.desktop-docked')).toBeInTheDocument();
+      expect(container.querySelector('.weft-session.desktop-docked')).toBeInTheDocument();
       expect(screen.getByTestId('drawer')).toBeInTheDocument();
       unmount();
     } finally {
@@ -175,7 +175,7 @@ describe('SessionScreen desktop docked sidebar (#183)', () => {
     // Narrow/mobile viewport (default stub: matches always false): no docked class, and the
     // overlay drawer stays closed until the user opens it — mobile behavior is unchanged.
     const { container } = renderActive(makeSession('live'));
-    expect(container.querySelector('.helm-session.desktop-docked')).not.toBeInTheDocument();
+    expect(container.querySelector('.weft-session.desktop-docked')).not.toBeInTheDocument();
     expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
   });
 });

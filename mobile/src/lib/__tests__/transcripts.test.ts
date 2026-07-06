@@ -42,7 +42,7 @@ describe('transcript storage', () => {
     await saveTranscript('ch1', data);
 
     expect(await loadTranscript('ch1')).toEqual(data);
-    const raw = localStorage.getItem('helm.transcript.v1.ch1');
+    const raw = localStorage.getItem('weft.transcript.v1.ch1');
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw as string)).toMatchObject({ v: 1, data });
   });
@@ -52,11 +52,11 @@ describe('transcript storage', () => {
     await clearTranscript('ch1');
 
     expect(await loadTranscript('ch1')).toBeNull();
-    expect(localStorage.getItem('helm.transcript.v1.ch1')).toBeNull();
+    expect(localStorage.getItem('weft.transcript.v1.ch1')).toBeNull();
   });
 
   it('returns null for wrong envelope versions', async () => {
-    await Preferences.set({ key: 'helm.transcript.v1.bad', value: JSON.stringify({ v: 2, savedAt: 1, data: persisted() }) });
+    await Preferences.set({ key: 'weft.transcript.v1.bad', value: JSON.stringify({ v: 2, savedAt: 1, data: persisted() }) });
 
     await expect(loadTranscript('bad')).resolves.toBeNull();
   });

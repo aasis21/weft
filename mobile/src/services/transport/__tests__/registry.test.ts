@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { EventEnvelope, EventType, SecureChannel } from '@aasis21/helm-shared';
+import type { EventEnvelope, EventType, SecureChannel } from '@aasis21/weft-shared';
 import { createTransportRegistry, type ConnectOpts } from '@/services/transport/registry';
-import type { HelmClient } from '@/lib/helmClient';
+import type { WeftClient } from '@/lib/weftClient';
 
-function makeClient(channelId: string): HelmClient {
+function makeClient(channelId: string): WeftClient {
   return {
     channelId,
     channel: {} as SecureChannel,
@@ -17,7 +17,7 @@ function makeClient(channelId: string): HelmClient {
 describe('createTransportRegistry', () => {
   it('connect stores and returns a client', async () => {
     const client = makeClient('channel-1');
-    const createClient = vi.fn<(opts: ConnectOpts) => HelmClient | Promise<HelmClient>>().mockReturnValue(client);
+    const createClient = vi.fn<(opts: ConnectOpts) => WeftClient | Promise<WeftClient>>().mockReturnValue(client);
     const registry = createTransportRegistry({ createClient });
     const opts: ConnectOpts = { raw: 'pairing-payload' };
 
@@ -46,7 +46,7 @@ describe('createTransportRegistry', () => {
     const first = makeClient('channel-1');
     const second = makeClient('channel-2');
     const clients = [first, second];
-    const registry = createTransportRegistry({ createClient: () => clients.shift() as HelmClient });
+    const registry = createTransportRegistry({ createClient: () => clients.shift() as WeftClient });
     await registry.connect('stable-session-1', { raw: 'first-payload' });
     await registry.connect('stable-session-2', { raw: 'second-payload' });
 

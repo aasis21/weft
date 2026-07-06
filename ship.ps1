@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-  One command to ship Helm: build -> refresh the hosted "site bits" -> deploy to
+  One command to ship Weft: build -> refresh the hosted "site bits" -> deploy to
   Netlify -> install the extension on THIS laptop. Optionally git push.
 
 .DESCRIPTION
@@ -15,13 +15,13 @@
                                               `irm .../install.ps1 | iex` installer downloads)
     3. Build the mobile web app              (Vite -> mobile/dist, embedding the fresh
                                               extension.mjs + install.ps1/.sh + headers)
-    4. Deploy mobile/dist to Netlify         (site `usehelm`, production by default)
-    5. Install the extension on this laptop  (-> ~/.copilot/extensions/helm + colocated .env)
+    4. Deploy mobile/dist to Netlify         (site `useweft`, production by default)
+    5. Install the extension on this laptop  (-> ~/.copilot/extensions/weft + colocated .env)
 
   Relay creds are read from env at build/install time (mobile/.env.local for the web build,
   the repo-root .env for the local extension). Nothing secret is written into the repo.
 
-.PARAMETER Site         Netlify site name or id (default: usehelm).
+.PARAMETER Site         Netlify site name or id (default: useweft).
 .PARAMETER Draft        Deploy a Netlify preview (draft) instead of production.
 .PARAMETER Push         Run `git push` for the current branch after a successful pipeline.
 .PARAMETER SkipBuild    Reuse the existing extension/dist + mobile/dist (no rebuild).
@@ -37,7 +37,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Site = '371d3579-feaa-4678-b812-c0e65d83ecd5',  # usehelm (id; name lookup is flaky from a workspace root)
+    [string]$Site = '137f2a7d-1dcf-43bd-8c0e-fdaec08835a7',  # useweft (id; name lookup is flaky from a workspace root)
     [switch]$Draft,
     [switch]$Push,
     [switch]$SkipBuild,
@@ -57,7 +57,7 @@ function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
     $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
-    $helmCliBundle = Join-Path $root 'extension\dist\helm-cli.mjs'
+    $weftCliBundle = Join-Path $root 'extension\dist\weft-cli.mjs'
     $publicBundle = Join-Path $root 'mobile\public\extension.mjs'
     $distDir      = Join-Path $root 'mobile\dist'
 
@@ -69,13 +69,13 @@ try {
 
     if (-not $SkipBuild) {
         Step 'Building extension (esbuild)'
-        npm run build -w '@aasis21/helm-extension' | Out-Null
+        npm run build -w '@aasis21/weft-extension' | Out-Null
         if (-not (Test-Path $extBundle)) { throw "extension build did not produce $extBundle" }
         Ok 'extension/dist/extension.mjs'
         if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
         Ok 'extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)'
-        if (-not (Test-Path $helmCliBundle)) { throw "extension build did not produce $helmCliBundle" }
-        Ok 'extension/dist/helm-cli.mjs  (standalone Device Station CLI, no repo checkout needed)'
+        if (-not (Test-Path $weftCliBundle)) { throw "extension build did not produce $weftCliBundle" }
+        Ok 'extension/dist/weft-cli.mjs  (standalone Device Station CLI, no repo checkout needed)'
 
         Step 'Refreshing site bits (extension bundle -> mobile/public)'
         Copy-Item $extBundle $publicBundle -Force
@@ -83,30 +83,30 @@ try {
         $publicRelayBundle = Join-Path $root 'mobile\public\relayServerProcess.mjs'
         Copy-Item $relayBundle $publicRelayBundle -Force
         Ok 'mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)'
-        $publicHelmCliBundle = Join-Path $root 'mobile\public\helm-cli.mjs'
-        Copy-Item $helmCliBundle $publicHelmCliBundle -Force
-        Ok 'mobile/public/helm-cli.mjs  (served as /helm-cli.mjs by the installer)'
+        $publicWeftCliBundle = Join-Path $root 'mobile\public\weft-cli.mjs'
+        Copy-Item $weftCliBundle $publicWeftCliBundle -Force
+        Ok 'mobile/public/weft-cli.mjs  (served as /weft-cli.mjs by the installer)'
 
         Step 'Building mobile web app (Vite)'
-        npm run build -w '@aasis21/helm-mobile' | Out-Null
+        npm run build -w '@aasis21/weft-mobile' | Out-Null
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "mobile build did not produce $distDir" }
         Ok 'mobile/dist'
 
         # The Android APK lives in mobile/release/ (NOT mobile/public/) so `cap sync` never bundles
         # it into the native app's own assets. It's only stitched into the web dist here, so the
         # hosted /app download page (mobile/public/app.html) has something to link to.
-        $apkSource = Join-Path $PSScriptRoot 'mobile\release\helm-debug.apk'
+        $apkSource = Join-Path $PSScriptRoot 'mobile\release\weft-debug.apk'
         if (Test-Path $apkSource) {
-            Copy-Item $apkSource (Join-Path $distDir 'helm-debug.apk') -Force
-            Ok 'mobile/dist/helm-debug.apk  (served as /helm-debug.apk for the /app download page)'
+            Copy-Item $apkSource (Join-Path $distDir 'weft-debug.apk') -Force
+            Ok 'mobile/dist/weft-debug.apk  (served as /weft-debug.apk for the /app download page)'
         } else {
-            Info 'No mobile/release/helm-debug.apk yet - /app download page will 404 until one is built'
+            Info 'No mobile/release/weft-debug.apk yet - /app download page will 404 until one is built'
         }
     } else {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $relayBundle)) { throw "no $relayBundle - run once without -SkipBuild first" }
-        if (-not (Test-Path $helmCliBundle)) { throw "no $helmCliBundle - run once without -SkipBuild first" }
+        if (-not (Test-Path $weftCliBundle)) { throw "no $weftCliBundle - run once without -SkipBuild first" }
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "no $distDir - run once without -SkipBuild first" }
     }
 
@@ -116,7 +116,7 @@ try {
         # --no-build: we already built mobile/dist above; just upload it. --filter resolves the
         # npm-workspace monorepo so the CLI does not prompt. Site is referenced by id (the name
         # lookup is unreliable from a workspaces root).
-        $deployArgs = @('deploy', '--no-build', '--filter', '@aasis21/helm-mobile', '--dir', $distDir, '--site', $Site, '--message', "ship.ps1 $(Get-Date -Format s)")
+        $deployArgs = @('deploy', '--no-build', '--filter', '@aasis21/weft-mobile', '--dir', $distDir, '--site', $Site, '--message', "ship.ps1 $(Get-Date -Format s)")
         if (-not $Draft) { $deployArgs += '--prod' }
         & netlify @deployArgs
         if ($LASTEXITCODE -ne 0) {
@@ -126,9 +126,9 @@ try {
     } else { Info 'SkipDeploy' }
 
     if (-not $SkipInstall) {
-        Step 'Installing extension on this laptop (~/.copilot/extensions/helm)'
+        Step 'Installing extension on this laptop (~/.copilot/extensions/weft)'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle to install - drop -SkipBuild" }
-        $dest = Join-Path $env:USERPROFILE '.copilot\extensions\helm'
+        $dest = Join-Path $env:USERPROFILE '.copilot\extensions\weft'
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item $extBundle (Join-Path $dest 'extension.mjs') -Force
         Ok "extension.mjs -> $dest"
@@ -136,34 +136,34 @@ try {
             Copy-Item $relayBundle (Join-Path $dest 'relayServerProcess.mjs') -Force
             Ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
         } else {
-            Warn "no $relayBundle - /helm devtunnel will fail to spawn the shared relay until rebuilt"
+            Warn "no $relayBundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
         }
-        if (Test-Path $helmCliBundle) {
-            Copy-Item $helmCliBundle (Join-Path $dest 'helm-cli.mjs') -Force
-            Ok "helm-cli.mjs -> $dest  (standalone Device Station CLI)"
-            $shimPath = Join-Path $dest 'helm-cli.cmd'
+        if (Test-Path $weftCliBundle) {
+            Copy-Item $weftCliBundle (Join-Path $dest 'weft-cli.mjs') -Force
+            Ok "weft-cli.mjs -> $dest  (standalone Device Station CLI)"
+            $shimPath = Join-Path $dest 'weft-cli.cmd'
             @"
 @echo off
-node "%~dp0helm-cli.mjs" %*
+node "%~dp0weft-cli.mjs" %*
 "@ | Set-Content -Path $shimPath -Encoding ascii
             $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
             $pathEntries = @()
             if ($userPath) { $pathEntries = $userPath -split ';' | Where-Object { $_ } }
             if ($pathEntries -notcontains $dest) {
                 [Environment]::SetEnvironmentVariable('Path', (($pathEntries + $dest) -join ';'), 'User')
-                Ok "helm-cli.cmd -> $dest  (added $dest to your User PATH - open a NEW terminal for it to take effect)"
+                Ok "weft-cli.cmd -> $dest  (added $dest to your User PATH - open a NEW terminal for it to take effect)"
             } else {
-                Ok "helm-cli.cmd -> $dest  (already on your PATH)"
+                Ok "weft-cli.cmd -> $dest  (already on your PATH)"
             }
         } else {
-            Warn "no $helmCliBundle - the standalone \`helm-cli\` command was not (re)installed"
+            Warn "no $weftCliBundle - the standalone \`weft-cli\` command was not (re)installed"
         }
         $envFile = Join-Path $root '.env'
         if (Test-Path $envFile) {
             Copy-Item $envFile (Join-Path $dest '.env') -Force
             Ok 'copied .env (relay credentials) next to the extension'
         } else {
-            Warn "no .env at repo root - set HELM_SUPABASE_URL / HELM_SUPABASE_ANON_KEY / HELM_TRANSPORT before 'copilot'"
+            Warn "no .env at repo root - set WEFT_SUPABASE_URL / WEFT_SUPABASE_ANON_KEY / WEFT_TRANSPORT before 'copilot'"
         }
     } else { Info 'SkipInstall' }
 
@@ -176,16 +176,16 @@ node "%~dp0helm-cli.mjs" %*
 
     Step 'Done'
     if (-not $SkipDeploy -and -not $Draft) {
-        Write-Host '  Site:      https://usehelm.netlify.app' -ForegroundColor Green
-        Write-Host '  Installer: irm https://usehelm.netlify.app/install.ps1 | iex' -ForegroundColor Green
+        Write-Host '  Site:      https://useweft.netlify.app' -ForegroundColor Green
+        Write-Host '  Installer: irm https://useweft.netlify.app/install.ps1 | iex' -ForegroundColor Green
     }
     if (-not $SkipInstall) {
-        # ship.ps1 can only refresh the files in ~/.copilot/extensions/helm; the running Copilot
+        # ship.ps1 can only refresh the files in ~/.copilot/extensions/weft; the running Copilot
         # CLI still holds the OLD bundle in memory. When this script is run BY the Copilot agent,
         # the agent should immediately call its `extensions_reload` tool to hot-load the new
         # extension.mjs from disk (no `copilot` restart needed). Outside the agent, restart `copilot`.
         Write-Host '  Local CLI: call the `extensions_reload` agent tool to hot-load the new bundle' -ForegroundColor Green
-        Write-Host '             (or restart `copilot` if not running under the agent); then /helm for the QR.' -ForegroundColor Green
+        Write-Host '             (or restart `copilot` if not running under the agent); then /weft for the QR.' -ForegroundColor Green
     }
 }
 finally {

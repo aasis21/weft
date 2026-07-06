@@ -5,7 +5,7 @@ vi.mock('@capacitor/app', () => ({
 }));
 import { App } from '@capacitor/app';
 import { loadEventLog } from '@/lib/eventLog';
-import { registry } from '@/test/helpers/fakeHelmClient';
+import { registry } from '@/test/helpers/fakeWeftClient';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
 
@@ -42,7 +42,7 @@ describe('scenario: device persistence + auto-reconnect (#186 follow-up)', () =>
     await h!.flush();
     const listener = registry.get('listener-1')!;
 
-    listener.emit(B.projectList([{ name: 'helm', path: '/repo', isDefault: true }], 'Akash Laptop'));
+    listener.emit(B.projectList([{ name: 'weft', path: '/repo', isDefault: true }], 'Akash Laptop'));
     await h!.flush();
     await vi.advanceTimersByTimeAsync(2_000);
     await h!.flush();

@@ -17,14 +17,14 @@ interface LandingScreenProps {
 type OsTab = 'windows' | 'unix';
 
 const INSTALL: Record<OsTab, { label: string; cmd: string }> = {
-  windows: { label: 'Windows', cmd: 'irm https://usehelm.netlify.app/install.ps1 | iex' },
-  unix: { label: 'macOS · Linux', cmd: 'curl -fsSL https://usehelm.netlify.app/install.sh | bash' },
+  windows: { label: 'Windows', cmd: 'irm https://useweft.netlify.app/install.ps1 | iex' },
+  unix: { label: 'macOS · Linux', cmd: 'curl -fsSL https://useweft.netlify.app/install.sh | bash' },
 };
 
 const STEPS = [
   {
     n: 1,
-    title: 'Install Helm on your laptop',
+    title: 'Install Weft on your laptop',
     body: 'One line. Copilot picks it up automatically — no accounts, no setup.',
   },
   {
@@ -53,7 +53,7 @@ const CAN_DO = [
   {
     icon: 'refresh',
     title: 'Pick up where you left off',
-    body: 'Sessions stay warm and reconnect when you reopen Helm. Juggle several at once.',
+    body: 'Sessions stay warm and reconnect when you reopen Weft. Juggle several at once.',
   },
 ];
 
@@ -160,14 +160,14 @@ export function LandingScreen({
 
       <section className="landing-hero">
         <div className="brand-mark" aria-hidden="true">
-          H
+          W
         </div>
         <p className="eyebrow">GitHub Copilot, off the desk</p>
         <h1>
           Your Copilot session, now in your <em className="serif">hand.</em>
         </h1>
         <p className="lede">
-          Helm connects to your live GitHub Copilot session and puts you in control from your
+          Weft connects to your live GitHub Copilot session and puts you in control from your
           phone — see what it&apos;s doing, tell it what to do next, and approve its moves.
           Wherever you are. Private, end&nbsp;to&nbsp;end.
         </p>
@@ -270,7 +270,7 @@ export function LandingScreen({
       </section>
 
       <footer className="landing-footer">
-        <a href="https://github.com/aasis21/helm" target="_blank" rel="noreferrer">
+        <a href="https://github.com/aasis21/weft" target="_blank" rel="noreferrer">
           GitHub
         </a>
         <span aria-hidden="true">·</span>

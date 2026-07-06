@@ -18,7 +18,7 @@ await build({
   // because `require` is undefined. Re-create a real require from import.meta.url
   // so those built-in requires resolve at runtime.
   banner: {
-    js: "import { createRequire as __helmCreateRequire } from 'node:module'; const require = __helmCreateRequire(import.meta.url);",
+    js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },
   logLevel: "info",
 });
@@ -39,27 +39,27 @@ await build({
   format: "esm",
   sourcemap: true,
   banner: {
-    js: "import { createRequire as __helmCreateRequire } from 'node:module'; const require = __helmCreateRequire(import.meta.url);",
+    js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },
   logLevel: "info",
 });
 
-// helm-cli.mjs (the "Device Station" CLI) imports relative ../src/*.mjs files today, so it only
+// weft-cli.mjs (the "Device Station" CLI) imports relative ../src/*.mjs files today, so it only
 // works when the FULL repo is checked out — it can't be copied standalone onto a machine that
-// just needs to run `helm-cli start` (e.g. a headless "device station" box with no Copilot CLI /
+// just needs to run `weft-cli start` (e.g. a headless "device station" box with no Copilot CLI /
 // extension installed at all). Bundle it the same way as the other two entry points so
-// dist/helm-cli.mjs is fully self-contained (only real Node built-ins + npm deps inlined) and can
+// dist/weft-cli.mjs is fully self-contained (only real Node built-ins + npm deps inlined) and can
 // be installed as a single file + a tiny PATH shim — see ship.ps1 / install.ps1 / install.sh.
 await build({
-  entryPoints: ["bin/helm-cli.mjs"],
-  outfile: "dist/helm-cli.mjs",
+  entryPoints: ["bin/weft-cli.mjs"],
+  outfile: "dist/weft-cli.mjs",
   bundle: true,
   platform: "node",
   target: "node18",
   format: "esm",
   sourcemap: true,
   banner: {
-    js: "import { createRequire as __helmCreateRequire } from 'node:module'; const require = __helmCreateRequire(import.meta.url);",
+    js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },
   logLevel: "info",
 });
@@ -73,9 +73,9 @@ try {
   console.log("[verify] bundle loaded (did not reach SDK stub, but no require error)");
 } catch (err) {
   const msg = err?.message ?? String(err);
-  if (msg === "HELM_SDK_STUB_REACHED") {
+  if (msg === "WEFT_SDK_STUB_REACHED") {
     console.log("[verify] bundle loads OK — reached SDK entrypoint past all CJS requires, no callback hooks");
-  } else if (msg.startsWith("HELM_RUNTIME_REJECTS_HOOKS")) {
+  } else if (msg.startsWith("WEFT_RUNTIME_REJECTS_HOOKS")) {
     console.error(
       "[verify] FAIL: joinSession() is passing callback `hooks` — the Copilot CLI native runtime " +
         "rejects these at session.resume. Use session.on(...) events instead.",

@@ -520,7 +520,7 @@ export function SessionDrawer({
         ) : null}
 
         <button className="drawer-home" type="button" onClick={onGoHome}>
-          ⌂ About Helm
+          ⌂ About Weft
         </button>
       </aside>
       {docked ? null : <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />}

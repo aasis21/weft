@@ -83,7 +83,7 @@ describe('scenario: stream', () => {
 
     const transcript = await loadTranscript('c1');
     expect(assistantTexts(transcript?.items ?? [])).toEqual(['Hello']);
-    const transcriptWrites = setSpy.mock.calls.filter(([arg]) => arg.key === 'helm.transcript.v1.c1');
+    const transcriptWrites = setSpy.mock.calls.filter(([arg]) => arg.key === 'weft.transcript.v1.c1');
     expect(transcriptWrites).toHaveLength(1);
   });
 });

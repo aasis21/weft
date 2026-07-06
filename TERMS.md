@@ -1,10 +1,10 @@
-# Helm — Acceptable Use (hosted relay)
+# Weft — Acceptable Use (hosted relay)
 
-> Template terms for anyone operating a **public** Helm relay. This is a starting point,
+> Template terms for anyone operating a **public** Weft relay. This is a starting point,
 > not legal advice — adapt it before relying on it. If you self-host for personal use
 > only, you can ignore this file.
 
-The Helm **software** is licensed under Apache-2.0 (see [`LICENSE`](./LICENSE)). These
+The Weft **software** is licensed under Apache-2.0 (see [`LICENSE`](./LICENSE)). These
 terms govern use of a **hosted relay instance**, which is a separate service that an
 operator runs. See [`docs/hosting.md`](./docs/hosting.md) for the distinction.
 

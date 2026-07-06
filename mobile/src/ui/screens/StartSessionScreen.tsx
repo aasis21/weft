@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
-import type { SpawnMode } from '@aasis21/helm-shared';
+import type { SpawnMode } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
@@ -96,7 +96,7 @@ export function StartSessionScreen({
     : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'} · ${onlineCount} online`;
 
   return (
-    <main className="helm-session join-session start-session-v2">
+    <main className="weft-session join-session start-session-v2">
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"

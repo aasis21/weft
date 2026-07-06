@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Generic helper for small JSON "is this shared resource still alive" registry files under
-// ~/.helm (see projects.mjs's helmHome()). Used by devtunnel.mjs (shared relay/tunnel discovery)
+// ~/.weft (see projects.mjs's weftHome()). Used by devtunnel.mjs (shared relay/tunnel discovery)
 // and listener.mjs (live device-connection bookkeeping) — this file knows nothing about either;
 // it just reads/writes JSON atomically and answers "is this pid still running", cross-platform.
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { helmHome } from "./projects.mjs";
+import { weftHome } from "./projects.mjs";
 
-/** Read and JSON-parse a registry file under ~/.helm. Returns null if missing/corrupt. */
+/** Read and JSON-parse a registry file under ~/.weft. Returns null if missing/corrupt. */
 export function readRegistry(fileName, { baseDir } = {}) {
-  const file = join(helmHome(baseDir), fileName);
+  const file = join(weftHome(baseDir), fileName);
   try {
     return JSON.parse(readFileSync(file, "utf8"));
   } catch {
@@ -20,13 +20,13 @@ export function readRegistry(fileName, { baseDir } = {}) {
 }
 
 /**
- * Atomically write a registry file under ~/.helm (tmp file + rename, same pattern as
+ * Atomically write a registry file under ~/.weft (tmp file + rename, same pattern as
  * deviceIdentity.mjs) so a reader never observes a half-written file. Best-effort: a failed write
  * only means the resource isn't discoverable by OTHER processes, not that the caller's own
  * in-memory state is invalid.
  */
 export function writeRegistryAtomic(fileName, data, { baseDir } = {}) {
-  const dir = helmHome(baseDir);
+  const dir = weftHome(baseDir);
   const file = join(dir, fileName);
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -44,9 +44,9 @@ export function writeRegistryAtomic(fileName, data, { baseDir } = {}) {
   }
 }
 
-/** Best-effort delete of a registry file under ~/.helm. Never throws. */
+/** Best-effort delete of a registry file under ~/.weft. Never throws. */
 export function clearRegistry(fileName, { baseDir } = {}) {
-  const file = join(helmHome(baseDir), fileName);
+  const file = join(weftHome(baseDir), fileName);
   try {
     rmSync(file, { force: true });
   } catch {

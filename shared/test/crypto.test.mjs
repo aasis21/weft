@@ -53,8 +53,8 @@ test("tampered ciphertext and wrong keys are rejected", async () => {
   const wrongKey = await deriveSessionKey(attacker.privateKey, attacker.publicKeyB64);
   const payload = await encryptJSON(aKey, { secret: "relay only sees ciphertext" });
 
-  await assert.rejects(() => decryptJSON(bKey, flipCiphertextByte(payload)), /helm\/crypto:/);
-  await assert.rejects(() => decryptJSON(wrongKey, payload), /helm\/crypto:/);
+  await assert.rejects(() => decryptJSON(bKey, flipCiphertextByte(payload)), /weft\/crypto:/);
+  await assert.rejects(() => decryptJSON(wrongKey, payload), /weft\/crypto:/);
 });
 
 test("randomChannelId returns unique 128-bit hex identifiers", () => {
@@ -100,12 +100,12 @@ test("public key export/import round-trip remains derivable", async () => {
   assert.deepEqual(await decryptJSON(bKey, await encryptJSON(aKey, value)), value);
 });
 
-test("invalid payloads fail with helm/crypto-prefixed errors", async () => {
+test("invalid payloads fail with weft/crypto-prefixed errors", async () => {
   const { aKey } = await pairedSessionKeys();
 
-  await assert.rejects(() => importPeerPublicKey("not base64!"), /helm\/crypto:/);
-  await assert.rejects(() => decryptJSON(aKey, null), /helm\/crypto:/);
-  await assert.rejects(() => decryptJSON(aKey, { iv: "", ciphertext: "" }), /helm\/crypto:/);
+  await assert.rejects(() => importPeerPublicKey("not base64!"), /weft\/crypto:/);
+  await assert.rejects(() => decryptJSON(aKey, null), /weft\/crypto:/);
+  await assert.rejects(() => decryptJSON(aKey, { iv: "", ciphertext: "" }), /weft\/crypto:/);
 });
 
 test("base64 helpers preserve binary bytes in Node and browser fallback paths", () => {

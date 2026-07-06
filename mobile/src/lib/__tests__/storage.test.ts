@@ -20,7 +20,7 @@ describe('pairing storage', () => {
     await saveStoredPairing(pairing);
 
     await expect(loadStoredPairing()).resolves.toEqual(pairing);
-    expect(localStorage.getItem('helm.pairing.v1')).toBe(JSON.stringify(pairing));
+    expect(localStorage.getItem('weft.pairing.v1')).toBe(JSON.stringify(pairing));
   });
 
   it('clear removes the pairing', async () => {
@@ -28,11 +28,11 @@ describe('pairing storage', () => {
     await clearStoredPairing();
 
     await expect(loadStoredPairing()).resolves.toBeNull();
-    expect(localStorage.getItem('helm.pairing.v1')).toBeNull();
+    expect(localStorage.getItem('weft.pairing.v1')).toBeNull();
   });
 
   it('returns null instead of throwing for corrupt JSON', async () => {
-    await Preferences.set({ key: 'helm.pairing.v1', value: '{not-json' });
+    await Preferences.set({ key: 'weft.pairing.v1', value: '{not-json' });
 
     await expect(loadStoredPairing()).resolves.toBeNull();
   });

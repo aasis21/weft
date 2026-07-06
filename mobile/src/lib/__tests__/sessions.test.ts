@@ -88,7 +88,7 @@ describe('sessions storage', () => {
       await upsertSession(session('ch-web', { sessionId: 'sw' }));
       // The write must not throw, and the joined channel must survive because the localStorage mirror
       // was written even though Preferences.set rejected.
-      expect(localStorage.getItem('helm.sessions.v1')).toContain('ch-web');
+      expect(localStorage.getItem('weft.sessions.v1')).toContain('ch-web');
       expect(await loadSessions()).toEqual([session('ch-web', { sessionId: 'sw' })]);
     } finally {
       setSpy.mockRestore();
@@ -110,7 +110,7 @@ describe('sessions storage', () => {
 
   it('reads legacy array-shaped session stores as sessions with no last active id', async () => {
     const legacy = [session('legacy')];
-    localStorage.setItem('helm.sessions.v1', JSON.stringify(legacy));
+    localStorage.setItem('weft.sessions.v1', JSON.stringify(legacy));
 
     expect(await loadSessions()).toEqual(legacy);
     expect(await loadLastActiveSessionId()).toBeNull();
@@ -186,9 +186,9 @@ describe('sessions storage', () => {
     const loaded = await loadSessions();
     expect(loaded).toEqual([{ pairing: legacy, title: null, cwd: null, addedAt: 123, lastSeenAt: 123 }]);
 
-    localStorage.removeItem('helm.pairing.v1');
+    localStorage.removeItem('weft.pairing.v1');
     expect(await loadSessions()).toEqual(loaded);
-    expect(JSON.parse(localStorage.getItem('helm.sessions.v1') ?? '{}')).toEqual({
+    expect(JSON.parse(localStorage.getItem('weft.sessions.v1') ?? '{}')).toEqual({
       sessions: loaded,
       lastActiveId: null,
     });

@@ -1,7 +1,7 @@
 import { Preferences } from '@capacitor/preferences';
-import type { TransportDescriptor } from '@aasis21/helm-shared';
+import type { TransportDescriptor } from '@aasis21/weft-shared';
 
-const PAIRING_KEY = 'helm.pairing.v1';
+const PAIRING_KEY = 'weft.pairing.v1';
 
 export interface StoredPairing {
   channelId: string;

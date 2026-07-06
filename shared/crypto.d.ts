@@ -1,4 +1,4 @@
-// Type definitions for Helm shared crypto.
+// Type definitions for Weft shared crypto.
 
 export interface KeyPair {
   privateKey: CryptoKey;

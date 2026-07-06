@@ -20,13 +20,13 @@ jobs:
         run: npm ci
 
       - name: Shared contracts (crypto, pairing, transport, protocol)
-        run: npm test -w @aasis21/helm-shared
+        run: npm test -w @aasis21/weft-shared
 
       - name: Extension relay loop (harness smoke)
         run: node extension/harness/harness.mjs --auto
 
       - name: Build extension bundle
-        run: npm run build -w @aasis21/helm-extension
+        run: npm run build -w @aasis21/weft-extension
 
       - name: Build mobile (web)
-        run: npm run build -w @aasis21/helm-mobile
+        run: npm run build -w @aasis21/weft-mobile

@@ -38,7 +38,7 @@ interface EventEnvelope {
                          // — the wire-level topic; == today's EVENTS, unchanged (7 values)
   eventSubtype: string; // fine-grained type, scoped under eventType
                          // — replaces today's KIND, but consistently namespaced
-  channelId: string;    // the pairing's channel id (private:helm:<channelId>)
+  channelId: string;    // the pairing's channel id (private:weft:<channelId>)
   sessionId: string;    // the Copilot CLI session being mirrored
   senderId: string;     // stable device identifier: "laptop" | "phone-<uuid>"
   senderName: string;   // display label for who sent it
@@ -51,7 +51,7 @@ Design rationale:
 
 - **`eventType` stays at 7 values and stays == the transport-level publish/subscribe
   event.** No change to `Transport`, no wildcard-subscribe plumbing needed, no change
-  to Supabase channel/RLS behavior. `ALL_EVENTS` in `mobile/src/lib/helmClient.ts`
+  to Supabase channel/RLS behavior. `ALL_EVENTS` in `mobile/src/lib/weftClient.ts`
   keeps working unmodified.
 - **`eventSubtype` replaces `KIND`,** but is scoped under its `eventType` instead of
   being an independently-invented flat string. `eventForKind()` is deleted entirely —
@@ -135,7 +135,7 @@ Touches: `shared/messages.mjs` / `.d.ts` (rewrite), `shared/channel.mjs` (drop
 `eventForKind`, build the envelope), `extension/src/relay.mjs` (every
 `channel.onEvent(EVENTS.X, ...)` call site + kind-guards + every `data.foo` /
 `msg.foo` access), `mobile/src/lib/sessionManager.ts`, `mobile/src/lib/timeline.ts`,
-`mobile/src/lib/helmClient.ts`, and every test in `shared/test/*` and
+`mobile/src/lib/weftClient.ts`, and every test in `shared/test/*` and
 `mobile/src/lib/__tests__/*` that asserts on `kind` / `EVENTS` / flat payload
 fields. This is a **wire-protocol breaking change** — the extension and the
 mobile app must be redeployed together; there is no on-wire backward-compat

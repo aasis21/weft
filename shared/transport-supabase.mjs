@@ -2,10 +2,10 @@
 // Supabase Realtime Broadcast transport.
 //
 // Required Supabase setup: enable Realtime Authorization for private channels and add RLS
-// policies on `realtime.messages` that only allow authorized Helm clients to join
-// `private:helm:*` channels. Channels are created with `config.private = true`, so joins
+// policies on `realtime.messages` that only allow authorized Weft clients to join
+// `private:weft:*` channels. Channels are created with `config.private = true`, so joins
 // are denied until those policies exist — apply
-// `supabase/migrations/*_helm_realtime_broadcast_rls.sql`. The relay remains untrusted and
+// `supabase/migrations/*_weft_realtime_broadcast_rls.sql`. The relay remains untrusted and
 // only carries ciphertext.
 //
 // Subscribe-order independence: a SINGLE catch-all broadcast listener is registered at
@@ -21,7 +21,7 @@ const STATUS_TIMED_OUT = "TIMED_OUT";
 const STATUS_CLOSED = "CLOSED";
 
 function fail(message) {
-  return new Error(`helm/transport-supabase: ${message}`);
+  return new Error(`weft/transport-supabase: ${message}`);
 }
 
 /**
@@ -34,7 +34,7 @@ export function createSupabaseTransport({ client, channelId } = {}) {
   }
   if (!channelId) throw fail("channelId is required");
 
-  const name = `private:helm:${channelId}`;
+  const name = `private:weft:${channelId}`;
   const channel = client.channel(name, {
     config: { private: true, broadcast: { self: false, ack: true } },
   });
@@ -118,7 +118,7 @@ export function createSupabaseTransport({ client, channelId } = {}) {
 
     connectPromise = promise.catch((err) => {
       connectPromise = undefined;
-      if (err instanceof Error && err.message.startsWith("helm/transport-supabase:")) {
+      if (err instanceof Error && err.message.startsWith("weft/transport-supabase:")) {
         throw err;
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -135,7 +135,7 @@ export function createSupabaseTransport({ client, channelId } = {}) {
         throw fail(`send failed with status ${result}`);
       }
     } catch (err) {
-      if (err instanceof Error && err.message.startsWith("helm/transport-supabase:")) {
+      if (err instanceof Error && err.message.startsWith("weft/transport-supabase:")) {
         throw err;
       }
       const message = err instanceof Error ? err.message : String(err);

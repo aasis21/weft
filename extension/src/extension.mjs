@@ -12,31 +12,31 @@ import {
   randomChannelId,
   buildPairingPayload,
   listenForPeers,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 
-// Names accepted by `/helm <name>` — the sync-resolvable ones (env/config-backed) plus the async,
+// Names accepted by `/weft <name>` — the sync-resolvable ones (env/config-backed) plus the async,
 // self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
 // transportFactory's own SUPPORTED_TRANSPORT_NAMES because devtunnel isn't a plain descriptor
 // resolution: it spins up a local relay server + a real cloud tunnel on first use.
-const HELM_COMMAND_TRANSPORT_NAMES = [...SUPPORTED_TRANSPORT_NAMES, "devtunnel"];
+const WEFT_COMMAND_TRANSPORT_NAMES = [...SUPPORTED_TRANSPORT_NAMES, "devtunnel"];
 
 // Minimal ANSI styling for the pairing banner. The Copilot CLI forwards ANSI straight to the
 // terminal (the QR itself is rendered with ANSI escapes), so truecolor brand accents render in
 // any modern terminal. Honor NO_COLOR (https://no-color.org) and TERM=dumb — otherwise the
 // helpers just return the bare string, so the banner stays readable everywhere.
-const HELM_COLOR = !process.env.NO_COLOR && process.env.TERM !== "dumb";
-const paint = (codes) => (s) => (HELM_COLOR ? `\x1b[${codes}m${s}\x1b[0m` : `${s}`);
+const WEFT_COLOR = !process.env.NO_COLOR && process.env.TERM !== "dumb";
+const paint = (codes) => (s) => (WEFT_COLOR ? `\x1b[${codes}m${s}\x1b[0m` : `${s}`);
 const ui = {
-  brand: paint("1;38;2;198;242;78"), // bold signal-lime (#C6F24E) — Helm's primary
+  brand: paint("1;38;2;198;242;78"), // bold signal-lime (#C6F24E) — Weft's primary
   lime: paint("38;2;198;242;78"),
   cyan: paint("38;2;63;224;206"), // secondary accent (#3FE0CE)
   dim: paint("2"),
 };
 
-// Best-effort: load SUPABASE_URL / SUPABASE_ANON_KEY / HELM_TRANSPORT from a colocated
+// Best-effort: load SUPABASE_URL / SUPABASE_ANON_KEY / WEFT_TRANSPORT from a colocated
 // `.env` (next to the installed extension or in the launch cwd) so operators don't have to
 // export them by hand before every `copilot`. Already-exported shell vars always win;
 // a missing/unreadable file is a silent no-op. Never commit a real `.env` (it is gitignored).
@@ -53,7 +53,7 @@ function loadLocalEnv() {
   // and its values win; the launch cwd .env is a secondary fallback. Both are merged — we do
   // NOT stop after the first readable file, so a partial cwd/.env can't mask the install one.
   // Any already-exported process env still wins per key (see the collision note in
-  // createTransport for why Helm uses HELM_SUPABASE_* rather than generic SUPABASE_*).
+  // createTransport for why Weft uses WEFT_SUPABASE_* rather than generic SUPABASE_*).
   const candidates = [];
   if (here) candidates.push(join(here, ".env"));
   candidates.push(join(process.cwd(), ".env"));
@@ -70,20 +70,20 @@ function loadLocalEnv() {
 }
 loadLocalEnv();
 
-const handedOffIdentity = await loadIdentityFromFile(process.env.HELM_IDENTITY_FILE);
+const handedOffIdentity = await loadIdentityFromFile(process.env.WEFT_IDENTITY_FILE);
 const identityFileWasPresent = Boolean(handedOffIdentity);
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
-const channelId = handedOffIdentity?.channelId ?? (process.env.HELM_CHANNEL_ID || randomChannelId());
-// Resolved once from this laptop's own env (HELM_TRANSPORT / HELM_SUPABASE_* / HELM_WEBPUBSUB_*)
-// or the persisted `helm-cli set-transport` default, and stamped into the QR below so the phone
+const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
+// Resolved once from this laptop's own env (WEFT_TRANSPORT / WEFT_SUPABASE_* / WEFT_WEBPUBSUB_*)
+// or the persisted `weft-cli set-transport` default, and stamped into the QR below so the phone
 // builds a matching transport at connect time, with no pre-baked config of its own. A
-// misconfigured transport (e.g. HELM_TRANSPORT=webpubsub without HELM_WEBPUBSUB_NEGOTIATE_URL) is
+// misconfigured transport (e.g. WEFT_TRANSPORT=webpubsub without WEFT_WEBPUBSUB_NEGOTIATE_URL) is
 // not something pairing can work around, so this fails fast at load with a clear, actionable
 // error rather than surfacing as a confusing retry-loop timeout later. resolveTransportForChannel
 // (not the plain resolveTransportDescriptor) so a persisted default of "devtunnel" gets expanded
 // into a real, connectable descriptor (spawns/reuses the shared relay — see devtunnel.mjs) right
-// here at boot, not just when a user explicitly runs `/helm devtunnel` for the session.
-// `let`, not `const` — `/helm <transport>` (see switchTransport) overrides this for just the
+// here at boot, not just when a user explicitly runs `/weft devtunnel` for the session.
+// `let`, not `const` — `/weft <transport>` (see switchTransport) overrides this for just the
 // running session without touching the persisted device-wide default.
 let transportDescriptor = await resolveTransportForChannel({ channelId });
 let pairingPayload = buildCurrentPairingPayload();
@@ -112,8 +112,8 @@ let pairChain = Promise.resolve();
 
 // Show the full pairing walk-through (instructions + QR + status) and re-kick the relay listener
 // if it isn't currently live (initial connect gave up, or it was torn down). A live listener
-// already answers re-scans, so we never stack a second transport. Bound to the `/helm` command.
-// `context.args` (the text after `/helm`, e.g. "supabase") optionally overrides the transport for
+// already answers re-scans, so we never stack a second transport. Bound to the `/weft` command.
+// `context.args` (the text after `/weft`, e.g. "supabase") optionally overrides the transport for
 // just this session — see switchTransport. No args (or blank) keeps this device's default.
 const showPairing = async (context) => {
   const requested = context?.args?.trim();
@@ -125,11 +125,11 @@ const showPairing = async (context) => {
 // Rebuild transportDescriptor/pairingPayload for `name` and tear down any live relay so the next
 // connectRelayWithRetry() picks up the new transport. Returns false (after logging a clear error)
 // for an unknown/misconfigured name, leaving the current transport untouched. This only affects
-// the running session — it never writes to the persisted `helm-cli set-transport` config.
+// the running session — it never writes to the persisted `weft-cli set-transport` config.
 async function switchTransport(name) {
   const normalized = name.trim().toLowerCase();
   if (normalized === "devtunnel") {
-    session.log?.("Helm: setting up a devtunnel (first run creates a tunnel; can take ~10-20s)…", {
+    session.log?.("Weft: setting up a devtunnel (first run creates a tunnel; can take ~10-20s)…", {
       ephemeral: false,
     });
   }
@@ -140,18 +140,18 @@ async function switchTransport(name) {
         ? await provisionDevTunnelTransport({ channelId })
         : resolveTransportByName(normalized);
   } catch (err) {
-    session.log?.(`Helm: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
+    session.log?.(`Weft: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
     return false;
   }
   if (JSON.stringify(descriptor) === JSON.stringify(transportDescriptor)) {
-    session.log?.(`Helm: already using "${descriptor.kind}" for this session.`, { ephemeral: false });
+    session.log?.(`Weft: already using "${descriptor.kind}" for this session.`, { ephemeral: false });
     return true;
   }
   transportDescriptor = descriptor;
   pairingPayload = buildCurrentPairingPayload();
   await teardownRelay("transport-switch");
   session.log?.(
-    `Helm: switched transport to "${descriptor.kind}" for this session only. Scan the fresh QR below.`,
+    `Weft: switched transport to "${descriptor.kind}" for this session only. Scan the fresh QR below.`,
     { ephemeral: false },
   );
   return true;
@@ -161,7 +161,7 @@ const session = await joinSession({
   streaming: true,
   onPermissionRequest: async (request, invocation) => {
     if (!permissionRelay) {
-      // No phone is paired yet, so Helm has no remote user to ask. Report the user as
+      // No phone is paired yet, so Weft has no remote user to ask. Report the user as
       // unavailable (a valid native decision kind) so the CLI falls back to its own
       // in-terminal approval prompt instead of erroring on an unknown decision.
       return { kind: "user-not-available" };
@@ -170,10 +170,10 @@ const session = await joinSession({
   },
   commands: [
     {
-      name: "helm",
+      name: "weft",
       description:
-        'Pair your phone with this Copilot session (shows the QR + setup steps). Optional arg overrides the transport for this session only: /helm [' +
-        HELM_COMMAND_TRANSPORT_NAMES.join("|") +
+        'Pair your phone with this Copilot session (shows the QR + setup steps). Optional arg overrides the transport for this session only: /weft [' +
+        WEFT_COMMAND_TRANSPORT_NAMES.join("|") +
         "].",
       handler: showPairing,
     },
@@ -201,12 +201,12 @@ if (identityFileWasPresent) void connectRelayWithRetry();
 // walk-away tool, so retry the subscribe with capped exponential backoff using a FRESH transport
 // each attempt (a realtime channel is single-use after an error). Once subscribed, `listenForPeers`
 // answers every hello — the first scan AND any later re-scan/reload — so pairing self-heals.
-// `/helm` can re-kick this if all attempts gave up.
+// `/weft` can re-kick this if all attempts gave up.
 async function connectRelayWithRetry({ reconnect = false } = {}) {
   if (connecting || pairingStop || shuttingDown) return false;
   connecting = true;
   try {
-    const maxAttempts = positiveIntFromEnv("HELM_CONNECT_MAX_ATTEMPTS", 6);
+    const maxAttempts = positiveIntFromEnv("WEFT_CONNECT_MAX_ATTEMPTS", 6);
     for (let attempt = 1; !shuttingDown; attempt++) {
       const transport = createTransportFromDescriptor(transportDescriptor, { channelId });
       try {
@@ -229,8 +229,8 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
         }) ?? null;
         session.log?.(
           reconnect
-            ? "Helm: reconnected."
-            : "Helm: pairing channel ready; listening for phone hellos…",
+            ? "Weft: reconnected."
+            : "Weft: pairing channel ready; listening for phone hellos…",
         );
         return true;
       } catch (err) {
@@ -238,17 +238,17 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
         if (shuttingDown) return false;
         if (attempt >= maxAttempts) {
           process.stderr.write(
-            `Helm: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
+            `Weft: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
           );
           session.log?.(
-            `Helm: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /helm to retry.`,
+            `Weft: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /weft to retry.`,
             { level: "warning", ephemeral: false },
           );
           return false;
         }
         const backoffMs = Math.min(1500 * 2 ** (attempt - 1), 15_000);
         session.log?.(
-          `Helm: pairing channel subscribe attempt ${attempt} failed (${err?.message ?? err}); retrying in ${Math.round(backoffMs / 1000)}s…`,
+          `Weft: pairing channel subscribe attempt ${attempt} failed (${err?.message ?? err}); retrying in ${Math.round(backoffMs / 1000)}s…`,
           { level: "warning", ephemeral: false },
         );
         await sleep(backoffMs);
@@ -263,7 +263,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
 function requestReconnect(detail) {
   if (shuttingDown || reconnecting) return;
   reconnecting = true;
-  session.log?.("Helm: connection lost, reconnecting…", { level: "warning", ephemeral: false });
+  session.log?.("Weft: connection lost, reconnecting…", { level: "warning", ephemeral: false });
   void reconnectRelay(detail).finally(() => {
     reconnecting = false;
   });
@@ -275,7 +275,7 @@ async function reconnectRelay() {
 }
 
 // Shared shutdown of any live relay/listener/transport, used by both a dropped-connection
-// reconnect and a user-requested `/helm <transport>` switch — `reason` is only used for the
+// reconnect and a user-requested `/weft <transport>` switch — `reason` is only used for the
 // relay's own stop() bookkeeping/logging.
 async function teardownRelay(reason) {
   const previousRelay = relayHandle;
@@ -308,7 +308,7 @@ async function teardownRelay(reason) {
 // a duplicate hello from the same phone is already ACKed by `listenForPeers`, so we just no-op.
 function onPeerPaired(transport, info) {
   pairChain = pairChain.then(() => attachForPeer(transport, info)).catch((err) => {
-    session.log?.(`Helm: re-pair failed: ${err?.message ?? err}`, {
+    session.log?.(`Weft: re-pair failed: ${err?.message ?? err}`, {
       level: "warning",
       ephemeral: false,
     });
@@ -410,7 +410,7 @@ async function loadIdentityFromFile(file) {
     const laptopKeys = await importKeyPair({ privateKeyJwk: parsed.privateKeyJwk });
     return { channelId: parsed.channelId, laptopKeys };
   } catch (err) {
-    process.stderr.write(`Helm: could not load handed-off identity; using a fresh pairing: ${err?.message ?? err}\n`);
+    process.stderr.write(`Weft: could not load handed-off identity; using a fresh pairing: ${err?.message ?? err}\n`);
     return null;
   } finally {
     try {
@@ -429,22 +429,22 @@ function positiveIntFromEnv(name, fallback) {
 async function logPairing(session, payload, { full = false } = {}) {
   const qr = (await QRCode.toString(payload, { type: "terminal", small: true })).replace(/\n+$/, "");
   // Reflects whichever descriptor is actually active for THIS session — not just the env var —
-  // so a `/helm <name>` override (see switchTransport) shows correctly after a switch.
+  // so a `/weft <name>` override (see switchTransport) shows correctly after a switch.
   const transport = transportDescriptor.kind;
   const channelShort = channelId.slice(0, 8);
 
-  // Session start prints a light banner — just the QR + one status line. `/helm` prints the full
+  // Session start prints a light banner — just the QR + one status line. `/weft` prints the full
   // walk-through (value prop, numbered steps, manual-paste fallback, security footer).
   const lines = full
     ? [
-        `${ui.brand("HELM")}  ${ui.dim("·  pair your phone")}`,
+        `${ui.brand("WEFT")}  ${ui.dim("·  pair your phone")}`,
         "",
         ui.dim("Mirror this Copilot session on your phone — watch the live token"),
         ui.dim("stream, read diffs, and approve tool runs from anywhere."),
         "",
         qr,
         "",
-        `${ui.lime("1")}  Open the Helm app   ${ui.dim("·")}  ${ui.cyan("usehelm.netlify.app")}`,
+        `${ui.lime("1")}  Open the Weft app   ${ui.dim("·")}  ${ui.cyan("useweft.netlify.app")}`,
         `${ui.lime("2")}  Tap ${ui.dim("“Scan QR to pair”")} and point it at the code above`,
         `${ui.lime("3")}  Approve the link on your phone — it confirms right here`,
         "",
@@ -458,11 +458,11 @@ async function logPairing(session, payload, { full = false } = {}) {
         `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}`,
       ]
     : [
-        `${ui.brand("HELM")}  ${ui.dim("·  scan to pair your phone")}`,
+        `${ui.brand("WEFT")}  ${ui.dim("·  scan to pair your phone")}`,
         "",
         qr,
         "",
-        `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}   ${ui.dim("·")}   ${ui.dim("run")} ${ui.lime("/helm")} ${ui.dim("for setup steps")}`,
+        `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}   ${ui.dim("·")}   ${ui.dim("run")} ${ui.lime("/weft")} ${ui.dim("for setup steps")}`,
       ];
   session.log?.(lines.join("\n"), { level: "info", ephemeral: false });
 }

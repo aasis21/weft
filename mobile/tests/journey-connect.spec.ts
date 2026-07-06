@@ -57,7 +57,7 @@ test.describe('Journey: connect & navigate', () => {
     await page.getByRole('button', { name: 'Demo / Simulator' }).click();
 
     // Now inside the chat surface: header + status render, composer is present.
-    await expect(page.locator('.helm-session')).toBeVisible();
+    await expect(page.locator('.weft-session')).toBeVisible();
     await expect(page.locator('.status-bar')).toBeVisible();
     await expect(page.locator('.status-title')).toContainText('Demo session');
     await expect(page.locator('.composer')).toBeVisible();
@@ -65,7 +65,7 @@ test.describe('Journey: connect & navigate', () => {
 
   test('the demo can also be launched straight from the Landing hero', async ({ page }) => {
     await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
-    await expect(page.locator('.helm-session')).toBeVisible();
+    await expect(page.locator('.weft-session')).toBeVisible();
     await expect(page.locator('.status-bar')).toBeVisible();
   });
 });

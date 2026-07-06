@@ -2,7 +2,7 @@ import { Preferences } from '@capacitor/preferences';
 import type { StoredPairing } from './storage';
 import { loadStoredPairing } from './storage';
 
-const SESSIONS_KEY = 'helm.sessions.v1';
+const SESSIONS_KEY = 'weft.sessions.v1';
 
 interface SessionsStore {
   sessions: StoredSession[];
@@ -153,7 +153,7 @@ function dedupeBySessionId(list: StoredSession[]): StoredSession[] {
 
 /**
  * Load every joined session. Transparently migrates a single legacy
- * `helm.pairing.v1` entry into the multi-session list on first run.
+ * `weft.pairing.v1` entry into the multi-session list on first run.
  */
 export async function loadSessions(): Promise<StoredSession[]> {
   const list = dedupeBySessionId(await read());

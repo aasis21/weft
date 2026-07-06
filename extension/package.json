@@ -1,9 +1,9 @@
 {
-  "name": "@aasis21/helm-extension",
+  "name": "@aasis21/weft-extension",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Helm Copilot CLI extension (joinSession) + local test harness. Source in src/, bundled to dist/extension.mjs (esbuild) with @github/copilot-sdk external.",
+  "description": "Weft Copilot CLI extension (joinSession) + local test harness. Source in src/, bundled to dist/extension.mjs (esbuild) with @github/copilot-sdk external.",
   "license": "Apache-2.0",
   "scripts": {
     "build": "node esbuild.config.mjs",
@@ -11,7 +11,7 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@aasis21/helm-shared": "*",
+    "@aasis21/weft-shared": "*",
     "@azure/web-pubsub-client": "^1.1.0",
     "@supabase/supabase-js": "^2.39.7",
     "qrcode": "^1.5.4",
@@ -21,6 +21,6 @@
     "esbuild": "^0.25.12"
   },
   "bin": {
-    "helm-cli": "bin/helm-cli.mjs"
+    "weft-cli": "bin/weft-cli.mjs"
   }
 }

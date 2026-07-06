@@ -23,7 +23,7 @@
 const WS_OPEN = 1; // WebSocket.OPEN — hard-coded so this file needs no DOM/ws lib types.
 
 function fail(message) {
-  return new Error(`helm/transport-relay: ${message}`);
+  return new Error(`weft/transport-relay: ${message}`);
 }
 
 /**
@@ -79,7 +79,7 @@ export function createRelayTransport({ socket, channelId } = {}) {
       const data = typeof e?.data === "string" ? e.data : e;
       parsed = JSON.parse(data);
     } catch {
-      return; // Not a Helm envelope frame; ignore.
+      return; // Not a Weft envelope frame; ignore.
     }
     if (!parsed || typeof parsed.event !== "string") return;
     dispatch(parsed.event, parsed.envelope);

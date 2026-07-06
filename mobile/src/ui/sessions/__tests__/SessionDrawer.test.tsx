@@ -225,7 +225,7 @@ describe('SessionDrawer', () => {
     expect(within(curRow).queryByText(/new/)).not.toBeInTheDocument();
   });
 
-  it('navigates to the landing page from the About Helm link', async () => {
+  it('navigates to the landing page from the About Weft link', async () => {
     const user = userEvent.setup();
     const onGoHome = vi.fn();
     render(
@@ -240,7 +240,7 @@ describe('SessionDrawer', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: '⌂ About Helm' }));
+    await user.click(screen.getByRole('button', { name: '⌂ About Weft' }));
     expect(onGoHome).toHaveBeenCalledTimes(1);
   });
 

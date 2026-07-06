@@ -2,8 +2,8 @@ import '@/ui/styles/composer.css';
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
-import { MODES } from '@aasis21/helm-shared';
-import type { PromptAttachment, SessionMode } from '@aasis21/helm-shared';
+import { MODES } from '@aasis21/weft-shared';
+import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 import { isDesktopInput } from '@/lib/platform';
@@ -79,8 +79,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-const DRAFT_KEY_PREFIX = 'helm.draft.v1.';
-const ATTACHMENTS_KEY_PREFIX = 'helm.draft-attachments.v1.';
+const DRAFT_KEY_PREFIX = 'weft.draft.v1.';
+const ATTACHMENTS_KEY_PREFIX = 'weft.draft-attachments.v1.';
 const SEND_AFTER_STOP_SUPPRESS_MS = 500;
 
 function draftKey(sessionId: string): string {

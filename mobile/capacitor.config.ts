@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'dev.aasis21.helm',
-  appName: 'Helm',
+  appId: 'dev.aasis21.weft',
+  appName: 'Weft',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

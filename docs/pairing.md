@@ -1,11 +1,11 @@
-# Helm pairing handshake
+# Weft pairing handshake
 
 How a phone attaches to a live `copilot` session and establishes an end-to-end
 encrypted channel, with no shared secret ever leaving the two devices.
 
 ## Why a handshake is needed
 
-Helm encrypts every payload with an **AES-256-GCM session key** derived via **ECDH
+Weft encrypts every payload with an **AES-256-GCM session key** derived via **ECDH
 (P-256)**. ECDH needs *both* parties' public keys:
 
 ```
@@ -42,7 +42,7 @@ the channel. Everything afterwards goes through `SecureChannel` (ciphertext only
 Both ends now hold the identical `key` and only ever exchange
 `{ iv, ciphertext, ts }` envelopes.
 
-## API (`@aasis21/helm-shared`, `shared/pairing.mjs`)
+## API (`@aasis21/weft-shared`, `shared/pairing.mjs`)
 
 | Function | Side | Purpose |
 |---|---|---|

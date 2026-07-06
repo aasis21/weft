@@ -97,7 +97,7 @@ export function JoinSessionScreen({
   const inApp = hasSessions && !firstRun;
 
   return (
-    <main className={inApp ? 'helm-session join-session' : 'join-shell'}>
+    <main className={inApp ? 'weft-session join-session' : 'join-shell'}>
       <div className={inApp ? 'session-join-inner' : undefined}>
         <header className={inApp ? 'session-join-head' : 'join-head'}>
           {onCancel && !firstRun ? (

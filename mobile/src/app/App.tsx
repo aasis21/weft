@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import type { SessionMode } from '@aasis21/helm-shared';
+import type { SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
 import { StartSessionScreen } from '@/ui/screens/StartSessionScreen';
@@ -10,7 +10,7 @@ import { SessionScreen } from '@/ui/screens/SessionScreen';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { sessionRuntime } from '@/session/runtime/instance';
 
-type ModalHistoryState = { helmView: 'devices' } | { helmView: 'device-details'; channelId: string } | null;
+type ModalHistoryState = { weftView: 'devices' } | { weftView: 'device-details'; channelId: string } | null;
 
 export default function App(): JSX.Element {
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
@@ -33,10 +33,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const onPopState = (event: PopStateEvent): void => {
       const state = event.state as ModalHistoryState;
-      if (state?.helmView === 'devices') {
+      if (state?.weftView === 'devices') {
         setDevicesOpen(true);
         setDeviceDetailsChannelId(undefined);
-      } else if (state?.helmView === 'device-details') {
+      } else if (state?.weftView === 'device-details') {
         setDevicesOpen(false);
         setDeviceDetailsChannelId(state.channelId);
       } else {
@@ -81,7 +81,7 @@ export default function App(): JSX.Element {
     setStarting(false);
     setDeviceDetailsChannelId(undefined);
     setDevicesOpen(true);
-    window.history.pushState({ helmView: 'devices' } satisfies ModalHistoryState, '');
+    window.history.pushState({ weftView: 'devices' } satisfies ModalHistoryState, '');
   }, []);
 
   const openDeviceDetails = useCallback((channelId: string): void => {
@@ -90,7 +90,7 @@ export default function App(): JSX.Element {
     setStarting(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(channelId);
-    window.history.pushState({ helmView: 'device-details', channelId } satisfies ModalHistoryState, '');
+    window.history.pushState({ weftView: 'device-details', channelId } satisfies ModalHistoryState, '');
   }, []);
 
   const closeDeviceScreens = useCallback((): void => {
@@ -115,21 +115,21 @@ export default function App(): JSX.Element {
   const hasSessions = snapshot.sessions.length > 0;
 
   // Desktop multi-tab convenience: reflect the active session name and total unread count
-  // in the browser tab title, so a backgrounded Helm tab is distinguishable at a glance.
+  // in the browser tab title, so a backgrounded Weft tab is distinguishable at a glance.
   // Mobile PWA installs also get this (harmless there — no tab strip to read it from).
   useEffect(() => {
     const unreadCount = snapshot.sessions.reduce((sum, s) => sum + (s.unread ? 1 : 0), 0);
     const prefix = unreadCount > 0 ? `(${unreadCount}) ` : '';
-    document.title = active ? `${prefix}${active.meta.title} · Helm` : 'Helm';
+    document.title = active ? `${prefix}${active.meta.title} · Weft` : 'Weft';
     return () => {
-      document.title = 'Helm';
+      document.title = 'Weft';
     };
   }, [active, snapshot.sessions]);
 
   if (!snapshot.ready) {
     return (
       <main className="boot">
-        <div className="boot-mark" aria-hidden="true">H</div>
+        <div className="boot-mark" aria-hidden="true">W</div>
         <p>Restoring your sessions…</p>
       </main>
     );
@@ -210,7 +210,7 @@ export default function App(): JSX.Element {
   }
 
   // Single-device drill-down: live status, event log, and every session ever spawned from this
-  // device (matched by its stable deviceId, so it survives helm-cli restarts).
+  // device (matched by its stable deviceId, so it survives weft-cli restarts).
   if (deviceDetailsChannelId) {
     const device = snapshot.devices.find((d) => d.channelId === deviceDetailsChannelId);
     if (device) {

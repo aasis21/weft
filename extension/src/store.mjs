@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Read-only access to the Copilot CLI's own session store (~/.copilot/session-store.db)
 // for the chat title (summary) and conversation history (turns). This is the SAME data
-// the CLI session picker shows, so Helm's phone stays in sync with the terminal without
+// the CLI session picker shows, so Weft's phone stays in sync with the terminal without
 // depending on the experimental session-metadata RPC. node:sqlite ships built-in on
 // Node 24 (no flag).
 import { homedir } from "node:os";
@@ -10,7 +10,7 @@ import {
   HISTORY_PAGE_DEFAULT,
   HISTORY_PAGE_MAX,
   clipText,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 
 const DB_PATH = join(homedir(), ".copilot", "session-store.db");
 

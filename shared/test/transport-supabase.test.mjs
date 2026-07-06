@@ -72,11 +72,11 @@ test("connect resolves after SUBSCRIBED and is idempotent", async () => {
   assert.equal(client.channels[0].subscribeCalls, 1);
 });
 
-test("uses the expected private Helm channel name", () => {
+test("uses the expected private Weft channel name", () => {
   const client = createFakeSupabaseClient();
   createSupabaseTransport({ client, channelId: "abc123" });
 
-  assert.equal(client.channels[0].name, "private:helm:abc123");
+  assert.equal(client.channels[0].name, "private:weft:abc123");
   assert.deepEqual(client.channels[0].opts, {
     config: { private: true, broadcast: { self: false, ack: true } },
   });
@@ -158,7 +158,7 @@ test("publish after close throws", async () => {
 
   await assert.rejects(
     () => transport.publish("stream", envelope),
-    /helm\/transport-supabase: publish: transport is closed/
+    /weft\/transport-supabase: publish: transport is closed/
   );
 });
 

@@ -40,7 +40,7 @@ test.describe('Journey: production smoke & layout', () => {
     const errors = trackErrors(page);
     await page.goto('/');
     await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
-    await expect(page.locator('.helm-session')).toBeVisible();
+    await expect(page.locator('.weft-session')).toBeVisible();
     await expect(page.locator('.composer')).toBeVisible();
 
     // The composer is pinned to the bottom of the 915px-tall viewport (a small
@@ -58,7 +58,7 @@ test.describe('Journey: production smoke & layout', () => {
   test('the message thread scrolls when the transcript overflows a short viewport', async ({ page }) => {
     await page.goto('/');
     await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
-    await expect(page.locator('.helm-session')).toBeVisible();
+    await expect(page.locator('.weft-session')).toBeVisible();
 
     // Short viewport so the demo transcript overflows the thread.
     await page.setViewportSize({ width: 412, height: 420 });

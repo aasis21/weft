@@ -1,7 +1,7 @@
 import { Preferences } from '@capacitor/preferences';
-import type { TransportDescriptor } from '@aasis21/helm-shared';
+import type { TransportDescriptor } from '@aasis21/weft-shared';
 
-const DEVICES_KEY = 'helm.devices.v1';
+const DEVICES_KEY = 'weft.devices.v1';
 
 export interface RegisteredDevice {
   channelId: string;
@@ -23,7 +23,7 @@ export interface RegisteredDevice {
   isDefault?: boolean;
   lastProjectName?: string;
   /**
-   * Stable, NON-SECRET id the listener persists across `helm-cli start` restarts (see
+   * Stable, NON-SECRET id the listener persists across `weft-cli start` restarts (see
    * extension/src/deviceIdentity.mjs), reported in its `project_list` reply. Unlike `channelId`
    * (a fresh pairing channel minted every listener run, by design, for forward secrecy), this id
    * lets the phone recognize "same laptop" across restarts so it can dedupe stale entries instead
@@ -136,7 +136,7 @@ export interface ReconcileResult {
 /**
  * Reconcile a listener's stable, non-secret `deviceId` (reported in its `project_list` reply)
  * against the persisted device list. Because `channelId` is a fresh ephemeral pairing channel
- * minted every `helm-cli start` run (by design — see RegisteredDevice.deviceId), the SAME laptop
+ * minted every `weft-cli start` run (by design — see RegisteredDevice.deviceId), the SAME laptop
  * restarting its listener shows up under a brand-new channelId. This folds any OTHER persisted
  * entry sharing the same deviceId into the current `channelId` row — carrying over its
  * `isDefault`/`lastProjectName`/`name` — and drops the stale duplicate(s) so "Start another

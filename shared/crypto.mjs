@@ -1,4 +1,4 @@
-// Helm end-to-end crypto.
+// Weft end-to-end crypto.
 //
 // ECDH (P-256) key agreement -> HKDF-SHA256 -> AES-256-GCM. P-256 is chosen for universal
 // Web Crypto support in BOTH Node (>=18) and browsers; the pairing QR carries only a PUBLIC
@@ -10,18 +10,18 @@
 const cryptoObj = globalThis.crypto;
 const subtle = cryptoObj?.subtle;
 if (!subtle) {
-  throw new Error("helm/crypto: Web Crypto (globalThis.crypto.subtle) is unavailable.");
+  throw new Error("weft/crypto: Web Crypto (globalThis.crypto.subtle) is unavailable.");
 }
 if (typeof cryptoObj.getRandomValues !== "function") {
-  throw new Error("helm/crypto: Web Crypto getRandomValues is unavailable.");
+  throw new Error("weft/crypto: Web Crypto getRandomValues is unavailable.");
 }
 
 const te = new TextEncoder();
 const td = new TextDecoder();
 
 const EC_PARAMS = { name: "ECDH", namedCurve: "P-256" };
-const HKDF_SALT = te.encode("helm-v1");
-const HKDF_INFO = te.encode("helm-session-key");
+const HKDF_SALT = te.encode("weft-v1");
+const HKDF_INFO = te.encode("weft-session-key");
 const P256_RAW_PUBLIC_KEY_BYTES = 65;
 const AES_GCM_IV_BYTES = 12;
 const AES_GCM_TAG_BYTES = 16;
@@ -30,7 +30,7 @@ const MAX_CIPHERTEXT_BYTES = MAX_JSON_BYTES + AES_GCM_TAG_BYTES;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 function cryptoError(message, cause) {
-  return new Error(`helm/crypto: ${message}`, cause === undefined ? undefined : { cause });
+  return new Error(`weft/crypto: ${message}`, cause === undefined ? undefined : { cause });
 }
 
 function assertCryptoKey(key, label, expected) {
@@ -155,7 +155,7 @@ export async function generateKeyPair() {
 }
 
 /**
- * Export an ECDH keypair to a portable, JSON-serializable identity. Used by the `helm-cli`
+ * Export an ECDH keypair to a portable, JSON-serializable identity. Used by the `weft-cli`
  * listener to pre-mint a session's identity and hand it to the spawned Copilot process via a
  * short-lived 0600 temp file (never on argv/env). The private key is exported as a JWK; keys are
  * generated extractable, so this is always possible.

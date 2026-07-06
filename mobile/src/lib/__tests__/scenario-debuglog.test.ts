@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { heartbeat } from '@aasis21/helm-shared';
+import { heartbeat } from '@aasis21/weft-shared';
 import { loadEventLog } from '@/lib/eventLog';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';

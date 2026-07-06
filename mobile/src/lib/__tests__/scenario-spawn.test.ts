@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeManager } from '@/test/helpers/makeManager';
-import { registry } from '@/test/helpers/fakeHelmClient';
+import { registry } from '@/test/helpers/fakeWeftClient';
 import * as B from '@/test/helpers/builders';
 
 function listenerQr(channelId: string): string {
@@ -37,7 +37,7 @@ describe('scenario: phone-launched sessions', () => {
     expect(listener!.sentOfKind('control.project_list_request')).toHaveLength(1);
 
     listener!.emit(B.projectList([
-      { name: 'helm', path: 'C:\\Users\\akash\\helm', isDefault: true },
+      { name: 'weft', path: 'C:\\Users\\akash\\weft', isDefault: true },
       { name: 'cortex', path: 'C:\\Users\\akash\\cortex' },
     ], 'Akash Laptop'));
     await h!.flush();
@@ -45,12 +45,12 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.snapshot().devices[0]).toMatchObject({
       channelId: 'listener-1',
       name: 'Akash Laptop',
-      projects: [{ name: 'helm', path: 'C:\\Users\\akash\\helm', isDefault: true }, { name: 'cortex', path: 'C:\\Users\\akash\\cortex' }],
+      projects: [{ name: 'weft', path: 'C:\\Users\\akash\\weft', isDefault: true }, { name: 'cortex', path: 'C:\\Users\\akash\\cortex' }],
       connected: true,
     });
 
     const tempId = await h!.manager.spawnSession('listener-1', {
-      projectName: 'helm',
+      projectName: 'weft',
       mode: 'allow-all',
       name: 'Phone launch',
     });
@@ -59,7 +59,7 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.snapshot().activeId).toBe(tempId);
     expect(h!.active()?.status).toBe('initializing');
     const spawn = listener!.sentOfKind('control.spawn_session')[0];
-    expect(spawn).toMatchObject({ projectName: 'helm', mode: 'allow-all', name: 'Phone launch' });
+    expect(spawn).toMatchObject({ projectName: 'weft', mode: 'allow-all', name: 'Phone launch' });
 
     listener!.emit(B.spawnPairing(spawn.requestId as string, {
       v: 1,
@@ -67,7 +67,7 @@ describe('scenario: phone-launched sessions', () => {
       pub: 'spawned-pub',
       kind: 'session',
       transport: { kind: 'local' },
-    }, 'Phone launch', 'helm'));
+    }, 'Phone launch', 'weft'));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
@@ -111,7 +111,7 @@ describe('scenario: phone-launched sessions', () => {
     await h!.manager.addByQr(listenerQr('listener-timeout'));
     await h!.flush();
     const tempId = await h!.manager.spawnSession('listener-timeout', {
-      projectName: 'helm',
+      projectName: 'weft',
       mode: 'default',
     });
 

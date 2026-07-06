@@ -1,4 +1,4 @@
-# Helm setup & developer guide
+# Weft setup & developer guide
 
 This is the v1 developer workflow. The whole vertical slice runs locally with **no
 Supabase and no phone** via the in-process harness + the mobile Demo/Simulator; wiring
@@ -14,7 +14,7 @@ the real relay is the only user-gated step.
 ## Install
 
 ```sh
-cd helm
+cd weft
 npm install          # resolves the npm workspaces: shared, extension, mobile
 ```
 
@@ -22,17 +22,17 @@ npm install          # resolves the npm workspaces: shared, extension, mobile
 
 ```sh
 # 1. Shared contracts: crypto, pairing handshake, transport, message round-trips
-npm test -w @aasis21/helm-shared
+npm test -w @aasis21/weft-shared
 
 # 2. Extension relay end-to-end against a simulated phone (LocalTransport):
 #    pairing → stream → approval round-trip → prompt → mode switch → session end
 node extension/harness/harness.mjs --auto
 
 # 3. Bundle the extension (esbuild; @github/copilot-sdk left external)
-npm run build -w @aasis21/helm-extension   # -> extension/dist/extension.mjs
+npm run build -w @aasis21/weft-extension   # -> extension/dist/extension.mjs
 
 # 4. Build the mobile app (Vite production build)
-npm run build -w @aasis21/helm-mobile
+npm run build -w @aasis21/weft-mobile
 ```
 
 ## Run the mobile Demo/Simulator
@@ -53,7 +53,7 @@ and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 > installer; the agent only ships it.
 
 **1. Install the extension** (builds + copies the single bundled `extension.mjs` into
-`~/.copilot/extensions/helm/`, where the CLI auto-discovers it, and copies a colocated
+`~/.copilot/extensions/weft/`, where the CLI auto-discovers it, and copies a colocated
 `.env` if present):
 
 ```sh
@@ -62,33 +62,33 @@ and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 # remove later with ./uninstall.ps1 / ./uninstall.sh
 ```
 
-The extension auto-loads `HELM_SUPABASE_URL` / `HELM_SUPABASE_ANON_KEY` /
-`HELM_TRANSPORT=supabase` from a `.env` next to it (or inherits them from the shell that
-launches `copilot`; exported shell vars win). The names are Helm-namespaced so a generic
+The extension auto-loads `WEFT_SUPABASE_URL` / `WEFT_SUPABASE_ANON_KEY` /
+`WEFT_TRANSPORT=supabase` from a `.env` next to it (or inherits them from the shell that
+launches `copilot`; exported shell vars win). The names are Weft-namespaced so a generic
 `SUPABASE_URL` you may have exported for an unrelated project can't hijack the relay; the
 generic names still work as a fallback when the namespaced ones are unset.
 
 **2. Get the app on your phone** — pick one:
 
-- **Hosted web app (easiest, zero install):** open **<https://usehelm.netlify.app>**
+- **Hosted web app (easiest, zero install):** open **<https://useweft.netlify.app>**
   on your phone. On Android Chrome it scans the QR with your camera directly in the browser
   (via the `BarcodeDetector` API); on iOS Safari / Firefox it uses an on-page jsQR fallback,
   and if the camera is unavailable you can paste the JSON payload. Served over HTTPS with a
   `camera=(self)` permissions policy so scanning works.
 - **Native APK (camera QR scan):** `cd mobile && npx cap sync android` then build/install
   via Android Studio (or `cd android && ./gradlew assembleDebug` and install the APK). The
-  build bakes in `VITE_HELM_TRANSPORT=supabase` + the relay creds from `mobile/.env.local`.
+  build bakes in `VITE_WEFT_TRANSPORT=supabase` + the relay creds from `mobile/.env.local`.
 - **Local dev server:** `cd mobile && npm run dev -- --host`, open the printed LAN URL on
   your phone (same in-browser camera scan + paste fallback as the hosted app).
 
-> The hosted site is a static deploy of `mobile/dist` on Netlify (site `usehelm`,
+> The hosted site is a static deploy of `mobile/dist` on Netlify (site `useweft`,
 > team `aasis21`). It points at the same public relay as everything else; the embedded
 > publishable key is client-safe and the channel is guarded by RLS + end-to-end AES-256-GCM.
-> Redeploy after a change with `npm run build -w @aasis21/helm-mobile` then a Netlify deploy
+> Redeploy after a change with `npm run build -w @aasis21/weft-mobile` then a Netlify deploy
 > of `mobile/dist` (or connect the repo — `netlify.toml` already has the build config).
 
-**3. Pair and drive it.** Start `copilot` in any repo; Helm prints a pairing QR via
-`session.log()` (run `/helm` to re-show it). Scan/paste it, then trigger a Copilot
+**3. Pair and drive it.** Start `copilot` in any repo; Weft prints a pairing QR via
+`session.log()` (run `/weft` to re-show it). Scan/paste it, then trigger a Copilot
 action (e.g. a file write) and watch the stream — approve/deny and switch modes from the
 phone. Everything on the relay is AES-256-GCM ciphertext.
 
@@ -105,22 +105,22 @@ planned follow-up.)
 1. Create a fresh Supabase project. Configure its MCP like `kirana360` does
    (`https://mcp.supabase.com/mcp?project_ref=<ref>` in `mcp/mcp-config.json`).
 2. Enable **Realtime Authorization** and add RLS policies on `realtime.messages` so
-   only authorized clients may join `private:helm:*` channels. This is stored as code:
+   only authorized clients may join `private:weft:*` channels. This is stored as code:
    apply [`supabase/migrations/`](../supabase/migrations) to the project (via the Supabase
    MCP, the Supabase CLI `supabase db push`, or by pasting the SQL into the dashboard SQL
    editor). Channels are opened with `config.private = true`, so **joins are denied until
    this migration is applied** (see [`security.md`](./security.md) and
    [`supabase/README.md`](../supabase/README.md)).
 3. Provide credentials via env (never commit secrets):
-   - extension: `HELM_SUPABASE_URL`, `HELM_SUPABASE_ANON_KEY` (generic `SUPABASE_URL` /
+   - extension: `WEFT_SUPABASE_URL`, `WEFT_SUPABASE_ANON_KEY` (generic `SUPABASE_URL` /
      `SUPABASE_ANON_KEY` work as a fallback)
    - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-   - `HELM_TRANSPORT=supabase`
+   - `WEFT_TRANSPORT=supabase`
 4. The caller constructs a `@supabase/supabase-js` client, calls
    `client.realtime.setAuth(anonKey)` (the anon key is the Realtime access token that RLS
    authorizes), and passes it to `createSupabaseTransport({ client, channelId })` (the
    `shared/` package stays dependency-free by injecting the client). The extension does
-   this from env automatically when `HELM_TRANSPORT=supabase`.
+   this from env automatically when `WEFT_TRANSPORT=supabase`.
 
 > **Resolved (p4):** `SupabaseTransport` registers a single catch-all broadcast listener
 > before `subscribe()` and dispatches internally, so subscriptions added after `connect()`
@@ -130,10 +130,10 @@ planned follow-up.)
 
 | Env var | Used by | Meaning |
 |---|---|---|
-| `HELM_TRANSPORT` | extension | `local` (default) or `supabase` |
-| `HELM_APPROVAL_TIMEOUT_MS` | extension | approval wait before auto-deny (default 120000) |
-| `HELM_CHANNEL_ID` | extension | force a channel id (tests); otherwise random 128-bit |
-| `HELM_SUPABASE_URL` / `HELM_SUPABASE_ANON_KEY` | extension | relay credentials (preferred; generic `SUPABASE_URL` / `SUPABASE_ANON_KEY` are a fallback) |
+| `WEFT_TRANSPORT` | extension | `local` (default) or `supabase` |
+| `WEFT_APPROVAL_TIMEOUT_MS` | extension | approval wait before auto-deny (default 120000) |
+| `WEFT_CHANNEL_ID` | extension | force a channel id (tests); otherwise random 128-bit |
+| `WEFT_SUPABASE_URL` / `WEFT_SUPABASE_ANON_KEY` | extension | relay credentials (preferred; generic `SUPABASE_URL` / `SUPABASE_ANON_KEY` are a fallback) |
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | mobile | relay credentials |
 
 ## Docs index

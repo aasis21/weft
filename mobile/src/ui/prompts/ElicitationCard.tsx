@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { ElicitationRequestMsg } from '@aasis21/helm-shared';
+import type { ElicitationRequestMsg } from '@aasis21/weft-shared';
 
 type FieldValue = string | number | boolean | string[];
 
@@ -120,7 +120,7 @@ function initialValues(fields: Field[]): Record<string, FieldValue> {
 }
 
 function storageKey(requestId: string): string {
-  return `helm.elicitation.${requestId}`;
+  return `weft.elicitation.${requestId}`;
 }
 
 function readDraft(requestId: string): { values?: Record<string, FieldValue>; step?: number } | null {

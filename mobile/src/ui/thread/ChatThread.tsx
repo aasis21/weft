@@ -6,7 +6,7 @@ import type {
   ReactNode,
   TouchEvent as ReactTouchEvent,
 } from 'react';
-import type { HistoryItem } from '@aasis21/helm-shared';
+import type { HistoryItem } from '@aasis21/weft-shared';
 import type { TimelineItem } from '@/lib/timeline';
 import { attachmentSrc } from '@/lib/imageAttachments';
 import { Markdown } from './Markdown';

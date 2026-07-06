@@ -20,7 +20,7 @@ import {
   voiceMode,
   elicitationResponse,
   approvalDecision,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import {
   attachRelay,
   createElicitationRelay,

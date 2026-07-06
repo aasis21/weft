@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command to ship Helm: build -> refresh the hosted "site bits" -> deploy to
+# One command to ship Weft: build -> refresh the hosted "site bits" -> deploy to
 # Netlify -> install the extension on THIS laptop. Optionally git push.
 # See ship.ps1 for the Windows/PowerShell version and full docs.
 #
@@ -9,8 +9,8 @@
 #   2. Refresh site bits        (copy that -> mobile/public/extension.mjs, the gitignored
 #                                deploy-time artifact the hosted install.sh downloads)
 #   3. Build the mobile web app (Vite      -> mobile/dist)
-#   4. Deploy mobile/dist to Netlify (site usehelm, production by default)
-#   5. Install the extension    (-> ~/.copilot/extensions/helm + colocated .env)
+#   4. Deploy mobile/dist to Netlify (site useweft, production by default)
+#   5. Install the extension    (-> ~/.copilot/extensions/weft + colocated .env)
 #
 # Usage:
 #   ./ship.sh                     # build + refresh + deploy prod + install on this laptop
@@ -20,7 +20,7 @@
 #   ./ship.sh --site my-site      # target a different Netlify site
 set -euo pipefail
 
-SITE="371d3579-feaa-4678-b812-c0e65d83ecd5"  # usehelm (id; name lookup is flaky from a workspace root)
+SITE="137f2a7d-1dcf-43bd-8c0e-fdaec08835a7"  # useweft (id; name lookup is flaky from a workspace root)
 DRAFT=0; PUSH=0; SKIP_BUILD=0; SKIP_DEPLOY=0; SKIP_INSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -55,7 +55,7 @@ fi
 
 if [ "$SKIP_BUILD" -eq 0 ]; then
   cyan "Building extension (esbuild)"
-  npm run build -w @aasis21/helm-extension >/dev/null
+  npm run build -w @aasis21/weft-extension >/dev/null
   [ -f "$ext_bundle" ] || { echo "extension build did not produce $ext_bundle" >&2; exit 1; }
   ok "extension/dist/extension.mjs"
 
@@ -64,7 +64,7 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   ok "mobile/public/extension.mjs  (served as /extension.mjs by the installer)"
 
   cyan "Building mobile web app (Vite)"
-  npm run build -w @aasis21/helm-mobile >/dev/null
+  npm run build -w @aasis21/weft-mobile >/dev/null
   [ -f "$dist_dir/index.html" ] || { echo "mobile build did not produce $dist_dir" >&2; exit 1; }
   ok "mobile/dist"
 else
@@ -78,7 +78,7 @@ if [ "$SKIP_DEPLOY" -eq 0 ]; then
   cyan "Deploying mobile/dist to Netlify [$SITE] - $kind"
   # --no-build: mobile/dist is already built above; just upload it. --filter resolves the
   # npm-workspace monorepo so the CLI does not prompt. Site referenced by id.
-  args=(deploy --no-build --filter @aasis21/helm-mobile --dir "$dist_dir" --site "$SITE" --message "ship.sh $(date +%FT%T)")
+  args=(deploy --no-build --filter @aasis21/weft-mobile --dir "$dist_dir" --site "$SITE" --message "ship.sh $(date +%FT%T)")
   [ "$DRAFT" -eq 1 ] || args+=(--prod)
   if ! netlify "${args[@]}"; then
     echo "netlify deploy failed. Try 'netlify login' and confirm access to site '$SITE'." >&2
@@ -90,9 +90,9 @@ else
 fi
 
 if [ "$SKIP_INSTALL" -eq 0 ]; then
-  cyan "Installing extension on this laptop (~/.copilot/extensions/helm)"
+  cyan "Installing extension on this laptop (~/.copilot/extensions/weft)"
   [ -f "$ext_bundle" ] || { echo "no $ext_bundle to install - drop --skip-build" >&2; exit 1; }
-  dest="$HOME/.copilot/extensions/helm"
+  dest="$HOME/.copilot/extensions/weft"
   mkdir -p "$dest"
   cp "$ext_bundle" "$dest/extension.mjs"
   ok "extension.mjs -> $dest"
@@ -100,7 +100,7 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
     cp "$root/.env" "$dest/.env"
     ok "copied .env (relay credentials) next to the extension"
   else
-    warn "no .env at repo root - set HELM_SUPABASE_URL / HELM_SUPABASE_ANON_KEY / HELM_TRANSPORT before 'copilot'"
+    warn "no .env at repo root - set WEFT_SUPABASE_URL / WEFT_SUPABASE_ANON_KEY / WEFT_TRANSPORT before 'copilot'"
   fi
 else
   info "skip-install"
@@ -114,7 +114,7 @@ fi
 
 cyan "Done"
 if [ "$SKIP_DEPLOY" -eq 0 ] && [ "$DRAFT" -eq 0 ]; then
-  printf '\033[32m  Site:      https://usehelm.netlify.app\033[0m\n'
-  printf '\033[32m  Installer: curl -fsSL https://usehelm.netlify.app/install.sh | bash\033[0m\n'
+  printf '\033[32m  Site:      https://useweft.netlify.app\033[0m\n'
+  printf '\033[32m  Installer: curl -fsSL https://useweft.netlify.app/install.sh | bash\033[0m\n'
 fi
-[ "$SKIP_INSTALL" -eq 0 ] && printf '\033[32m  Local CLI: restart copilot to load the new extension; run /helm to show the QR.\033[0m\n'
+[ "$SKIP_INSTALL" -eq 0 ] && printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'

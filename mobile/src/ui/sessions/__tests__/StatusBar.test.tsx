@@ -19,8 +19,8 @@ afterEach(() => {
 
 function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) {
   const defaults: ComponentProps<typeof StatusBar> = {
-    title: 'helm',
-    cwd: 'C:\\Users\\akash\\helm',
+    title: 'weft',
+    cwd: 'C:\\Users\\akash\\weft',
     status: 'live',
     busy: false,
     onOpenDrawer: vi.fn(),
@@ -40,7 +40,7 @@ describe('StatusBar', () => {
   it('renders title, cwd title attribute, and status line classes', () => {
     const { container } = renderStatusBar({ status: 'connecting' });
 
-    expect(screen.getByText('helm')).toHaveAttribute('title', 'C:\\Users\\akash\\helm');
+    expect(screen.getByText('weft')).toHaveAttribute('title', 'C:\\Users\\akash\\weft');
     const statusLine = screen.getByText('Connecting…').closest('.status-line');
     expect(statusLine).toHaveClass('connecting');
     expect(statusLine?.querySelector('.status-dot')).toBeInTheDocument();
@@ -54,7 +54,7 @@ describe('StatusBar', () => {
 
     rerender(
       <StatusBar
-        title="helm"
+        title="weft"
         cwd={null}
         status="idle"
         busy
@@ -122,17 +122,17 @@ describe('StatusBar', () => {
     expect(container.querySelector('.unread-badge')).not.toBeInTheDocument();
   });
 
-  it('swaps the hamburger for a static Helm mark when the sidebar is already docked (#183)', async () => {
+  it('swaps the hamburger for a static Weft mark when the sidebar is already docked (#183)', async () => {
     const user = userEvent.setup();
     const onOpenDrawer = vi.fn();
     const onGoHome = vi.fn();
     renderStatusBar({ desktopDocked: true, onOpenDrawer, onGoHome });
 
     expect(screen.queryByRole('button', { name: 'Open sessions' })).not.toBeInTheDocument();
-    const helmMark = screen.getByRole('button', { name: 'About Helm' });
-    expect(helmMark).toBeInTheDocument();
+    const weftMark = screen.getByRole('button', { name: 'About Weft' });
+    expect(weftMark).toBeInTheDocument();
 
-    await user.click(helmMark);
+    await user.click(weftMark);
     expect(onGoHome).toHaveBeenCalledTimes(1);
     expect(onOpenDrawer).not.toHaveBeenCalled();
   });

@@ -23,7 +23,7 @@ import {
   history,
   recentTurns,
   stateSnapshot,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
 
@@ -88,7 +88,7 @@ export function createPermissionRelay({
   approvalTimeoutMs = approvalTimeoutFromEnv(),
   logger = () => {},
 } = {}) {
-  if (!channel) throw new Error("helm relay: channel is required");
+  if (!channel) throw new Error("weft relay: channel is required");
   const pending = new Map();
   let loggedShellApprovalShape = false;
 
@@ -109,7 +109,7 @@ export function createPermissionRelay({
     const toolName = inferToolName(request);
     if (!loggedShellApprovalShape && isShellToolName(toolName)) {
       loggedShellApprovalShape = true;
-      logger(`Helm debug: shell approval request shape ${safeJson({ request, invocation })}`, {
+      logger(`Weft debug: shell approval request shape ${safeJson({ request, invocation })}`, {
         level: "info",
         ephemeral: false,
       });
@@ -130,14 +130,14 @@ export function createPermissionRelay({
       const timer = setTimeout(() => {
         pending.delete(requestId);
         logger(
-          `Helm: approval request timed out after ${approvalTimeoutMs}ms; denying ${toolName}.`,
+          `Weft: approval request timed out after ${approvalTimeoutMs}ms; denying ${toolName}.`,
           { level: "warning", ephemeral: false },
         );
         // Tell the phone the request is gone so its banner doesn't linger as a zombie (#78).
         void channel.send(approvalComplete(requestId, "timeout")).catch(() => {});
         resolve({
           kind: "reject",
-          feedback: "Helm approval timed out",
+          feedback: "Weft approval timed out",
         });
       }, approvalTimeoutMs);
 
@@ -157,7 +157,7 @@ export function createPermissionRelay({
       clearTimeout(entry.timer);
       entry.resolve({
         kind: "reject",
-        feedback: "Helm relay stopped before approval decision",
+        feedback: "Weft relay stopped before approval decision",
       });
       pending.delete(requestId);
     }
@@ -189,7 +189,7 @@ export function createElicitationRelay({
   elicitationTimeoutMs = elicitationTimeoutFromEnv(),
   logger = () => {},
 } = {}) {
-  if (!channel) throw new Error("helm relay: channel is required");
+  if (!channel) throw new Error("weft relay: channel is required");
   const pending = new Map();
   const respond = pickElicitationResponder(session, logger);
   let releaseInterest = () => {};
@@ -207,7 +207,7 @@ export function createElicitationRelay({
     clearPending(answer.requestId);
     if (!respond) {
       logger(
-        "Helm: this CLI build can't accept remote ask_user answers (handlePendingElicitation unavailable).",
+        "Weft: this CLI build can't accept remote ask_user answers (handlePendingElicitation unavailable).",
         { level: "warning", ephemeral: false },
       );
       return;
@@ -216,7 +216,7 @@ export function createElicitationRelay({
     // (typically the terminal) already answered — harmless, the phone form is already dismissed.
     void Promise.resolve(respond(answer.requestId, elicitResultFromResponse(answer))).then((accepted) => {
       if (accepted === false) {
-        logger("Helm: ask_user was already answered before the phone's reply arrived.", {
+        logger("Weft: ask_user was already answered before the phone's reply arrived.", {
           level: "info",
         });
       }
@@ -242,7 +242,7 @@ export function createElicitationRelay({
       // Fail safe so a walked-away phone can't hang the agent; no-op if already answered.
       respond?.(requestId, { action: "cancel" });
       void channel.send(elicitationComplete(requestId, "cancel")).catch(() => {});
-      logger(`Helm: ask_user prompt unanswered after ${elicitationTimeoutMs}ms; cancelled.`, {
+      logger(`Weft: ask_user prompt unanswered after ${elicitationTimeoutMs}ms; cancelled.`, {
         level: "warning",
         ephemeral: false,
       });
@@ -286,7 +286,7 @@ export function createElicitationRelay({
 }
 
 /**
- * Relays the SDK's separate `exit_plan_mode.requested` event to the phone using Helm's
+ * Relays the SDK's separate `exit_plan_mode.requested` event to the phone using Weft's
  * existing approval envelope, then answers through the runtime UI RPC.
  */
 export function createExitPlanModeRelay({
@@ -295,7 +295,7 @@ export function createExitPlanModeRelay({
   approvalTimeoutMs = approvalTimeoutFromEnv(),
   logger = () => {},
 } = {}) {
-  if (!channel) throw new Error("helm relay: channel is required");
+  if (!channel) throw new Error("weft relay: channel is required");
   const pending = new Map();
   const respond = pickExitPlanModeResponder(session, logger);
   let releaseInterest = () => {};
@@ -313,7 +313,7 @@ export function createExitPlanModeRelay({
     void channel.send(approvalComplete(decision.requestId, decision.optionId)).catch(() => {});
     if (!respond) {
       logger(
-        "Helm: this CLI build can't accept remote plan-exit answers (handlePendingExitPlanMode unavailable).",
+        "Weft: this CLI build can't accept remote plan-exit answers (handlePendingExitPlanMode unavailable).",
         { level: "warning", ephemeral: false },
       );
       return;
@@ -321,7 +321,7 @@ export function createExitPlanModeRelay({
     void Promise.resolve(respond(decision.requestId, exitPlanResponseFromOption(decision.optionId))).then(
       (accepted) => {
         if (accepted === false) {
-          logger("Helm: plan-exit request was already answered before the phone's reply arrived.", {
+          logger("Weft: plan-exit request was already answered before the phone's reply arrived.", {
             level: "info",
           });
         }
@@ -347,9 +347,9 @@ export function createExitPlanModeRelay({
     await channel.send(payload);
     const timer = setTimeout(() => {
       clearPending(requestId);
-      respond?.(requestId, { approved: false, feedback: "Helm plan-exit approval timed out" });
+      respond?.(requestId, { approved: false, feedback: "Weft plan-exit approval timed out" });
       void channel.send(approvalComplete(requestId, "timeout")).catch(() => {});
-      logger(`Helm: plan-exit request unanswered after ${approvalTimeoutMs}ms; declined.`, {
+      logger(`Weft: plan-exit request unanswered after ${approvalTimeoutMs}ms; declined.`, {
         level: "warning",
         ephemeral: false,
       });
@@ -398,8 +398,8 @@ export async function attachRelay({
   permissionRelay,
   onConnectionLost,
 } = {}) {
-  if (!session) throw new Error("helm relay: session is required");
-  if (!channel) throw new Error("helm relay: channel is required");
+  if (!session) throw new Error("weft relay: session is required");
+  if (!channel) throw new Error("weft relay: channel is required");
 
   await channel.connect?.();
 
@@ -470,7 +470,7 @@ export async function attachRelay({
       ]);
       if (!activity && !relayActivity.activityUnknownLogged) {
         relayActivity.activityUnknownLogged = true;
-        logger("Helm: session activity RPC unavailable; heartbeat busy state is unknown.", {
+        logger("Weft: session activity RPC unavailable; heartbeat busy state is unknown.", {
           level: "info",
         });
       }
@@ -527,7 +527,7 @@ export async function attachRelay({
       void session
         .send?.(sendOptions)
         ?.catch?.((err) =>
-          logger(`Helm prompt relay failed: ${err?.message ?? err}`, {
+          logger(`Weft prompt relay failed: ${err?.message ?? err}`, {
             level: "warning",
           }),
         );
@@ -555,7 +555,7 @@ export async function attachRelay({
       if (msg?.eventSubtype === SUBTYPE.CONTROL.VOICE_MODE) {
         voiceModeActive = Boolean(msg.msg?.active);
         logger(
-          `Helm: voice mode ${voiceModeActive ? "on — replies authored for speech" : "off — normal replies"}.`,
+          `Weft: voice mode ${voiceModeActive ? "on — replies authored for speech" : "off — normal replies"}.`,
           { level: "info" },
         );
         return;
@@ -681,7 +681,7 @@ async function serveHistory(sessionId, req, sendSafe, logger) {
     const page = await readHistory(sessionId, { before, since, limit: req?.limit });
     await sendSafe(history(page.items, page.nextCursor, page.hasMore, since));
   } catch (err) {
-    logger?.(`Helm history request failed: ${err?.message ?? err}`, { level: "warning" });
+    logger?.(`Weft history request failed: ${err?.message ?? err}`, { level: "warning" });
     await sendSafe(history([], null, false));
   }
 }
@@ -693,7 +693,7 @@ async function serveRecentTurns(turnBuffer, req, sendSafe, logger) {
     const items = turnBuffer?.snapshot?.(req?.limit) ?? [];
     await sendSafe(recentTurns(items));
   } catch (err) {
-    logger?.(`Helm recent-turns request failed: ${err?.message ?? err}`, { level: "warning" });
+    logger?.(`Weft recent-turns request failed: ${err?.message ?? err}`, { level: "warning" });
     await sendSafe(recentTurns([]));
   }
 }
@@ -725,7 +725,7 @@ async function serveStateSnapshot({ session, sessionId, approvals, elicitations,
       }),
     );
   } catch (err) {
-    logger?.(`Helm state request failed: ${err?.message ?? err}`, { level: "warning" });
+    logger?.(`Weft state request failed: ${err?.message ?? err}`, { level: "warning" });
     // An empty snapshot is safe (ready + no pending); the phone falls back to live events.
     await sendSafe(stateSnapshot({}));
   }
@@ -776,7 +776,7 @@ async function readCurrentMode(session) {
 
 async function applyMode(session, mode, logger, sendSafe) {
   if (!MODES.includes(mode)) {
-    logger(`Helm: ignored unsupported mode "${mode}".`, { level: "warning" });
+    logger(`Weft: ignored unsupported mode "${mode}".`, { level: "warning" });
     return;
   }
 
@@ -784,13 +784,13 @@ async function applyMode(session, mode, logger, sendSafe) {
     try {
       const result = await session.rpc.mode.set({ mode });
       const appliedMode = result?.mode ?? mode;
-      logger(`Helm: mode change requested -> ${mode}; applied ${appliedMode}.`, {
+      logger(`Weft: mode change requested -> ${mode}; applied ${appliedMode}.`, {
         level: "info",
         ephemeral: false,
       });
       await sendSafe(modeChange(appliedMode));
     } catch (err) {
-      logger(`Helm: mode change to ${mode} failed: ${err?.message ?? err}`, {
+      logger(`Weft: mode change to ${mode} failed: ${err?.message ?? err}`, {
         level: "warning",
         ephemeral: false,
       });
@@ -798,7 +798,7 @@ async function applyMode(session, mode, logger, sendSafe) {
     return;
   }
 
-  logger(`Helm: mode change requested -> ${mode} (best-effort fallback).`, {
+  logger(`Weft: mode change requested -> ${mode} (best-effort fallback).`, {
     level: "info",
     ephemeral: false,
   });
@@ -813,7 +813,7 @@ async function applyMode(session, mode, logger, sendSafe) {
 // immediate feedback even when the abort emits no further session events.
 async function applyInterrupt(session, logger, sendSafe) {
   if (typeof session.rpc?.abort !== "function") {
-    logger("Helm: interrupt requested but session.rpc.abort is unavailable.", {
+    logger("Weft: interrupt requested but session.rpc.abort is unavailable.", {
       level: "warning",
       ephemeral: false,
     });
@@ -822,16 +822,16 @@ async function applyInterrupt(session, logger, sendSafe) {
   try {
     const result = await session.rpc.abort({ reason: "remote_command" });
     if (result && result.success === false) {
-      logger(`Helm: interrupt failed: ${result.error ?? "unknown error"}.`, {
+      logger(`Weft: interrupt failed: ${result.error ?? "unknown error"}.`, {
         level: "warning",
         ephemeral: false,
       });
       return;
     }
-    logger("Helm: generation interrupted from phone.", { level: "info", ephemeral: false });
+    logger("Weft: generation interrupted from phone.", { level: "info", ephemeral: false });
     await sendSafe(logLine("warning", "■ Generation stopped from your phone."));
   } catch (err) {
-    logger(`Helm: interrupt threw: ${err?.message ?? err}`, {
+    logger(`Weft: interrupt threw: ${err?.message ?? err}`, {
       level: "warning",
       ephemeral: false,
     });
@@ -977,7 +977,7 @@ function permissionResultFromDecision(msg) {
   if (approved) return { kind: "approve-once" };
   return {
     kind: "reject",
-    feedback: msg.raw?.feedback ?? "Denied from Helm mobile",
+    feedback: msg.raw?.feedback ?? "Denied from Weft mobile",
   };
 }
 
@@ -1001,12 +1001,12 @@ function safeJson(value) {
 }
 
 function approvalTimeoutFromEnv() {
-  const raw = Number.parseInt(process.env.HELM_APPROVAL_TIMEOUT_MS ?? "", 10);
+  const raw = Number.parseInt(process.env.WEFT_APPROVAL_TIMEOUT_MS ?? "", 10);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_APPROVAL_TIMEOUT_MS;
 }
 
 function elicitationTimeoutFromEnv() {
-  const raw = Number.parseInt(process.env.HELM_ELICITATION_TIMEOUT_MS ?? "", 10);
+  const raw = Number.parseInt(process.env.WEFT_ELICITATION_TIMEOUT_MS ?? "", 10);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_ELICITATION_TIMEOUT_MS;
 }
 
@@ -1025,7 +1025,7 @@ function elicitResultFromResponse(msg) {
  * `session.rpc.ui.handlePendingElicitation({ requestId, result }) -> { success }` — NOT the
  * `respondToElicitation(requestId, result)` shown in the stale SDK `.d.ts` (probing that returned
  * nothing, which is exactly what blocked remote ask_user answers). We probe `session.rpc.ui` then
- * `session.ui` defensively, matching helm's pattern for `session.rpc.abort` / `mode.set`.
+ * `session.ui` defensively, matching weft's pattern for `session.rpc.abort` / `mode.set`.
  * Returns an async `(requestId, result) => boolean` responder (false = another client won the
  * race), or null when the host exposes no handler.
  */
@@ -1039,7 +1039,7 @@ function pickElicitationResponder(session, logger = () => {}) {
         // `{ success: false }` means the terminal (or another device) already answered.
         return outcome?.success !== false;
       } catch (err) {
-        logger(`Helm: handlePendingElicitation failed: ${err?.message ?? err}`, { level: "warning" });
+        logger(`Weft: handlePendingElicitation failed: ${err?.message ?? err}`, { level: "warning" });
         return false;
       }
     };
@@ -1056,7 +1056,7 @@ function pickExitPlanModeResponder(session, logger = () => {}) {
         const outcome = await fn.call(ui, { requestId, response });
         return outcome?.success !== false;
       } catch (err) {
-        logger(`Helm: handlePendingExitPlanMode failed: ${err?.message ?? err}`, { level: "warning" });
+        logger(`Weft: handlePendingExitPlanMode failed: ${err?.message ?? err}`, { level: "warning" });
         return false;
       }
     };
@@ -1068,7 +1068,7 @@ function pickExitPlanModeResponder(session, logger = () => {}) {
       try {
         return (await fn.call(owner, requestId, response)) !== false;
       } catch (err) {
-        logger(`Helm: respondToExitPlanMode failed: ${err?.message ?? err}`, { level: "warning" });
+        logger(`Weft: respondToExitPlanMode failed: ${err?.message ?? err}`, { level: "warning" });
         return false;
       }
     };
@@ -1100,7 +1100,7 @@ async function registerInterestForEvent(session, eventType, logger = () => {}) {
         }
       };
     } catch (err) {
-      logger(`Helm: registerInterest(${eventType}) failed; continuing: ${err?.message ?? err}`, {
+      logger(`Weft: registerInterest(${eventType}) failed; continuing: ${err?.message ?? err}`, {
         level: "info",
       });
       return () => {};

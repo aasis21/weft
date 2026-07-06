@@ -1,9 +1,9 @@
 import { chromium } from '@playwright/test';
 import { pathToFileURL } from 'node:url';
 
-const HTML = 'C:\\Users\\akash\\helm\\design\\dossier.html';
-const PDF = 'C:\\Users\\akash\\helm\\design\\Helm-Design-Dossier.pdf';
-const ASSETS = 'C:\\Users\\akash\\helm\\design\\assets';
+const HTML = 'C:\\Users\\akash\\weft\\design\\dossier.html';
+const PDF = 'C:\\Users\\akash\\weft\\design\\Weft-Design-Dossier.pdf';
+const ASSETS = 'C:\\Users\\akash\\weft\\design\\assets';
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 2 });

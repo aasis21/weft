@@ -104,15 +104,15 @@ body {
   background-attachment: fixed;
 }
 
-/* Pin the mobile browser toolbar on the in-app (.helm-session) screens.
+/* Pin the mobile browser toolbar on the in-app (.weft-session) screens.
    Those screens are a position:fixed, 100dvh shell with their own internal
    scroll, so the page body should not scroll at all. A scrollable body is
    what lets mobile browsers hide/collapse their address bar, so we lock
-   html/body to the small viewport whenever a .helm-session screen is mounted.
+   html/body to the small viewport whenever a .weft-session screen is mounted.
    The landing/pairing (.join-shell / .pairing-shell) screens are unaffected
    and keep normal page scrolling. */
-html:has(.helm-session),
-body:has(.helm-session) {
+html:has(.weft-session),
+body:has(.weft-session) {
   height: 100svh;
   min-height: 0;
   overflow: hidden;

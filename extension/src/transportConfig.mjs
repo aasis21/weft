@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
-// Persisted `helm-cli set-transport` choice, read by resolveTransportDescriptor() in
-// transportFactory.mjs. Mirrors projects.mjs's storage pattern (same ~/.helm home, same
+// Persisted `weft-cli set-transport` choice, read by resolveTransportDescriptor() in
+// transportFactory.mjs. Mirrors projects.mjs's storage pattern (same ~/.weft home, same
 // atomic-write-then-rename) so both the Copilot CLI extension (extension.mjs) and the
-// device-station CLI (helm-cli.mjs) pick up whatever transport the user configured, without
-// needing an explicit HELM_TRANSPORT env var / .env file (which remains a supported override).
+// device-station CLI (weft-cli.mjs) pick up whatever transport the user configured, without
+// needing an explicit WEFT_TRANSPORT env var / .env file (which remains a supported override).
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { helmHome } from "./projects.mjs";
+import { weftHome } from "./projects.mjs";
 
 const STORE_FILE = "transport.json";
 
 function storePath(baseDir) {
-  return join(helmHome(baseDir), STORE_FILE);
+  return join(weftHome(baseDir), STORE_FILE);
 }
 
 function ensureDir(baseDir) {
-  const dir = helmHome(baseDir);
+  const dir = weftHome(baseDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     chmodSync(dir, 0o700);
@@ -27,8 +27,8 @@ function ensureDir(baseDir) {
 }
 
 /** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. "local" and
- * "webpubsub" are intentionally no longer offered by any user-facing command (helm-cli
- * set-transport, /helm <name>) — see transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES — but are
+ * "webpubsub" are intentionally no longer offered by any user-facing command (weft-cli
+ * set-transport, /weft <name>) — see transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES — but are
  * still accepted here so existing persisted configs / tests keep working. "devtunnel" persists as
  * a bare marker (no url yet): the actual shared-relay URL is provisioned fresh per channelId at
  * resolve time by resolveTransportForChannel(), never stored. */
@@ -52,11 +52,11 @@ export function loadTransportConfig({ baseDir } = {}) {
   }
 }
 
-/** Persist a transport descriptor as the user's chosen default (`helm-cli set-transport`). */
+/** Persist a transport descriptor as the user's chosen default (`weft-cli set-transport`). */
 export function saveTransportConfig(descriptor, { baseDir } = {}) {
   if (!isValidTransportDescriptor(descriptor)) {
     throw new Error(
-      'Helm: invalid transport descriptor (kind must be "supabase" or "devtunnel" — or, for ' +
+      'Weft: invalid transport descriptor (kind must be "supabase" or "devtunnel" — or, for ' +
         'internal/testing use, "local"/"webpubsub" — with the fields that kind requires)',
     );
   }

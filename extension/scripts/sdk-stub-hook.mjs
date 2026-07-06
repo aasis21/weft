@@ -27,8 +27,8 @@ export async function load(url, context, nextLoad) {
       source:
         "export function joinSession(config){" +
         "  if (config && config.hooks && Object.values(config.hooks).some(Boolean))" +
-        "    throw new Error('HELM_RUNTIME_REJECTS_HOOKS: SDK hook callbacks are no longer supported by the native runtime');" +
-        "  throw new Error('HELM_SDK_STUB_REACHED');" +
+        "    throw new Error('WEFT_RUNTIME_REJECTS_HOOKS: SDK hook callbacks are no longer supported by the native runtime');" +
+        "  throw new Error('WEFT_SDK_STUB_REACHED');" +
         "}",
     };
   }

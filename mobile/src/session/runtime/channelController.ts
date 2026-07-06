@@ -1,4 +1,4 @@
-import type { HelmClient } from '@/lib/helmClient';
+import type { WeftClient } from '@/lib/weftClient';
 
 /** The named, per-channel timers the liveness/persistence FSM arms. Each is a fail-safe or a
  *  coalescing window; all are cleared together by {@link ChannelController.dispose}. */
@@ -22,7 +22,7 @@ type Handle = ReturnType<typeof setTimeout>;
 export class ChannelController {
   readonly id: string;
   readonly ephemeral: boolean;
-  client: HelmClient | null = null;
+  client: WeftClient | null = null;
   stopDemo?: () => Promise<void>;
   unsubscribe?: () => void;
   /** True while a reconnect is in flight, so overlapping triggers (resume + button) don't race. */

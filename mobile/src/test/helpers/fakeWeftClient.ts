@@ -1,21 +1,21 @@
-// FakeHelmClient — the in-memory transport that stands in for the real Supabase/WebCrypto client.
+// FakeWeftClient — the in-memory transport that stands in for the real Supabase/WebCrypto client.
 //
 // SessionManager only ever touches the transport through `pairSession` / `connectSession` from
-// `./helmClient`, and only uses this small surface: `channelId`, `send`, `subscribe`, `onStatus`,
+// `./weftClient`, and only uses this small surface: `channelId`, `send`, `subscribe`, `onStatus`,
 // `close`. So a fake that records outbound `send`s and lets a test push inbound messages in bypasses
 // ALL crypto and networking while exercising the real manager end-to-end.
 //
-// setup.ts installs `helmClientMock` as the module mock; `registry` is shared with makeManager so a
+// setup.ts installs `weftClientMock` as the module mock; `registry` is shared with makeManager so a
 // test can grab the client the manager just created and `emit()` messages into it.
-import type { EventEnvelope, PairingPayload, SecureChannel } from '@aasis21/helm-shared';
+import type { EventEnvelope, PairingPayload, SecureChannel } from '@aasis21/weft-shared';
 import type { StoredPairing } from '@/lib/storage';
 
 type MessageHandler = (message: EventEnvelope, event: string) => void;
 type StatusHandler = (status: 'connected' | 'disconnected') => void;
 
-export class FakeHelmClient {
+export class FakeWeftClient {
   readonly channelId: string;
-  /** Not used by SessionManager; a typed stub so the shape satisfies HelmClient. */
+  /** Not used by SessionManager; a typed stub so the shape satisfies WeftClient. */
   readonly channel: SecureChannel = {} as SecureChannel;
   /** Every EventEnvelope the manager pushed outbound, in order. */
   readonly sent: EventEnvelope[] = [];
@@ -94,23 +94,23 @@ export class FakeHelmClient {
 
 // --- registry: newest client per channelId, shared between the module mock and the harness --------
 class FakeClientRegistry {
-  private byChannel = new Map<string, FakeHelmClient>();
-  private all: FakeHelmClient[] = [];
+  private byChannel = new Map<string, FakeWeftClient>();
+  private all: FakeWeftClient[] = [];
 
-  create(channelId: string): FakeHelmClient {
-    const client = new FakeHelmClient(channelId);
+  create(channelId: string): FakeWeftClient {
+    const client = new FakeWeftClient(channelId);
     this.byChannel.set(channelId, client);
     this.all.push(client);
     return client;
   }
 
   /** The most recently created client for a channel (what a fresh pair/connect handed the manager). */
-  get(channelId: string): FakeHelmClient | undefined {
+  get(channelId: string): FakeWeftClient | undefined {
     return this.byChannel.get(channelId);
   }
 
   /** Every client ever created this test (a rescan/reconnect makes more than one per channel). */
-  forChannel(channelId: string): FakeHelmClient[] {
+  forChannel(channelId: string): FakeWeftClient[] {
     return this.all.filter((c) => c.channelId === channelId);
   }
 
@@ -147,24 +147,24 @@ function channelIdFromRaw(raw: string | PairingPayload): string {
   return raw;
 }
 
-// --- the module mock installed for `@/lib/helmClient` in setup.ts ---------------------------------
-export const helmClientMock = {
-  async pairSession(raw: string | PairingPayload): Promise<{ client: FakeHelmClient; pairing: StoredPairing }> {
+// --- the module mock installed for `@/lib/weftClient` in setup.ts ---------------------------------
+export const weftClientMock = {
+  async pairSession(raw: string | PairingPayload): Promise<{ client: FakeWeftClient; pairing: StoredPairing }> {
     const channelId = channelIdFromRaw(raw);
     const client = registry.create(channelId);
     return { client, pairing: fakePairing(channelId) };
   },
-  async pairWithPublicKey(opts: { channelId: string; publicKeyB64: string }): Promise<{ client: FakeHelmClient; pairing: StoredPairing }> {
+  async pairWithPublicKey(opts: { channelId: string; publicKeyB64: string }): Promise<{ client: FakeWeftClient; pairing: StoredPairing }> {
     const client = registry.create(opts.channelId);
     return { client, pairing: { ...fakePairing(opts.channelId), peerPublicKeyB64: opts.publicKeyB64 } };
   },
-  async connectDevice(opts: { channelId: string }): Promise<FakeHelmClient> {
+  async connectDevice(opts: { channelId: string }): Promise<FakeWeftClient> {
     return registry.create(opts.channelId);
   },
-  async connectSession(pairing: StoredPairing): Promise<FakeHelmClient> {
+  async connectSession(pairing: StoredPairing): Promise<FakeWeftClient> {
     return registry.create(pairing.channelId);
   },
-  async createClientFromMaterial(opts: { channelId: string }): Promise<FakeHelmClient> {
+  async createClientFromMaterial(opts: { channelId: string }): Promise<FakeWeftClient> {
     return registry.create(opts.channelId);
   },
   getSenderName(): string {

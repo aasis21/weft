@@ -1,7 +1,7 @@
 import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 
-const DEBUG_KEY = 'helm.debugMode.v1';
+const DEBUG_KEY = 'weft.debugMode.v1';
 
 /** Read the persisted "show technical details on error" toggle. Defaults to off. Mirrors the
  *  Preferences + localStorage double-write pattern used elsewhere in lib/storage.ts so it works
@@ -64,7 +64,7 @@ export function describeError(err: unknown, context: Record<string, string | und
   const lines = [
     `time: ${new Date().toISOString()}`,
     `platform: ${Capacitor.getPlatform()} (native=${Capacitor.isNativePlatform()})`,
-    `transport: ${import.meta.env.VITE_HELM_TRANSPORT ?? 'local'}`,
+    `transport: ${import.meta.env.VITE_WEFT_TRANSPORT ?? 'local'}`,
     `userAgent: ${globalThis.navigator?.userAgent ?? 'n/a'}`,
     `online: ${globalThis.navigator?.onLine ?? 'n/a'}`,
     ...Object.entries(context)

@@ -12,8 +12,8 @@ export class SecureChannel {
    * @param {{ channelId?: string, sessionId?: string, senderId?: string, senderName?: string }} [opts.identity]
    */
   constructor({ transport, key, identity = {} }) {
-    if (!transport) throw new Error("helm/channel: transport is required");
-    if (!key) throw new Error("helm/channel: key is required");
+    if (!transport) throw new Error("weft/channel: transport is required");
+    if (!key) throw new Error("weft/channel: key is required");
     this.transport = transport;
     this.key = key;
     this.identity = identity;

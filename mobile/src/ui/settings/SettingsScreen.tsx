@@ -5,7 +5,7 @@ import {
   setTheme,
   setVoiceAutoRelisten,
   setVoiceSpeakStreaming,
-  type HelmSettings,
+  type WeftSettings,
   type ThemeSetting,
 } from '@/lib/settings';
 
@@ -27,7 +27,7 @@ const THEME_OPTIONS: Array<{ value: ThemeSetting; label: string }> = [
 ];
 
 export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
-  const [settings, setSettingsState] = useState<HelmSettings>({
+  const [settings, setSettingsState] = useState<WeftSettings>({
     voiceAutoRelisten: false,
     voiceSpeakStreaming: false,
     theme: 'system',
@@ -142,7 +142,7 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
             <div className="settings-row-head">
               <div>
                 <h2 id="settings-theme-title">Theme</h2>
-                <p>Choose Helm's appearance on this device.</p>
+                <p>Choose Weft's appearance on this device.</p>
               </div>
             </div>
             <div className="settings-segments" role="radiogroup" aria-label="Theme">
@@ -165,7 +165,7 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
             <div className="settings-row-head">
               <div>
                 <h2 id="settings-voice-title">Voice Mode</h2>
-                <p>Hands-free conversation behavior after Helm speaks.</p>
+                <p>Hands-free conversation behavior after Weft speaks.</p>
               </div>
               <label className="settings-switch">
                 <input

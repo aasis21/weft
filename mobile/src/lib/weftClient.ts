@@ -12,9 +12,9 @@ import {
   isValidEnvelope,
   parsePairingPayload,
   sayHello,
-} from '@aasis21/helm-shared';
-import type { EventEnvelope, EventType, Transport, TransportDescriptor } from '@aasis21/helm-shared';
-import type { PairingPayload } from '@aasis21/helm-shared';
+} from '@aasis21/weft-shared';
+import type { EventEnvelope, EventType, Transport, TransportDescriptor } from '@aasis21/weft-shared';
+import type { PairingPayload } from '@aasis21/weft-shared';
 import type { StoredPairing } from './storage';
 
 /** A connect that never reaches SUBSCRIBED (a wedged/suspended shared socket) would otherwise hang
@@ -39,7 +39,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
-export interface HelmClient {
+export interface WeftClient {
   channelId: string;
   channel: SecureChannel;
   send(message: EventEnvelope): Promise<void>;
@@ -66,7 +66,7 @@ const ALL_EVENTS: EventType[] = [
 export async function pairSession(
   raw: string | PairingPayload,
   opts?: { transport?: Transport },
-): Promise<{ client: HelmClient; pairing: StoredPairing }> {
+): Promise<{ client: WeftClient; pairing: StoredPairing }> {
   const { channelId, publicKeyB64, transport: transportDescriptor } = parsePairingPayload(raw);
   return pairWithPublicKey({
     channelId,
@@ -82,7 +82,7 @@ export async function pairWithPublicKey(opts: {
   /** Which transport + endpoint to connect with — laptop-resolved, carried in the QR/pairing payload. */
   transportDescriptor: TransportDescriptor;
   transport?: Transport;
-}): Promise<{ client: HelmClient; pairing: StoredPairing }> {
+}): Promise<{ client: WeftClient; pairing: StoredPairing }> {
   const { channelId, publicKeyB64, transportDescriptor } = opts;
   const phoneKeys = await generateKeyPair();
   const deviceId = getStableDeviceId();
@@ -107,7 +107,7 @@ export async function pairWithPublicKey(opts: {
     savedAt: Date.now(),
     transport: transportDescriptor,
   };
-  let client: HelmClient;
+  let client: WeftClient;
   try {
     client = await createClientFromMaterial({ channelId, key, deviceId, transport });
   } catch (err) {
@@ -130,7 +130,7 @@ interface ReconnectMaterial {
 
 /**
  * Reconnect using a previously-derived ECDH keypair instead of minting a new one. Critical for
- * listener devices (#device-reconnect): the laptop's `helm-cli` listener locks onto the FIRST
+ * listener devices (#device-reconnect): the laptop's `weft-cli` listener locks onto the FIRST
  * phone public key it sees per run (`boundPeerPub` in listener.mjs) and silently ignores any hello
  * from a different key ("ignoring pairing from a different phone"). Generating a fresh keypair on
  * every reconnect (as a first-time pairing does) would make the SAME phone look like an intruder
@@ -140,7 +140,7 @@ interface ReconnectMaterial {
 async function reconnectFromMaterial(
   material: ReconnectMaterial,
   opts?: { transport?: Transport },
-): Promise<HelmClient> {
+): Promise<WeftClient> {
   const privateKey = await crypto.subtle.importKey(
     'jwk',
     material.privateKeyJwk,
@@ -184,7 +184,7 @@ async function reconnectFromMaterial(
 export async function connectSession(
   pairing: StoredPairing,
   opts?: { transport?: Transport },
-): Promise<HelmClient> {
+): Promise<WeftClient> {
   return reconnectFromMaterial(pairing, opts);
 }
 
@@ -193,7 +193,7 @@ export async function connectSession(
 export async function connectDevice(
   device: ReconnectMaterial,
   opts?: { transport?: Transport },
-): Promise<HelmClient> {
+): Promise<WeftClient> {
   return reconnectFromMaterial(device, opts);
 }
 
@@ -202,7 +202,7 @@ export async function createClientFromMaterial(opts: {
   key: CryptoKey;
   deviceId?: string;
   transport: Transport;
-}): Promise<HelmClient> {
+}): Promise<WeftClient> {
   const channel = new SecureChannel({
     transport: opts.transport,
     key: opts.key,
@@ -230,7 +230,7 @@ function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
   let client = sharedSupabaseClients.get(cacheKey);
   if (!client) {
     client = createClient(url, anonKey, {
-      // Helm uses the anon key directly for realtime auth (private-channel RLS); there is no
+      // Weft uses the anon key directly for realtime auth (private-channel RLS); there is no
       // Supabase user session in play. Disabling persist/auto-refresh prevents the auth module
       // from firing SIGNED_IN / TOKEN_REFRESHED events that would call realtime.setAuth() with
       // a stale or wrong token — on Android, localStorage persists across app restarts, making
@@ -256,7 +256,7 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
     // Belt-and-braces: sessions.ts already filters these out on load, but a directly-stored
     // pairing (e.g. storage.ts's single "current" pairing) could still reach here. Fail with a
     // clear, actionable message instead of a raw "Cannot read properties of undefined" crash.
-    throw new Error('Helm: this session has no transport info — remove it and re-pair by scanning a fresh QR.');
+    throw new Error('Weft: this session has no transport info — remove it and re-pair by scanning a fresh QR.');
   }
   if (descriptor.kind === 'local') return createLocalTransport({ channelId });
   if (descriptor.kind === 'supabase') {
@@ -283,7 +283,7 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
     const socket = new WebSocket(descriptor.url);
     return createRelayTransport({ socket, channelId });
   }
-  throw new Error(`Helm: unknown transport descriptor kind "${(descriptor as { kind: string }).kind}"`);
+  throw new Error(`Weft: unknown transport descriptor kind "${(descriptor as { kind: string }).kind}"`);
 }
 
 /**
@@ -295,14 +295,14 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
 async function fetchWebPubSubClientAccessUrl(negotiateUrl: string, channelId: string): Promise<string> {
   const response = await fetch(`${negotiateUrl}?channelId=${encodeURIComponent(channelId)}`);
   if (!response.ok) {
-    throw new Error(`Helm: Web PubSub negotiate failed with status ${response.status}`);
+    throw new Error(`Weft: Web PubSub negotiate failed with status ${response.status}`);
   }
   const { url } = (await response.json()) as { url?: string };
-  if (!url) throw new Error('Helm: Web PubSub negotiate response missing "url"');
+  if (!url) throw new Error('Weft: Web PubSub negotiate response missing "url"');
   return url;
 }
 
-function wrapChannel(channelId: string, channel: SecureChannel): HelmClient {
+function wrapChannel(channelId: string, channel: SecureChannel): WeftClient {
   return {
     channelId,
     channel,
@@ -340,7 +340,7 @@ export function getSenderName(): string {
 }
 
 export function getStableDeviceId(): string {
-  const key = 'helm.deviceId.v1';
+  const key = 'weft.deviceId.v1';
   const existing = globalThis.localStorage?.getItem(key);
   if (existing) return existing;
   const next = `phone-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;

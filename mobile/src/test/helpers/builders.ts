@@ -1,6 +1,6 @@
 // Message builders for tests.
 //
-// These are thin re-exports of the REAL @aasis21/helm-shared factories, so every message a test
+// These are thin re-exports of the REAL @aasis21/weft-shared factories, so every message a test
 // pushes tracks the live protocol schema (rename a field in shared and these tests break, exactly as
 // intended). On top of the factories we add:
 //   - `stamp()` to attach the identity fields (channelId/sessionId/senderId/senderName) that
@@ -46,10 +46,10 @@ export {
   deviceHeartbeat,
   voiceMode,
   isValidEnvelope,
-} from '@aasis21/helm-shared';
+} from '@aasis21/weft-shared';
 
-import { channelUp as realChannelUp, history, recentTurns as realRecentTurns } from '@aasis21/helm-shared';
-import type { ChannelUp, EnvelopeBase, History, HistoryItem, RecentTurnItem, RecentTurns } from '@aasis21/helm-shared';
+import { channelUp as realChannelUp, history, recentTurns as realRecentTurns } from '@aasis21/weft-shared';
+import type { ChannelUp, EnvelopeBase, History, HistoryItem, RecentTurnItem, RecentTurns } from '@aasis21/weft-shared';
 
 /** Identity/ordering fields a test may want to pin on an inbound envelope (as the wire would carry). */
 export interface StampFields {

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.unmock('../helmClient');
-vi.unmock('@/lib/helmClient');
+vi.unmock('../weftClient');
+vi.unmock('@/lib/weftClient');
 
 const shared = vi.hoisted(() => ({
   close: vi.fn<() => Promise<void>>(),
   connect: vi.fn<() => Promise<void>>(),
 }));
 
-vi.mock('@aasis21/helm-shared', () => ({
+vi.mock('@aasis21/weft-shared', () => ({
   EVENT_TYPE: {
     STREAM: 'stream',
     PROMPT: 'prompt',
@@ -50,7 +50,7 @@ describe('pairSession', () => {
   });
 
   it('closes the transport when client construction fails', async () => {
-    const { pairSession } = await import('../helmClient');
+    const { pairSession } = await import('../weftClient');
     const transport = {
       connect: vi.fn(),
       publish: vi.fn(),
@@ -69,7 +69,7 @@ describe('connectDevice', () => {
     shared.close.mockResolvedValue(undefined);
     shared.connect.mockResolvedValue(undefined);
     vi.spyOn(crypto.subtle, 'importKey').mockResolvedValue({} as CryptoKey);
-    const { SecureChannel } = await import('@aasis21/helm-shared');
+    const { SecureChannel } = await import('@aasis21/weft-shared');
     vi.mocked(SecureChannel).mockImplementation(
       () =>
         ({
@@ -83,8 +83,8 @@ describe('connectDevice', () => {
   });
 
   it('reuses the stored keypair instead of minting a new one, and does not wait for an ack', async () => {
-    const { connectDevice } = await import('../helmClient');
-    const { sayHello, generateKeyPair } = await import('@aasis21/helm-shared');
+    const { connectDevice } = await import('../weftClient');
+    const { sayHello, generateKeyPair } = await import('@aasis21/weft-shared');
     const transport = {
       connect: vi.fn(),
       publish: vi.fn(),
@@ -124,7 +124,7 @@ describe('pairWithPublicKey with a devtunnel transport descriptor', () => {
     // connect instead — same "closes the transport on failure" shape as the pairSession test.
     shared.connect.mockRejectedValue(new Error('connect failed'));
     vi.spyOn(crypto.subtle, 'exportKey').mockResolvedValue({} as JsonWebKey);
-    const { SecureChannel } = await import('@aasis21/helm-shared');
+    const { SecureChannel } = await import('@aasis21/weft-shared');
     vi.mocked(SecureChannel).mockImplementation(
       () =>
         ({
@@ -138,8 +138,8 @@ describe('pairWithPublicKey with a devtunnel transport descriptor', () => {
   });
 
   it('builds a WebSocket from the descriptor url and hands it to createRelayTransport', async () => {
-    const { pairWithPublicKey } = await import('../helmClient');
-    const { createRelayTransport } = await import('@aasis21/helm-shared');
+    const { pairWithPublicKey } = await import('../weftClient');
+    const { createRelayTransport } = await import('@aasis21/weft-shared');
 
     const fakeSocket = {
       addEventListener: vi.fn(),

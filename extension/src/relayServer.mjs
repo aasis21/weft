@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // A tiny local WebSocket relay server: pairs up sockets by `?channelId=` on the connection URL and
 // forwards any message one peer sends to every OTHER peer in the same room. It never inspects
-// message contents (Helm's own E2E encryption already covers that — see shared/transport-relay.mjs,
+// message contents (Weft's own E2E encryption already covers that — see shared/transport-relay.mjs,
 // whose wire frame is opaque `{event, envelope}`), so this file has zero crypto/auth logic of its
 // own. It exists so a transport built on `createRelayTransport` has something to connect BOTH ends
 // to: normally that's a managed service (Supabase Realtime, Azure Web PubSub); for the `devtunnel`

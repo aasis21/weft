@@ -30,7 +30,7 @@ interface DeviceDetailsScreenProps {
 
 /**
  * Device details (#device-events): the full record for ONE registered listener — its live status,
- * its stable identifiers (deviceId survives `helm-cli start` restarts; channelId is the current
+ * its stable identifiers (deviceId survives `weft-cli start` restarts; channelId is the current
  * pairing channel, freshly minted every run), a "Sessions from this device" list (every session
  * ever spawned here via "Start session", matched by the listener's stable deviceId), and the raw
  * DEVICE-channel event log (project list / spawn / forget — reuses the same DebugPanel component
@@ -68,7 +68,7 @@ export function DeviceDetailsScreen({
     .sort((a, b) => (b.lastEventAt ?? b.meta.addedAt) - (a.lastEventAt ?? a.meta.addedAt));
 
   return (
-    <main className="helm-session join-session device-details-screen">
+    <main className="weft-session join-session device-details-screen">
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -169,7 +169,7 @@ export function DeviceDetailsScreen({
             </div>
           </dl>
           <p className="device-card-sub">
-            Device ID is stable across <code>helm-cli start</code> restarts; the channel ID is a
+            Device ID is stable across <code>weft-cli start</code> restarts; the channel ID is a
             fresh pairing channel minted every run, for forward secrecy.
           </p>
         </details>

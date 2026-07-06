@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/helm-shared";
+import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
 import { spawnCopilotSession, writeIdentityFile } from "../src/spawn.mjs";
 
 const cleanupFiles = [];
@@ -42,7 +42,7 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   delete process.env.WT_SESSION;
   delete process.env.TERM_PROGRAM;
   delete process.env.GNOME_TERMINAL_SCREEN;
-  const projectDir = mkdtempSync(join(tmpdir(), "helm-spawn-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   const calls = [];
   const result = spawnCopilotSession({
@@ -52,7 +52,7 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
     identity: await identity("chan-spawn"),
     spawnFn(command, args, options) {
       calls.push({ command, args, options });
-      cleanupFiles.push(options.env.HELM_IDENTITY_FILE);
+      cleanupFiles.push(options.env.WEFT_IDENTITY_FILE);
       return { unref() {} };
     },
   });
@@ -66,13 +66,13 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   assert.deepEqual(calls[0].args, ["-n", "brave-otter", "--allow-all"]);
   assert.equal(calls[0].options.cwd, projectDir);
   assert.equal(calls[0].options.shell, false);
-  assert.equal(calls[0].options.env.HELM_CHANNEL_ID, "chan-spawn");
-  assert.ok(calls[0].options.env.HELM_IDENTITY_FILE);
-  assert.equal(JSON.parse(readFileSync(calls[0].options.env.HELM_IDENTITY_FILE, "utf8")).channelId, "chan-spawn");
+  assert.equal(calls[0].options.env.WEFT_CHANNEL_ID, "chan-spawn");
+  assert.ok(calls[0].options.env.WEFT_IDENTITY_FILE);
+  assert.equal(JSON.parse(readFileSync(calls[0].options.env.WEFT_IDENTITY_FILE, "utf8")).channelId, "chan-spawn");
 });
 
 test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "helm-spawn-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   let identityPath;
   const result = spawnCopilotSession({
@@ -80,7 +80,7 @@ test("spawnCopilotSession reports spawn errors and cleans up identity file", asy
     name: "plain",
     identity: await identity("chan-fail"),
     spawnFn(_command, _args, options) {
-      identityPath = options.env.HELM_IDENTITY_FILE;
+      identityPath = options.env.WEFT_IDENTITY_FILE;
       throw new Error("boom");
     },
   });

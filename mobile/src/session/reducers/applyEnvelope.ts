@@ -1,4 +1,4 @@
-import { EVENT_TYPE, SUBTYPE, MODES, mergeHistory } from '@aasis21/helm-shared';
+import { EVENT_TYPE, SUBTYPE, MODES, mergeHistory } from '@aasis21/weft-shared';
 import type {
   ApprovalRequestMsg,
   AssistantDelta,
@@ -15,7 +15,7 @@ import type {
   ToolComplete,
   ToolStart,
   UserMessageEcho,
-} from '@aasis21/helm-shared';
+} from '@aasis21/weft-shared';
 import type {
   AssistantItem,
   NoticeItem,

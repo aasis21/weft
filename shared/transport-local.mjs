@@ -21,7 +21,7 @@ function busFor(channelId) {
  *   deliverSelf — if true, a publisher also receives its own publishes (default false).
  */
 export function createLocalTransport({ channelId, deliverSelf = false } = {}) {
-  if (!channelId) throw new Error("helm/transport-local: channelId is required");
+  if (!channelId) throw new Error("weft/transport-local: channelId is required");
   const localHandlers = new Map(); // event -> Set<handler> registered by THIS instance
   const statusHandlers = new Set();
   let closed = false;
@@ -53,7 +53,7 @@ export function createLocalTransport({ channelId, deliverSelf = false } = {}) {
     },
 
     async publish(event, envelope) {
-      if (closed) throw new Error("helm/transport-local: transport is closed");
+      if (closed) throw new Error("weft/transport-local: transport is closed");
       const handlers = busFor(channelId).get(event);
       if (!handlers) return;
       for (const h of handlers) {

@@ -14,7 +14,7 @@ import {
   importKeyPair,
   sayHello,
   spawnSession,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import { createListener } from "../src/listener.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
 
@@ -46,14 +46,14 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
 };
 
 async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
-  const { createLocalTransport } = await import("@aasis21/helm-shared");
+  const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
   const listenerTransport = createLocalTransport({ channelId });
   const projectsApi = { listProjects: () => projects ?? [] };
   // Isolate the connections.json registry per test so these tests never touch a real user's
-  // ~/.helm — see registryFile.mjs / the CONNECTIONS_REGISTRY_FILE comment in listener.mjs.
-  const connectionsHome = mkdtempSync(join(tmpdir(), "helm-connections-"));
+  // ~/.weft — see registryFile.mjs / the CONNECTIONS_REGISTRY_FILE comment in listener.mjs.
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-connections-"));
   connectionsHomes.push(connectionsHome);
   const listener = createListener({
     transport: listenerTransport,
@@ -94,7 +94,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
 }
 
 test("emits PROJECT_LIST when the phone pairs", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "helm-listener-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
   dirs.push(projectDir);
   const { listener, messages } = await pairedHarness({
     projects: [{ name: "app", path: projectDir, default: true }],
@@ -125,14 +125,14 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
   delete process.env.TERM_PROGRAM;
   delete process.env.GNOME_TERMINAL_SCREEN;
 
-  const projectDir = mkdtempSync(join(tmpdir(), "helm-listener-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
   dirs.push(projectDir);
   const spawnCalls = [];
   const { listener, phoneChannel, messages } = await pairedHarness({
     projects: [{ name: "app", path: projectDir, default: true }],
     spawnFn(command, args, options) {
       spawnCalls.push({ command, args, options });
-      identityFiles.push(options.env.HELM_IDENTITY_FILE);
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
       return { unref() {} };
     },
   });
@@ -149,8 +149,8 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
   assert.deepEqual(spawnCalls[0].args, ["-n", "phone-started", "--allow-all"]);
   assert.equal(spawnCalls[0].options.cwd, projectDir);
   assert.equal(spawnCalls[0].options.shell, false);
-  const identity = JSON.parse(readFileSync(spawnCalls[0].options.env.HELM_IDENTITY_FILE, "utf8"));
-  assert.equal(identity.channelId, spawnCalls[0].options.env.HELM_CHANNEL_ID);
+  const identity = JSON.parse(readFileSync(spawnCalls[0].options.env.WEFT_IDENTITY_FILE, "utf8"));
+  assert.equal(identity.channelId, spawnCalls[0].options.env.WEFT_CHANNEL_ID);
   const imported = await importKeyPair({ privateKeyJwk: identity.privateKeyJwk });
   assert.equal(imported.publicKeyB64, identity.publicKeyB64);
 
@@ -167,7 +167,7 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
 });
 
 test("unknown project emits SPAWN_RESULT ok:false", async () => {
-  const projectDir = mkdtempSync(join(tmpdir(), "helm-listener-project-"));
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
   dirs.push(projectDir);
   const { listener, phoneChannel, messages } = await pairedHarness({
     projects: [{ name: "app", path: projectDir, default: true }],
@@ -184,7 +184,7 @@ test("unknown project emits SPAWN_RESULT ok:false", async () => {
 });
 
 test("a second different phone public key is ignored after first binding", async () => {
-  const { createLocalTransport } = await import("@aasis21/helm-shared");
+  const { createLocalTransport } = await import("@aasis21/weft-shared");
   const warnings = [];
   const { listener, listenerKeys, channelId, messages } = await pairedHarness({
     projects: [],

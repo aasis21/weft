@@ -11,7 +11,7 @@ import {
   createSupabaseTransport,
   createWebPubSubTransport,
   createRelayTransport,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
 import { provisionDevTunnelTransport } from "./devtunnel.mjs";
 
@@ -49,19 +49,19 @@ function defaultEnvFiles() {
  * (RLS enforces access) and Web PubSub's negotiateUrl is just an endpoint — the actual
  * per-connection token is minted separately by that endpoint, never carried here.
  *
- * Precedence: an explicit HELM_TRANSPORT env var (e.g. from a repo-root .env, for CI/power-user
- * overrides) wins outright. Otherwise, the persisted choice from `helm-cli set-transport` (see
- * transportConfig.mjs) applies. With neither set, Helm defaults to Supabase — Helm's own relay is
- * the supported out-of-the-box path — reading HELM_SUPABASE_URL/HELM_SUPABASE_ANON_KEY (or the
+ * Precedence: an explicit WEFT_TRANSPORT env var (e.g. from a repo-root .env, for CI/power-user
+ * overrides) wins outright. Otherwise, the persisted choice from `weft-cli set-transport` (see
+ * transportConfig.mjs) applies. With neither set, Weft defaults to Supabase — Weft's own relay is
+ * the supported out-of-the-box path — reading WEFT_SUPABASE_URL/WEFT_SUPABASE_ANON_KEY (or the
  * generic SUPABASE_* fallback); `local` is opt-in only, for same-machine testing.
  *
- * This is "this device's default" — the one `/helm` (no arguments) pairs with. `/helm <name>`
+ * This is "this device's default" — the one `/weft` (no arguments) pairs with. `/weft <name>`
  * overrides it for a single running session via resolveTransportByName below, without touching
  * the persisted device-wide config.
  */
 export function resolveTransportDescriptor({ baseDir } = {}) {
-  if (process.env.HELM_TRANSPORT) {
-    return resolveFromEnv(process.env.HELM_TRANSPORT);
+  if (process.env.WEFT_TRANSPORT) {
+    return resolveFromEnv(process.env.WEFT_TRANSPORT);
   }
 
   const configured = loadTransportConfig({ baseDir });
@@ -71,35 +71,35 @@ export function resolveTransportDescriptor({ baseDir } = {}) {
     return resolveFromEnv("supabase");
   } catch (err) {
     throw new Error(
-      `${err.message}\nHelm: no transport configured. Run \`helm-cli set-transport supabase ` +
-        "--url <url> --anon-key <key>\` (or `helm-cli set-transport local` to test without a " +
+      `${err.message}\nWeft: no transport configured. Run \`weft-cli set-transport supabase ` +
+        "--url <url> --anon-key <key>\` (or `weft-cli set-transport local` to test without a " +
         "relay) to choose one.",
     );
   }
 }
 
 /**
- * Transport kinds a user can pick via a user-facing command (`helm-cli set-transport`, `/helm
- * <name>`). Only the two "supported" transports Helm documents/installs are listed here:
+ * Transport kinds a user can pick via a user-facing command (`weft-cli set-transport`, `/weft
+ * <name>`). Only the two "supported" transports Weft documents/installs are listed here:
  * Supabase (hosted, zero-config) and devtunnel (self-hosted local relay, no cloud account) — see
- * HELM_COMMAND_TRANSPORT_NAMES in extension.mjs, which adds "devtunnel" back in for the /helm
+ * WEFT_COMMAND_TRANSPORT_NAMES in extension.mjs, which adds "devtunnel" back in for the /weft
  * command specifically since it needs a channelId to provision and can't go through the plain
  * resolveTransportByName() below. "local" and "webpubsub" remain fully implemented (resolveFromEnv
- * below, createTransportFromDescriptor) for internal testing / advanced HELM_TRANSPORT env
+ * below, createTransportFromDescriptor) for internal testing / advanced WEFT_TRANSPORT env
  * overrides — they're just no longer offered or documented anywhere a user would see them.
  */
 export const SUPPORTED_TRANSPORT_NAMES = ["supabase"];
 
 /**
  * Requires a name from SUPPORTED_TRANSPORT_NAMES (case-insensitive); throws a single
- * user-facing message (listing the valid names) for anything else, so callers like /helm's
+ * user-facing message (listing the valid names) for anything else, so callers like /weft's
  * handler can surface it directly without re-deriving the allowed list themselves.
  */
 export function resolveTransportByName(transportName) {
   const normalized = String(transportName ?? "").trim().toLowerCase();
   if (!SUPPORTED_TRANSPORT_NAMES.includes(normalized)) {
     throw new Error(
-      `Helm: unknown transport "${transportName}". Supported: ${SUPPORTED_TRANSPORT_NAMES.join(", ")}.`,
+      `Weft: unknown transport "${transportName}". Supported: ${SUPPORTED_TRANSPORT_NAMES.join(", ")}.`,
     );
   }
   return resolveFromEnv(normalized);
@@ -110,26 +110,26 @@ function resolveFromEnv(transportName) {
   if (transportName === "devtunnel") return { kind: "devtunnel" };
 
   if (transportName === "webpubsub") {
-    const negotiateUrl = process.env.HELM_WEBPUBSUB_NEGOTIATE_URL;
+    const negotiateUrl = process.env.WEFT_WEBPUBSUB_NEGOTIATE_URL;
     if (!negotiateUrl) {
       throw new Error(
-        "Helm: HELM_TRANSPORT=webpubsub requires HELM_WEBPUBSUB_NEGOTIATE_URL",
+        "Weft: WEFT_TRANSPORT=webpubsub requires WEFT_WEBPUBSUB_NEGOTIATE_URL",
       );
     }
     return { kind: "webpubsub", negotiateUrl };
   }
 
-  const url = process.env.HELM_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.HELM_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  const url = process.env.WEFT_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.WEFT_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
     throw new Error(
-      "Helm: HELM_TRANSPORT=supabase requires HELM_SUPABASE_URL and HELM_SUPABASE_ANON_KEY",
+      "Weft: WEFT_TRANSPORT=supabase requires WEFT_SUPABASE_URL and WEFT_SUPABASE_ANON_KEY",
     );
   }
-  if (!process.env.HELM_SUPABASE_URL || !process.env.HELM_SUPABASE_ANON_KEY) {
+  if (!process.env.WEFT_SUPABASE_URL || !process.env.WEFT_SUPABASE_ANON_KEY) {
     process.stderr.write(
-      `Helm: using generic SUPABASE_* env (relay host ${safeHost(url)}). Set ` +
-        "HELM_SUPABASE_URL / HELM_SUPABASE_ANON_KEY so a global SUPABASE_URL for another " +
+      `Weft: using generic SUPABASE_* env (relay host ${safeHost(url)}). Set ` +
+        "WEFT_SUPABASE_URL / WEFT_SUPABASE_ANON_KEY so a global SUPABASE_URL for another " +
         "project cannot hijack the relay.\n",
     );
   }
@@ -154,7 +154,7 @@ export function createTransportFromDescriptor(descriptor, { channelId }) {
     const client = createClient(descriptor.url, descriptor.anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    // Helm uses *private* broadcast channels, authorized by RLS on realtime.messages
+    // Weft uses *private* broadcast channels, authorized by RLS on realtime.messages
     // (see supabase/migrations). The anon key is the realtime access token; without
     // setAuth + the RLS policies applied, channel joins are denied.
     client.realtime.setAuth(descriptor.anonKey);
@@ -169,7 +169,7 @@ export function createTransportFromDescriptor(descriptor, { channelId }) {
     return createRelayTransport({ socket, channelId });
   }
 
-  throw new Error(`Helm: unknown transport descriptor kind "${descriptor.kind}"`);
+  throw new Error(`Weft: unknown transport descriptor kind "${descriptor.kind}"`);
 }
 
 export function createTransport({ channelId }) {
@@ -181,7 +181,7 @@ export function createTransport({ channelId }) {
  * connectable descriptor (spawning/reusing the shared relay+tunnel — see devtunnel.mjs) since that
  * requires a channelId up front and can't happen inside the plain synchronous resolver. Every
  * caller that needs a descriptor it can actually connect with (as opposed to just displaying the
- * configured kind, e.g. `helm-cli show-transport`) should call this instead of
+ * configured kind, e.g. `weft-cli show-transport`) should call this instead of
  * resolveTransportDescriptor() directly.
  */
 export async function resolveTransportForChannel({ baseDir, channelId } = {}) {
@@ -208,9 +208,9 @@ function safeHost(url) {
 async function fetchWebPubSubClientAccessUrl(negotiateUrl, channelId) {
   const response = await fetch(`${negotiateUrl}?channelId=${encodeURIComponent(channelId)}`);
   if (!response.ok) {
-    throw new Error(`Helm: Web PubSub negotiate failed with status ${response.status}`);
+    throw new Error(`Weft: Web PubSub negotiate failed with status ${response.status}`);
   }
   const { url } = await response.json();
-  if (!url) throw new Error('Helm: Web PubSub negotiate response missing "url"');
+  if (!url) throw new Error('Weft: Web PubSub negotiate response missing "url"');
   return url;
 }

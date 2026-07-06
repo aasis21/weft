@@ -1,6 +1,6 @@
 {
-  "name": "Helm",
-  "short_name": "Helm",
+  "name": "Weft",
+  "short_name": "Weft",
   "description": "Encrypted mobile remote for live GitHub Copilot CLI sessions.",
   "start_url": "/",
   "scope": "/",

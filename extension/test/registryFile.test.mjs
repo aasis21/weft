@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { clearRegistry, isPidAlive, readRegistry, writeRegistryAtomic } from "../src/registryFile.mjs";
 
 test("readRegistry returns null when the file doesn't exist", () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-registry-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-registry-"));
   try {
     assert.equal(readRegistry("nope.json", { baseDir: dir }), null);
   } finally {
@@ -17,7 +17,7 @@ test("readRegistry returns null when the file doesn't exist", () => {
 });
 
 test("readRegistry returns null for corrupt JSON instead of throwing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-registry-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-registry-"));
   try {
     writeRegistryAtomic("bad.json", { ok: true }, { baseDir: dir });
     // Corrupt it directly.
@@ -30,7 +30,7 @@ test("readRegistry returns null for corrupt JSON instead of throwing", () => {
 });
 
 test("writeRegistryAtomic round-trips through readRegistry", () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-registry-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-registry-"));
   try {
     const ok = writeRegistryAtomic("thing.json", { pid: 123, url: "wss://x" }, { baseDir: dir });
     assert.equal(ok, true);
@@ -41,7 +41,7 @@ test("writeRegistryAtomic round-trips through readRegistry", () => {
 });
 
 test("writeRegistryAtomic never leaves a stray .tmp file behind on success", () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-registry-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-registry-"));
   try {
     writeRegistryAtomic("thing.json", { a: 1 }, { baseDir: dir });
     const entries = readdirSync(dir);
@@ -52,7 +52,7 @@ test("writeRegistryAtomic never leaves a stray .tmp file behind on success", () 
 });
 
 test("clearRegistry removes the file and is a no-op if it's already gone", () => {
-  const dir = mkdtempSync(join(tmpdir(), "helm-registry-"));
+  const dir = mkdtempSync(join(tmpdir(), "weft-registry-"));
   try {
     writeRegistryAtomic("thing.json", { a: 1 }, { baseDir: dir });
     assert.ok(existsSync(join(dir, "thing.json")));

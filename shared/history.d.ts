@@ -1,4 +1,4 @@
-// Type definitions for Helm history-backfill helpers.
+// Type definitions for Weft history-backfill helpers.
 
 /** One backfilled message: a turn yields at most one user + one assistant item. */
 export interface HistoryItem {

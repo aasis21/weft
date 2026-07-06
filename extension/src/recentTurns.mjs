@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// In-memory recent-turns buffer for the Helm extension.
+// In-memory recent-turns buffer for the Weft extension.
 //
 // The CLI's session store (~/.copilot/session-store.db) persists only a turn's FINAL assistant text
 // and leaves it NULL for long / multi-tool / task-ending turns — so DB-backed scrollback shows those
@@ -11,7 +11,7 @@
 // Model: a flat, chronological list of message entries `{ role, text, ts, id }`, capped to the last
 // `max` TURNS (a turn boundary = a user message). Pure + injectable clock → unit-testable.
 
-import { clipText, RECENT_TURNS_DEFAULT } from "@aasis21/helm-shared";
+import { clipText, RECENT_TURNS_DEFAULT } from "@aasis21/weft-shared";
 
 export function createRecentTurns({ max = RECENT_TURNS_DEFAULT, now = () => Date.now() } = {}) {
   const cap = Number.isFinite(max) && max > 0 ? Math.floor(max) : RECENT_TURNS_DEFAULT;

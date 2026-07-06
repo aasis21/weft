@@ -19,7 +19,7 @@ test.describe('Journey: session management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
-    await expect(page.locator('.helm-session')).toBeVisible();
+    await expect(page.locator('.weft-session')).toBeVisible();
   });
 
   test('the drawer lists the joined session and can be dismissed', async ({ page }) => {
@@ -57,7 +57,7 @@ test.describe('Journey: session management', () => {
     // Cancel keeps the session — we are still in the chat surface.
     await confirm.getByRole('button', { name: 'Cancel' }).click();
     await expect(confirm).toHaveCount(0);
-    await expect(page.locator('.helm-session')).toBeVisible();
+    await expect(page.locator('.weft-session')).toBeVisible();
 
     // Trigger it again and confirm the leave.
     await page.locator('.drawer-btn').click();
@@ -67,7 +67,7 @@ test.describe('Journey: session management', () => {
 
     // Removing the last session routes back to the onboarding Landing.
     await expect(page.locator('.landing-shell')).toBeVisible();
-    await expect(page.locator('.helm-session')).toHaveCount(0);
+    await expect(page.locator('.weft-session')).toHaveCount(0);
   });
 
   test('the status-bar menu also offers a "Leave this session" action', async ({ page }) => {

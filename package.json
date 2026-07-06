@@ -1,8 +1,8 @@
 {
-  "name": "helm",
+  "name": "weft",
   "version": "0.0.0",
   "private": true,
-  "description": "Helm — your Copilot command center. Mobile app that binds to live Copilot CLI sessions via a session-bound CLI extension + Supabase Realtime relay.",
+  "description": "Weft — your Copilot command center. Mobile app that binds to live Copilot CLI sessions via a session-bound CLI extension + Supabase Realtime relay.",
   "type": "module",
   "license": "Apache-2.0",
   "workspaces": [

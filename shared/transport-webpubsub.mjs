@@ -9,7 +9,7 @@
 // transport without touching SecureChannel or anything above it.
 //
 // Mapping onto the Transport interface:
-//   - One Helm pairing channel -> one Web PubSub group, named `helm:<channelId>`.
+//   - One Weft pairing channel -> one Web PubSub group, named `weft:<channelId>`.
 //   - publish(event, envelope)  -> client.sendToGroup(group, JSON.stringify({event, envelope}))
 //   - subscribe(event, handler) -> in-memory dispatch off a single "group-message" listener
 //   - onStatus                 -> forwards the SDK's connected/disconnected/stopped events
@@ -20,7 +20,7 @@
 // but Web PubSub's client SDK surface is less stable across versions than Supabase's.
 
 function fail(message) {
-  return new Error(`helm/transport-webpubsub: ${message}`);
+  return new Error(`weft/transport-webpubsub: ${message}`);
 }
 
 /**
@@ -34,7 +34,7 @@ export function createWebPubSubTransport({ client, channelId } = {}) {
   }
   if (!channelId) throw fail("channelId is required");
 
-  const group = `helm:${channelId}`;
+  const group = `weft:${channelId}`;
 
   let closed = false;
   let started = false;
@@ -76,7 +76,7 @@ export function createWebPubSubTransport({ client, channelId } = {}) {
     try {
       parsed = typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
     } catch {
-      return; // Not a Helm envelope frame; ignore.
+      return; // Not a Weft envelope frame; ignore.
     }
     if (!parsed || typeof parsed.event !== "string") return;
     dispatch(parsed.event, parsed.envelope);

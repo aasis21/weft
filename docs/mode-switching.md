@@ -4,7 +4,7 @@
 
 **Verdict: Supported via `session.rpc.mode.set({ mode })` in the installed SDK.**
 
-Helm is a Copilot CLI extension that joins the live foreground session with
+Weft is a Copilot CLI extension that joins the live foreground session with
 `joinSession()`. The public `CopilotSession` class does not currently expose a
 convenience `setMode()` method, but the joined session has typed session-scoped
 RPC methods, including `session.rpc.mode.get()` and `session.rpc.mode.set(...)`.
@@ -49,7 +49,7 @@ async function joinSession(config = {}) {
 }
 ```
 
-### Session mode RPC exists and accepts exactly Helm's mode union
+### Session mode RPC exists and accepts exactly Weft's mode union
 
 `C:\Users\akash\Anya\bridge\node_modules\@github\copilot-sdk\dist\generated\rpc.d.ts`
 
@@ -182,7 +182,7 @@ the agent/session mode. Anya uses it this way:
 await chat.session.send({ prompt: text, attachments: sdkAttachments, mode: mode ?? 'enqueue' });
 ```
 
-Helm should still use `{ mode: "immediate" }` for phone prompts if desired, but
+Weft should still use `{ mode: "immediate" }` for phone prompts if desired, but
 that does not switch interactive/plan/autopilot.
 
 ### Sister/embedding examples
@@ -205,9 +205,9 @@ agent?: string;
 
 Do not confuse custom-agent selection with interactive/plan/autopilot mode.
 
-## Recommended Helm implementation
+## Recommended Weft implementation
 
-Helm already receives a CONTROL `mode` message carrying one of
+Weft already receives a CONTROL `mode` message carrying one of
 `["interactive", "plan", "autopilot"]`. The handler should validate the mode,
 call `session.rpc.mode.set({ mode })`, optionally verify with `get()`, and log
 the result.
@@ -217,21 +217,21 @@ Code sketch for `extension/src/relay.mjs`:
 ```js
 async function applyModeBestEffort(session, mode, logger) {
   if (!MODES.includes(mode)) {
-    logger(`Helm: ignored unsupported mode "${mode}".`, { level: "warning" });
+    logger(`Weft: ignored unsupported mode "${mode}".`, { level: "warning" });
     return;
   }
 
   try {
     if (typeof session.rpc?.mode?.set === "function") {
       const result = await session.rpc.mode.set({ mode });
-      logger(`Helm: mode switched -> ${result?.mode ?? mode}.`, {
+      logger(`Weft: mode switched -> ${result?.mode ?? mode}.`, {
         level: "info",
         ephemeral: false,
       });
       return;
     }
   } catch (err) {
-    logger(`Helm: session.mode.set failed: ${err?.message ?? err}`, {
+    logger(`Weft: session.mode.set failed: ${err?.message ?? err}`, {
       level: "warning",
       ephemeral: false,
     });
@@ -240,7 +240,7 @@ async function applyModeBestEffort(session, mode, logger) {
   // Compatibility fallback only; not the preferred path.
   if (typeof session.send === "function") {
     await session.send({ prompt: `/${mode}`, mode: "immediate" });
-    logger(`Helm: relayed /${mode} as fallback; switch is not guaranteed.`, {
+    logger(`Weft: relayed /${mode} as fallback; switch is not guaranteed.`, {
       level: "warning",
       ephemeral: false,
     });
@@ -267,7 +267,7 @@ setting.
   `onPermissionRequest` hook. It is a separate
   `exit_plan_mode.requested` / `exit_plan_mode.completed` session event flow.
   The response path is exposed as `session.rpc.ui.handlePendingExitPlanMode(...)`
-  (with lower-level `respondToExitPlanMode(...)` types also present), so Helm
+  (with lower-level `respondToExitPlanMode(...)` types also present), so Weft
   relays that event to the phone as an approval banner and forwards the selected
   action back through the UI RPC.
 - If `session.rpc.mode.set` is unavailable or fails consistently, the honest

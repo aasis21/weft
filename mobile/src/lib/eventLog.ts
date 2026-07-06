@@ -1,11 +1,11 @@
 import { Preferences } from '@capacitor/preferences';
-import type { EventEnvelope } from '@aasis21/helm-shared';
+import type { EventEnvelope } from '@aasis21/weft-shared';
 
 // Per-session debug event log. The phone records every envelope it exchanges with the laptop — both
 // inbound (Copilot → phone) and outbound (phone → Copilot) — so the session-detail debug panel can
 // show the raw event chain, newest-first. Mirrors transcripts.ts: Preferences is the source of truth
 // with a localStorage mirror so a browser refresh (web build) restores the log too.
-const PREFIX = 'helm.eventlog.v1.';
+const PREFIX = 'weft.eventlog.v1.';
 const VERSION = 1 as const;
 
 /** Keep at most this many events per session (a ring buffer; oldest fall off the front). */

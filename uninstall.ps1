@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
-# Remove the installed Helm Copilot CLI extension.
+# Remove the installed Weft Copilot CLI extension.
 $ErrorActionPreference = "Stop"
-$dest = Join-Path $env:USERPROFILE ".copilot\extensions\helm"
+$dest = Join-Path $env:USERPROFILE ".copilot\extensions\weft"
 if (Test-Path $dest) {
   Remove-Item -Recurse -Force $dest
   Write-Host "Removed $dest" -ForegroundColor Green

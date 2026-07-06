@@ -7,9 +7,9 @@ import { join } from "node:path";
 
 export function writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk }) {
   if (!channelId || !publicKeyB64 || !privateKeyJwk) {
-    throw new Error("Helm spawn: channelId, publicKeyB64, and privateKeyJwk are required");
+    throw new Error("Weft spawn: channelId, publicKeyB64, and privateKeyJwk are required");
   }
-  const file = join(tmpdir(), `helm-identity-${process.pid}-${randomUUID()}.json`);
+  const file = join(tmpdir(), `weft-identity-${process.pid}-${randomUUID()}.json`);
   const fd = openSync(file, "wx", 0o600);
   try {
     writeFileSync(fd, JSON.stringify({ channelId, publicKeyB64, privateKeyJwk }), "utf8");
@@ -31,7 +31,7 @@ export function detectTerminal(env = process.env, platform = process.platform) {
 export function spawnCopilotSession({ project, name, mode = "default", identity, spawnFn = childSpawn } = {}) {
   const cwd = project?.path;
   if (!cwd) return { ok: false, error: "Project path is required" };
-  const sessionName = name || "helm-session";
+  const sessionName = name || "weft-session";
   let identityFile;
   try {
     identityFile = writeIdentityFile(identity);
@@ -39,8 +39,8 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
     if (mode === "allow-all") copilotArgs.push("--allow-all");
     const env = {
       ...process.env,
-      HELM_IDENTITY_FILE: identityFile,
-      HELM_CHANNEL_ID: identity.channelId,
+      WEFT_IDENTITY_FILE: identityFile,
+      WEFT_CHANNEL_ID: identity.channelId,
     };
     const terminal = detectTerminal();
     const launch = buildLaunch({ terminal, cwd, copilotArgs });

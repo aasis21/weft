@@ -30,7 +30,7 @@ interface StatusBarProps {
   onOpenDebug(): void;
   /** Desktop (#183): the session list is already docked and always visible, so the
    *  hamburger that opens it would be redundant (and confusing — nothing "opens").
-   *  Show a static Helm mark instead, linking to About Helm like a typical app logo. */
+   *  Show a static Weft mark instead, linking to About Weft like a typical app logo. */
   desktopDocked?: boolean;
 }
 
@@ -127,13 +127,13 @@ export function StatusBar({
     <header className="status-bar">
       {desktopDocked ? (
         <button
-          className="icon-btn helm-mark-btn"
+          className="icon-btn weft-mark-btn"
           type="button"
           onClick={onGoHome}
-          title="About Helm"
-          aria-label="About Helm"
+          title="About Weft"
+          aria-label="About Weft"
         >
-          <span className="helm-mark" aria-hidden="true">⎈</span>
+          <span className="weft-mark" aria-hidden="true">⎈</span>
         </button>
       ) : (
         <button

@@ -18,7 +18,7 @@ import {
   parsePairingPayload,
   waitForPeer,
   sayHello,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import { attachRelay } from "../src/relay.mjs";
 
 const auto = process.argv.includes("--auto");
@@ -26,7 +26,7 @@ const auto = process.argv.includes("--auto");
 class FakeSession {
   constructor() {
     this.sessionId = "fake-session-1";
-    this.cwd = "C:\\Users\\akash\\helm";
+    this.cwd = "C:\\Users\\akash\\weft";
     this.sent = [];
     this.modeSetCalls = [];
     this.logs = [];
@@ -165,7 +165,7 @@ async function main() {
   });
   session.emitSession("assistant.message", {
     messageId: "m1",
-    content: "Hello from Helm harness",
+    content: "Hello from Weft harness",
   });
   session.emitSession("tool.execution_start", {
     toolCallId: "t1",
@@ -188,9 +188,9 @@ async function main() {
     { sessionId: session.sessionId },
   );
 
-  await phoneChannel.send(prompt("run the Helm smoke test"));
+  await phoneChannel.send(prompt("run the Weft smoke test"));
   await phoneChannel.send(modeChange("plan"));
-  await waitFor(() => session.sent.some((m) => m.prompt === "run the Helm smoke test"));
+  await waitFor(() => session.sent.some((m) => m.prompt === "run the Weft smoke test"));
   await waitFor(() => session.modeSetCalls.includes("plan"));
   await waitFor(() => seen.modeConfirm);
 
@@ -212,7 +212,7 @@ async function main() {
   assert.equal(session.sent[0].mode, "immediate");
   assert.equal((await session.rpc.mode.get()).mode, "plan");
 
-  console.log("Helm harness smoke passed.");
+  console.log("Weft harness smoke passed.");
 }
 
 function print(quiet, message) {

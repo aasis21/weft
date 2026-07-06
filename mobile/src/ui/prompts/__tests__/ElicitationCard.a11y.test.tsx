@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ElicitationRequestMsg } from '@aasis21/helm-shared';
+import type { ElicitationRequestMsg } from '@aasis21/weft-shared';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 
 describe('ElicitationCard multiselect accessibility', () => {
@@ -52,7 +52,7 @@ describe('ElicitationCard multiselect accessibility', () => {
     } as ElicitationRequestMsg;
 
     const first = render(<ElicitationCard req={req} onSubmit={vi.fn()} onDecline={vi.fn()} onCancel={vi.fn()} />);
-    await user.type(screen.getByRole('textbox', { name: /Project/ }), 'helm');
+    await user.type(screen.getByRole('textbox', { name: /Project/ }), 'weft');
     await user.click(screen.getByRole('button', { name: 'Next →' }));
     await user.type(screen.getByRole('textbox', { name: /Reason/ }), 'reconnect');
     expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
@@ -63,6 +63,6 @@ describe('ElicitationCard multiselect accessibility', () => {
     expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /Reason/ })).toHaveValue('reconnect');
     await user.click(screen.getByRole('button', { name: '← Back' }));
-    expect(screen.getByRole('textbox', { name: /Project/ })).toHaveValue('helm');
+    expect(screen.getByRole('textbox', { name: /Project/ })).toHaveValue('weft');
   });
 });

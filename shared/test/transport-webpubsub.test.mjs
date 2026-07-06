@@ -51,7 +51,7 @@ function createFakeWebPubSubClient(bus = new Map()) {
   return client;
 }
 
-test("connect starts the client and joins the helm group once", async () => {
+test("connect starts the client and joins the weft group once", async () => {
   const client = createFakeWebPubSubClient();
   const transport = createWebPubSubTransport({ client, channelId: "pair-1" });
 
@@ -59,7 +59,7 @@ test("connect starts the client and joins the helm group once", async () => {
   await transport.connect();
 
   assert.equal(client.started, true);
-  assert.deepEqual([...client.joinedGroups], ["helm:pair-1"]);
+  assert.deepEqual([...client.joinedGroups], ["weft:pair-1"]);
 });
 
 test("publishes to a second transport on the same channel and event only", async () => {
@@ -138,7 +138,7 @@ test("publish after close throws", async () => {
 
   await assert.rejects(
     () => transport.publish("stream", envelope),
-    /helm\/transport-webpubsub: publish: transport is closed/
+    /weft\/transport-webpubsub: publish: transport is closed/
   );
 });
 

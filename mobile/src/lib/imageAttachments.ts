@@ -1,4 +1,4 @@
-import type { PromptAttachment } from '@aasis21/helm-shared';
+import type { PromptAttachment } from '@aasis21/weft-shared';
 
 /**
  * Turn a user-picked image File into a relay-ready {@link PromptAttachment}: downscaled,

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Entry point for the SHARED devtunnel relay: spawned DETACHED by devtunnel.mjs's
-// provisionDevTunnelTransport() the first time any Helm CLI session on this machine requests the
+// provisionDevTunnelTransport() the first time any Weft CLI session on this machine requests the
 // `devtunnel` transport, and reused by every session (this one or any other) after that via the
-// registry file it publishes at ~/.helm/devtunnel.json. It owns the full lifecycle of ONE relay
+// registry file it publishes at ~/.weft/devtunnel.json. It owns the full lifecycle of ONE relay
 // server + ONE Dev Tunnel + the `devtunnel host` process:
 //   - starts the local WS relay (relayServer.mjs)
 //   - creates + ports + hosts a Dev Tunnel pointed at that relay
 //   - publishes {pid, relayPort, tunnelId, baseUrl, startedAt} so other processes can find it
 //   - watches its own room occupancy; once nobody has been connected for IDLE_TIMEOUT_MS, deletes
 //     the cloud tunnel, clears the registry file, and exits
-// No CLI session's shutdown owns tearing this down — it tears itself down. This keeps Helm's
+// No CLI session's shutdown owns tearing this down — it tears itself down. This keeps Weft's
 // no-daemon philosophy intact in spirit: nothing is started eagerly or run as an installed
 // service, it's just a plain child process that happens to detach and self-manage its own exit.
 import { fileURLToPath } from "node:url";
@@ -18,8 +18,8 @@ import { findDevTunnelBinary, killProcessTree, run, DEVTUNNEL_REGISTRY_FILE } fr
 import { clearRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { spawn } from "node:child_process";
 
-const IDLE_TIMEOUT_MS = Number(process.env.HELM_DEVTUNNEL_IDLE_MS) || 5 * 60_000;
-const IDLE_CHECK_MS = Number(process.env.HELM_DEVTUNNEL_CHECK_MS) || 30_000;
+const IDLE_TIMEOUT_MS = Number(process.env.WEFT_DEVTUNNEL_IDLE_MS) || 5 * 60_000;
+const IDLE_CHECK_MS = Number(process.env.WEFT_DEVTUNNEL_CHECK_MS) || 30_000;
 const HOST_STARTUP_TIMEOUT_MS = 20_000;
 
 export async function main() {
@@ -48,7 +48,7 @@ export async function main() {
         // best-effort — an orphaned tunnel just expires after 30 days.
       }
     }
-    clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir: process.env.HELM_HOME });
+    clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir: process.env.WEFT_HOME });
   };
 
   try {
@@ -89,7 +89,7 @@ export async function main() {
   writeRegistryAtomic(
     DEVTUNNEL_REGISTRY_FILE,
     { pid: process.pid, relayPort: relay.port, tunnelId, baseUrl, startedAt: Date.now() },
-    { baseDir: process.env.HELM_HOME },
+    { baseDir: process.env.WEFT_HOME },
   );
 
   idleTimer = setInterval(() => {

@@ -1,8 +1,8 @@
-# Netlify build config for the Helm web app (the hosted, install-free viewport).
+# Netlify build config for the Weft web app (the hosted, install-free viewport).
 #
 # This drives a git-connected build. The runtime relay creds are NOT committed here:
 # set them as Netlify environment variables on the site (Site settings > Environment):
-#   VITE_HELM_TRANSPORT = supabase
+#   VITE_WEFT_TRANSPORT = supabase
 #   VITE_SUPABASE_URL    = https://<ref>.supabase.co
 #   VITE_SUPABASE_ANON_KEY = sb_publishable_...   (client-safe publishable key by design)
 #
@@ -10,9 +10,9 @@
 # RLS on realtime.messages plus end-to-end AES-256-GCM, so a public web build is fine.
 
 [build]
-  # Repo root so npm workspaces resolve @aasis21/helm-shared before the mobile build.
+  # Repo root so npm workspaces resolve @aasis21/weft-shared before the mobile build.
   base = "."
-  command = "npm run build -w @aasis21/helm-mobile"
+  command = "npm run build -w @aasis21/weft-mobile"
   publish = "mobile/dist"
 
 [build.environment]

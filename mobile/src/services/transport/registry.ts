@@ -2,10 +2,10 @@ import {
   connectSession,
   createClientFromMaterial,
   pairSession,
-  type HelmClient,
-} from '@/lib/helmClient';
+  type WeftClient,
+} from '@/lib/weftClient';
 import type { StoredPairing } from '@/lib/storage';
-import type { Transport } from '@aasis21/helm-shared';
+import type { Transport } from '@aasis21/weft-shared';
 
 export type ConnectOpts =
   | { raw: string; transport?: Transport }
@@ -13,12 +13,12 @@ export type ConnectOpts =
   | { channelId: string; key: CryptoKey; deviceId?: string; transport: Transport };
 
 export interface TransportRegistry {
-  connect(id: string, opts: ConnectOpts): Promise<HelmClient>;
+  connect(id: string, opts: ConnectOpts): Promise<WeftClient>;
   /** Register an already-created client (e.g. one the runtime paired directly to keep the pairing). */
-  adopt(id: string, client: HelmClient): void;
+  adopt(id: string, client: WeftClient): void;
   /** Move a client to a new id (identity reconcile after a channel rotation). */
   rehome(from: string, to: string): void;
-  get(id: string): HelmClient | undefined;
+  get(id: string): WeftClient | undefined;
   has(id: string): boolean;
   dispose(id: string): void;
   disposeAll(): void;
@@ -26,9 +26,9 @@ export interface TransportRegistry {
 }
 
 export function createTransportRegistry(deps?: {
-  createClient?: (opts: ConnectOpts) => HelmClient | Promise<HelmClient>;
+  createClient?: (opts: ConnectOpts) => WeftClient | Promise<WeftClient>;
 }): TransportRegistry {
-  const clients = new Map<string, HelmClient>();
+  const clients = new Map<string, WeftClient>();
   const createClient = deps?.createClient ?? createDefaultClient;
 
   return {
@@ -77,17 +77,17 @@ export function createTransportRegistry(deps?: {
   };
 }
 
-async function createDefaultClient(opts: ConnectOpts): Promise<HelmClient> {
+async function createDefaultClient(opts: ConnectOpts): Promise<WeftClient> {
   if ('raw' in opts) {
-    const { client } = await pairSession(opts.raw, helmClientOptions(opts));
+    const { client } = await pairSession(opts.raw, weftClientOptions(opts));
     return client;
   }
   if ('pairing' in opts) {
-    return connectSession(opts.pairing, helmClientOptions(opts));
+    return connectSession(opts.pairing, weftClientOptions(opts));
   }
   return createClientFromMaterial(opts);
 }
 
-function helmClientOptions(opts: { transport?: Transport }): { transport?: Transport } | undefined {
+function weftClientOptions(opts: { transport?: Transport }): { transport?: Transport } | undefined {
   return opts.transport === undefined ? undefined : { transport: opts.transport };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EnvelopeBase, EventEnvelope } from '@aasis21/helm-shared';
+import type { EnvelopeBase, EventEnvelope } from '@aasis21/weft-shared';
 import * as B from '@/test/helpers/builders';
 import { emptySession, type Session, type SessionMeta } from '../model';
 import { applyEnvelope, markHistoryLoading } from '../reducers/applyEnvelope';

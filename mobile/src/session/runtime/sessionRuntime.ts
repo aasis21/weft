@@ -15,7 +15,7 @@ import {
   forgetDevice as forgetDeviceMessage,
   voiceMode,
   RECENT_TURNS_DEFAULT,
-} from '@aasis21/helm-shared';
+} from '@aasis21/weft-shared';
 import type {
   EventEnvelope,
   PairingPayload,
@@ -26,9 +26,9 @@ import type {
   SpawnPairingMsg,
   SpawnResultMsg,
   StateSnapshotMsg,
-} from '@aasis21/helm-shared';
-import { connectDevice as connectDeviceSession, connectSession, pairSession, getSenderName } from '@/lib/helmClient';
-import type { HelmClient } from '@/lib/helmClient';
+} from '@aasis21/weft-shared';
+import { connectDevice as connectDeviceSession, connectSession, pairSession, getSenderName } from '@/lib/weftClient';
+import type { WeftClient } from '@/lib/weftClient';
 import {
   loadLastActiveSessionId,
   loadSessions,
@@ -450,7 +450,7 @@ export class SessionRuntime {
   }
 
   // --- connecting / attaching ----------------------------------------------------------------------
-  private attach(channelId: string, client: HelmClient): void {
+  private attach(channelId: string, client: WeftClient): void {
     const ctrl = this.controllers.get(channelId);
     if (!ctrl || !this.session(channelId)) {
       void client.close().catch(() => {});
@@ -483,7 +483,7 @@ export class SessionRuntime {
   }
 
   /** Enter unconfirmed 'connecting' and arm the liveness deadline. The single honest-Live guard. */
-  private beginHostConfirm(channelId: string, client: HelmClient): void {
+  private beginHostConfirm(channelId: string, client: WeftClient): void {
     const ctrl = this.controllers.get(channelId);
     if (!ctrl || ctrl.ephemeral || ctrl.client !== client) return;
     const session = this.session(channelId);
@@ -552,7 +552,7 @@ export class SessionRuntime {
 
   private handleTransportStatus(
     channelId: string,
-    client: HelmClient,
+    client: WeftClient,
     status: 'connected' | 'disconnected',
   ): void {
     const ctrl = this.controllers.get(channelId);
@@ -584,7 +584,7 @@ export class SessionRuntime {
     });
   }
 
-  private syncHistory(channelId: string, _client: HelmClient): void {
+  private syncHistory(channelId: string, _client: WeftClient): void {
     const ctrl = this.controllers.get(channelId);
     const session = this.session(channelId);
     if (!ctrl || !session || ctrl.ephemeral) return;
@@ -644,7 +644,7 @@ export class SessionRuntime {
     };
   }
 
-  private onMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
+  private onMessage(channelId: string, client: WeftClient, message: EventEnvelope): void {
     const ctrl = this.controllers.get(channelId);
     const before = this.session(channelId);
     if (!ctrl || !before) return;
@@ -792,7 +792,7 @@ export class SessionRuntime {
 
   // --- adding sessions -----------------------------------------------------------------------------
   private async openPairedSession(
-    client: HelmClient,
+    client: WeftClient,
     pairing: StoredPairing,
     opts: {
       title?: string | null;
@@ -917,7 +917,7 @@ export class SessionRuntime {
     const channelId = parsed.channelId;
     const prior = this.device(channelId);
     // Only a genuinely NEW device counts against the cap — re-scanning an already-registered
-    // listener (e.g. after `helm-cli start` was restarted and minted a fresh channelId, before
+    // listener (e.g. after `weft-cli start` was restarted and minted a fresh channelId, before
     // reconcileDevice folds it in) must never be blocked by its own prior entry.
     if (!prior && this.store.getState().sessions.devices.length >= MAX_DEVICES) {
       throw new Error(
@@ -1079,7 +1079,7 @@ export class SessionRuntime {
     this.store.dispatch(deviceDefaultSet(channelId));
   }
 
-  private attachListener(channelId: string, client: HelmClient): void {
+  private attachListener(channelId: string, client: WeftClient): void {
     const ctrl = this.ensureListenerController(channelId);
     const previous = ctrl.client;
     ctrl.detach();
@@ -1110,7 +1110,7 @@ export class SessionRuntime {
     }
   }
 
-  private onListenerMessage(channelId: string, client: HelmClient, message: EventEnvelope): void {
+  private onListenerMessage(channelId: string, client: WeftClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
     this.recordDeviceEvent(channelId, 'in', message);
@@ -1124,7 +1124,7 @@ export class SessionRuntime {
       const msg = message.msg as ProjectListMsg;
       this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
-      // The listener's deviceId is stable across `helm-cli start` restarts even though this
+      // The listener's deviceId is stable across `weft-cli start` restarts even though this
       // channelId is a fresh ephemeral pairing channel (forward secrecy). Fold any stale entry
       // for the same physical laptop into this one instead of leaving a dead duplicate around.
       if (msg.deviceId) void this.reconcileDevice(channelId, msg.deviceId);
@@ -1642,7 +1642,7 @@ export class SessionRuntime {
       }
       // Device (listener) channels: flip the Online dot to Offline once its heartbeat/lastSeenAt
       // goes stale, rather than trusting the transport's own connect state alone (a hung/crashed
-      // `helm-cli` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
+      // `weft-cli` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
       for (const device of this.store.getState().sessions.devices) {
         if (!device.connected || !device.lastSeenAt) continue;
         if (now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {

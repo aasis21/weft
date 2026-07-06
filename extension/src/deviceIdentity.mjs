@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// A STABLE, NON-SECRET device id for the `helm-cli` listener, persisted at ~/.helm/device-id.
+// A STABLE, NON-SECRET device id for the `weft-cli` listener, persisted at ~/.weft/device-id.
 //
-// Deliberately separate from pairing crypto: `helm-cli start` still mints a FRESH keypair +
+// Deliberately separate from pairing crypto: `weft-cli start` still mints a FRESH keypair +
 // channelId every run (see listener.mjs) so the encrypted session key never survives a restart —
 // that's what keeps every relayed conversation forward-secret. This id carries no cryptographic
 // weight at all; it is just an opaque random tag so the phone can recognize "this is the same
@@ -12,12 +12,12 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { helmHome } from "./projects.mjs";
+import { weftHome } from "./projects.mjs";
 
 const DEVICE_ID_FILE = "device-id";
 
 export function getOrCreateDeviceId({ baseDir } = {}) {
-  const dir = helmHome(baseDir);
+  const dir = weftHome(baseDir);
   const file = join(dir, DEVICE_ID_FILE);
   try {
     const existing = readFileSync(file, "utf8").trim();

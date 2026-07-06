@@ -16,7 +16,7 @@ import {
   randomChannelId,
   spawnPairing,
   spawnResult,
-} from "@aasis21/helm-shared";
+} from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransportForChannel } from "./transportFactory.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
@@ -30,12 +30,12 @@ const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"
 // socket is up.
 const DEVICE_HEARTBEAT_MS = 120_000;
 
-// A machine-wide, cross-session view of "which phone is bound to which live Helm listener right
-// now", persisted at ~/.helm/connections.json (see registryFile.mjs — same atomic-write + pid
+// A machine-wide, cross-session view of "which phone is bound to which live Weft listener right
+// now", persisted at ~/.weft/connections.json (see registryFile.mjs — same atomic-write + pid
 // liveness pattern as devtunnel.json). Diagnostic only: it never gates or changes pairing
 // behavior (each listener still binds/rejects peers purely from its own in-memory boundPeerPub),
 // it just makes that already-existing state observable across processes — e.g. a future
-// `/helm status` or the mobile debug panel could show every session a given phone is paired to,
+// `/weft status` or the mobile debug panel could show every session a given phone is paired to,
 // and a listener could warn if the same phone is already bound live somewhere else.
 const CONNECTIONS_REGISTRY_FILE = "connections.json";
 
@@ -49,7 +49,7 @@ function pruneDeadConnections(map) {
   return next;
 }
 
-// NOTE: concurrent read-modify-write from multiple Helm sessions binding/unbinding at almost the
+// NOTE: concurrent read-modify-write from multiple Weft sessions binding/unbinding at almost the
 // exact same instant could race and drop one session's update — acceptable for a diagnostic-only,
 // low-frequency (once per phone connect/disconnect, not the message hot path) view.
 function upsertConnection(channelId, entry, baseDir) {
@@ -74,10 +74,10 @@ export function createListener({
   spawnFn,
   projectsApi = projectsStore,
   log = console,
-  // ~/.helm by default (see projects.mjs's helmHome()) — overridable so tests don't touch a real
-  // user's Helm home when exercising the connections.json registry.
+  // ~/.weft by default (see projects.mjs's weftHome()) — overridable so tests don't touch a real
+  // user's Weft home when exercising the connections.json registry.
   connectionsHome = undefined,
-  // Optional UI hooks so a host (e.g. helm-cli) can render a live connection/heartbeat indicator
+  // Optional UI hooks so a host (e.g. weft-cli) can render a live connection/heartbeat indicator
   // without this module knowing anything about terminals or rendering.
   onDeviceConnected = null,
   onDeviceDisconnected = null,
@@ -129,7 +129,7 @@ export function createListener({
       keyPair: listenerKeyPair,
       connect: true,
       channelId: listenerChannelId,
-      senderId: "helm-listener",
+      senderId: "weft-listener",
       senderName: hostname(),
       onPeer: bindPeer,
     });
@@ -179,7 +179,7 @@ export function createListener({
   async function bindPeer({ key, peer }) {
     if (stopped) return;
     if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
-      log?.warn?.(`Helm Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
+      log?.warn?.(`Weft Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
       return;
     }
     // The phone re-broadcasts HELLO on a short retry loop until it sees our ACK (see
@@ -201,7 +201,7 @@ export function createListener({
       key,
       identity: {
         channelId: listenerChannelId,
-        senderId: "helm-listener",
+        senderId: "weft-listener",
         senderName: hostname(),
       },
     });
@@ -348,7 +348,7 @@ export function createListener({
       return defaultProject;
     }
     // No project registered/selected as default yet (e.g. a fresh install with no
-    // `helm-cli add-project` run) — rather than erroring out, fall back to the user's home
+    // `weft-cli add-project` run) — rather than erroring out, fall back to the user's home
     // directory so the phone can still spawn a working session immediately.
     return { name: "home", path: homedir() };
   }

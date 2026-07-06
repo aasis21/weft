@@ -1,6 +1,6 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { EVENT_TYPE, SUBTYPE } from '@aasis21/helm-shared';
-import type { EventEnvelope, HistoryMsg } from '@aasis21/helm-shared';
+import { EVENT_TYPE, SUBTYPE } from '@aasis21/weft-shared';
+import type { EventEnvelope, HistoryMsg } from '@aasis21/weft-shared';
 import type {
   ApprovalRequestMsg,
   DebugEvent,
@@ -205,7 +205,7 @@ const sessionsSlice = createSlice({
       }
     },
     // Folds a stale duplicate device (same physical laptop, an OLDER ephemeral channelId from a
-    // prior `helm-cli start` run) into the surviving `channelId` entry. See devices.ts
+    // prior `weft-cli start` run) into the surviving `channelId` entry. See devices.ts
     // reconcileDeviceId — this reducer mirrors that persisted merge into redux state.
     deviceReconciled(
       state,

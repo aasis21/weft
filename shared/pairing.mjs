@@ -1,4 +1,4 @@
-// Helm pairing handshake.
+// Weft pairing handshake.
 //
 // ECDH needs BOTH public keys. The laptop (extension) shows ITS public key + channelId in the
 // QR code. The phone scans it, then must deliver ITS OWN public key back to the laptop so both
@@ -23,7 +23,7 @@ import { EVENT_TYPE, SUBTYPE } from "./messages.mjs";
 
 export const PAIR_VERSION = 1;
 
-/** Pairing payload kinds: a normal mirrored-session QR vs an ephemeral `helm-cli` listener QR. */
+/** Pairing payload kinds: a normal mirrored-session QR vs an ephemeral `weft-cli` listener QR. */
 export const PAIR_KIND = Object.freeze({ SESSION: "session", LISTENER: "listener" });
 
 /**
@@ -58,16 +58,16 @@ function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {
  * descriptor (kind + non-secret endpoint) the laptop resolved from its own env — the laptop is
  * the single source of truth for transport selection; the phone builds its transport straight
  * from this, with no pre-baked config of its own. `kind` marks whether this is a normal mirrored
- * session ("session", default) or a `helm-cli` listener ("listener") the phone should register as
+ * session ("session", default) or a `weft-cli` listener ("listener") the phone should register as
  * a spawn-capable device rather than open as a session.
  */
 export function buildPairingPayload({ channelId, publicKeyB64, transport, kind = PAIR_KIND.SESSION }) {
   if (!channelId || !publicKeyB64) {
-    throw new Error("helm/pairing: channelId and publicKeyB64 are required");
+    throw new Error("weft/pairing: channelId and publicKeyB64 are required");
   }
   if (!isValidTransportDescriptor(transport)) {
     throw new Error(
-      'helm/pairing: transport descriptor is required (kind: "local" | "supabase" | "webpubsub" | "devtunnel")',
+      'weft/pairing: transport descriptor is required (kind: "local" | "supabase" | "webpubsub" | "devtunnel")',
     );
   }
   const payload = { v: PAIR_VERSION, channelId, pub: publicKeyB64, transport };
@@ -86,7 +86,7 @@ export function parsePairingPayload(input) {
     typeof o.pub !== "string" ||
     !isValidTransportDescriptor(o.transport)
   ) {
-    throw new Error("helm/pairing: invalid pairing payload");
+    throw new Error("weft/pairing: invalid pairing payload");
   }
   const kind = o.kind === PAIR_KIND.LISTENER ? PAIR_KIND.LISTENER : PAIR_KIND.SESSION;
   return { channelId: o.channelId, publicKeyB64: o.pub, kind, transport: o.transport };
@@ -121,9 +121,9 @@ export async function listenForPeers({
   senderId = "copilot",
   senderName = "Copilot",
 } = {}) {
-  if (!transport) throw new Error("helm/pairing: transport is required");
-  if (!keyPair?.privateKey) throw new Error("helm/pairing: keyPair is required");
-  if (typeof onPeer !== "function") throw new Error("helm/pairing: onPeer is required");
+  if (!transport) throw new Error("weft/pairing: transport is required");
+  if (!keyPair?.privateKey) throw new Error("weft/pairing: keyPair is required");
+  if (typeof onPeer !== "function") throw new Error("weft/pairing: onPeer is required");
 
   const unsub = transport.subscribe(EVENT_TYPE.PAIR, async (payload) => {
     const hello = readHello(payload);
@@ -171,8 +171,8 @@ export async function waitForPeer({
   senderId = "copilot",
   senderName = "Copilot",
 } = {}) {
-  if (!transport) throw new Error("helm/pairing: transport is required");
-  if (!keyPair?.privateKey) throw new Error("helm/pairing: keyPair is required");
+  if (!transport) throw new Error("weft/pairing: transport is required");
+  if (!keyPair?.privateKey) throw new Error("weft/pairing: keyPair is required");
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -215,7 +215,7 @@ export async function waitForPeer({
     }
     if (timeoutMs > 0) {
       timer = setTimeout(
-        () => finish(reject, new Error("helm/pairing: timed out waiting for phone")),
+        () => finish(reject, new Error("weft/pairing: timed out waiting for phone")),
         timeoutMs,
       );
       timer.unref?.();
@@ -249,11 +249,11 @@ export async function sayHello({
   timeoutMs = 20_000,
   retryMs = 1_200,
 } = {}) {
-  if (!transport) throw new Error("helm/pairing: transport is required");
+  if (!transport) throw new Error("weft/pairing: transport is required");
   if (!keyPair?.privateKey || !keyPair.publicKeyB64) {
-    throw new Error("helm/pairing: keyPair is required");
+    throw new Error("weft/pairing: keyPair is required");
   }
-  if (!peerPublicKeyB64) throw new Error("helm/pairing: peerPublicKeyB64 is required");
+  if (!peerPublicKeyB64) throw new Error("weft/pairing: peerPublicKeyB64 is required");
 
   const key = await deriveSessionKey(keyPair.privateKey, peerPublicKeyB64);
   const buildHello = () =>
@@ -301,7 +301,7 @@ export async function sayHello({
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error("helm/pairing: no ack from laptop"));
+      reject(new Error("weft/pairing: no ack from laptop"));
     }, timeoutMs);
     timer.unref?.();
 

@@ -1,38 +1,38 @@
-# Helm
+# Weft
 
-**Your Copilot command center.** Helm is a secure mobile app that binds to your live
+**Your Copilot command center.** Weft is a secure mobile app that binds to your live
 Copilot CLI sessions: watch the token stream, answer permission prompts, send prompts, and
 switch modes — all from your phone.
 
-> **Try it now (no install):** **<https://usehelm.netlify.app>** — open on your phone,
+> **Try it now (no install):** **<https://useweft.netlify.app>** — open on your phone,
 > scan the pairing QR your terminal prints (or paste it), and you're bound to the session.
 
 ### Install the extension on your laptop
 
-One line. Downloads the prebuilt extension into `~/.copilot/extensions/helm/` (where
+One line. Downloads the prebuilt extension into `~/.copilot/extensions/weft/` (where
 Copilot CLI auto-discovers it), pre-wired to the hosted relay — no clone, no Node build:
 
 ```powershell
 # Windows (PowerShell)
-irm https://usehelm.netlify.app/install.ps1 | iex
+irm https://useweft.netlify.app/install.ps1 | iex
 ```
 
 ```bash
 # macOS / Linux
-curl -fsSL https://usehelm.netlify.app/install.sh | bash
+curl -fsSL https://useweft.netlify.app/install.sh | bash
 ```
 
-Then start `copilot` in any repo, open **<https://usehelm.netlify.app>** on your phone,
-scan the QR (or run `/helm` to re-show it), and approve/deny from anywhere.
+Then start `copilot` in any repo, open **<https://useweft.netlify.app>** on your phone,
+scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 
 - **Zero-config** — uses the creator's hosted relay (a client-safe publishable key + RLS +
   end-to-end AES-256-GCM; Supabase only ever sees ciphertext).
 - **Run your own relay** — installer flags let you point at your own Supabase project:
   `... | iex` becomes
-  `& ([scriptblock]::Create((irm https://usehelm.netlify.app/install.ps1))) -SupabaseUrl <url> -SupabaseKey <key>`
-  on Windows, or `HELM_SUPABASE_URL=<url> HELM_SUPABASE_KEY=<key> bash -c "$(curl -fsSL https://usehelm.netlify.app/install.sh)"` on Unix.
+  `& ([scriptblock]::Create((irm https://useweft.netlify.app/install.ps1))) -SupabaseUrl <url> -SupabaseKey <key>`
+  on Windows, or `WEFT_SUPABASE_URL=<url> WEFT_SUPABASE_ANON_KEY=<key> bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"` on Unix.
   Prefer building from source? Use [`setup.ps1` / `setup.sh`](docs/setup.md).
-- **Uninstall** — delete `~/.copilot/extensions/helm/`.
+- **Uninstall** — delete `~/.copilot/extensions/weft/`.
 
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
 > [`aasis21/anya`](https://github.com/aasis21/anya), and
@@ -44,9 +44,9 @@ scan the QR (or run `/helm` to re-show it), and approve/deny from anywhere.
 
 ```
 +------------------------------+        +------------------------------+        +-------------------------------+
-| Helm Mobile                  |        |   Supabase Realtime          |        |  Laptop terminal              |
+| Weft Mobile                  |        |   Supabase Realtime          |        |  Laptop terminal              |
 | (React + Capacitor, Android) |        |   Broadcast channel          |        |  copilot (parent)             |
-|                              |        |   private:helm:<channelId>   |        |   └─ extension.mjs (child)    |
+|                              |        |   private:weft:<channelId>   |        |   └─ extension.mjs (child)    |
 |  • scans QR (channel + pub)  |  WSS   |   • in-memory pub/sub        |  WSS   |   • joinSession()             |
 |  • ECDH → AES-256-GCM        | <----> |   • zero DB persistence      | <----> |   • onPermissionRequest→relay |
 |  • decrypts token stream     |        |   • RLS-gated private chan   |        |   • on(assistant.message)→push|
@@ -62,7 +62,7 @@ Three layers, one monorepo:
 |---|---|
 | `extension/` | The Copilot CLI extension (`joinSession`) + a local test **harness** that mimics the phone with no Supabase needed. |
 | `shared/` | Contracts imported by **both** ends: message schema, E2E crypto (ECDH→AES-GCM), and a pluggable transport (LocalTransport now → SupabaseTransport later). |
-| `mobile/` | React + Vite + Capacitor app (Android first); also ships as a hosted **web app** ([usehelm.netlify.app](https://usehelm.netlify.app)) with in-browser camera QR scanning. |
+| `mobile/` | React + Vite + Capacitor app (Android first); also ships as a hosted **web app** ([useweft.netlify.app](https://useweft.netlify.app)) with in-browser camera QR scanning. |
 
 ### Design principles
 - **Approval = pure relay of native Copilot behavior.** The extension forwards the *native*
@@ -82,7 +82,7 @@ Three layers, one monorepo:
 - The extension is authored in `extension/src/` and bundled (esbuild) to a single
   `extension/dist/extension.mjs`. `@github/copilot-sdk` is marked **external** (the CLI provides
   it at runtime); everything else (e.g. `@supabase/supabase-js`, `shared/`) is bundled in.
-- Install copies `extension/dist/` into `~/.copilot/extensions/helm/`, where Copilot CLI
+- Install copies `extension/dist/` into `~/.copilot/extensions/weft/`, where Copilot CLI
   auto-discovers it (see `setup.*` / `install.*`). Crypto uses Web Crypto — no native deps.
 - For local development you do **not** need to install into `~/.copilot`: run the **harness**
   (`extension/harness/`) which drives the extension logic against `LocalTransport`.
@@ -93,10 +93,10 @@ Three layers, one monorepo:
 
 ```sh
 npm install                                 # resolve workspaces (shared, extension, mobile)
-npm test -w @aasis21/helm-shared            # crypto + pairing + transport + message tests
+npm test -w @aasis21/weft-shared            # crypto + pairing + transport + message tests
 node extension/harness/harness.mjs --auto   # full relay loop vs a simulated phone (no Supabase)
-npm run build -w @aasis21/helm-extension    # bundle -> extension/dist/extension.mjs
-npm run build -w @aasis21/helm-mobile       # Vite production build
+npm run build -w @aasis21/weft-extension    # bundle -> extension/dist/extension.mjs
+npm run build -w @aasis21/weft-mobile       # Vite production build
 cd mobile && npm run dev                    # then pick "Demo / Simulator"
 ```
 
@@ -127,7 +127,7 @@ See [`docs/setup.md`](docs/setup.md) for the full developer guide.
 - **Vitest = breadth.** The exhaustive scenario matrix — join, resume-dedupe, remove→re-join,
   network drop→catch-up, state snapshot, approvals, elicitations, streaming, the 20s/30s heartbeat
   watchdog, persistence-across-restart — drives the **real `SessionManager`** through a mocked
-  transport (`FakeHelmClient`) with fake timers, so no network, crypto, or Supabase is touched. Plus
+  transport (`FakeWeftClient`) with fake timers, so no network, crypto, or Supabase is touched. Plus
   pure-logic (`reduceTimeline`, `sessions`, `transcripts`, `storage`) and React component tests (RTL).
 - **Playwright = depth.** A few *bigger journeys* against `dist/` in a real phone viewport (412×915),
   driven by the in-app demo simulator: `journey-connect` (Landing→Join→Session navigation),
@@ -138,9 +138,9 @@ See [`docs/setup.md`](docs/setup.md) for the full developer guide.
 
 ```sh
 npm test                                   # all workspaces: shared + extension + mobile
-npm test -w @aasis21/helm-mobile           # just the mobile Vitest unit/scenario suite
-npm run coverage -w @aasis21/helm-mobile   # mobile coverage table (report-only, no gate)
-npm run test:e2e -w @aasis21/helm-mobile   # build dist/ + run the Playwright journeys
+npm test -w @aasis21/weft-mobile           # just the mobile Vitest unit/scenario suite
+npm run coverage -w @aasis21/weft-mobile   # mobile coverage table (report-only, no gate)
+npm run test:e2e -w @aasis21/weft-mobile   # build dist/ + run the Playwright journeys
 ```
 
 ---
@@ -154,7 +154,7 @@ crypto, pairing handshake, message protocol, pluggable transport), the CLI exten
 switching, on-device approval notifications, lifecycle), its local harness, and the
 React/Capacitor app (pairing, live stream, approval cards, prompt composer, mode selector,
 session-ended) all build and pass their checks. A real Supabase relay (RLS-gated Broadcast)
-is provisioned and the app is deployed at **[usehelm.netlify.app](https://usehelm.netlify.app)**
+is provisioned and the app is deployed at **[useweft.netlify.app](https://useweft.netlify.app)**
 with one-line installers for the laptop extension.
 
 **Remaining:** a full real-device pass (physical phone ↔ laptop over the live relay), plus

@@ -23,8 +23,8 @@ describe('settings persistence', () => {
 
     expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, theme: 'dark' });
     expect(document.documentElement.dataset.theme).toBe('dark');
-    expect(localStorage.getItem('helm.settings.v1')).toContain('voiceAutoRelisten');
-    expect((await memoryPreferences.get({ key: 'helm.settings.v1' })).value).toContain('dark');
+    expect(localStorage.getItem('weft.settings.v1')).toContain('voiceAutoRelisten');
+    expect((await memoryPreferences.get({ key: 'weft.settings.v1' })).value).toContain('dark');
 
     applyTheme('system');
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
