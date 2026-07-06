@@ -14,6 +14,7 @@ import {
 } from "@aasis21/weft-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
 import { provisionDevTunnelTransport } from "./devtunnel.mjs";
+import { weftHome } from "./projects.mjs";
 
 export function loadLocalEnv({ files } = {}) {
   if (typeof parseEnv !== "function") return;
@@ -30,8 +31,11 @@ export function loadLocalEnv({ files } = {}) {
   }
 }
 
+// ~/.weft/.env is canonical (see extension.mjs's loadLocalEnv for the full rationale: it keeps
+// ~/.copilot/extensions/weft holding only installed code, never user config). The install-dir
+// .env and a launch-cwd .env remain as fallbacks for pre-existing installs.
 function defaultEnvFiles() {
-  const candidates = [];
+  const candidates = [join(weftHome(), ".env")];
   try {
     candidates.push(join(dirname(fileURLToPath(import.meta.url)), ".env"));
   } catch {

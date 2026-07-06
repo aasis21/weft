@@ -53,8 +53,8 @@ and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 > installer; the agent only ships it.
 
 **1. Install the extension** (builds + copies the single bundled `extension.mjs` into
-`~/.copilot/extensions/weft/`, where the CLI auto-discovers it, and copies a colocated
-`.env` if present):
+`~/.copilot/extensions/weft/`, where the CLI auto-discovers it — that directory holds
+installed **code only**; a colocated `.env` is copied to `~/.weft/.env` instead, if present):
 
 ```sh
 ./setup.ps1     # Windows
@@ -63,8 +63,11 @@ and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 ```
 
 The extension auto-loads `WEFT_SUPABASE_URL` / `WEFT_SUPABASE_ANON_KEY` /
-`WEFT_TRANSPORT=supabase` from a `.env` next to it (or inherits them from the shell that
-launches `copilot`; exported shell vars win). The names are Weft-namespaced so a generic
+`WEFT_TRANSPORT=supabase` from `~/.weft/.env` — the canonical, user-facing config location
+(alongside `projects.json` / `transport.json`; see `weftHome()` in `extension/src/projects.mjs`)
+— or inherits them from the shell that launches `copilot` (exported shell vars win). An
+install-dir `.env` and a launch-cwd `.env` are still read as fallbacks for pre-existing
+installs. The names are Weft-namespaced so a generic
 `SUPABASE_URL` you may have exported for an unrelated project can't hijack the relay; the
 generic names still work as a fallback when the namespaced ones are unset.
 

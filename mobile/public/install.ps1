@@ -6,8 +6,9 @@
   Downloads the prebuilt Weft Copilot CLI extension (+ its two standalone companion bundles:
   relayServerProcess.mjs for the shared devtunnel relay, and weft.mjs — the "Device Station"
   CLI you can run on any machine, extension or no extension) and drops them where `copilot`
-  auto-discovers extensions (~/.copilot/extensions/weft). Also registers a `weft` command on
-  your PATH. No git clone, no Node build required — just Node itself.
+  auto-discovers extensions (~/.copilot/extensions/weft — CODE only). All user config (relay
+  .env, projects, transport choice) lives separately in ~/.weft. Also registers a `weft` command
+  on your PATH. No git clone, no Node build required — just Node itself.
 
   Designed to be run with:
     irm https://useweft.netlify.app/install.ps1 | iex
@@ -120,9 +121,17 @@ Ok "weft.mjs -> $InstallDir  $(Dim '(standalone Device Station CLI)')"
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: write / migrate the .env relay config.
+#
+# Canonical location is ~/.weft/.env — user config lives in ~/.weft (alongside projects.json /
+# transport.json), so ~/.copilot/extensions/weft only ever holds installed CODE. If an older
+# install left a .env next to the extension, its values are migrated in and the old file is
+# removed so the split stays clean going forward.
 # ---------------------------------------------------------------------------------------------
 StepHeader 3 $TOTAL_STEPS 'Writing relay config'
-$envPath = Join-Path $InstallDir '.env'
+$weftHome = Join-Path $env:USERPROFILE '.weft'
+New-Item -ItemType Directory -Force -Path $weftHome | Out-Null
+$envPath = Join-Path $weftHome '.env'
+$legacyEnvPath = Join-Path $InstallDir '.env'
 $envTemplate = @"
 # Weft relay config. The publishable key is client-safe by design; the channel is
 # guarded by Supabase RLS + end-to-end AES-256-GCM. To run your own relay, swap these
@@ -140,6 +149,16 @@ WEFT_SUPABASE_URL=$SupabaseUrl
 WEFT_SUPABASE_ANON_KEY=$SupabaseKey
 WEFT_APPROVAL_TIMEOUT_MS=120000
 "@
+
+if ((Test-Path $legacyEnvPath) -and -not (Test-Path $envPath)) {
+    # First run after upgrading from a version that wrote .env next to the extension: move it,
+    # don't copy — ~/.copilot/extensions/weft should hold only code from here on.
+    Move-Item -Path $legacyEnvPath -Destination $envPath
+    Ok "moved your .env: $legacyEnvPath -> $envPath"
+} elseif (Test-Path $legacyEnvPath) {
+    Remove-Item -Path $legacyEnvPath -Force
+    Ok "removed stale $legacyEnvPath (your config already lives in $envPath)"
+}
 
 if ((Test-Path $envPath) -and -not $Force) {
     # Auto-migrate an older .env (generic SUPABASE_* only) by adding the namespaced keys,
@@ -202,4 +221,4 @@ Write-Host ''
 Write-Host "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
 Write-Host "  (no Copilot CLI open, just this)? Open a new terminal and run: $(Cyan 'weft start')"
 Write-Host ''
-Write-Host (Dim "Uninstall: Remove-Item -Recurse -Force `"$InstallDir`"")
+Write-Host (Dim "Uninstall: Remove-Item -Recurse -Force `"$InstallDir`", `"$weftHome`"")

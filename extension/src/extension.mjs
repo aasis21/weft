@@ -16,6 +16,7 @@ import {
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+import { weftHome } from "./projects.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (env/config-backed) plus the async,
 // self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
@@ -37,9 +38,9 @@ const ui = {
 };
 
 // Best-effort: load SUPABASE_URL / SUPABASE_ANON_KEY / WEFT_TRANSPORT from a colocated
-// `.env` (next to the installed extension or in the launch cwd) so operators don't have to
-// export them by hand before every `copilot`. Already-exported shell vars always win;
-// a missing/unreadable file is a silent no-op. Never commit a real `.env` (it is gitignored).
+// `.env` so operators don't have to export them by hand before every `copilot`.
+// Already-exported shell vars always win; a missing/unreadable file is a silent no-op.
+// Never commit a real `.env` (it is gitignored).
 function loadLocalEnv() {
   if (typeof parseEnv !== "function") return;
   const here = (() => {
@@ -49,12 +50,14 @@ function loadLocalEnv() {
       return null;
     }
   })();
-  // The install-dir .env (next to a shipped extension) is canonical, so it is tried first
-  // and its values win; the launch cwd .env is a secondary fallback. Both are merged — we do
-  // NOT stop after the first readable file, so a partial cwd/.env can't mask the install one.
+  // ~/.weft/.env is the canonical, user-facing config location (kept alongside projects.json /
+  // transport.json — see projects.mjs's weftHome()) so ~/.copilot/extensions/weft only ever
+  // holds installed CODE, never user config. The old install-dir .env (next to the shipped
+  // extension) and a launch-cwd .env remain as fallbacks for installs made before this split —
+  // all three are merged (we do NOT stop after the first readable file) and ~/.weft wins ties.
   // Any already-exported process env still wins per key (see the collision note in
   // createTransport for why Weft uses WEFT_SUPABASE_* rather than generic SUPABASE_*).
-  const candidates = [];
+  const candidates = [join(weftHome(), ".env")];
   if (here) candidates.push(join(here, ".env"));
   candidates.push(join(process.cwd(), ".env"));
   for (const file of candidates) {
@@ -179,6 +182,10 @@ const session = await joinSession({
     },
   ],
 });
+
+// A one-line hint on every session start, same idea as vox's boot log — tells the operator this
+// extension is live and how to reach it, without waiting for them to already know `/weft` exists.
+session.log?.(`${ui.brand("Weft loaded")} — run ${ui.cyan("/weft")} to pair your phone for a remote session.`);
 
 // Session-end cleanup. The native runtime (Copilot CLI >= 1.0.66) no longer accepts
 // SDK callback hooks (the old `hooks: { onSessionEnd }` throws at session.resume), so we

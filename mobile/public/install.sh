@@ -5,7 +5,8 @@
 #
 # Downloads the prebuilt Weft Copilot CLI extension (+ the standalone `weft`
 # Device Station command) and drops them where `copilot` auto-discovers extensions
-# (~/.copilot/extensions/weft), wired to your chosen relay transport.
+# (~/.copilot/extensions/weft - CODE only), wired to your chosen relay transport. All
+# user config (relay .env, projects, transport choice) lives separately in ~/.weft.
 # No git clone, no Node build required on your machine.
 #
 # Choose your transport non-interactively: WEFT_TRANSPORT=supabase|devtunnel
@@ -78,7 +79,21 @@ ok "weft.mjs -> $INSTALL_DIR  (standalone Device Station CLI)"
 
 # ---------------------------------------------------------------------------
 step 3 "Writing relay config"
-ENV_PATH="$INSTALL_DIR/.env"
+# Canonical location is ~/.weft/.env - user config lives in ~/.weft (alongside projects.json /
+# transport.json), so ~/.copilot/extensions/weft only ever holds installed CODE. If an older
+# install left a .env next to the extension, its values are migrated in and the old file is
+# removed so the split stays clean going forward.
+WEFT_HOME="$HOME/.weft"
+mkdir -p "$WEFT_HOME"
+ENV_PATH="$WEFT_HOME/.env"
+LEGACY_ENV_PATH="$INSTALL_DIR/.env"
+if [ -f "$LEGACY_ENV_PATH" ] && [ ! -f "$ENV_PATH" ]; then
+  mv "$LEGACY_ENV_PATH" "$ENV_PATH"
+  ok "moved your .env: $LEGACY_ENV_PATH -> $ENV_PATH"
+elif [ -f "$LEGACY_ENV_PATH" ]; then
+  rm -f "$LEGACY_ENV_PATH"
+  ok "removed stale $LEGACY_ENV_PATH (your config already lives in $ENV_PATH)"
+fi
 if [ -f "$ENV_PATH" ] && [ "${WEFT_FORCE:-0}" != "1" ]; then
   # Auto-migrate an older .env (generic SUPABASE_* only) by adding the namespaced keys,
   # preserving any custom relay values already set. Existing installs self-heal.
@@ -157,4 +172,4 @@ echo ""
 echo "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
 echo "  (no Copilot CLI open, just this)? Open a new terminal and run: $(cyan 'weft start')"
 echo ""
-printf '%s\n' "$(dim "Uninstall: rm -rf \"$INSTALL_DIR\" \"$SHIM_PATH\"")"
+printf '%s\n' "$(dim "Uninstall: rm -rf \"$INSTALL_DIR\" \"$SHIM_PATH\" \"$HOME/.weft\"")"
