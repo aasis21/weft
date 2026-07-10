@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { WebQrScanner } from '@/ui/pairing/WebQrScanner';
 import { isNativeRuntime, scanNativeQr, usePairing } from '@/ui/hooks/usePairing';
+import { isDesktopInput } from '@/lib/platform';
 import { isDebugModeEnabled, setDebugModeEnabled } from '@/lib/debugSettings';
 import { runConnectivityProbe } from '@/lib/wsProbe';
 
@@ -11,6 +12,13 @@ interface JoinSessionScreenProps {
   hasSessions: boolean;
   /** Open the manual paste box on mount (e.g. user tapped "Paste a pairing code"). */
   initialManual?: boolean;
+  /**
+   * What the user came here to do — changes the copy so the same scanner doesn't read as
+   * "join a session" when they actually tapped "add a device" (or vice versa). The QR itself
+   * still decides what actually happens (see sessionRuntime.addByQr); this only sets
+   * expectations up front so a scan doesn't feel like it did the "wrong" thing (#weft-scan-ux).
+   */
+  purpose?: 'session' | 'device';
   error: string | null;
   onError(error: string | null): void;
   onPair(raw: string): Promise<void>;
@@ -21,12 +29,17 @@ export function JoinSessionScreen({
   firstRun = false,
   hasSessions,
   initialManual = false,
+  purpose = 'session',
   error,
   onError,
   onPair,
   onCancel,
 }: JoinSessionScreenProps): JSX.Element {
   const native = isNativeRuntime();
+  // Manual/paste pairing is a keyboard-and-mouse convenience (copy a JSON blob from a
+  // terminal) — on a touch phone it's just a confusing dead-end box, so keep it desktop-only
+  // for now and rely on the camera scanner everywhere else.
+  const desktop = isDesktopInput();
   const { busy, run, errorDetail } = usePairing(onError);
   const [manual, setManual] = useState('');
   const [showManual, setShowManual] = useState(initialManual);
@@ -95,6 +108,12 @@ export function JoinSessionScreen({
 
   const backLabel = hasSessions ? 'Back to sessions' : 'Back';
   const inApp = hasSessions && !firstRun;
+  const isDevice = purpose === 'device';
+  const kicker = isDevice ? 'Add a device' : (hasSessions ? 'Join another session' : 'Pair your phone');
+  const heading = isDevice ? "Point your camera at the device's pairing QR" : 'Point your camera at the laptop QR';
+  const hint = isDevice
+    ? <>Run <code>copilot</code> on the new laptop, then frame the pairing QR it prints to add it to your devices.</>
+    : <>Run <code>copilot</code> on your laptop, then frame the pairing QR it prints.</>;
 
   return (
     <main className={inApp ? 'weft-session join-session' : 'join-shell'}>
@@ -105,13 +124,9 @@ export function JoinSessionScreen({
               ← {backLabel}
             </button>
           ) : null}
-          <p className={inApp ? 'session-join-kicker' : 'eyebrow'}>
-            {hasSessions ? 'Join another session' : 'Pair your phone'}
-          </p>
-          <h2>Point your camera at the laptop QR</h2>
-          <p className={inApp ? 'session-join-hint' : 'join-hint'}>
-            Run <code>copilot</code> on your laptop, then frame the pairing QR it prints.
-          </p>
+          <p className={inApp ? 'session-join-kicker' : 'eyebrow'}>{kicker}</p>
+          <h2>{heading}</h2>
+          <p className={inApp ? 'session-join-hint' : 'join-hint'}>{hint}</p>
         </header>
 
       <div className={inApp ? 'session-join-scanner' : 'join-scanner'}>
@@ -140,7 +155,7 @@ export function JoinSessionScreen({
             variant="inline"
             onResult={handleScannerResult}
             onCancel={() => undefined}
-            onPasteCode={() => setShowManual(true)}
+            onPasteCode={desktop ? () => setShowManual(true) : undefined}
           />
         )}
       </div>
@@ -184,31 +199,35 @@ export function JoinSessionScreen({
         >
           Debug mode: {debugMode ? 'On' : 'Off'}
         </button>
-        <button
-          type="button"
-          className={inApp ? 'session-link-btn' : 'link-btn'}
-          aria-expanded={showManual}
-          onClick={() => setShowManual((v) => !v)}
-        >
-          {showManual ? 'Hide manual entry' : 'Enter code manually'}
-        </button>
-        {showManual ? (
+        {desktop ? (
           <>
-            <textarea
-              className={inApp ? 'session-manual-input' : undefined}
-              aria-label="Manual pairing JSON"
-              value={manual}
-              onChange={(event) => setManual(event.target.value)}
-              placeholder='{"v":1,"channelId":"...","pub":"..."}'
-            />
             <button
               type="button"
-              className={inApp ? 'session-secondary-action' : 'secondary-action'}
-              disabled={busy || !manual.trim()}
-              onClick={() => void pair(manual)}
+              className={inApp ? 'session-link-btn' : 'link-btn'}
+              aria-expanded={showManual}
+              onClick={() => setShowManual((v) => !v)}
             >
-              Pair from pasted code
+              {showManual ? 'Hide manual entry' : 'Enter code manually'}
             </button>
+            {showManual ? (
+              <>
+                <textarea
+                  className={inApp ? 'session-manual-input' : undefined}
+                  aria-label="Manual pairing JSON"
+                  value={manual}
+                  onChange={(event) => setManual(event.target.value)}
+                  placeholder='{"v":1,"channelId":"...","pub":"..."}'
+                />
+                <button
+                  type="button"
+                  className={inApp ? 'session-secondary-action' : 'secondary-action'}
+                  disabled={busy || !manual.trim()}
+                  onClick={() => void pair(manual)}
+                >
+                  Pair from pasted code
+                </button>
+              </>
+            ) : null}
           </>
         ) : null}
       </div>

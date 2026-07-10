@@ -85,6 +85,12 @@ export function createListener({
   onDeviceConnected = null,
   onDeviceDisconnected = null,
   onHeartbeat = null,
+  // Persistent-pairing-only: fired the moment optimisticBind() opens the channel + starts
+  // heartbeating from a REMEMBERED peer key, before this run's phone has said hello at all — see
+  // optimisticBind's comment. Lets a host UI (weft start) show "connected"/heartbeat status
+  // immediately instead of a "waiting/reconnecting" spinner, since we're not actually waiting on
+  // anything from the phone in this case.
+  onOptimisticBind = null,
   onSpawnRequest = null,
   onSpawnResult = null,
 } = {}) {
@@ -262,6 +268,11 @@ export function createListener({
         void handleControl(envelope);
       });
       startHeartbeat();
+      try {
+        onOptimisticBind?.();
+      } catch {
+        // best-effort UI hook
+      }
     } catch {
       // Couldn't derive the key from the remembered peer (shouldn't happen — corrupt/legacy
       // record) — fall back to the normal wait-for-hello path below.
@@ -291,10 +302,13 @@ export function createListener({
       return;
     } else if (boundPeerPub === peer.publicKeyB64) {
       if (boundOptimistically) {
-        // A genuine hello confirms our optimistic guess — the channel + heartbeat are already
-        // live, so just promote to a confirmed connection and fire the "really connected" hooks.
+        // A genuine hello confirms our optimistic guess — the encrypted channel + heartbeat are
+        // already live, so we don't need to rebuild them. But this hello is still the PHONE's
+        // first real contact THIS run (its own process just (re)started too), so it still needs
+        // a fresh PROJECT_LIST — only skip the channel/heartbeat rebuild, not the reply.
         boundOptimistically = false;
         if (isPersistentPairingEnabled()) markPersistedIdentityConnected(listenerChannelId, peer.publicKeyB64);
+        await sendProjectList();
         upsertConnection(
           listenerChannelId,
           {
@@ -493,6 +507,13 @@ export function createListener({
     // show "reconnecting a known phone" instead of "waiting for the first scan".
     get everConnectedBeforeThisRun() {
       return listenerEverConnectedBeforeThisRun;
+    },
+    // True right after start() if optimisticBind() succeeded — i.e. the channel is open and
+    // heartbeating from a remembered peer key, before this run's phone has said anything. Lets a
+    // host UI (weft start) print accurate "already sending heartbeats" copy instead of
+    // "waiting"/"reconnecting" wording implying we're blocked on the phone.
+    get optimisticallyBound() {
+      return boundOptimistically;
     },
   };
   return api;

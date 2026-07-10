@@ -12,9 +12,16 @@ vi.mock('@/ui/pairing/WebQrScanner', () => ({
   ),
 }));
 
+// Manual/paste pairing is desktop-only now (#weft-scan-ux). Default the mock to "desktop" so
+// existing tests exercising that path don't need to change; one test below flips it to "touch"
+// to lock in that the option disappears there.
+const platformState = vi.hoisted(() => ({ desktop: true }));
+vi.mock('@/lib/platform', () => ({ isDesktopInput: () => platformState.desktop }));
+
 describe('LandingScreen', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    platformState.desktop = true;
   });
 
   it('renders pairing CTAs and fires their callbacks', async () => {
@@ -58,6 +65,7 @@ describe('LandingScreen', () => {
 describe('JoinSessionScreen', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    platformState.desktop = true;
   });
 
   it('renders scanner region and pairs scanner results', async () => {
@@ -103,5 +111,19 @@ describe('JoinSessionScreen', () => {
 
     await user.click(screen.getByRole('button', { name: '← Back to sessions' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides manual/paste entry entirely on touch devices, both on Landing and Join', async () => {
+    platformState.desktop = false;
+    const { unmount } = render(
+      <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Paste a code' })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <JoinSessionScreen hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn().mockResolvedValue(undefined)} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Enter code manually' })).not.toBeInTheDocument();
   });
 });

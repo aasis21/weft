@@ -106,6 +106,11 @@ async function start() {
     onDeviceConnected: () => status.setConnected(true),
     onDeviceDisconnected: () => status.setConnected(false),
     onHeartbeat: () => status.pulse(),
+    // Persistent mode + a known-returning phone: the listener is ALREADY sending heartbeats to
+    // the last-known channel before this run's phone has said anything — show that as
+    // "connected" right away instead of a "waiting/reconnecting" spinner, since we're genuinely
+    // not waiting on the phone for anything at this point.
+    onOptimisticBind: () => status.setConnected(true),
     onSpawnRequest: ({ projectName, mode, name }) =>
       status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${projectName || "default project"} ${c.dim(`[${mode}]`)}`),
     onSpawnResult: ({ ok, error, name, projectName }) =>
@@ -130,6 +135,7 @@ async function start() {
   console.log(`   ${c.cyan("Channel ID")}  ${c.bold(listener.channelId)}`);
   const persistent = isPersistentPairingEnabled();
   const everConnected = listener.everConnectedBeforeThisRun === true;
+  const optimisticallyBound = listener.optimisticallyBound === true;
   console.log(
     `   ${c.cyan("Pairing")}     ${persistent ? c.green("persistent") : c.yellow("ephemeral")}` +
       c.dim(
@@ -144,10 +150,24 @@ async function start() {
   console.log(`${c.bold("3.")} Projects available to spawn sessions in:\n`);
   printProjects(listProjects());
   console.log(c.dim("   Hint: add projects with `weft add-project <name> <path> --default`.\n"));
-  const reconnecting = persistent && everConnected;
-  const idleLabel = reconnecting ? "reconnecting a previously-paired phone…" : "waiting for phone to connect…";
+  // optimisticallyBound: the listener is ALREADY sending heartbeats to this phone's remembered
+  // channel — we aren't actually waiting on anything from it, so say so plainly instead of
+  // "reconnecting"/"waiting" wording that implies we're blocked. The live status line below
+  // (driven by onOptimisticBind → status.setConnected(true)) already reflects this as
+  // "device connected · last heartbeat Ns ago".
+  const idleLabel = optimisticallyBound
+    ? "heartbeat active on the last-known channel…"
+    : persistent && everConnected
+      ? "reconnecting a previously-paired phone…"
+      : "waiting for phone to connect…";
   console.log(
-    `${c.bold("4.")} ${reconnecting ? "Reconnecting — this phone paired here before, so it should attach automatically" : "Waiting for your phone to connect"}…\n`,
+    `${c.bold("4.")} ${
+      optimisticallyBound
+        ? "Already sending heartbeats on the last-known channel — your phone attaches silently, no waiting"
+        : persistent && everConnected
+          ? "Reconnecting — this phone paired here before, so it should attach automatically"
+          : "Waiting for your phone to connect"
+    }…\n`,
   );
   status.setIdleLabel(idleLabel);
   status.start();
@@ -269,10 +289,20 @@ function createStatusLine({ idleLabel = "listening for phone…" } = {}) {
   return {
     start() {
       if (!tty) {
-        console.log(`${label.charAt(0).toUpperCase()}${label.slice(1).replace(/…$/, "")}…`);
+        // onOptimisticBind may already have fired `setConnected(true)` during listener.start()
+        // (before this call) and logged "Device connected." — don't also print the stale idle
+        // line on top of that.
+        if (!connected) console.log(`${label.charAt(0).toUpperCase()}${label.slice(1).replace(/…$/, "")}…`);
         return;
       }
-      startSpinner();
+      // onOptimisticBind (persistent mode, known-returning phone) may have already called
+      // setConnected(true) during listener.start(), before this runs — pick up ticking rather
+      // than clobbering it with the idle spinner.
+      if (connected) {
+        startTicking();
+      } else {
+        startSpinner();
+      }
       render();
     },
     setIdleLabel(next) {

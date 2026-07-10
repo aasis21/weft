@@ -56,8 +56,21 @@ const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID |
 // for the session.
 // `let`, not `const` — `/weft <transport>` (see switchTransport) overrides this for just the
 // running session without touching the persisted device-wide default.
-let transportDescriptor = await resolveTransportForChannel({ channelId });
-let pairingPayload = buildCurrentPairingPayload();
+//
+// A misbehaving devtunnel (CLI missing, not logged in, or the shared relay not coming up within
+// PROVISION_TIMEOUT_MS — see devtunnel.mjs) must NOT crash the whole extension at load: that would
+// take down the entire Copilot session over a Weft-only feature. So this is caught here; a null
+// transportDescriptor just means pairing isn't available yet. The error is surfaced via
+// session.log once `session` exists (see below `if (transportSetupError)` block), and the user can
+// retry any time with `/weft <name>` (switchTransport already has its own try/catch).
+let transportDescriptor = null;
+let transportSetupError = null;
+try {
+  transportDescriptor = await resolveTransportForChannel({ channelId });
+} catch (err) {
+  transportSetupError = err;
+}
+let pairingPayload = transportDescriptor ? buildCurrentPairingPayload() : null;
 
 function buildCurrentPairingPayload() {
   return buildPairingPayload({
@@ -89,6 +102,14 @@ let pairChain = Promise.resolve();
 const showPairing = async (context) => {
   const requested = context?.args?.trim();
   if (requested && !(await switchTransport(requested))) return;
+  if (!transportDescriptor) {
+    session.log?.(
+      `Weft: no working transport yet (${transportSetupError?.message ?? "not configured"}). ` +
+        `Run \`/weft [${WEFT_COMMAND_TRANSPORT_NAMES.join("|")}]\` to pick one.`,
+      { level: "warning", ephemeral: false },
+    );
+    return;
+  }
   await logPairing(session, JSON.stringify(pairingPayload), { full: true });
   if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
 };
@@ -100,7 +121,7 @@ const showPairing = async (context) => {
 async function switchTransport(name) {
   const normalized = name.trim().toLowerCase();
   if (normalized === "devtunnel") {
-    session.log?.("Weft: setting up a devtunnel (first run creates a tunnel; can take ~10-20s)…", {
+    session.log?.("Weft: setting up a devtunnel (first run creates a tunnel; can take up to 45s)…", {
       ephemeral: false,
     });
   }
@@ -119,6 +140,7 @@ async function switchTransport(name) {
     return true;
   }
   transportDescriptor = descriptor;
+  transportSetupError = null;
   pairingPayload = buildCurrentPairingPayload();
   await teardownRelay("transport-switch");
   session.log?.(
@@ -155,6 +177,14 @@ const session = await joinSession({
 // extension is live and how to reach it, without waiting for them to already know `/weft` exists.
 session.log?.(`${ui.brand("Weft loaded")} — run ${ui.cyan("/weft")} to pair your phone for a remote session.`);
 
+if (transportSetupError) {
+  session.log?.(
+    `Weft: transport didn't come up at startup (${transportSetupError.message}). ` +
+      `Run \`/weft [${WEFT_COMMAND_TRANSPORT_NAMES.join("|")}]\` to configure/retry it.`,
+    { level: "warning", ephemeral: false },
+  );
+}
+
 // Session-end cleanup. The native runtime (Copilot CLI >= 1.0.66) no longer accepts
 // SDK callback hooks (the old `hooks: { onSessionEnd }` throws at session.resume), so we
 // subscribe to the `session.shutdown` event instead to stop the relay and tell the phone.
@@ -179,6 +209,7 @@ if (identityFileWasPresent) void connectRelayWithRetry();
 // `/weft` can re-kick this if all attempts gave up.
 async function connectRelayWithRetry({ reconnect = false } = {}) {
   if (connecting || pairingStop || shuttingDown) return false;
+  if (!transportDescriptor) return false; // boot-time transport setup failed; see /weft to retry.
   connecting = true;
   try {
     const maxAttempts = positiveIntFromEnv("WEFT_CONNECT_MAX_ATTEMPTS", 6);

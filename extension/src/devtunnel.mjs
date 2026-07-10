@@ -29,8 +29,18 @@ const execFileAsync = promisify(execFile);
 
 export const DEVTUNNEL_REGISTRY_FILE = "devtunnel.json";
 const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mjs", import.meta.url));
-const PROVISION_TIMEOUT_MS = 20_000;
+// First-ever provision on a machine has to: spawn the detached relay process, have IT shell out to
+// `devtunnel host` (a real network call to Microsoft's tunnel service), and wait for that tunnel's
+// URL to come back before the registry read here sees a healthy entry — 20s cut this close on a
+// slow/loaded network. Bumped to 45s of headroom; still overridable per-machine via
+// WEFT_DEVTUNNEL_TIMEOUT_MS for anyone on a particularly slow connection.
+const PROVISION_TIMEOUT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_TIMEOUT_MS", 45_000);
 const REGISTRY_POLL_MS = 100;
+
+function positiveIntFromEnv(name, fallback) {
+  const raw = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
 
 // winget installs devtunnel.exe here without adding it to PATH until the shell is restarted —
 // fall back to this well-known location so Weft works in the same session it was installed in.
@@ -155,7 +165,16 @@ export async function provisionDevTunnelTransport({ channelId, baseDir } = {}) {
   try {
     await run(bin, ["user", "show"]);
   } catch {
-    throw new Error("Weft: not logged in to devtunnel. Run `devtunnel user login -g` and try again.");
+    // Not logged in (or the token expired) — `login -g` opens the user's default browser for a
+    // GitHub device-code flow and blocks until they complete it, so just run it instead of making
+    // the user retype the command themselves.
+    try {
+      await run(bin, ["user", "login", "-g"]);
+    } catch {
+      throw new Error(
+        "Weft: automatic devtunnel login failed. Run `devtunnel user login -g` manually and try again.",
+      );
+    }
   }
 
   const entry = await spawnRelayServerProcess({ bin, baseDir });

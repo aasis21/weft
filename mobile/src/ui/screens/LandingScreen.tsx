@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { JSX } from 'react';
 import { usePairing } from '@/ui/hooks/usePairing';
+import { isDesktopInput } from '@/lib/platform';
 
 interface LandingScreenProps {
   onBeginPair(manual?: boolean): void;
@@ -189,9 +190,11 @@ export function LandingScreen({
               Start another session
             </button>
           ) : null}
-          <button type="button" className="secondary-action" onClick={() => onBeginPair(true)}>
-            Paste a code
-          </button>
+          {isDesktopInput() ? (
+            <button type="button" className="secondary-action" onClick={() => onBeginPair(true)}>
+              Paste a code
+            </button>
+          ) : null}
           <button type="button" className="demo-action" disabled={busy} onClick={() => void run(onStartDemo)}>
             Try the demo
           </button>
