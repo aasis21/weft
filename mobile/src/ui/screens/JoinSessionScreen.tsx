@@ -129,6 +129,11 @@ export function JoinSessionScreen({
               {busy ? 'Scanning…' : 'Scan QR'}
             </button>
           </div>
+        ) : busy ? (
+          <div className="scanner-connecting" role="status" aria-live="polite">
+            <div className="connecting-spinner" aria-hidden="true" />
+            <p>QR found — connecting to your laptop…</p>
+          </div>
         ) : (
           <WebQrScanner
             key={scanNonce}

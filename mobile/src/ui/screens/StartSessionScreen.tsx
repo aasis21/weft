@@ -121,9 +121,9 @@ export function StartSessionScreen({
       <div className="session-join-inner">
         {sortedDevices.length === 0 ? (
           <section className="session-join-scanner start-empty">
-            <p>No listener devices saved yet.</p>
+            <p>No devices saved yet.</p>
             <button type="button" className="session-primary-action" onClick={onScanListener}>
-              Scan a listener QR
+              Scan a device QR
             </button>
           </section>
         ) : (
@@ -133,7 +133,7 @@ export function StartSessionScreen({
                 1. Device
                 {sortedDevices.length > 1 ? <span className="start-section-count">{sortedDevices.length}</span> : null}
               </h3>
-              <div className="start-device-list" role="radiogroup" aria-label="Listener device">
+              <div className="start-device-list" role="radiogroup" aria-label="Device">
                 {sortedDevices.map((device) => {
                   const status = deviceStatus(device);
                   const isSelected = device.channelId === selected?.channelId;
@@ -169,9 +169,9 @@ export function StartSessionScreen({
             <section className="start-section">
               <h3 className="start-section-title">2. Project</h3>
               {selected?.projectsLoading ? (
-                <p className="session-join-hint start-loading">Loading projects from the listener…</p>
+                <p className="session-join-hint start-loading">Loading projects from the device…</p>
               ) : selected && selected.projects.length === 0 ? (
-                <p className="session-join-hint">No projects received yet. Refresh after the listener is online.</p>
+                <p className="session-join-hint">No projects received yet. Refresh after the device is online.</p>
               ) : (
                 <label className="session-field start-project-field">
                   <select
@@ -235,11 +235,6 @@ export function StartSessionScreen({
               >
                 {busy ? 'Starting…' : `Start on ${selected ? deviceLabel(selected) : 'device'}`}
               </button>
-              <div className="start-footer-links">
-                <button type="button" className="session-link-btn" onClick={onScanListener}>
-                  Scan another listener QR
-                </button>
-              </div>
             </div>
           </>
         )}

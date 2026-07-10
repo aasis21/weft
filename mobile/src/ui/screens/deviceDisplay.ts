@@ -1,7 +1,7 @@
 import type { ListenerDeviceState } from '@/session/model';
 
 export function deviceLabel(device: ListenerDeviceState): string {
-  return device.name || `Listener ${device.channelId.slice(0, 8)}`;
+  return device.name || `Device ${device.channelId.slice(0, 8)}`;
 }
 
 export function deviceStatus(device: ListenerDeviceState): { label: string; tone: 'online' | 'offline' | 'loading' } {

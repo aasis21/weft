@@ -213,9 +213,9 @@ export function DevicesScreen({
 
         {sortedDevices.length === 0 ? (
           <section className="session-join-scanner start-empty">
-            <p>No listener devices saved yet.</p>
+            <p>No devices saved yet.</p>
             <button type="button" className="session-primary-action" onClick={onScanListener}>
-              Scan a listener QR
+              Scan a device QR
             </button>
           </section>
         ) : (
@@ -232,10 +232,6 @@ export function DevicesScreen({
                 {offlineDevices.map(renderDevice)}
               </div>
             ) : null}
-
-            <button type="button" className="session-secondary-action" onClick={onScanListener}>
-              + Scan another listener QR
-            </button>
           </section>
         )}
       </div>

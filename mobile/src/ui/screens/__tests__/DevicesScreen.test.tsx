@@ -23,7 +23,7 @@ function makeDevice(overrides: Partial<ListenerDeviceState> = {}): ListenerDevic
 }
 
 describe('DevicesScreen', () => {
-  it('shows the empty state and lets the user scan a listener QR', () => {
+  it('shows the empty state and lets the user scan a device QR', () => {
     const onScanListener = vi.fn();
     render(
       <DevicesScreen
@@ -46,7 +46,7 @@ describe('DevicesScreen', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /scan a listener qr/i }));
+    fireEvent.click(screen.getByRole('button', { name: /scan a device qr/i }));
     expect(onScanListener).toHaveBeenCalledTimes(1);
   });
 

@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
 import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
-import { clearTransportConfig, saveTransportConfig, savePairingMode } from "../src/transportConfig.mjs";
+import { clearTransportConfig, saveTransportConfig, savePairingMode, isPersistentPairingEnabled } from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
 
@@ -128,11 +128,28 @@ async function start() {
   console.log(`${c.bold("2.")} These identify this station for the pairing/session comms:\n`);
   console.log(`   ${c.cyan("Device ID")}   ${c.bold(listener.deviceId)}`);
   console.log(`   ${c.cyan("Channel ID")}  ${c.bold(listener.channelId)}`);
+  const persistent = isPersistentPairingEnabled();
+  const everConnected = listener.everConnectedBeforeThisRun === true;
+  console.log(
+    `   ${c.cyan("Pairing")}     ${persistent ? c.green("persistent") : c.yellow("ephemeral")}` +
+      c.dim(
+        persistent
+          ? everConnected
+            ? " — same channel/key as before; this phone should reconnect automatically, no rescan needed."
+            : " — same channel/key will be reused every start once a phone first scans it below."
+          : " — a fresh channel/key every start; re-scan the QR each time (run `weft set-pairing persistent` to change).",
+      ),
+  );
   console.log(`   ${c.dim(`Heartbeat every ${Math.round(listener.heartbeatMs / 1000)}s keeps the pairing alive.`)}\n`);
   console.log(`${c.bold("3.")} Projects available to spawn sessions in:\n`);
   printProjects(listProjects());
   console.log(c.dim("   Hint: add projects with `weft add-project <name> <path> --default`.\n"));
-  console.log(`${c.bold("4.")} Waiting for your phone to connect…\n`);
+  const reconnecting = persistent && everConnected;
+  const idleLabel = reconnecting ? "reconnecting a previously-paired phone…" : "waiting for phone to connect…";
+  console.log(
+    `${c.bold("4.")} ${reconnecting ? "Reconnecting — this phone paired here before, so it should attach automatically" : "Waiting for your phone to connect"}…\n`,
+  );
+  status.setIdleLabel(idleLabel);
   status.start();
 
   const shutdown = async (signal) => {
@@ -195,7 +212,7 @@ function isProcessAlive(pid) {
 // Device Station's live connection + heartbeat state without growing the scrollback. Falls back to
 // one plain, non-blinking log line when stdout isn't a TTY (e.g. piped to a file or `nohup`), since
 // carriage-return redraws only make sense on an interactive terminal.
-function createStatusLine() {
+function createStatusLine({ idleLabel = "listening for phone…" } = {}) {
   const tty = Boolean(process.stdout.isTTY);
   const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let connected = false;
@@ -205,6 +222,7 @@ function createStatusLine() {
   let pulseTimer = null;
   let bright = false;
   let lastBeatAt = null;
+  let label = idleLabel;
 
   function render() {
     if (!tty) return;
@@ -213,7 +231,7 @@ function createStatusLine() {
       // Spinner proves the station process itself is alive/listening even before any phone has
       // ever paired (the DEVICE_HEARTBEAT protocol only starts once a phone is bound).
       const spin = c.yellow(SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length]);
-      line = `${spin} ${c.dim("listening for phone…")}`;
+      line = `${spin} ${c.dim(label)}`;
     } else {
       const dot = bright ? c.brightGreen("●") : c.green("●");
       const agoMs = lastBeatAt ? Date.now() - lastBeatAt : null;
@@ -251,11 +269,15 @@ function createStatusLine() {
   return {
     start() {
       if (!tty) {
-        console.log("Waiting for phone to connect…");
+        console.log(`${label.charAt(0).toUpperCase()}${label.slice(1).replace(/…$/, "")}…`);
         return;
       }
       startSpinner();
       render();
+    },
+    setIdleLabel(next) {
+      label = next;
+      if (!connected) render();
     },
     setConnected(value) {
       connected = value;

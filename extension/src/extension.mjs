@@ -13,8 +13,6 @@ import {
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
-import { getOrCreatePersistedIdentity } from "./pairingIdentity.mjs";
-import { isPersistentPairingEnabled } from "./transportConfig.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async,
 // self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
@@ -37,13 +35,15 @@ const ui = {
 
 const handedOffIdentity = await loadIdentityFromFile(process.env.WEFT_IDENTITY_FILE);
 const identityFileWasPresent = Boolean(handedOffIdentity);
-// `weft set-pairing persistent` opts this device into reusing the same channelId + keypair across
-// every `copilot` launch (see pairingIdentity.mjs) instead of minting a fresh one — skipped
-// entirely when a same-session handoff identity is present (e.g. after /clear), since that must
-// win regardless of the persistent-pairing setting.
-const persistedIdentity = handedOffIdentity || !isPersistentPairingEnabled() ? null : await getOrCreatePersistedIdentity();
-const laptopKeys = handedOffIdentity?.laptopKeys ?? persistedIdentity?.keyPair ?? (await generateKeyPair());
-const channelId = handedOffIdentity?.channelId ?? persistedIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
+// Each Copilot session always gets its own fresh channel + keypair (forward-secret, and required
+// for the relay's 1-peer-per-channel binding — see listener.mjs's boundPeerPub / bindPeer). The
+// only exception is a same-session handoff identity (e.g. after /clear), which must be reused
+// verbatim so the phone recognizes it as a continuation of the same session, not a new one.
+// Persistent pairing (`weft set-pairing persistent`) is a `weft start`-only concept (see
+// listener.mjs) — it never applies here, since sharing one channel across multiple live Copilot
+// sessions would mean the relay ACKs/serves the phone's hello from more than one process at once.
+const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
+const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
 // Resolved once from the single ~/.weft/weft.config.json config file written by `weft
 // set-transport` (see transportFactory.mjs — there is no env var / .env fallback, so a
 // reinstall/rebuild of the extension can never silently override this), and stamped into the QR

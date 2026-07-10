@@ -53,14 +53,25 @@ function writeIdentityFile(record, { baseDir } = {}) {
   }
 }
 
-/** Read the persisted {channelId, keyPair} if present and valid, else null. Never throws. */
+/** Read the persisted {channelId, keyPair, everConnected, peerPublicKeyB64} if present and valid,
+ * else null. Never throws. `everConnected` is true once ANY phone has ever bound to this channel
+ * (see markPersistedIdentityConnected) — lets a host (weft start's status line) distinguish "still
+ * waiting for the very first scan" from "reconnecting a phone that's paired before". `peerPublicKeyB64`
+ * is the last phone public key that actually bound to this channel — lets the listener derive the
+ * session key and open the encrypted channel (+ start heartbeating) BEFORE that phone's hello
+ * arrives this run, instead of sitting idle until it does (see listener.mjs's optimisticBind). */
 export async function loadPersistedIdentity({ baseDir } = {}) {
   try {
     const raw = readFileSync(storePath(baseDir), "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed?.channelId || !parsed.privateKeyJwk) return null;
     const keyPair = await importKeyPair({ privateKeyJwk: parsed.privateKeyJwk });
-    return { channelId: parsed.channelId, keyPair };
+    return {
+      channelId: parsed.channelId,
+      keyPair,
+      everConnected: parsed.everConnected === true,
+      peerPublicKeyB64: typeof parsed.peerPublicKeyB64 === "string" ? parsed.peerPublicKeyB64 : null,
+    };
   } catch {
     return null;
   }
@@ -74,18 +85,36 @@ export async function getOrCreatePersistedIdentity({ baseDir } = {}) {
   const keyPair = await generateKeyPair();
   const { publicKeyB64, privateKeyJwk } = await exportKeyPair(keyPair);
   const channelId = randomChannelId();
-  writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk }, { baseDir });
-  return { channelId, keyPair };
+  writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk, everConnected: false }, { baseDir });
+  return { channelId, keyPair, everConnected: false, peerPublicKeyB64: null };
 }
 
 /** Force a new persisted channelId + keypair (`weft rotate-pairing`) — e.g. if a device/QR may
- * have leaked. Any phone paired against the old identity will need to rescan. */
+ * have leaked. Any phone paired against the old identity will need to rescan, so this always
+ * resets everConnected (and the remembered peer key) back to unset. */
 export async function rotatePersistedIdentity({ baseDir } = {}) {
   const keyPair = await generateKeyPair();
   const { publicKeyB64, privateKeyJwk } = await exportKeyPair(keyPair);
   const channelId = randomChannelId();
-  writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk }, { baseDir });
-  return { channelId, keyPair };
+  writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk, everConnected: false }, { baseDir });
+  return { channelId, keyPair, everConnected: false, peerPublicKeyB64: null };
+}
+
+/** Mark the CURRENT persisted identity as having had a phone connect at least once, and remember
+ * ITS public key too (called from the listener's bindPeer once a phone genuinely binds). No-op if
+ * pairing isn't persistent (no file to mark) or the channelId has since rotated out from under the
+ * caller. Always refreshes peerPublicKeyB64 (not just on the first connect) so a later re-pair with
+ * a different phone keypair on the SAME channel updates who we'll optimistically bind to next run. */
+export function markPersistedIdentityConnected(channelId, peerPublicKeyB64, { baseDir } = {}) {
+  try {
+    const file = storePath(baseDir);
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    if (parsed?.channelId !== channelId) return;
+    if (parsed.everConnected === true && parsed.peerPublicKeyB64 === peerPublicKeyB64) return;
+    writeIdentityFile({ ...parsed, everConnected: true, peerPublicKeyB64 }, { baseDir });
+  } catch {
+    // Not persisted (ephemeral mode) or unreadable — nothing to mark.
+  }
 }
 
 /** Remove the persisted identity file entirely (e.g. when switching back to ephemeral mode). */
