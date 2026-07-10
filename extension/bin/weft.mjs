@@ -9,6 +9,14 @@ import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
 import { clearTransportConfig, saveTransportConfig, savePairingMode, isPersistentPairingEnabled } from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
+import {
+  provisionDevTunnelTransport,
+  describeStage,
+  healthyRegistryEntry,
+  forceStopDevTunnel,
+  DEVTUNNEL_REGISTRY_FILE,
+} from "../src/devtunnel.mjs";
+import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -62,6 +70,8 @@ try {
     await setPairing(args);
   } else if (command === "rotate-pairing") {
     await rotatePairing();
+  } else if (command === "devtunnel") {
+    await devtunnelCommand(args);
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -90,6 +100,133 @@ async function setPairing([mode]) {
 async function rotatePairing() {
   await rotatePersistedIdentity();
   console.log("Persisted pairing identity rotated — the next 'weft start' or /weft will show a new QR to (re)scan.");
+}
+
+// Standalone entry point for the shared devtunnel relay — usable independently of any paired
+// phone or `/weft` session, for first-time setup or troubleshooting. Shares provisioning/
+// discovery logic with the extension (src/devtunnel.mjs) so behavior is identical either way.
+async function devtunnelCommand([sub, ...rest]) {
+  if (sub === "start") return devtunnelStart();
+  if (sub === "status") return devtunnelStatus();
+  if (sub === "stop") return devtunnelStop();
+  throw new Error("Usage: weft devtunnel <start|status|stop>");
+}
+
+// Not tied to any real pairing session — this command only cares about provisioning the shared
+// relay/tunnel and reporting its base URL, so a fixed placeholder channelId satisfies
+// provisionDevTunnelTransport's signature without implying an actual pairing exists.
+const DIAGNOSTIC_CHANNEL_ID = "weft-cli-devtunnel-check";
+
+async function devtunnelStart() {
+  printHeader("WEFT DEVTUNNEL");
+  const status = createProvisionStatusLine();
+  status.start();
+
+  let interrupted = false;
+  const onSigint = () => {
+    interrupted = true;
+    status.stop();
+    console.log(c.dim("\nStopped watching — the shared relay keeps running in the background; re-run this command anytime."));
+    process.exit(0);
+  };
+  process.once("SIGINT", onSigint);
+
+  try {
+    const descriptor = await provisionDevTunnelTransport({
+      channelId: DIAGNOSTIC_CHANNEL_ID,
+      onProgress: (stage) => status.setStage(stage),
+      onRetry: (attempt, maxAttempts) => status.setRetry(attempt, maxAttempts),
+    });
+    status.stop();
+    if (interrupted) return;
+    const baseUrl = descriptor.url.split("?")[0];
+    console.log(`${c.green("✓")} ${c.bold("devtunnel ready")}  ${c.dim(baseUrl)}`);
+    console.log(c.dim("This shared relay stays up in the background and is reused by every `/weft devtunnel` and `weft start` on this machine."));
+  } catch (err) {
+    status.stop();
+    if (interrupted) return;
+    console.error(`${c.red("✗")} ${err?.message ?? err}`);
+    process.exitCode = 1;
+  } finally {
+    process.off("SIGINT", onSigint);
+  }
+}
+
+async function devtunnelStatus() {
+  const registryEntry = readRegistry(DEVTUNNEL_REGISTRY_FILE);
+  if (!registryEntry) {
+    console.log(`${c.yellow("○")} Not running. Run ${c.bold("weft devtunnel start")} to provision it.`);
+    return;
+  }
+  if (!isPidAlive(registryEntry.pid)) {
+    console.log(`${c.yellow("○")} Stale entry (pid ${registryEntry.pid} no longer running). Run ${c.bold("weft devtunnel start")} to reprovision.`);
+    return;
+  }
+  const healthy = await healthyRegistryEntry();
+  if (!healthy) {
+    console.log(`${c.yellow("!")} Registered (pid ${registryEntry.pid}) but not accepting connections on port ${registryEntry.relayPort}.`);
+    console.log(c.dim(`Run ${c.bold("weft devtunnel stop")} then ${c.bold("weft devtunnel start")} to reset it.`));
+    return;
+  }
+  const upForMs = Date.now() - (registryEntry.startedAt ?? Date.now());
+  console.log(`${c.green("●")} ${c.bold("running")}  ${c.dim(healthy.baseUrl)}`);
+  console.log(c.dim(`   pid ${registryEntry.pid} · up ${Math.round(upForMs / 1000)}s · tunnel ${registryEntry.tunnelId ?? "?"}`));
+}
+
+async function devtunnelStop() {
+  const { stopped, entry } = await forceStopDevTunnel();
+  if (!stopped) {
+    console.log(c.dim("Nothing was running."));
+    return;
+  }
+  console.log(`${c.green("✓")} Stopped the shared devtunnel relay${entry?.pid ? ` (was pid ${entry.pid})` : ""}.`);
+}
+
+// Live status line for `weft devtunnel start`, shown while provisionDevTunnelTransport works
+// through its stages. Mirrors createStatusLine's spinner/redraw approach below, but renders
+// provisioning stage + retry-attempt text instead of device-connection state.
+function createProvisionStatusLine() {
+  const tty = Boolean(process.stdout.isTTY);
+  const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let spinnerFrame = 0;
+  let spinnerTimer = null;
+  let label = "starting…";
+
+  function render() {
+    if (!tty) return;
+    const spin = c.yellow(SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length]);
+    process.stdout.write(`\r\x1b[2K${spin} ${c.dim(label)}`);
+  }
+
+  return {
+    start() {
+      if (!tty) {
+        console.log("Setting up a devtunnel — this can take a couple of minutes on first run…");
+        return;
+      }
+      spinnerTimer = setInterval(() => {
+        spinnerFrame += 1;
+        render();
+      }, 120);
+      spinnerTimer.unref?.();
+      render();
+    },
+    setStage(stage) {
+      label = describeStage(stage);
+      if (!tty) console.log(label);
+      else render();
+    },
+    setRetry(attempt, maxAttempts) {
+      label = `still setting up (attempt ${attempt + 1}/${maxAttempts})…`;
+      if (!tty) console.log(label);
+      else render();
+    },
+    stop() {
+      clearInterval(spinnerTimer);
+      spinnerTimer = null;
+      if (tty) process.stdout.write("\r\x1b[2K");
+    },
+  };
 }
 
 async function start() {
@@ -449,6 +586,7 @@ function usage() {
   weft show-transport
   weft set-pairing <persistent|ephemeral>
   weft rotate-pairing
+  weft devtunnel <start|status|stop>
   weft help
 
 Config lives in a single file: ~/.weft/weft.config.json (written by \`weft set-transport\`).
@@ -459,6 +597,11 @@ By default every \`weft start\` / /weft mints a brand-new channel + key (forward
 means rescanning the QR every time). Run \`weft set-pairing persistent\` to reuse the same
 channel + key across every run instead — an already-paired phone then reconnects with no
 rescan. \`weft rotate-pairing\` forces a fresh one on demand; \`weft set-pairing ephemeral\`
-reverts to a new identity every run.`);
+reverts to a new identity every run.
+
+\`weft devtunnel start\` provisions (or attaches to) the shared devtunnel relay in the
+foreground with a live status line — useful for first-time setup or watching a slow
+provision independently of any \`/weft\` session. \`weft devtunnel status\` reports whether
+it's currently running; \`weft devtunnel stop\` force-tears it down for troubleshooting.`);
 }
 

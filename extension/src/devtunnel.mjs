@@ -23,19 +23,44 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import WebSocket from "ws";
-import { isPidAlive, readRegistry } from "./registryFile.mjs";
+import { clearRegistry, isPidAlive, readRegistry } from "./registryFile.mjs";
 
 const execFileAsync = promisify(execFile);
 
 export const DEVTUNNEL_REGISTRY_FILE = "devtunnel.json";
+// Interim "still working on it" file: relayServerProcess.mjs updates this at each provisioning
+// stage (see STAGE_LABELS below) BEFORE the final healthy entry lands in DEVTUNNEL_REGISTRY_FILE,
+// so a poller here can show real progress instead of silence for the whole provisioning window.
+export const DEVTUNNEL_STATUS_FILE = "devtunnel-status.json";
 const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mjs", import.meta.url));
 // First-ever provision on a machine has to: spawn the detached relay process, have IT shell out to
 // `devtunnel host` (a real network call to Microsoft's tunnel service), and wait for that tunnel's
 // URL to come back before the registry read here sees a healthy entry — 20s cut this close on a
 // slow/loaded network. Bumped to 45s of headroom; still overridable per-machine via
-// WEFT_DEVTUNNEL_TIMEOUT_MS for anyone on a particularly slow connection.
+// WEFT_DEVTUNNEL_TIMEOUT_MS for anyone on a particularly slow connection. On top of that, the
+// whole provision now auto-retries (see provisionDevTunnelTransport) rather than hard-failing the
+// instant one cycle elapses — WEFT_DEVTUNNEL_MAX_WAIT_MS caps how long that retrying continues
+// before finally giving up and pointing the user at the standalone `weft devtunnel` CLI.
 const PROVISION_TIMEOUT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_TIMEOUT_MS", 45_000);
+const MAX_WAIT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_MAX_WAIT_MS", 120_000);
 const REGISTRY_POLL_MS = 100;
+
+// Ordered, human-readable labels for each stage relayServerProcess.mjs reports through
+// DEVTUNNEL_STATUS_FILE. Shared by extension.mjs (session.log) and bin/weft.mjs (CLI status line)
+// so both surfaces describe the exact same provisioning step identically.
+export const STAGE_LABELS = {
+  "starting-relay": "starting the local relay server…",
+  "creating-tunnel": "creating the dev tunnel…",
+  "creating-port": "configuring the tunnel port…",
+  "creating-access": "setting anonymous access on the tunnel…",
+  hosting: "hosting the tunnel (devtunnel host)…",
+  "waiting-for-url": "waiting for the tunnel's public URL…",
+};
+
+/** Human-readable label for a provisioning stage, or the raw stage string if unrecognized. */
+export function describeStage(stage) {
+  return STAGE_LABELS[stage] ?? stage;
+}
 
 function positiveIntFromEnv(name, fallback) {
   const raw = Number.parseInt(process.env[name] ?? "", 10);
@@ -107,8 +132,9 @@ export async function killProcessTree(child) {
 }
 
 /** Probe whether a relay server is actually accepting connections on 127.0.0.1:port — guards
- * against a stale/reused pid whose registry entry no longer corresponds to a live relay. */
-function probeRelay(port, timeoutMs = 1500) {
+ * against a stale/reused pid whose registry entry no longer corresponds to a live relay. Exported
+ * for bin/weft.mjs's standalone `weft devtunnel status` command. */
+export function probeRelay(port, timeoutMs = 1500) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (ok) => {
@@ -136,7 +162,10 @@ function probeRelay(port, timeoutMs = 1500) {
   });
 }
 
-async function healthyRegistryEntry(baseDir) {
+/** Reads DEVTUNNEL_REGISTRY_FILE and confirms it's a live, connectable relay (not a stale entry
+ * from a pid that's since exited or a port nothing is listening on). Exported for the standalone
+ * `weft devtunnel status` CLI command. */
+export async function healthyRegistryEntry(baseDir) {
   const entry = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
   if (!entry || !isPidAlive(entry.pid) || !entry.relayPort || !entry.baseUrl) return null;
   const alive = await probeRelay(entry.relayPort);
@@ -148,8 +177,15 @@ async function healthyRegistryEntry(baseDir) {
  * `channelId`. Throws an actionable error if the CLI is missing or the user isn't logged in —
  * both are one-time, user-fixable setup steps, so `/weft devtunnel`'s caller is expected to
  * surface err.message directly rather than retry.
+ *
+ * `onProgress(stage)` fires whenever the detached relay process's reported provisioning stage
+ * changes (see STAGE_LABELS) — lets a caller (extension.mjs's session.log, or the standalone CLI's
+ * live status line) show real progress instead of silence. `onRetry(attempt, maxAttempts)` fires
+ * each time one PROVISION_TIMEOUT_MS cycle elapses without success and another begins (see
+ * MAX_WAIT_MS) — the detached process itself is NOT respawned on retry, only re-polled, since it
+ * keeps running/working in the background regardless of how long this call watches it.
  */
-export async function provisionDevTunnelTransport({ channelId, baseDir } = {}) {
+export async function provisionDevTunnelTransport({ channelId, baseDir, onProgress, onRetry } = {}) {
   if (!channelId) throw new Error("Weft: provisionDevTunnelTransport requires a channelId");
 
   const existing = await healthyRegistryEntry(baseDir);
@@ -177,21 +213,40 @@ export async function provisionDevTunnelTransport({ channelId, baseDir } = {}) {
     }
   }
 
-  const entry = await spawnRelayServerProcess({ bin, baseDir });
-  return descriptorFor(entry.baseUrl, channelId);
+  // Spawn the detached relay exactly once, no matter how many PROVISION_TIMEOUT_MS cycles the
+  // retry loop below runs — it outlives this call and keeps working regardless of how long we
+  // watch it, so a later cycle just needs to re-poll, not re-spawn.
+  spawnRelayServerProcess({ bin, baseDir });
+
+  const maxAttempts = Math.max(1, Math.ceil(MAX_WAIT_MS / PROVISION_TIMEOUT_MS));
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const entry = await pollForHealthyEntry({ baseDir, onProgress });
+      return descriptorFor(entry.baseUrl, channelId);
+    } catch (err) {
+      if (attempt >= maxAttempts) {
+        throw new Error(
+          "Weft: devtunnel is taking longer than usual to set up. It may still finish in the " +
+            "background — run `weft devtunnel status` to check, or `weft devtunnel start` to watch it live.",
+        );
+      }
+      onRetry?.(attempt, maxAttempts);
+    }
+  }
+  // Unreachable (loop always returns or throws), but keeps this function's return type honest.
+  throw new Error("Weft: timed out waiting for the shared devtunnel relay to come up");
 }
 
 function descriptorFor(baseUrl, channelId) {
   return { kind: "devtunnel", url: `${baseUrl}?channelId=${encodeURIComponent(channelId)}` };
 }
 
-// Spawns relayServerProcess.mjs DETACHED (survives this process's exit) and waits for it to
-// publish a healthy registry entry. A second caller racing this one (e.g. two `/weft devtunnel`
-// calls on different machines' sessions at nearly the same moment) will each spawn their own
-// process — a harmless, self-resolving race: relayServerProcess.mjs's own registry write is
-// atomic, and either process type ends up as a temporarily-unused, soon-to-self-idle-out relay,
-// not a correctness problem for pairing itself.
-async function spawnRelayServerProcess({ bin, baseDir }) {
+// Spawns relayServerProcess.mjs DETACHED (survives this process's exit). A second caller racing
+// this one (e.g. two `/weft devtunnel` calls on different machines' sessions at nearly the same
+// moment) will each spawn their own process — a harmless, self-resolving race:
+// relayServerProcess.mjs's own registry write is atomic, and either process type ends up as a
+// temporarily-unused, soon-to-self-idle-out relay, not a correctness problem for pairing itself.
+function spawnRelayServerProcess({ bin, baseDir }) {
   const env = { ...process.env };
   if (baseDir) env.WEFT_HOME = baseDir;
   if (bin) env.WEFT_DEVTUNNEL_BIN = bin;
@@ -201,14 +256,70 @@ async function spawnRelayServerProcess({ bin, baseDir }) {
     env,
   });
   child.unref();
+  return child;
+}
 
+/** Polls for up to PROVISION_TIMEOUT_MS for a healthy registry entry, calling `onProgress(stage)`
+ * whenever the interim DEVTUNNEL_STATUS_FILE's reported stage changes. Throws on timeout — the
+ * caller (provisionDevTunnelTransport's retry loop) decides whether to give up or poll again. */
+async function pollForHealthyEntry({ baseDir, onProgress }) {
+  let lastStage;
   const deadline = Date.now() + PROVISION_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const entry = await healthyRegistryEntry(baseDir);
     if (entry) return entry;
+    const status = readRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
+    if (status?.stage && status.stage !== lastStage) {
+      lastStage = status.stage;
+      onProgress?.(status.stage);
+    }
     await new Promise((r) => setTimeout(r, REGISTRY_POLL_MS));
   }
   throw new Error("Weft: timed out waiting for the shared devtunnel relay to come up");
+}
+
+/**
+ * Force-tears-down the shared relay + tunnel right now: kills the relay process tree (if its
+ * registered pid is alive), best-effort deletes the cloud tunnel, and clears both registry files.
+ * Unlike stopDevTunnel() below (a deliberate no-op for normal shutdown), this is an explicit,
+ * user-initiated action — the standalone `weft devtunnel stop` CLI command — for troubleshooting
+ * a stuck/misbehaving shared relay.
+ */
+export async function forceStopDevTunnel({ baseDir } = {}) {
+  const entry = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
+  if (!entry) {
+    clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
+    clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
+    return { stopped: false };
+  }
+  if (isPidAlive(entry.pid)) {
+    if (process.platform === "win32") {
+      try {
+        await execFileAsync("taskkill", ["/pid", String(entry.pid), "/t", "/f"]);
+      } catch {
+        // best-effort — process may have already exited.
+      }
+    } else {
+      try {
+        process.kill(entry.pid);
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  if (entry.tunnelId) {
+    const bin = await findDevTunnelBinary();
+    if (bin) {
+      try {
+        await run(bin, ["delete", entry.tunnelId, "--force"]);
+      } catch {
+        // best-effort — an orphaned tunnel just expires after 30 days.
+      }
+    }
+  }
+  clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
+  clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
+  return { stopped: true, entry };
 }
 
 /**

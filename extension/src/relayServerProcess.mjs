@@ -14,7 +14,7 @@
 // service, it's just a plain child process that happens to detach and self-manage its own exit.
 import { fileURLToPath } from "node:url";
 import { startRelayServer } from "./relayServer.mjs";
-import { findDevTunnelBinary, killProcessTree, run, DEVTUNNEL_REGISTRY_FILE } from "./devtunnel.mjs";
+import { findDevTunnelBinary, killProcessTree, run, DEVTUNNEL_REGISTRY_FILE, DEVTUNNEL_STATUS_FILE } from "./devtunnel.mjs";
 import { clearRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { spawn } from "node:child_process";
 
@@ -22,9 +22,18 @@ const IDLE_TIMEOUT_MS = Number(process.env.WEFT_DEVTUNNEL_IDLE_MS) || 5 * 60_000
 const IDLE_CHECK_MS = Number(process.env.WEFT_DEVTUNNEL_CHECK_MS) || 30_000;
 const HOST_STARTUP_TIMEOUT_MS = 20_000;
 
+// Publishes the current provisioning stage to DEVTUNNEL_STATUS_FILE (see devtunnel.mjs's
+// STAGE_LABELS) so devtunnel.mjs's poller — and through it, extension.mjs / the standalone CLI —
+// can show real progress instead of silence while this process works through its startup steps.
+function publishStage(stage) {
+  writeRegistryAtomic(DEVTUNNEL_STATUS_FILE, { pid: process.pid, stage, updatedAt: Date.now() }, { baseDir: process.env.WEFT_HOME });
+}
+
 export async function main() {
+  publishStage("starting-relay");
   const bin = await findDevTunnelBinary();
   if (!bin) {
+    clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir: process.env.WEFT_HOME });
     process.exitCode = 1;
     return;
   }
@@ -49,22 +58,29 @@ export async function main() {
       }
     }
     clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir: process.env.WEFT_HOME });
+    clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir: process.env.WEFT_HOME });
   };
 
   try {
+    publishStage("creating-tunnel");
     const createOut = await run(bin, ["create", "--json"]);
     tunnelId = JSON.parse(createOut).tunnel.tunnelId;
+    publishStage("creating-port");
     await run(bin, ["port", "create", tunnelId, "-p", String(relay.port), "--protocol", "http"]);
+    publishStage("creating-access");
     await run(bin, ["access", "create", tunnelId, "--anonymous", "--scopes", "connect"]);
   } catch {
     await relay.close().catch(() => {});
+    clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir: process.env.WEFT_HOME });
     process.exitCode = 1;
     return;
   }
 
+  publishStage("hosting");
   host = spawn(bin, ["host", tunnelId], { stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
   let baseUrl;
   try {
+    publishStage("waiting-for-url");
     baseUrl = await new Promise((resolve, reject) => {
       let buffer = "";
       const onData = (chunk) => {
@@ -91,6 +107,7 @@ export async function main() {
     { pid: process.pid, relayPort: relay.port, tunnelId, baseUrl, startedAt: Date.now() },
     { baseDir: process.env.WEFT_HOME },
   );
+  clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir: process.env.WEFT_HOME });
 
   idleTimer = setInterval(() => {
     if (relay.totalConnections() > 0) {

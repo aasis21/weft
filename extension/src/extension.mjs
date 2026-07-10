@@ -12,7 +12,7 @@ import {
 } from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
-import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+import { provisionDevTunnelTransport, stopDevTunnel, describeStage } from "./devtunnel.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async,
 // self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
@@ -121,7 +121,7 @@ const showPairing = async (context) => {
 async function switchTransport(name) {
   const normalized = name.trim().toLowerCase();
   if (normalized === "devtunnel") {
-    session.log?.("Weft: setting up a devtunnel (first run creates a tunnel; can take up to 45s)…", {
+    session.log?.("Weft: setting up a devtunnel (first run creates a tunnel; this can take a couple of minutes)…", {
       ephemeral: false,
     });
   }
@@ -129,7 +129,18 @@ async function switchTransport(name) {
   try {
     descriptor =
       normalized === "devtunnel"
-        ? await provisionDevTunnelTransport({ channelId })
+        ? await provisionDevTunnelTransport({
+            channelId,
+            // Surfaces real progress instead of silence — see devtunnel.mjs's STAGE_LABELS.
+            onProgress: (stage) => session.log?.(`Weft: ${describeStage(stage)}`, { ephemeral: false }),
+            // A 45s cycle elapsed with no success yet; the detached relay keeps working in the
+            // background regardless, so just let the user know we're still watching it rather
+            // than failing outright (provisionDevTunnelTransport caps this at ~2 minutes total).
+            onRetry: (attempt, maxAttempts) =>
+              session.log?.(`Weft: still setting up the devtunnel (attempt ${attempt + 1}/${maxAttempts})…`, {
+                ephemeral: false,
+              }),
+          })
         : resolveTransportByName(normalized);
   } catch (err) {
     session.log?.(`Weft: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
