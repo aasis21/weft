@@ -259,7 +259,12 @@ export default function App(): JSX.Element {
     // Device vanished (forgotten elsewhere) — fall through to the normal screen below.
   }
 
-  if (starting) {
+  // Also cover the "device paired but no session started yet" case: rather than falling through
+  // to the plain marketing landing page (which would look like nothing happened), go straight to
+  // the device-aware start flow so the paired device is visible and ready to launch a session on.
+  const hasDevicesOnly = !hasSessions && snapshot.devices.length > 0;
+
+  if (starting || hasDevicesOnly) {
     return (
       <StartSessionScreen
         hasSessions={hasSessions}
@@ -298,8 +303,8 @@ export default function App(): JSX.Element {
     );
   }
 
-  // First run / no active session: web shows the onboarding landing; the native app
-  // skips marketing and goes straight to the scan/pair screen.
+  // True first run (no sessions, no paired devices either): web shows the onboarding landing;
+  // the native app skips marketing and goes straight to the scan/pair screen.
   if (!hasSessions || !active) {
     return isNativeRuntime() ? (
       <JoinSessionScreen
