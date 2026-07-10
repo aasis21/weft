@@ -1,5 +1,5 @@
 ---
-name: weft
+name: weft-how-to-use
 description: Pair a phone to a running GitHub Copilot CLI session with Weft — show/refresh the QR code, pick a transport (Supabase realtime or a self-hosted Microsoft Dev Tunnel), manage the shared devtunnel relay, and run/manage the standalone `weft` Device Station CLI outside of any Copilot session. Use when the user asks to "pair my phone", "show the Weft QR", "switch Weft transport", "start/check/stop the weft devtunnel", "run weft standalone", or asks why `/weft` or `weft` isn't working.
 ---
 

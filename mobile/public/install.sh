@@ -6,7 +6,7 @@
 # Downloads the prebuilt Weft Copilot CLI extension (+ the standalone `weft`
 # Device Station command) and drops them where `copilot` auto-discovers extensions
 # (~/.copilot/extensions/weft - CODE only). Also installs a "how to use Weft" skill to
-# ~/.copilot/skills/weft/SKILL.md, the same way the extension goes to
+# ~/.copilot/skills/weft-how-to-use/SKILL.md, the same way the extension goes to
 # ~/.copilot/extensions/weft, so the agent can answer usage questions directly. All user
 # config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written
 # via `weft set-transport` - there is NO env var / .env for this, so re-running this
@@ -109,10 +109,10 @@ curl -fsSL "$BASE/relayServerProcess.mjs" -o "$INSTALL_DIR/relayServerProcess.mj
 ok "relayServerProcess.mjs -> $INSTALL_DIR  (shared devtunnel relay, only spawned if you use devtunnel)"
 curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"
 ok "weft.mjs -> $INSTALL_DIR  (standalone Device Station CLI)"
-# The "how to use Weft" skill goes to ~/.copilot/skills/weft/SKILL.md - same convention as the
+# The "how to use Weft" skill goes to ~/.copilot/skills/weft-how-to-use/SKILL.md - same convention as the
 # extension going to ~/.copilot/extensions/weft - so the agent can answer "how do I pair my
 # phone" / "how do I switch transport" etc. without the user having to ask us directly.
-SKILL_DIR="$HOME/.copilot/skills/weft"
+SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
 mkdir -p "$SKILL_DIR"
 curl -fsSL "$BASE/weft-skill.md" -o "$SKILL_DIR/SKILL.md"
 ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"

@@ -89,11 +89,11 @@ try {
         $publicWeftCliBundle = Join-Path $root 'mobile\public\weft.mjs'
         Copy-Item $weftCliBundle $publicWeftCliBundle -Force
         Ok 'mobile/public/weft.mjs  (served as /weft.mjs by the installer)'
-        $skillSource = Join-Path $root 'skill\weft\SKILL.md'
+        $skillSource = Join-Path $root 'skill\weft-how-to-use\SKILL.md'
         $publicSkillBundle = Join-Path $root 'mobile\public\weft-skill.md'
         if (Test-Path $skillSource) {
             Copy-Item $skillSource $publicSkillBundle -Force
-            Ok 'mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft/SKILL.md)'
+            Ok 'mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft-how-to-use/SKILL.md)'
         } else {
             Warn "no $skillSource - the how-to-use skill won't be (re)published"
         }
@@ -169,9 +169,9 @@ node "%~dp0weft.mjs" %*
         } else {
             Warn "no $weftCliBundle - the standalone \`weft\` command was not (re)installed"
         }
-        $skillSource = Join-Path $root 'skill\weft\SKILL.md'
+        $skillSource = Join-Path $root 'skill\weft-how-to-use\SKILL.md'
         if (Test-Path $skillSource) {
-            $skillDest = Join-Path $env:USERPROFILE '.copilot\skills\weft'
+            $skillDest = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
             New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
             Copy-Item $skillSource (Join-Path $skillDest 'SKILL.md') -Force
             Ok "SKILL.md -> $skillDest  (how-to-use skill, alongside the extension)"

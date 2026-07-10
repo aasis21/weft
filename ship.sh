@@ -73,10 +73,10 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   ok "mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)"
   cp "$weft_cli_bundle" "$root/mobile/public/weft.mjs"
   ok "mobile/public/weft.mjs  (served as /weft.mjs by the installer)"
-  skill_source="$root/skill/weft/SKILL.md"
+  skill_source="$root/skill/weft-how-to-use/SKILL.md"
   if [ -f "$skill_source" ]; then
     cp "$skill_source" "$root/mobile/public/weft-skill.md"
-    ok "mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft/SKILL.md)"
+    ok "mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft-how-to-use/SKILL.md)"
   else
     warn "no $skill_source - the how-to-use skill won't be (re)published"
   fi
@@ -132,9 +132,9 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
   else
     warn "no $weft_cli_bundle - the standalone 'weft' command was not (re)installed"
   fi
-  skill_source="$root/skill/weft/SKILL.md"
+  skill_source="$root/skill/weft-how-to-use/SKILL.md"
   if [ -f "$skill_source" ]; then
-    skill_dest="$HOME/.copilot/skills/weft"
+    skill_dest="$HOME/.copilot/skills/weft-how-to-use"
     mkdir -p "$skill_dest"
     cp "$skill_source" "$skill_dest/SKILL.md"
     ok "SKILL.md -> $skill_dest  (how-to-use skill, alongside the extension)"

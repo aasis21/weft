@@ -28,7 +28,7 @@ encrypted relay — watch it work, approve its moves, talk back, from anywhere.
 
 One line. Downloads the prebuilt extension into `~/.copilot/extensions/weft/` (where
 Copilot CLI auto-discovers it) plus a "how to use Weft" skill into
-`~/.copilot/skills/weft/`, pre-wired to the hosted relay — no clone, no Node build:
+`~/.copilot/skills/weft-how-to-use/`, pre-wired to the hosted relay — no clone, no Node build:
 
 ```powershell
 # Windows (PowerShell)
@@ -50,7 +50,7 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
   `& ([scriptblock]::Create((irm https://useweft.netlify.app/install.ps1))) -SupabaseUrl <url> -SupabaseKey <key>`
   on Windows, or `WEFT_SUPABASE_URL=<url> WEFT_SUPABASE_ANON_KEY=<key> bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"` on Unix.
   Prefer building from source? Use [`setup.ps1` / `setup.sh`](docs/setup.md).
-- **Uninstall** — delete `~/.copilot/extensions/weft/`, `~/.copilot/skills/weft/`, and
+- **Uninstall** — delete `~/.copilot/extensions/weft/`, `~/.copilot/skills/weft-how-to-use/`, and
   `~/.weft/` (your config: `weft.config.json` — registered projects, transport choice).
 
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),

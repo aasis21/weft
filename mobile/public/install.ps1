@@ -7,7 +7,7 @@
   relayServerProcess.mjs for the shared devtunnel relay, and weft.mjs — the "Device Station"
   CLI you can run on any machine, extension or no extension) and drops them where `copilot`
   auto-discovers extensions (~/.copilot/extensions/weft — CODE only). Also installs a
-  "how to use Weft" skill to ~/.copilot/skills/weft/SKILL.md, the same way the extension goes
+  "how to use Weft" skill to ~/.copilot/skills/weft-how-to-use/SKILL.md, the same way the extension goes
   to ~/.copilot/extensions/weft, so the agent can answer usage questions directly. All user
   config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written via
   `weft set-transport` — there is NO env var / .env for this, so re-running this installer to
@@ -151,10 +151,10 @@ Ok "relayServerProcess.mjs -> $InstallDir  $(Dim '(shared devtunnel relay, only 
 # installed) to let your phone spawn Copilot sessions there.
 Invoke-WebRequest -Uri "$base/weft.mjs" -OutFile (Join-Path $InstallDir 'weft.mjs') -UseBasicParsing
 Ok "weft.mjs -> $InstallDir  $(Dim '(standalone Device Station CLI)')"
-# The "how to use Weft" skill goes to ~/.copilot/skills/weft/SKILL.md — same convention as the
+# The "how to use Weft" skill goes to ~/.copilot/skills/weft-how-to-use/SKILL.md — same convention as the
 # extension going to ~/.copilot/extensions/weft — so the agent can answer "how do I pair my
 # phone" / "how do I switch transport" etc. without the user having to ask us directly.
-$skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft'
+$skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
 New-Item -ItemType Directory -Force -Path $skillDir | Out-Null
 Invoke-WebRequest -Uri "$base/weft-skill.md" -OutFile (Join-Path $skillDir 'SKILL.md') -UseBasicParsing
 Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"

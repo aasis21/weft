@@ -16,11 +16,11 @@ try {
   Copy-Item $bundle (Join-Path $dest "extension.mjs") -Force
   Write-Host "Installed extension.mjs -> $dest" -ForegroundColor Green
 
-  # Bundle the "how to use Weft" skill into ~/.copilot/skills/weft/ too, same as the extension
+  # Bundle the "how to use Weft" skill into ~/.copilot/skills/weft-how-to-use/ too, same as the extension
   # goes into ~/.copilot/extensions/weft/ — lets the agent answer "how do I pair my phone" etc.
-  $skillSource = Join-Path $root "skill\weft\SKILL.md"
+  $skillSource = Join-Path $root "skill\weft-how-to-use\SKILL.md"
   if (Test-Path $skillSource) {
-    $skillDest = Join-Path $env:USERPROFILE ".copilot\skills\weft"
+    $skillDest = Join-Path $env:USERPROFILE ".copilot\skills\weft-how-to-use"
     New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
     Copy-Item $skillSource (Join-Path $skillDest "SKILL.md") -Force
     Write-Host "Installed SKILL.md -> $skillDest" -ForegroundColor Green
