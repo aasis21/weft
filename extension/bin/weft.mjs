@@ -114,6 +114,17 @@ async function devtunnelCommand([sub, ...rest]) {
 
 async function devtunnelStart() {
   printHeader("WEFT DEVTUNNEL");
+
+  // Check first rather than always going through the spinner/provisioning path — a healthy
+  // relay is already channel-agnostic and shared machine-wide, so if one's already up there's
+  // nothing to "start"; just report it instead of implying fresh setup work is happening.
+  const existing = await healthyRegistryEntry();
+  if (existing) {
+    console.log(`${c.green("✓")} ${c.bold("devtunnel already running")}  ${c.dim(existing.baseUrl)}`);
+    console.log(c.dim(`pid ${existing.pid} · reused by every `) + "`/weft devtunnel`" + c.dim(" and ") + "`weft start`" + c.dim(" on this machine — run `weft devtunnel stop` to tear it down."));
+    return;
+  }
+
   const status = createProvisionStatusLine();
   status.start();
 
