@@ -33,6 +33,8 @@ weft list-projects
 weft set-default <name>
 weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
 weft show-transport
+weft set-name <name>
+weft show-name
 weft set-pairing <persistent|ephemeral>
 weft rotate-pairing
 weft devtunnel <start|status|stop>
@@ -54,6 +56,12 @@ weft help
   `weft start` / `/weft`, so an already-paired phone reconnects without rescanning the
   QR. Default is `ephemeral` (a fresh channel + key every run, forward-secret).
   `weft rotate-pairing` forces a new identity on demand.
+- **`weft set-name` / `show-name`** — set (or check) the display name this machine
+  shows to the phone in its DEVICES list. Defaults to the OS hostname until you set one;
+  the installer (install.ps1/install.sh) also prompts for this interactively at install
+  time, defaulting to the hostname (press Enter to keep it). Persisted alongside the
+  transport in `~/.weft/weft.config.json` — reinstalling/rebuilding never resets it.
+  Restart `weft start` / `/weft` for a changed name to reach an already-open session.
 - **`weft devtunnel start`** — foreground command that provisions (or reuses) the
   shared Microsoft Dev Tunnel relay and blocks with a live status line until it's ready.
   If a healthy relay is already running, it short-circuits instantly instead of

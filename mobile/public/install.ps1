@@ -38,9 +38,17 @@
 .PARAMETER SupabaseKey
   Override the relay publishable (anon) key.
 
+.PARAMETER DeviceName
+  The name shown to your phone for this machine (DEVICES list in the app). If omitted: an
+  existing ~/.weft/weft.config.json choice is left untouched; otherwise, if the session is
+  interactive, you'll be prompted with your hostname as the default (just press Enter to keep
+  it), or it defaults to the hostname non-interactively without writing anything (so it keeps
+  following hostname changes until you explicitly set your own with `weft set-name`).
+
 .PARAMETER Force
   Re-apply -Transport (or the default) even if a transport is already configured in
-  ~/.weft/weft.config.json, overwriting it.
+  ~/.weft/weft.config.json, overwriting it. Also re-applies -DeviceName (or re-prompts for one)
+  even if a device name is already configured.
 #>
 [CmdletBinding()]
 param(
@@ -49,6 +57,7 @@ param(
     [string]$Transport = '',
     [string]$SupabaseUrl = 'https://jqzohxjouzxzawqqlifv.supabase.co',
     [string]$SupabaseKey = 'sb_publishable_Rf_bymYhJk9fF2Op4xKT0w_eaWLiyCY',
+    [string]$DeviceName = '',
     [switch]$Force
 )
 
@@ -75,7 +84,7 @@ function Ok($msg)   { Write-Host "   $(Green '✓') $msg" }
 function Info($msg) { Write-Host "   $(Dim $msg)" }
 function Warn($msg) { Write-Host "   $(Yellow '!') $msg" }
 
-$TOTAL_STEPS = 5
+$TOTAL_STEPS = 6
 Banner "WEFT INSTALLER"
 
 # ---------------------------------------------------------------------------------------------
@@ -189,9 +198,49 @@ if ($applyTransport) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Step 4: register a `weft` command on PATH (a tiny .cmd shim next to the standalone bundle).
+# Step 4: choose a device name — shown to your phone in the DEVICES list instead of the raw OS
+# hostname. An existing ~/.weft/weft.config.json choice always wins unless the caller explicitly
+# passed -DeviceName or -Force (same "installer only ever refreshes code" contract as Step 1's
+# transport choice). Calls the just-downloaded weft.mjs's own `set-name` command so this installer
+# never has to duplicate its validation/persistence logic.
 # ---------------------------------------------------------------------------------------------
-StepHeader 4 $TOTAL_STEPS 'Registering the `weft` command'
+StepHeader 4 $TOTAL_STEPS 'Choose your device name'
+$deviceNameExplicit = $PSBoundParameters.ContainsKey('DeviceName') -and $DeviceName -ne ''
+$existingDeviceName = $null
+if (Test-Path $weftConfigPath) {
+    try {
+        $cfg = Get-Content $weftConfigPath -Raw | ConvertFrom-Json
+        if ($cfg.deviceName) { $existingDeviceName = $cfg.deviceName }
+    } catch {
+        # Unreadable/invalid — treat as unset, same as the extension's own loader does.
+    }
+}
+
+if ($existingDeviceName -and -not $deviceNameExplicit -and -not $Force) {
+    Ok "Existing device name found ($existingDeviceName) -> $weftConfigPath — left untouched."
+    Info 'Pass -DeviceName <name> or -Force to change it.'
+} else {
+    $defaultDeviceName = if ($DeviceName) { $DeviceName } else { $env:COMPUTERNAME }
+    $chosenDeviceName = $defaultDeviceName
+    if (-not $deviceNameExplicit) {
+        $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+        if ($interactive) {
+            Write-Host ''
+            $typed = Read-Host "   Device name shown to your phone (Enter for '$defaultDeviceName')"
+            if ($typed.Trim()) { $chosenDeviceName = $typed.Trim() }
+        } else {
+            Info "Non-interactive session — using hostname '$defaultDeviceName' (pass -DeviceName to override)."
+        }
+    }
+    & node $weftBin set-name $chosenDeviceName | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "weft set-name failed (exit $LASTEXITCODE)" }
+    Ok "Device name: $chosenDeviceName -> $weftConfigPath"
+}
+
+# ---------------------------------------------------------------------------------------------
+# Step 5: register a `weft` command on PATH (a tiny .cmd shim next to the standalone bundle).
+# ---------------------------------------------------------------------------------------------
+StepHeader 5 $TOTAL_STEPS 'Registering the `weft` command'
 $shimPath = Join-Path $InstallDir 'weft.cmd'
 @"
 @echo off
@@ -211,9 +260,9 @@ if ($pathEntries -notcontains $InstallDir) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Step 5: summary.
+# Step 6: summary.
 # ---------------------------------------------------------------------------------------------
-StepHeader 5 $TOTAL_STEPS 'Done'
+StepHeader 6 $TOTAL_STEPS 'Done'
 Write-Host ''
 Write-Host "  $(Bold '1.') Start Copilot CLI in any repo (run $(Cyan '/weft') to show the QR)."
 Write-Host "  $(Bold '2.') Open $(Cyan 'https://useweft.netlify.app') on your phone and scan the QR."

@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { stdin as input, stdout as output } from "node:process";
+import readline from "node:readline/promises";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
 import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
-import { clearTransportConfig, saveTransportConfig, savePairingMode, isPersistentPairingEnabled } from "../src/transportConfig.mjs";
+import { clearTransportConfig, saveTransportConfig, savePairingMode, isPersistentPairingEnabled, loadDeviceName, saveDeviceName } from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
 import {
@@ -40,6 +42,18 @@ function printHeader(title) {
   console.log(c.cyan(`└${bar}┘`));
 }
 
+// Last-resort safety net: `weft start` is a long-running station process — any stray unhandled
+// rejection or synchronous throw from deep in the transport/heartbeat stack must never silently
+// kill it (that's the "crashed 100s after the heartbeat fired, no stack trace" bug). We keep the
+// process alive and print the real stack so the root cause is diagnosable, instead of Node's
+// default --unhandled-rejections=throw behavior taking the whole station down.
+process.on("unhandledRejection", (reason) => {
+  console.error(`\n${c.red("✗ unhandled rejection (station kept running):")}`, reason?.stack ?? reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error(`\n${c.red("✗ uncaught exception (station kept running):")}`, err?.stack ?? err);
+});
+
 try {
   if (!command || command === "help" || command === "--help" || command === "-h") {
     usage();
@@ -66,6 +80,10 @@ try {
     setTransport(args);
   } else if (command === "show-transport") {
     showTransport();
+  } else if (command === "set-name") {
+    setName(args);
+  } else if (command === "show-name") {
+    showName();
   } else if (command === "set-pairing") {
     await setPairing(args);
   } else if (command === "rotate-pairing") {
@@ -262,8 +280,10 @@ async function start() {
       ),
   });
 
-  printHeader(`WEFT DEVICE STATION — ${hostname()}`);
+  printHeader(`WEFT DEVICE STATION — ${loadDeviceName() ?? hostname()}`);
   console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions.\n"));
+
+  await ensureAtLeastOneProject();
 
   await listener.start();
 
@@ -500,6 +520,32 @@ function createStatusLine({ idleLabel = "listening for phone…" } = {}) {
   };
 }
 
+async function ensureAtLeastOneProject() {
+  if (listProjects().length > 0) return;
+  if (!process.stdin.isTTY) {
+    console.log(c.dim("   No projects registered — run `weft add-project <name> <path> --default` to add one.\n"));
+    return;
+  }
+  console.log(c.yellow("No projects are registered yet — your phone won't be able to start sessions until one is added.\n"));
+  const rl = readline.createInterface({ input, output });
+  try {
+    for (;;) {
+      const answer = (await rl.question(`   Folder to register as a project [${process.cwd()}]: `)).trim();
+      const path = answer || process.cwd();
+      const name = basename(resolve(path));
+      try {
+        const project = addProject(name, path, { makeDefault: true });
+        console.log(c.green(`   Added project ${project.name}: ${project.path} (default)\n`));
+        return;
+      } catch (err) {
+        console.log(c.red(`   ${err?.message ?? err}`));
+      }
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 function printProjects(projects) {
   if (!projects.length) {
     console.log(c.dim("   No projects registered."));
@@ -579,6 +625,25 @@ function showTransport() {
   console.log(c.dim(`Source: ${join(weftHome(), "weft.config.json")}`));
 }
 
+// The display name shown to phones (DEVICES list entry, senderName on every message this
+// listener/CLI sends). Defaults to os.hostname() until the user picks their own via `weft
+// set-name` (offered interactively at install time, defaulting to the machine hostname).
+function setName([...nameParts]) {
+  const name = nameParts.join(" ").trim();
+  if (!name) throw new Error("Usage: weft set-name <name>");
+  const saved = saveDeviceName(name);
+  console.log(`Device name set to "${saved}". Restart \`weft start\` / /weft for phones to see the new name.`);
+}
+
+function showName() {
+  const configured = loadDeviceName();
+  if (configured) {
+    console.log(`Current device name: ${configured} ${c.dim("(from weft set-name)")}`);
+  } else {
+    console.log(`Current device name: ${hostname()} ${c.dim("(OS hostname — no custom name set, run `weft set-name <name>` to change)")}`);
+  }
+}
+
 function usage() {
   console.log(`Usage:
   weft start
@@ -588,6 +653,8 @@ function usage() {
   weft set-default <name>
   weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
   weft show-transport
+  weft set-name <name>
+  weft show-name
   weft set-pairing <persistent|ephemeral>
   weft rotate-pairing
   weft devtunnel <start|status|stop>
@@ -596,6 +663,10 @@ function usage() {
 Config lives in a single file: ~/.weft/weft.config.json (written by \`weft set-transport\`).
 There is no .env / WEFT_TRANSPORT env var — reinstalling or rebuilding the extension never
 touches this file, so your chosen transport always survives.
+
+Your device's display name (shown to phones in the DEVICES list) defaults to your OS hostname
+until you set your own with \`weft set-name <name>\` — the installer offers this as an
+interactive prompt (default: your hostname) the first time you install.
 
 By default every \`weft start\` / /weft mints a brand-new channel + key (forward-secret, but
 means rescanning the QR every time). Run \`weft set-pairing persistent\` to reuse the same

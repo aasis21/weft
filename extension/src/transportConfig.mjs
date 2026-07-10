@@ -131,3 +131,27 @@ export function savePairingMode(mode, { baseDir } = {}) {
   writeConfig({ ...config, pairing: { persistent: mode === "persistent" } }, { baseDir });
   return mode;
 }
+
+const MAX_DEVICE_NAME_LENGTH = 60;
+
+/** Read the user-chosen display name for this device (`weft set-name`), or null if unset —
+ * callers (listener.mjs, weft.mjs's `weft start` header) fall back to os.hostname() themselves so
+ * this module has no opinion about the default. Set during install (install.ps1/install.sh
+ * prompt, defaulting to the machine hostname) or any time after via `weft set-name`. */
+export function loadDeviceName({ baseDir } = {}) {
+  const { deviceName } = loadConfig({ baseDir });
+  return typeof deviceName === "string" && deviceName.trim() ? deviceName.trim() : null;
+}
+
+/** Persist this device's display name (shown to phones as the DEVICES entry / senderName on
+ * every message this listener sends). Merges into weft.config.json, same as saveTransportConfig. */
+export function saveDeviceName(name, { baseDir } = {}) {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  if (!trimmed) throw new Error("Weft: device name must be a non-empty string");
+  if (trimmed.length > MAX_DEVICE_NAME_LENGTH) {
+    throw new Error(`Weft: device name must be ${MAX_DEVICE_NAME_LENGTH} characters or fewer`);
+  }
+  const config = loadConfig({ baseDir });
+  writeConfig({ ...config, deviceName: trimmed }, { baseDir });
+  return trimmed;
+}

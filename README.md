@@ -70,6 +70,8 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 | `weft set-default <name>` | Choose the project a bare pairing launches into. |
 | `weft set-transport <supabase\|devtunnel\|clear> [--url <url>] [--anon-key <key>]` | Choose (or clear) the pairing transport. |
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
+| `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |
+| `weft show-name` | Print the device name currently in effect and where it came from. |
 | `weft devtunnel start` | Provision (or reuse) the shared devtunnel relay and watch live progress — no pairing session needed. |
 | `weft devtunnel status` | Check whether the shared devtunnel relay is running, without starting it. |
 | `weft devtunnel stop` | Tear down the shared devtunnel relay. |

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearTransportConfig, loadTransportConfig, saveTransportConfig } from "../src/transportConfig.mjs";
+import { clearTransportConfig, loadTransportConfig, saveTransportConfig, loadDeviceName, saveDeviceName } from "../src/transportConfig.mjs";
 
 let weftHome;
 
@@ -83,4 +83,29 @@ test("clearTransportConfig removes only the transport key, keeping other config"
   const raw = JSON.parse(readFileSync(join(weftHome, "weft.config.json"), "utf8"));
   assert.deepEqual(raw, { someOtherSetting: 42 });
   assert.equal(loadTransportConfig({ baseDir: weftHome }), null);
+});
+
+test("loadDeviceName returns null when nothing is configured", () => {
+  assert.equal(loadDeviceName({ baseDir: weftHome }), null);
+});
+
+test("save/load round-trips a device name, trimmed", () => {
+  saveDeviceName("  My Laptop  ", { baseDir: weftHome });
+  assert.equal(loadDeviceName({ baseDir: weftHome }), "My Laptop");
+});
+
+test("saveDeviceName rejects an empty/whitespace-only name", () => {
+  assert.throws(() => saveDeviceName("", { baseDir: weftHome }), /non-empty string/);
+  assert.throws(() => saveDeviceName("   ", { baseDir: weftHome }), /non-empty string/);
+});
+
+test("saveDeviceName rejects a name over the length limit", () => {
+  assert.throws(() => saveDeviceName("x".repeat(61), { baseDir: weftHome }), /60 characters or fewer/);
+});
+
+test("saveDeviceName merges into weft.config.json without clobbering the transport", () => {
+  saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
+  saveDeviceName("My Laptop", { baseDir: weftHome });
+  const raw = JSON.parse(readFileSync(join(weftHome, "weft.config.json"), "utf8"));
+  assert.deepEqual(raw, { transport: { kind: "local" }, deviceName: "My Laptop" });
 });

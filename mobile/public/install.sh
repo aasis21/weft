@@ -21,7 +21,13 @@
 #   WEFT_SUPABASE_URL=https://xxx.supabase.co WEFT_SUPABASE_ANON_KEY=sb_publishable_xxx \
 #     bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"
 #
-# Force re-applying the transport even if one is already configured: WEFT_FORCE=1
+# Choose the name shown to your phone (DEVICES list) non-interactively: WEFT_DEVICE_NAME=<name>
+# If omitted: an existing ~/.weft/weft.config.json choice is left untouched; otherwise, if the
+# session is interactive, you'll be prompted with your hostname as the default (just press
+# Enter to keep it), or it defaults to the hostname non-interactively without writing anything
+# (so it keeps following hostname changes until you explicitly set your own with `weft set-name`).
+#
+# Force re-applying the transport (or device name) even if one is already configured: WEFT_FORCE=1
 set -euo pipefail
 
 BASE="https://useweft.netlify.app"
@@ -33,7 +39,7 @@ WEFT_CONFIG_PATH="$WEFT_HOME/weft.config.json"
 # must not change which relay we install.
 RELAY_URL="${WEFT_SUPABASE_URL:-https://jqzohxjouzxzawqqlifv.supabase.co}"
 RELAY_KEY="${WEFT_SUPABASE_ANON_KEY:-sb_publishable_Rf_bymYhJk9fF2Op4xKT0w_eaWLiyCY}"
-TOTAL_STEPS=5
+TOTAL_STEPS=6
 
 bold()   { printf '\033[1m%s\033[0m' "$1"; }
 dim()    { printf '\033[2m%s\033[0m' "$1"; }
@@ -145,7 +151,46 @@ if [ "$APPLY_TRANSPORT" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-step 4 'Registering the `weft` command'
+# Step 4: choose a device name - shown to your phone in the DEVICES list instead of the raw OS
+# hostname. An existing ~/.weft/weft.config.json choice always wins unless the caller explicitly
+# set WEFT_DEVICE_NAME or WEFT_FORCE=1 (same "installer only ever refreshes code" contract as
+# Step 1's transport choice). Calls the just-downloaded weft.mjs's own `set-name` command so this
+# installer never has to duplicate its validation/persistence logic.
+# ---------------------------------------------------------------------------
+step 4 "Choose your device name"
+DEVICE_NAME="${WEFT_DEVICE_NAME:-}"
+DEVICE_NAME_EXPLICIT=1; [ -z "$DEVICE_NAME" ] && DEVICE_NAME_EXPLICIT=0
+EXISTING_DEVICE_NAME=""
+if [ -f "$WEFT_CONFIG_PATH" ]; then
+  EXISTING_DEVICE_NAME="$(node -e '
+    try {
+      const cfg = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      if (cfg && typeof cfg.deviceName === "string" && cfg.deviceName.trim()) process.stdout.write(cfg.deviceName);
+    } catch {}
+  ' "$WEFT_CONFIG_PATH" 2>/dev/null || true)"
+fi
+
+if [ -n "$EXISTING_DEVICE_NAME" ] && [ "$DEVICE_NAME_EXPLICIT" != "1" ] && [ "$FORCE" != "1" ]; then
+  ok "Existing device name found ($EXISTING_DEVICE_NAME) -> $WEFT_CONFIG_PATH - left untouched."
+  echo "      $(dim "Set WEFT_DEVICE_NAME=<name> or WEFT_FORCE=1 to change it.")"
+else
+  DEFAULT_DEVICE_NAME="${DEVICE_NAME:-$(hostname)}"
+  CHOSEN_DEVICE_NAME="$DEFAULT_DEVICE_NAME"
+  if [ "$DEVICE_NAME_EXPLICIT" != "1" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      printf "   Device name shown to your phone [%s]: " "$DEFAULT_DEVICE_NAME"
+      read -r typed </dev/tty || typed=""
+      [ -n "$typed" ] && CHOSEN_DEVICE_NAME="$typed"
+    else
+      ok "Non-interactive session - using hostname '$DEFAULT_DEVICE_NAME' (set WEFT_DEVICE_NAME to override)."
+    fi
+  fi
+  node "$INSTALL_DIR/weft.mjs" set-name "$CHOSEN_DEVICE_NAME" >/dev/null
+  ok "Device name: $CHOSEN_DEVICE_NAME -> $WEFT_CONFIG_PATH"
+fi
+
+# ---------------------------------------------------------------------------
+step 5 'Registering the `weft` command'
 mkdir -p "$BIN_DIR"
 SHIM_PATH="$BIN_DIR/weft"
 cat > "$SHIM_PATH" <<EOF
@@ -176,7 +221,7 @@ case ":$PATH:" in
 esac
 
 # ---------------------------------------------------------------------------
-step 5 "Done"
+step 6 "Done"
 echo ""
 echo "  $(bold '1.') Start Copilot CLI in any repo (run $(cyan '/weft') to show the QR)."
 echo "  $(bold '2.') Open $(cyan 'https://useweft.netlify.app') on your phone and scan the QR."

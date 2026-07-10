@@ -23,7 +23,7 @@ import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./pairingIdentity.mjs";
-import { isPersistentPairingEnabled } from "./transportConfig.mjs";
+import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
@@ -106,6 +106,10 @@ export function createListener({
   // Stable, non-secret device id (persisted across restarts) — see deviceIdentity.mjs. Independent
   // of listenerChannelId/listenerKeyPair, which stay ephemeral per run for forward secrecy.
   const listenerDeviceId = deviceId ?? getOrCreateDeviceId();
+  // Display name shown to phones (DEVICES list entry, senderName on every message this listener
+  // sends). Prefers the user's own choice from `weft set-name` (set at install time or any time
+  // after) over the raw OS hostname, which is what this fell back to unconditionally before.
+  const listenerDeviceName = loadDeviceName() ?? hostname();
   let pairingPayload = null;
   let pairingStop = null;
   let controlUnsub = null;
@@ -173,7 +177,7 @@ export function createListener({
       connect: true,
       channelId: listenerChannelId,
       senderId: "weft-listener",
-      senderName: hostname(),
+      senderName: listenerDeviceName,
       onPeer: bindPeer,
     });
     pairingStop = handle.stop;
@@ -227,16 +231,28 @@ export function createListener({
   function startHeartbeat() {
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
-      void channel
-        ?.send(deviceHeartbeat(listenerDeviceId))
-        ?.then(() => {
-          try {
-            onHeartbeat?.();
-          } catch {
-            // best-effort UI hook
-          }
-        })
-        ?.catch?.(() => {});
+      // Wrapped in try/catch + Promise.resolve().catch() as a hard safety net: a heartbeat
+      // failure (dropped channel, transport error, etc.) must never crash the whole station —
+      // it should just skip this beat and let the next one retry. A bare `channel?.send(...)
+      // ?.then()?.catch?.()` chain has a narrow race where `channel` can become non-thenable or
+      // get reassigned between call and resolution, letting a rejection slip past optional
+      // chaining and surface as an unhandled rejection that kills the process (Node's default
+      // --unhandled-rejections=throw behavior).
+      try {
+        Promise.resolve(channel?.send(deviceHeartbeat(listenerDeviceId)))
+          .then(() => {
+            try {
+              onHeartbeat?.();
+            } catch {
+              // best-effort UI hook
+            }
+          })
+          .catch(() => {
+            // Best-effort beat: drop this failure silently, next interval tick retries.
+          });
+      } catch {
+        // Synchronous throw from channel.send/deviceHeartbeat — same best-effort handling.
+      }
     }, heartbeatMs);
     heartbeatTimer.unref?.();
   }
@@ -261,7 +277,7 @@ export function createListener({
         identity: {
           channelId: listenerChannelId,
           senderId: "weft-listener",
-          senderName: hostname(),
+          senderName: listenerDeviceName,
         },
       });
       controlUnsub = channel.onEvent(EVENT_TYPE.CONTROL, (envelope) => {
@@ -350,7 +366,7 @@ export function createListener({
       identity: {
         channelId: listenerChannelId,
         senderId: "weft-listener",
-        senderName: hostname(),
+        senderName: listenerDeviceName,
       },
     });
     controlUnsub = channel.onEvent(EVENT_TYPE.CONTROL, (envelope) => {
@@ -385,7 +401,7 @@ export function createListener({
       path: p.path,
       isDefault: p.isDefault === true || p.default === true,
     }));
-    await channel.send(projectList(projects, hostname(), listenerDeviceId));
+    await channel.send(projectList(projects, listenerDeviceName, listenerDeviceId));
   }
 
   async function handleControl(envelope) {
@@ -495,6 +511,9 @@ export function createListener({
     },
     get deviceId() {
       return listenerDeviceId;
+    },
+    get deviceName() {
+      return listenerDeviceName;
     },
     get pairingPayload() {
       return pairingPayload;
