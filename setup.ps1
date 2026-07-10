@@ -16,6 +16,16 @@ try {
   Copy-Item $bundle (Join-Path $dest "extension.mjs") -Force
   Write-Host "Installed extension.mjs -> $dest" -ForegroundColor Green
 
+  # Bundle the "how to use Weft" skill into ~/.copilot/skills/weft/ too, same as the extension
+  # goes into ~/.copilot/extensions/weft/ — lets the agent answer "how do I pair my phone" etc.
+  $skillSource = Join-Path $root "skill\weft\SKILL.md"
+  if (Test-Path $skillSource) {
+    $skillDest = Join-Path $env:USERPROFILE ".copilot\skills\weft"
+    New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
+    Copy-Item $skillSource (Join-Path $skillDest "SKILL.md") -Force
+    Write-Host "Installed SKILL.md -> $skillDest" -ForegroundColor Green
+  }
+
   # Transport is configured once, in a single file: ~/.weft/weft.config.json (via `weft
   # set-transport`) — never via .env / env vars, so re-running this script never overwrites it.
   $weftConfig = Join-Path $env:USERPROFILE ".weft\weft.config.json"

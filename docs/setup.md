@@ -54,7 +54,7 @@ and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
 
 **1. Install the extension** (builds + copies the single bundled `extension.mjs` into
 `~/.copilot/extensions/weft/`, where the CLI auto-discovers it — that directory holds
-installed **code only**; a colocated `.env` is copied to `~/.weft/.env` instead, if present):
+installed **code only**):
 
 ```sh
 ./setup.ps1     # Windows
@@ -62,14 +62,14 @@ installed **code only**; a colocated `.env` is copied to `~/.weft/.env` instead,
 # remove later with ./uninstall.ps1 / ./uninstall.sh
 ```
 
-The extension auto-loads `WEFT_SUPABASE_URL` / `WEFT_SUPABASE_ANON_KEY` /
-`WEFT_TRANSPORT=supabase` from `~/.weft/.env` — the canonical, user-facing config location
-(alongside `projects.json` / `transport.json`; see `weftHome()` in `extension/src/projects.mjs`)
-— or inherits them from the shell that launches `copilot` (exported shell vars win). An
-install-dir `.env` and a launch-cwd `.env` are still read as fallbacks for pre-existing
-installs. The names are Weft-namespaced so a generic
-`SUPABASE_URL` you may have exported for an unrelated project can't hijack the relay; the
-generic names still work as a fallback when the namespaced ones are unset.
+Transport (Supabase vs. devtunnel) is configured once via `weft set-transport supabase
+--url <url> --anon-key <key>` (or `weft set-transport devtunnel`), persisted to
+`~/.weft/weft.config.json` — the canonical, user-facing config location (alongside
+`projects.json`; see `weftHome()` in `extension/src/projects.mjs`). There is **no env var
+/ `.env`** for this at all (see `transportConfig.mjs` / `transportFactory.mjs`), so
+re-running `setup.ps1`/`setup.sh` (or the site installer) never silently resets or shadows
+whatever you've already configured — `setup.ps1`/`setup.sh` print a reminder to run `weft
+set-transport` if nothing is configured yet, and otherwise leave it untouched.
 
 **2. Get the app on your phone** — pick one:
 
@@ -114,16 +114,18 @@ planned follow-up.)
    editor). Channels are opened with `config.private = true`, so **joins are denied until
    this migration is applied** (see [`security.md`](./security.md) and
    [`supabase/README.md`](../supabase/README.md)).
-3. Provide credentials via env (never commit secrets):
-   - extension: `WEFT_SUPABASE_URL`, `WEFT_SUPABASE_ANON_KEY` (generic `SUPABASE_URL` /
-     `SUPABASE_ANON_KEY` work as a fallback)
+3. Wire up the extension's transport (no env var, no `.env` — see
+   [`hosting.md`](./hosting.md#configuring-the-extensions-transport)):
+   ```sh
+   weft set-transport supabase --url <your-project-url> --anon-key <your-anon-key>
+   ```
+   and the mobile build's credentials via env (Vite build-time only, never committed):
    - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-   - `WEFT_TRANSPORT=supabase`
 4. The caller constructs a `@supabase/supabase-js` client, calls
    `client.realtime.setAuth(anonKey)` (the anon key is the Realtime access token that RLS
    authorizes), and passes it to `createSupabaseTransport({ client, channelId })` (the
    `shared/` package stays dependency-free by injecting the client). The extension does
-   this from env automatically when `WEFT_TRANSPORT=supabase`.
+   this automatically once `weft set-transport supabase` has been run.
 
 > **Resolved (p4):** `SupabaseTransport` registers a single catch-all broadcast listener
 > before `subscribe()` and dispatches internally, so subscriptions added after `connect()`
@@ -131,13 +133,17 @@ planned follow-up.)
 
 ## Configuration reference
 
+Transport (Supabase vs. devtunnel) is **not** an env var — it's configured once via `weft
+set-transport` and persisted to `~/.weft/weft.config.json` (see
+[`hosting.md`](./hosting.md#configuring-the-extensions-transport)). The extension has a
+small number of *unrelated*, legitimate tuning env vars:
+
 | Env var | Used by | Meaning |
 |---|---|---|
-| `WEFT_TRANSPORT` | extension | `local` (default) or `supabase` |
 | `WEFT_APPROVAL_TIMEOUT_MS` | extension | approval wait before auto-deny (default 120000) |
+| `WEFT_ELICITATION_TIMEOUT_MS` | extension | elicitation wait before auto-deny |
 | `WEFT_CHANNEL_ID` | extension | force a channel id (tests); otherwise random 128-bit |
-| `WEFT_SUPABASE_URL` / `WEFT_SUPABASE_ANON_KEY` | extension | relay credentials (preferred; generic `SUPABASE_URL` / `SUPABASE_ANON_KEY` are a fallback) |
-| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | mobile | relay credentials |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | mobile | relay credentials (Vite build-time) |
 
 ## Docs index
 

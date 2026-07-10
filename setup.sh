@@ -16,6 +16,16 @@ mkdir -p "$dest"
 cp "$bundle" "$dest/extension.mjs"
 echo "Installed extension.mjs -> $dest"
 
+# Bundle the "how to use Weft" skill into ~/.copilot/skills/weft/ too, same as the extension
+# goes into ~/.copilot/extensions/weft/ — lets the agent answer "how do I pair my phone" etc.
+skill_source="$root/skill/weft/SKILL.md"
+if [ -f "$skill_source" ]; then
+  skill_dest="$HOME/.copilot/skills/weft"
+  mkdir -p "$skill_dest"
+  cp "$skill_source" "$skill_dest/SKILL.md"
+  echo "Installed SKILL.md -> $skill_dest"
+fi
+
 # Transport is configured once, in a single file: ~/.weft/weft.config.json (via `weft
 # set-transport`) — never via .env / env vars, so re-running this script never overwrites it.
 weft_config="$HOME/.weft/weft.config.json"

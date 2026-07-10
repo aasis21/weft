@@ -6,9 +6,14 @@
   Downloads the prebuilt Weft Copilot CLI extension (+ its two standalone companion bundles:
   relayServerProcess.mjs for the shared devtunnel relay, and weft.mjs — the "Device Station"
   CLI you can run on any machine, extension or no extension) and drops them where `copilot`
-  auto-discovers extensions (~/.copilot/extensions/weft — CODE only). All user config (relay
-  .env, projects, transport choice) lives separately in ~/.weft. Also registers a `weft` command
-  on your PATH. No git clone, no Node build required — just Node itself.
+  auto-discovers extensions (~/.copilot/extensions/weft — CODE only). Also installs a
+  "how to use Weft" skill to ~/.copilot/skills/weft/SKILL.md, the same way the extension goes
+  to ~/.copilot/extensions/weft, so the agent can answer usage questions directly. All user
+  config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written via
+  `weft set-transport` — there is NO env var / .env for this, so re-running this installer to
+  update to a newer build never silently resets or shadows your chosen transport. Also
+  registers a `weft` command on your PATH. No git clone, no Node build required — just Node
+  itself.
 
   Designed to be run with:
     irm https://useweft.netlify.app/install.ps1 | iex
@@ -23,7 +28,9 @@
 .PARAMETER Transport
   Your default transport: "supabase" (hosted, zero-config — the default) or "devtunnel"
   (self-hosted local relay via Microsoft Dev Tunnels, no cloud account, needs the `devtunnel` CLI).
-  If omitted and the session is interactive, you'll be asked to pick.
+  If omitted: an existing ~/.weft/weft.config.json choice is left untouched (this installer only
+  ever refreshes code, never your config); otherwise, if the session is interactive, you'll be
+  asked to pick, or it defaults to supabase non-interactively.
 
 .PARAMETER SupabaseUrl
   Override the relay Supabase URL (to run your own relay).
@@ -32,7 +39,8 @@
   Override the relay publishable (anon) key.
 
 .PARAMETER Force
-  Overwrite an existing .env even if one is already present.
+  Re-apply -Transport (or the default) even if a transport is already configured in
+  ~/.weft/weft.config.json, overwriting it.
 #>
 [CmdletBinding()]
 param(
@@ -71,25 +79,50 @@ $TOTAL_STEPS = 5
 Banner "WEFT INSTALLER"
 
 # ---------------------------------------------------------------------------------------------
-# Step 1: pick a transport (before downloading anything, so the .env we write in step 3 is right
-# the first time — no separate re-run needed just to switch transports).
+# Step 1: pick a transport. An existing ~/.weft/weft.config.json choice always wins unless the
+# caller explicitly passed -Transport or -Force — this installer only ever refreshes CODE under
+# $InstallDir, never the user's config, so a plain re-run/upgrade can't silently reset it.
 # ---------------------------------------------------------------------------------------------
 StepHeader 1 $TOTAL_STEPS 'Choose your default transport'
-if (-not $Transport) {
-    $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
-    if ($interactive) {
-        Write-Host ''
-        Write-Host "   $(Bold '1.') supabase   $(Dim '- hosted relay, zero config, works anywhere (default)')"
-        Write-Host "   $(Bold '2.') devtunnel  $(Dim '- self-hosted local relay via Microsoft Dev Tunnels, no cloud account')"
-        Write-Host ''
-        $choice = Read-Host '   Pick 1 or 2 (Enter for 1/supabase)'
-        $Transport = if ($choice.Trim() -eq '2') { 'devtunnel' } else { 'supabase' }
-    } else {
-        $Transport = 'supabase'
-        Info 'Non-interactive session — defaulting to supabase (pass -Transport devtunnel to override).'
+$transportExplicit = $PSBoundParameters.ContainsKey('Transport') -and $Transport -ne ''
+$weftHome = Join-Path $env:USERPROFILE '.weft'
+$weftConfigPath = Join-Path $weftHome 'weft.config.json'
+$existingTransportKind = $null
+if (Test-Path $weftConfigPath) {
+    try {
+        $cfg = Get-Content $weftConfigPath -Raw | ConvertFrom-Json
+        if ($cfg.transport -and $cfg.transport.kind -in @('supabase', 'devtunnel')) {
+            $existingTransportKind = $cfg.transport.kind
+        }
+    } catch {
+        # Unreadable/invalid — treat as unset, same as the extension's own loader does.
     }
 }
-Ok "Transport: $Transport"
+
+$applyTransport = $true
+$legacyEnvPaths = @((Join-Path $InstallDir '.env'), (Join-Path $weftHome '.env'))
+if ($existingTransportKind -and -not $transportExplicit -and -not $Force) {
+    $Transport = $existingTransportKind
+    $applyTransport = $false
+    Ok "Existing transport config found ($Transport) -> $weftConfigPath — left untouched."
+    Info 'Pass -Transport <name> or -Force to change it.'
+} else {
+    if (-not $Transport) {
+        $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+        if ($interactive) {
+            Write-Host ''
+            Write-Host "   $(Bold '1.') supabase   $(Dim '- hosted relay, zero config, works anywhere (default)')"
+            Write-Host "   $(Bold '2.') devtunnel  $(Dim '- self-hosted local relay via Microsoft Dev Tunnels, no cloud account')"
+            Write-Host ''
+            $choice = Read-Host '   Pick 1 or 2 (Enter for 1/supabase)'
+            $Transport = if ($choice.Trim() -eq '2') { 'devtunnel' } else { 'supabase' }
+        } else {
+            $Transport = 'supabase'
+            Info 'Non-interactive session — defaulting to supabase (pass -Transport devtunnel to override).'
+        }
+    }
+    Ok "Transport: $Transport"
+}
 if ($Transport -eq 'devtunnel') {
     $devtunnelOnPath = Get-Command devtunnel -ErrorAction SilentlyContinue
     if (-not $devtunnelOnPath) {
@@ -118,73 +151,41 @@ Ok "relayServerProcess.mjs -> $InstallDir  $(Dim '(shared devtunnel relay, only 
 # installed) to let your phone spawn Copilot sessions there.
 Invoke-WebRequest -Uri "$base/weft.mjs" -OutFile (Join-Path $InstallDir 'weft.mjs') -UseBasicParsing
 Ok "weft.mjs -> $InstallDir  $(Dim '(standalone Device Station CLI)')"
+# The "how to use Weft" skill goes to ~/.copilot/skills/weft/SKILL.md — same convention as the
+# extension going to ~/.copilot/extensions/weft — so the agent can answer "how do I pair my
+# phone" / "how do I switch transport" etc. without the user having to ask us directly.
+$skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft'
+New-Item -ItemType Directory -Force -Path $skillDir | Out-Null
+Invoke-WebRequest -Uri "$base/weft-skill.md" -OutFile (Join-Path $skillDir 'SKILL.md') -UseBasicParsing
+Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"
 
 # ---------------------------------------------------------------------------------------------
-# Step 3: write / migrate the .env relay config.
-#
-# Canonical location is ~/.weft/.env — user config lives in ~/.weft (alongside projects.json /
-# transport.json), so ~/.copilot/extensions/weft only ever holds installed CODE. If an older
-# install left a .env next to the extension, its values are migrated in and the old file is
-# removed so the split stays clean going forward.
+# Step 3: apply the transport choice to ~/.weft/weft.config.json — the ONLY place the extension
+# and weft.mjs ever read transport config from (no env var, no .env — see transportConfig.mjs /
+# transportFactory.mjs). Calls the just-downloaded weft.mjs's own `set-transport` command so this
+# installer never has to duplicate its validation/persistence logic. A stale .env from an older
+# install (that config format is retired, no migration) is simply removed so it can't linger
+# around looking authoritative when it's now inert.
 # ---------------------------------------------------------------------------------------------
-StepHeader 3 $TOTAL_STEPS 'Writing relay config'
-$weftHome = Join-Path $env:USERPROFILE '.weft'
+StepHeader 3 $TOTAL_STEPS 'Applying transport config'
 New-Item -ItemType Directory -Force -Path $weftHome | Out-Null
-$envPath = Join-Path $weftHome '.env'
-$legacyEnvPath = Join-Path $InstallDir '.env'
-$envTemplate = @"
-# Weft relay config. The publishable key is client-safe by design; the channel is
-# guarded by Supabase RLS + end-to-end AES-256-GCM. To run your own relay, swap these
-# for your own Supabase project's URL + publishable key.
-#
-# Names are Weft-namespaced on purpose: a generic SUPABASE_URL / SUPABASE_ANON_KEY
-# exported globally for another Supabase project would otherwise hijack the relay.
-#
-# WEFT_TRANSPORT picks the default: "supabase" (hosted) or "devtunnel" (self-hosted, no cloud
-# account, needs the `devtunnel` CLI logged in). Change any time with:
-#   weft set-transport supabase --url <url> --anon-key <key>
-#   weft set-transport devtunnel
-WEFT_TRANSPORT=$Transport
-WEFT_SUPABASE_URL=$SupabaseUrl
-WEFT_SUPABASE_ANON_KEY=$SupabaseKey
-WEFT_APPROVAL_TIMEOUT_MS=120000
-"@
+$weftBin = Join-Path $InstallDir 'weft.mjs'
 
-if ((Test-Path $legacyEnvPath) -and -not (Test-Path $envPath)) {
-    # First run after upgrading from a version that wrote .env next to the extension: move it,
-    # don't copy — ~/.copilot/extensions/weft should hold only code from here on.
-    Move-Item -Path $legacyEnvPath -Destination $envPath
-    Ok "moved your .env: $legacyEnvPath -> $envPath"
-} elseif (Test-Path $legacyEnvPath) {
-    Remove-Item -Path $legacyEnvPath -Force
-    Ok "removed stale $legacyEnvPath (your config already lives in $envPath)"
+foreach ($p in $legacyEnvPaths) {
+    if (Test-Path $p) {
+        Remove-Item -Path $p -Force
+        Ok "removed stale $p  $(Dim '(config now lives only in weft.config.json)')"
+    }
 }
 
-if ((Test-Path $envPath) -and -not $Force) {
-    # Auto-migrate an older .env (generic SUPABASE_* only) by adding the namespaced keys,
-    # preserving any custom relay values the user already set. Existing installs self-heal.
-    $envText = Get-Content $envPath -Raw
-    $added = @()
-    if ($envText -notmatch '(?m)^\s*WEFT_SUPABASE_URL=') {
-        $existing = ([regex]::Match($envText, '(?m)^\s*SUPABASE_URL=(.*)$')).Groups[1].Value.Trim()
-        $val = if ($existing) { $existing } else { $SupabaseUrl }
-        Add-Content -Path $envPath -Value "WEFT_SUPABASE_URL=$val"
-        $added += 'WEFT_SUPABASE_URL'
-    }
-    if ($envText -notmatch '(?m)^\s*WEFT_SUPABASE_ANON_KEY=') {
-        $existingK = ([regex]::Match($envText, '(?m)^\s*SUPABASE_ANON_KEY=(.*)$')).Groups[1].Value.Trim()
-        $valK = if ($existingK) { $existingK } else { $SupabaseKey }
-        Add-Content -Path $envPath -Value "WEFT_SUPABASE_ANON_KEY=$valK"
-        $added += 'WEFT_SUPABASE_ANON_KEY'
-    }
-    if ($added.Count -gt 0) {
-        Ok ("migrated your .env to namespaced vars (+{0})" -f ($added -join ', '))
+if ($applyTransport) {
+    if ($Transport -eq 'supabase') {
+        & node $weftBin set-transport supabase --url $SupabaseUrl --anon-key $SupabaseKey | Out-Null
     } else {
-        Ok 'kept your existing .env (use -Force to overwrite, or `weft set-transport` to switch)'
+        & node $weftBin set-transport devtunnel | Out-Null
     }
-} else {
-    $envTemplate | Set-Content -Path $envPath -Encoding utf8
-    Ok "wrote relay config -> $envPath"
+    if ($LASTEXITCODE -ne 0) { throw "weft set-transport failed (exit $LASTEXITCODE)" }
+    Ok "wrote transport config ($Transport) -> $weftConfigPath"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -221,4 +222,9 @@ Write-Host ''
 Write-Host "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
 Write-Host "  (no Copilot CLI open, just this)? Open a new terminal and run: $(Cyan 'weft start')"
 Write-Host ''
-Write-Host (Dim "Uninstall: Remove-Item -Recurse -Force `"$InstallDir`", `"$weftHome`"")
+if ($Transport -eq 'devtunnel') {
+    Write-Host "  Using devtunnel: provision/check/tear down the shared relay any time, independent"
+    Write-Host "  of any pairing session, with: $(Cyan 'weft devtunnel start') / $(Cyan 'status') / $(Cyan 'stop')"
+    Write-Host ''
+}
+Write-Host (Dim "Uninstall: Remove-Item -Recurse -Force `"$InstallDir`", `"$weftHome`", `"$skillDir`"")

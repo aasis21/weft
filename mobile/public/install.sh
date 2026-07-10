@@ -5,23 +5,30 @@
 #
 # Downloads the prebuilt Weft Copilot CLI extension (+ the standalone `weft`
 # Device Station command) and drops them where `copilot` auto-discovers extensions
-# (~/.copilot/extensions/weft - CODE only), wired to your chosen relay transport. All
-# user config (relay .env, projects, transport choice) lives separately in ~/.weft.
-# No git clone, no Node build required on your machine.
+# (~/.copilot/extensions/weft - CODE only). Also installs a "how to use Weft" skill to
+# ~/.copilot/skills/weft/SKILL.md, the same way the extension goes to
+# ~/.copilot/extensions/weft, so the agent can answer usage questions directly. All user
+# config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written
+# via `weft set-transport` - there is NO env var / .env for this, so re-running this
+# installer to update to a newer build never silently resets or shadows your chosen
+# transport. No git clone, no Node build required on your machine (just Node itself).
 #
 # Choose your transport non-interactively: WEFT_TRANSPORT=supabase|devtunnel
 #   curl -fsSL https://useweft.netlify.app/install.sh | WEFT_TRANSPORT=devtunnel bash
 #
-# Run-your-own relay overrides (env vars):
+# Run-your-own relay overrides (env vars, used only to seed weft set-transport - not stored
+# as env vars anywhere):
 #   WEFT_SUPABASE_URL=https://xxx.supabase.co WEFT_SUPABASE_ANON_KEY=sb_publishable_xxx \
 #     bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"
 #
-# Force overwrite of an existing .env: WEFT_FORCE=1
+# Force re-applying the transport even if one is already configured: WEFT_FORCE=1
 set -euo pipefail
 
 BASE="https://useweft.netlify.app"
 INSTALL_DIR="${WEFT_INSTALL_DIR:-$HOME/.copilot/extensions/weft}"
 BIN_DIR="${WEFT_BIN_DIR:-$HOME/.local/bin}"
+WEFT_HOME="$HOME/.weft"
+WEFT_CONFIG_PATH="$WEFT_HOME/weft.config.json"
 # Weft-namespaced override env vars: a stray global SUPABASE_URL for another project
 # must not change which relay we install.
 RELAY_URL="${WEFT_SUPABASE_URL:-https://jqzohxjouzxzawqqlifv.supabase.co}"
@@ -39,23 +46,49 @@ echo ""
 echo "$(bold "$(cyan '=== WEFT INSTALLER ===')")"
 
 # ---------------------------------------------------------------------------
+# Step 1: pick a transport. An existing ~/.weft/weft.config.json choice always wins unless the
+# caller explicitly set WEFT_TRANSPORT or WEFT_FORCE=1 - this installer only ever refreshes CODE
+# under $INSTALL_DIR, never the user's config, so a plain re-run/upgrade can't silently reset it.
+# ---------------------------------------------------------------------------
 step 1 "Choose your default transport"
 TRANSPORT="${WEFT_TRANSPORT:-}"
-if [ -z "$TRANSPORT" ]; then
-  if [ -t 0 ] && [ -t 1 ]; then
-    echo "   $(bold '1.') supabase   $(dim '- hosted relay, zero config, works anywhere (default)')"
-    echo "   $(bold '2.') devtunnel  $(dim '- self-hosted local relay via Microsoft Dev Tunnels, no cloud account')"
-    printf "   Pick [1]: "
-    read -r choice </dev/tty || choice=""
-    case "$choice" in
-      2) TRANSPORT="devtunnel" ;;
-      *) TRANSPORT="supabase" ;;
-    esac
-  else
-    TRANSPORT="supabase"
-  fi
+TRANSPORT_EXPLICIT=1; [ -z "$TRANSPORT" ] && TRANSPORT_EXPLICIT=0
+FORCE="${WEFT_FORCE:-0}"
+EXISTING_TRANSPORT_KIND=""
+if [ -f "$WEFT_CONFIG_PATH" ]; then
+  EXISTING_TRANSPORT_KIND="$(node -e '
+    try {
+      const cfg = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const kind = cfg && cfg.transport && cfg.transport.kind;
+      if (kind === "supabase" || kind === "devtunnel") process.stdout.write(kind);
+    } catch {}
+  ' "$WEFT_CONFIG_PATH" 2>/dev/null || true)"
 fi
-ok "Transport: $TRANSPORT"
+
+APPLY_TRANSPORT=1
+LEGACY_ENV_PATHS=("$INSTALL_DIR/.env" "$WEFT_HOME/.env")
+if [ -n "$EXISTING_TRANSPORT_KIND" ] && [ "$TRANSPORT_EXPLICIT" != "1" ] && [ "$FORCE" != "1" ]; then
+  TRANSPORT="$EXISTING_TRANSPORT_KIND"
+  APPLY_TRANSPORT=0
+  ok "Existing transport config found ($TRANSPORT) -> $WEFT_CONFIG_PATH - left untouched."
+  echo "      $(dim "Set WEFT_TRANSPORT=<name> or WEFT_FORCE=1 to change it.")"
+else
+  if [ -z "$TRANSPORT" ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      echo "   $(bold '1.') supabase   $(dim '- hosted relay, zero config, works anywhere (default)')"
+      echo "   $(bold '2.') devtunnel  $(dim '- self-hosted local relay via Microsoft Dev Tunnels, no cloud account')"
+      printf "   Pick [1]: "
+      read -r choice </dev/tty || choice=""
+      case "$choice" in
+        2) TRANSPORT="devtunnel" ;;
+        *) TRANSPORT="supabase" ;;
+      esac
+    else
+      TRANSPORT="supabase"
+    fi
+  fi
+  ok "Transport: $TRANSPORT"
+fi
 if [ "$TRANSPORT" = "devtunnel" ]; then
   if ! command -v devtunnel >/dev/null 2>&1; then
     warn "The \`devtunnel\` CLI was not found on PATH."
@@ -76,59 +109,39 @@ curl -fsSL "$BASE/relayServerProcess.mjs" -o "$INSTALL_DIR/relayServerProcess.mj
 ok "relayServerProcess.mjs -> $INSTALL_DIR  (shared devtunnel relay, only spawned if you use devtunnel)"
 curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"
 ok "weft.mjs -> $INSTALL_DIR  (standalone Device Station CLI)"
+# The "how to use Weft" skill goes to ~/.copilot/skills/weft/SKILL.md - same convention as the
+# extension going to ~/.copilot/extensions/weft - so the agent can answer "how do I pair my
+# phone" / "how do I switch transport" etc. without the user having to ask us directly.
+SKILL_DIR="$HOME/.copilot/skills/weft"
+mkdir -p "$SKILL_DIR"
+curl -fsSL "$BASE/weft-skill.md" -o "$SKILL_DIR/SKILL.md"
+ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"
 
 # ---------------------------------------------------------------------------
-step 3 "Writing relay config"
-# Canonical location is ~/.weft/.env - user config lives in ~/.weft (alongside projects.json /
-# transport.json), so ~/.copilot/extensions/weft only ever holds installed CODE. If an older
-# install left a .env next to the extension, its values are migrated in and the old file is
-# removed so the split stays clean going forward.
-WEFT_HOME="$HOME/.weft"
+# Step 3: apply the transport choice to ~/.weft/weft.config.json - the ONLY place the extension
+# and weft.mjs ever read transport config from (no env var, no .env - see transportConfig.mjs /
+# transportFactory.mjs). Calls the just-downloaded weft.mjs's own `set-transport` command so this
+# installer never has to duplicate its validation/persistence logic. A stale .env from an older
+# install (that config format is retired, no migration) is simply removed so it can't linger
+# around looking authoritative when it's now inert.
+# ---------------------------------------------------------------------------
+step 3 "Applying transport config"
 mkdir -p "$WEFT_HOME"
-ENV_PATH="$WEFT_HOME/.env"
-LEGACY_ENV_PATH="$INSTALL_DIR/.env"
-if [ -f "$LEGACY_ENV_PATH" ] && [ ! -f "$ENV_PATH" ]; then
-  mv "$LEGACY_ENV_PATH" "$ENV_PATH"
-  ok "moved your .env: $LEGACY_ENV_PATH -> $ENV_PATH"
-elif [ -f "$LEGACY_ENV_PATH" ]; then
-  rm -f "$LEGACY_ENV_PATH"
-  ok "removed stale $LEGACY_ENV_PATH (your config already lives in $ENV_PATH)"
-fi
-if [ -f "$ENV_PATH" ] && [ "${WEFT_FORCE:-0}" != "1" ]; then
-  # Auto-migrate an older .env (generic SUPABASE_* only) by adding the namespaced keys,
-  # preserving any custom relay values already set. Existing installs self-heal.
-  added=""
-  if ! grep -qE '^[[:space:]]*WEFT_SUPABASE_URL=' "$ENV_PATH"; then
-    existing="$(grep -E '^[[:space:]]*SUPABASE_URL=' "$ENV_PATH" | head -n1 | cut -d= -f2- | tr -d '[:space:]')"
-    printf 'WEFT_SUPABASE_URL=%s\n' "${existing:-$RELAY_URL}" >> "$ENV_PATH"
-    added="WEFT_SUPABASE_URL"
+
+for p in "${LEGACY_ENV_PATHS[@]}"; do
+  if [ -f "$p" ]; then
+    rm -f "$p"
+    ok "removed stale $p  (config now lives only in weft.config.json)"
   fi
-  if ! grep -qE '^[[:space:]]*WEFT_SUPABASE_ANON_KEY=' "$ENV_PATH"; then
-    existingk="$(grep -E '^[[:space:]]*SUPABASE_ANON_KEY=' "$ENV_PATH" | head -n1 | cut -d= -f2- | tr -d '[:space:]')"
-    printf 'WEFT_SUPABASE_ANON_KEY=%s\n' "${existingk:-$RELAY_KEY}" >> "$ENV_PATH"
-    added="${added:+$added, }WEFT_SUPABASE_ANON_KEY"
-  fi
-  if [ -n "$added" ]; then
-    ok "migrated your .env to namespaced vars (+$added)"
+done
+
+if [ "$APPLY_TRANSPORT" = "1" ]; then
+  if [ "$TRANSPORT" = "supabase" ]; then
+    node "$INSTALL_DIR/weft.mjs" set-transport supabase --url "$RELAY_URL" --anon-key "$RELAY_KEY" >/dev/null
   else
-    ok "kept your existing .env (set WEFT_FORCE=1 to overwrite, or run: weft set-transport $TRANSPORT)"
+    node "$INSTALL_DIR/weft.mjs" set-transport devtunnel >/dev/null
   fi
-else
-  cat > "$ENV_PATH" <<EOF
-# Weft relay config. The publishable key is client-safe by design; the channel is
-# guarded by Supabase RLS + end-to-end AES-256-GCM. To run your own relay, swap these
-# for your own Supabase project's URL + publishable key.
-#
-# Names are Weft-namespaced on purpose: a generic SUPABASE_URL / SUPABASE_ANON_KEY
-# exported globally for another Supabase project would otherwise hijack the relay.
-#
-# Change your default any time with: weft set-transport <supabase|devtunnel>
-WEFT_TRANSPORT=$TRANSPORT
-WEFT_SUPABASE_URL=$RELAY_URL
-WEFT_SUPABASE_ANON_KEY=$RELAY_KEY
-WEFT_APPROVAL_TIMEOUT_MS=120000
-EOF
-  ok "wrote relay config -> $ENV_PATH"
+  ok "wrote transport config ($TRANSPORT) -> $WEFT_CONFIG_PATH"
 fi
 
 # ---------------------------------------------------------------------------
@@ -172,4 +185,9 @@ echo ""
 echo "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
 echo "  (no Copilot CLI open, just this)? Open a new terminal and run: $(cyan 'weft start')"
 echo ""
-printf '%s\n' "$(dim "Uninstall: rm -rf \"$INSTALL_DIR\" \"$SHIM_PATH\" \"$HOME/.weft\"")"
+if [ "$TRANSPORT" = "devtunnel" ]; then
+  echo "  Using devtunnel: provision/check/tear down the shared relay any time, independent"
+  echo "  of any pairing session, with: $(cyan 'weft devtunnel start') / $(cyan 'status') / $(cyan 'stop')"
+  echo ""
+fi
+printf '%s\n' "$(dim "Uninstall: rm -rf \"$INSTALL_DIR\" \"$SHIM_PATH\" \"$HOME/.weft\" \"$SKILL_DIR\"")"

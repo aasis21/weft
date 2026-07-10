@@ -10,7 +10,8 @@
 #                                deploy-time artifact the hosted install.sh downloads)
 #   3. Build the mobile web app (Vite      -> mobile/dist)
 #   4. Deploy mobile/dist to Netlify (site useweft, production by default)
-#   5. Install the extension    (-> ~/.copilot/extensions/weft + colocated .env)
+#   5. Install the extension    (-> ~/.copilot/extensions/weft; transport config stays
+#                                untouched in ~/.weft/weft.config.json)
 #
 # Usage:
 #   ./ship.sh                     # build + refresh + deploy prod + install on this laptop
@@ -44,6 +45,8 @@ info(){ printf '\033[90m  ..  %s\033[0m\n' "$1"; }
 warn(){ printf '\033[33m  !!  %s\033[0m\n' "$1"; }
 
 ext_bundle="$root/extension/dist/extension.mjs"
+relay_bundle="$root/extension/dist/relayServerProcess.mjs"
+weft_cli_bundle="$root/extension/dist/weft.mjs"
 public_bundle="$root/mobile/public/extension.mjs"
 dist_dir="$root/mobile/dist"
 
@@ -58,10 +61,25 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   npm run build -w @aasis21/weft-extension >/dev/null
   [ -f "$ext_bundle" ] || { echo "extension build did not produce $ext_bundle" >&2; exit 1; }
   ok "extension/dist/extension.mjs"
+  [ -f "$relay_bundle" ] || { echo "extension build did not produce $relay_bundle" >&2; exit 1; }
+  ok "extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)"
+  [ -f "$weft_cli_bundle" ] || { echo "extension build did not produce $weft_cli_bundle" >&2; exit 1; }
+  ok "extension/dist/weft.mjs  (standalone Device Station CLI, no repo checkout needed)"
 
   cyan "Refreshing site bits (extension bundle -> mobile/public)"
   cp "$ext_bundle" "$public_bundle"
   ok "mobile/public/extension.mjs  (served as /extension.mjs by the installer)"
+  cp "$relay_bundle" "$root/mobile/public/relayServerProcess.mjs"
+  ok "mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)"
+  cp "$weft_cli_bundle" "$root/mobile/public/weft.mjs"
+  ok "mobile/public/weft.mjs  (served as /weft.mjs by the installer)"
+  skill_source="$root/skill/weft/SKILL.md"
+  if [ -f "$skill_source" ]; then
+    cp "$skill_source" "$root/mobile/public/weft-skill.md"
+    ok "mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft/SKILL.md)"
+  else
+    warn "no $skill_source - the how-to-use skill won't be (re)published"
+  fi
 
   cyan "Building mobile web app (Vite)"
   npm run build -w @aasis21/weft-mobile >/dev/null
@@ -70,6 +88,8 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
 else
   info "skip-build: reusing existing extension/dist and mobile/dist"
   [ -f "$ext_bundle" ] || { echo "no $ext_bundle - run once without --skip-build first" >&2; exit 1; }
+  [ -f "$relay_bundle" ] || { echo "no $relay_bundle - run once without --skip-build first" >&2; exit 1; }
+  [ -f "$weft_cli_bundle" ] || { echo "no $weft_cli_bundle - run once without --skip-build first" >&2; exit 1; }
   [ -f "$dist_dir/index.html" ] || { echo "no $dist_dir - run once without --skip-build first" >&2; exit 1; }
 fi
 
@@ -96,11 +116,41 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
   mkdir -p "$dest"
   cp "$ext_bundle" "$dest/extension.mjs"
   ok "extension.mjs -> $dest"
-  if [ -f "$root/.env" ]; then
-    cp "$root/.env" "$dest/.env"
-    ok "copied .env (relay credentials) next to the extension"
+  if [ -f "$relay_bundle" ]; then
+    cp "$relay_bundle" "$dest/relayServerProcess.mjs"
+    ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
   else
-    warn "no .env at repo root - set WEFT_SUPABASE_URL / WEFT_SUPABASE_ANON_KEY / WEFT_TRANSPORT before 'copilot'"
+    warn "no $relay_bundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
+  fi
+  if [ -f "$weft_cli_bundle" ]; then
+    cp "$weft_cli_bundle" "$dest/weft.mjs"
+    ok "weft.mjs -> $dest  (standalone Device Station CLI)"
+    shim_path="$dest/weft"
+    printf '#!/usr/bin/env bash\nexec node "%s/weft.mjs" "$@"\n' "$dest" > "$shim_path"
+    chmod +x "$shim_path"
+    ok "weft -> $dest  (symlink/shim it onto your PATH, e.g. ln -sf \"$shim_path\" /usr/local/bin/weft)"
+  else
+    warn "no $weft_cli_bundle - the standalone 'weft' command was not (re)installed"
+  fi
+  skill_source="$root/skill/weft/SKILL.md"
+  if [ -f "$skill_source" ]; then
+    skill_dest="$HOME/.copilot/skills/weft"
+    mkdir -p "$skill_dest"
+    cp "$skill_source" "$skill_dest/SKILL.md"
+    ok "SKILL.md -> $skill_dest  (how-to-use skill, alongside the extension)"
+  else
+    warn "no $skill_source - the how-to-use skill was not (re)installed"
+  fi
+  # Transport lives in a single file, ~/.weft/weft.config.json, written only by `weft
+  # set-transport` - ship.sh never touches it, so reinstalling/rebuilding the extension can
+  # never silently overwrite (or be shadowed by) the user's chosen transport.
+  weft_home="$HOME/.weft"
+  mkdir -p "$weft_home"
+  weft_config="$weft_home/weft.config.json"
+  if [ -f "$weft_config" ]; then
+    ok "transport config untouched -> $weft_config"
+  else
+    warn "no transport configured yet - run: weft set-transport supabase --url <url> --anon-key <key>"
   fi
 else
   info "skip-install"

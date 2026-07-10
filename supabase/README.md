@@ -9,7 +9,7 @@ the clients join (`private:weft:<channelId>`).
 - `migrations/` — timestamped SQL (`YYYYMMDDHHmmss_*.sql`), Supabase-CLI compatible.
   - `*_weft_realtime_broadcast_rls.sql` — RLS on `realtime.messages` authorizing
     `private:weft:*` broadcast for the `anon` / `authenticated` roles. **Apply this before
-    using `WEFT_TRANSPORT=supabase`** — private channels are denied by default.
+    using the `supabase` transport** — private channels are denied by default.
 - `project.json` — `{ "project_id": "<ref>" }`. The ref of the live Supabase project.
 
 ## Live project (operator instance)
@@ -25,10 +25,12 @@ The reference public instance is provisioned and the migration applied + verifie
 | Postgres | 17 |
 | Auth | publishable/anon key (public by design); set via env, never committed |
 
-Credentials live in a gitignored `.env` (extension: `WEFT_SUPABASE_URL` / `WEFT_SUPABASE_ANON_KEY`)
-and `mobile/.env.local` (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`). The publishable
-key is safe to embed in clients; confidentiality rests on E2E encryption + channelId entropy
-(see the security note below). Self-hosters point these at their own project instead.
+Credentials are configured via `weft set-transport supabase --url <url> --anon-key <key>`
+(persisted to `~/.weft/weft.config.json` — no env var / `.env` for the extension) and
+`mobile/.env.local` (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`) for the mobile build.
+The publishable key is safe to embed in clients; confidentiality rests on E2E encryption +
+channelId entropy (see the security note below). Self-hosters point these at their own
+project instead.
 
 **Verified live (2026-06):** a private `private:weft:*` channel subscribes and round-trips a
 broadcast; a true two-client send→receive works with production `self:false`; a

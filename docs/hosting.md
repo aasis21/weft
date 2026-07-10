@@ -31,11 +31,21 @@ You only need a free Supabase project.
    broadcast channels (see [`setup.md`](./setup.md)).
 3. Set rate limits / quotas appropriate to your usage.
 4. Point the clients at your project:
-   - extension: `WEFT_SUPABASE_URL`, `WEFT_SUPABASE_ANON_KEY`, `WEFT_TRANSPORT=supabase`
+   - extension: `weft set-transport supabase --url <your-url> --anon-key <your-anon-key>`
    - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is
 untrusted infrastructure: it routes ciphertext and learns only timing and channel ids.
+
+## Configuring the extension's transport
+
+Unlike the mobile build (which bakes `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in at
+build time), the Copilot CLI extension has **no env var / `.env`** for this at all — it is
+configured once via `weft set-transport supabase --url <url> --anon-key <key>` (or `weft
+set-transport devtunnel`), persisted to `~/.weft/weft.config.json`, and read from nowhere
+else. This means reinstalling/rebuilding the extension can never silently reset or shadow
+your chosen transport — only `weft set-transport` (or the installer, on first run / when
+you explicitly pass `-Transport`) ever writes it.
 
 ## Operating a public instance
 

@@ -27,7 +27,8 @@ encrypted relay — watch it work, approve its moves, talk back, from anywhere.
 ### Install the extension on your laptop
 
 One line. Downloads the prebuilt extension into `~/.copilot/extensions/weft/` (where
-Copilot CLI auto-discovers it), pre-wired to the hosted relay — no clone, no Node build:
+Copilot CLI auto-discovers it) plus a "how to use Weft" skill into
+`~/.copilot/skills/weft/`, pre-wired to the hosted relay — no clone, no Node build:
 
 ```powershell
 # Windows (PowerShell)
@@ -49,8 +50,8 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
   `& ([scriptblock]::Create((irm https://useweft.netlify.app/install.ps1))) -SupabaseUrl <url> -SupabaseKey <key>`
   on Windows, or `WEFT_SUPABASE_URL=<url> WEFT_SUPABASE_ANON_KEY=<key> bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"` on Unix.
   Prefer building from source? Use [`setup.ps1` / `setup.sh`](docs/setup.md).
-- **Uninstall** — delete `~/.copilot/extensions/weft/` and `~/.weft/` (your config: relay
-  `.env`, registered projects, transport choice).
+- **Uninstall** — delete `~/.copilot/extensions/weft/`, `~/.copilot/skills/weft/`, and
+  `~/.weft/` (your config: `weft.config.json` — registered projects, transport choice).
 
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
 > [`aasis21/anya`](https://github.com/aasis21/anya), and
@@ -69,6 +70,9 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 | `weft set-default <name>` | Choose the project a bare pairing launches into. |
 | `weft set-transport <supabase\|devtunnel\|clear> [--url <url>] [--anon-key <key>]` | Choose (or clear) the pairing transport. |
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
+| `weft devtunnel start` | Provision (or reuse) the shared devtunnel relay and watch live progress — no pairing session needed. |
+| `weft devtunnel status` | Check whether the shared devtunnel relay is running, without starting it. |
+| `weft devtunnel stop` | Tear down the shared devtunnel relay. |
 | `weft help` | Show usage. |
 
 ---

@@ -89,6 +89,14 @@ try {
         $publicWeftCliBundle = Join-Path $root 'mobile\public\weft.mjs'
         Copy-Item $weftCliBundle $publicWeftCliBundle -Force
         Ok 'mobile/public/weft.mjs  (served as /weft.mjs by the installer)'
+        $skillSource = Join-Path $root 'skill\weft\SKILL.md'
+        $publicSkillBundle = Join-Path $root 'mobile\public\weft-skill.md'
+        if (Test-Path $skillSource) {
+            Copy-Item $skillSource $publicSkillBundle -Force
+            Ok 'mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft/SKILL.md)'
+        } else {
+            Warn "no $skillSource - the how-to-use skill won't be (re)published"
+        }
 
         Step 'Building mobile web app (Vite)'
         npm run build -w '@aasis21/weft-mobile' | Out-Null
@@ -160,6 +168,15 @@ node "%~dp0weft.mjs" %*
             }
         } else {
             Warn "no $weftCliBundle - the standalone \`weft\` command was not (re)installed"
+        }
+        $skillSource = Join-Path $root 'skill\weft\SKILL.md'
+        if (Test-Path $skillSource) {
+            $skillDest = Join-Path $env:USERPROFILE '.copilot\skills\weft'
+            New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
+            Copy-Item $skillSource (Join-Path $skillDest 'SKILL.md') -Force
+            Ok "SKILL.md -> $skillDest  (how-to-use skill, alongside the extension)"
+        } else {
+            Warn "no $skillSource - the how-to-use skill was not (re)installed"
         }
         # Transport lives in a single file, ~/.weft/weft.config.json, written only by `weft
         # set-transport` — ship.ps1 never touches it, so reinstalling/rebuilding the extension can
