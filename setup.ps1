@@ -16,15 +16,15 @@ try {
   Copy-Item $bundle (Join-Path $dest "extension.mjs") -Force
   Write-Host "Installed extension.mjs -> $dest" -ForegroundColor Green
 
-  $envFile = Join-Path $root ".env"
-  if (Test-Path $envFile) {
-    Copy-Item $envFile (Join-Path $dest ".env") -Force
-    Write-Host "Copied .env (relay credentials) next to the extension." -ForegroundColor Green
+  # Transport is configured once, in a single file: ~/.weft/weft.config.json (via `weft
+  # set-transport`) — never via .env / env vars, so re-running this script never overwrites it.
+  $weftConfig = Join-Path $env:USERPROFILE ".weft\weft.config.json"
+  if (Test-Path $weftConfig) {
+    Write-Host "Existing transport config found at $weftConfig — left untouched." -ForegroundColor Green
   } else {
-    Write-Host "No .env at repo root. Create one next to $dest\extension.mjs with:" -ForegroundColor Yellow
-    Write-Host "  WEFT_TRANSPORT=supabase" -ForegroundColor Yellow
-    Write-Host "  WEFT_SUPABASE_URL=...   WEFT_SUPABASE_ANON_KEY=..." -ForegroundColor Yellow
-    Write-Host "(or export those vars before 'copilot'). The extension auto-loads a colocated .env." -ForegroundColor Yellow
+    Write-Host "No transport configured yet. Run:" -ForegroundColor Yellow
+    Write-Host "  weft set-transport supabase --url <url> --anon-key <key>" -ForegroundColor Yellow
+    Write-Host "(or 'weft set-transport devtunnel' for a self-hosted relay, no cloud account)." -ForegroundColor Yellow
   }
 
   Write-Host "`nDone. Start 'copilot' in any repo; Weft prints a pairing QR (or run /weft). Scan it from the Weft app." -ForegroundColor Cyan

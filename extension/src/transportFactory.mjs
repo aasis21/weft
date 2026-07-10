@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { parseEnv } from "node:util";
 import { createClient } from "@supabase/supabase-js";
 import { WebPubSubClient } from "@azure/web-pubsub-client";
 import WebSocket from "ws";
@@ -14,36 +10,6 @@ import {
 } from "@aasis21/weft-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
 import { provisionDevTunnelTransport } from "./devtunnel.mjs";
-import { weftHome } from "./projects.mjs";
-
-export function loadLocalEnv({ files } = {}) {
-  if (typeof parseEnv !== "function") return;
-  const candidates = files ?? defaultEnvFiles();
-  for (const file of candidates) {
-    try {
-      const parsed = parseEnv(readFileSync(file, "utf8"));
-      for (const [k, v] of Object.entries(parsed)) {
-        if (process.env[k] === undefined) process.env[k] = v;
-      }
-    } catch {
-      // Try the next candidate.
-    }
-  }
-}
-
-// ~/.weft/.env is canonical (see extension.mjs's loadLocalEnv for the full rationale: it keeps
-// ~/.copilot/extensions/weft holding only installed code, never user config). The install-dir
-// .env and a launch-cwd .env remain as fallbacks for pre-existing installs.
-function defaultEnvFiles() {
-  const candidates = [join(weftHome(), ".env")];
-  try {
-    candidates.push(join(dirname(fileURLToPath(import.meta.url)), ".env"));
-  } catch {
-    // import.meta.url should be file:, but keep this loader defensive.
-  }
-  candidates.push(join(process.cwd(), ".env"));
-  return candidates;
-}
 
 /**
  * Resolve which transport + endpoint the laptop should use — no client is constructed here.
@@ -53,33 +19,25 @@ function defaultEnvFiles() {
  * (RLS enforces access) and Web PubSub's negotiateUrl is just an endpoint — the actual
  * per-connection token is minted separately by that endpoint, never carried here.
  *
- * Precedence: an explicit WEFT_TRANSPORT env var (e.g. from a repo-root .env, for CI/power-user
- * overrides) wins outright. Otherwise, the persisted choice from `weft set-transport` (see
- * transportConfig.mjs) applies. With neither set, Weft defaults to Supabase — Weft's own relay is
- * the supported out-of-the-box path — reading WEFT_SUPABASE_URL/WEFT_SUPABASE_ANON_KEY (or the
- * generic SUPABASE_* fallback); `local` is opt-in only, for same-machine testing.
+ * The ONLY source of truth is ~/.weft/weft.config.json (see transportConfig.mjs), written by
+ * `weft set-transport`. There is deliberately no env var override (no WEFT_TRANSPORT, no .env) —
+ * a rebuild/reinstall only ever refreshes installed code under ~/.copilot/extensions/weft, never
+ * this config file, so it can never silently overwrite (or be silently shadowed by a stray env
+ * var/leftover .env for) the user's chosen transport. If nothing is configured yet, this throws
+ * an actionable error rather than guessing a default.
  *
  * This is "this device's default" — the one `/weft` (no arguments) pairs with. `/weft <name>`
  * overrides it for a single running session via resolveTransportByName below, without touching
  * the persisted device-wide config.
  */
 export function resolveTransportDescriptor({ baseDir } = {}) {
-  if (process.env.WEFT_TRANSPORT) {
-    return resolveFromEnv(process.env.WEFT_TRANSPORT);
-  }
-
   const configured = loadTransportConfig({ baseDir });
   if (configured) return configured;
-
-  try {
-    return resolveFromEnv("supabase");
-  } catch (err) {
-    throw new Error(
-      `${err.message}\nWeft: no transport configured. Run \`weft set-transport supabase ` +
-        "--url <url> --anon-key <key>\` (or `weft set-transport local` to test without a " +
-        "relay) to choose one.",
-    );
-  }
+  throw new Error(
+    "Weft: no transport configured. Run `weft set-transport supabase --url <url> --anon-key " +
+      "<key>` (or `weft set-transport devtunnel` for a self-hosted relay, no cloud account) to " +
+      "choose one. This is stored once in ~/.weft/weft.config.json.",
+  );
 }
 
 /**
@@ -88,56 +46,35 @@ export function resolveTransportDescriptor({ baseDir } = {}) {
  * Supabase (hosted, zero-config) and devtunnel (self-hosted local relay, no cloud account) — see
  * WEFT_COMMAND_TRANSPORT_NAMES in extension.mjs, which adds "devtunnel" back in for the /weft
  * command specifically since it needs a channelId to provision and can't go through the plain
- * resolveTransportByName() below. "local" and "webpubsub" remain fully implemented (resolveFromEnv
- * below, createTransportFromDescriptor) for internal testing / advanced WEFT_TRANSPORT env
- * overrides — they're just no longer offered or documented anywhere a user would see them.
+ * resolveTransportByName() below. "local" and "webpubsub" remain fully implemented
+ * (createTransportFromDescriptor) for internal/testing use — they're just no longer offered or
+ * documented anywhere a user would see them, and have no env-based construction path anymore.
  */
 export const SUPPORTED_TRANSPORT_NAMES = ["supabase"];
 
 /**
  * Requires a name from SUPPORTED_TRANSPORT_NAMES (case-insensitive); throws a single
  * user-facing message (listing the valid names) for anything else, so callers like /weft's
- * handler can surface it directly without re-deriving the allowed list themselves.
+ * handler can surface it directly without re-deriving the allowed list themselves. Reads the
+ * SAME persisted config as resolveTransportDescriptor — there is no env var path — so `/weft
+ * supabase` only works once `weft set-transport supabase --url <url> --anon-key <key>` has
+ * actually been run.
  */
-export function resolveTransportByName(transportName) {
+export function resolveTransportByName(transportName, { baseDir } = {}) {
   const normalized = String(transportName ?? "").trim().toLowerCase();
   if (!SUPPORTED_TRANSPORT_NAMES.includes(normalized)) {
     throw new Error(
       `Weft: unknown transport "${transportName}". Supported: ${SUPPORTED_TRANSPORT_NAMES.join(", ")}.`,
     );
   }
-  return resolveFromEnv(normalized);
-}
-
-function resolveFromEnv(transportName) {
-  if (transportName === "local") return { kind: "local" };
-  if (transportName === "devtunnel") return { kind: "devtunnel" };
-
-  if (transportName === "webpubsub") {
-    const negotiateUrl = process.env.WEFT_WEBPUBSUB_NEGOTIATE_URL;
-    if (!negotiateUrl) {
-      throw new Error(
-        "Weft: WEFT_TRANSPORT=webpubsub requires WEFT_WEBPUBSUB_NEGOTIATE_URL",
-      );
-    }
-    return { kind: "webpubsub", negotiateUrl };
-  }
-
-  const url = process.env.WEFT_SUPABASE_URL || process.env.SUPABASE_URL;
-  const anonKey = process.env.WEFT_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
+  const configured = loadTransportConfig({ baseDir });
+  if (configured?.kind !== normalized) {
     throw new Error(
-      "Weft: WEFT_TRANSPORT=supabase requires WEFT_SUPABASE_URL and WEFT_SUPABASE_ANON_KEY",
+      `Weft: no ${normalized} transport configured. Run \`weft set-transport ${normalized} ` +
+        "--url <url> --anon-key <key>` first.",
     );
   }
-  if (!process.env.WEFT_SUPABASE_URL || !process.env.WEFT_SUPABASE_ANON_KEY) {
-    process.stderr.write(
-      `Weft: using generic SUPABASE_* env (relay host ${safeHost(url)}). Set ` +
-        "WEFT_SUPABASE_URL / WEFT_SUPABASE_ANON_KEY so a global SUPABASE_URL for another " +
-        "project cannot hijack the relay.\n",
-    );
-  }
-  return { kind: "supabase", url, anonKey };
+  return configured;
 }
 
 /** Build a live Transport from a resolved/parsed descriptor (see resolveTransportDescriptor). */
@@ -194,14 +131,6 @@ export async function resolveTransportForChannel({ baseDir, channelId } = {}) {
     return provisionDevTunnelTransport({ channelId, baseDir });
   }
   return descriptor;
-}
-
-function safeHost(url) {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "?";
-  }
 }
 
 /**

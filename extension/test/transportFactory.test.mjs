@@ -7,47 +7,21 @@ import { join } from "node:path";
 import { resolveTransportDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "../src/transportFactory.mjs";
 import { saveTransportConfig } from "../src/transportConfig.mjs";
 
-const ENV_KEYS = [
-  "WEFT_TRANSPORT",
-  "WEFT_SUPABASE_URL",
-  "WEFT_SUPABASE_ANON_KEY",
-  "SUPABASE_URL",
-  "SUPABASE_ANON_KEY",
-  "WEFT_WEBPUBSUB_NEGOTIATE_URL",
-];
-
 let weftHome;
-let savedEnv;
 
 beforeEach(() => {
   weftHome = mkdtempSync(join(tmpdir(), "weft-home-"));
-  savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-  for (const k of ENV_KEYS) delete process.env[k];
 });
 
 afterEach(() => {
   rmSync(weftHome, { recursive: true, force: true });
-  for (const k of ENV_KEYS) {
-    if (savedEnv[k] === undefined) delete process.env[k];
-    else process.env[k] = savedEnv[k];
-  }
 });
 
-test("defaults to supabase when nothing is configured and supabase env vars are present", () => {
-  process.env.WEFT_SUPABASE_URL = "https://default.supabase.co";
-  process.env.WEFT_SUPABASE_ANON_KEY = "default-anon";
-  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), {
-    kind: "supabase",
-    url: "https://default.supabase.co",
-    anonKey: "default-anon",
-  });
-});
-
-test("throws an actionable error when nothing is configured and no supabase env vars exist", () => {
+test("throws an actionable error when nothing is configured", () => {
   assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), /weft set-transport/);
 });
 
-test("a persisted `weft set-transport` choice wins over the supabase default", () => {
+test("resolves whatever was persisted via `weft set-transport` (config file is the only source)", () => {
   saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
   assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "local" });
 });
@@ -57,26 +31,22 @@ test("a persisted devtunnel choice is stored as a bare marker (url is provisione
   assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "devtunnel" });
 });
 
-test("WEFT_TRANSPORT env var wins over a persisted config", () => {
-  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: weftHome });
-  process.env.WEFT_TRANSPORT = "local";
-  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "local" });
-});
-
-test("WEFT_TRANSPORT=webpubsub requires WEFT_WEBPUBSUB_NEGOTIATE_URL", () => {
-  process.env.WEFT_TRANSPORT = "webpubsub";
-  assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), /WEFT_WEBPUBSUB_NEGOTIATE_URL/);
+test("a persisted supabase choice resolves exactly as saved", () => {
+  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), {
+    kind: "supabase",
+    url: "https://x.supabase.co",
+    anonKey: "anon",
+  });
 });
 
 test("resolveTransportByName only offers the user-facing transports (supabase)", () => {
   assert.deepEqual(SUPPORTED_TRANSPORT_NAMES, ["supabase"]);
 });
 
-test("resolveTransportByName resolves supabase regardless of persisted config/env", () => {
-  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://stale.example" }, { baseDir: weftHome });
-  process.env.WEFT_SUPABASE_URL = "https://x.supabase.co";
-  process.env.WEFT_SUPABASE_ANON_KEY = "anon";
-  assert.deepEqual(resolveTransportByName("supabase"), {
+test("resolveTransportByName resolves supabase from the persisted config", () => {
+  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  assert.deepEqual(resolveTransportByName("supabase", { baseDir: weftHome }), {
     kind: "supabase",
     url: "https://x.supabase.co",
     anonKey: "anon",
@@ -84,18 +54,26 @@ test("resolveTransportByName resolves supabase regardless of persisted config/en
 });
 
 test("resolveTransportByName is case-insensitive and trims whitespace", () => {
-  process.env.WEFT_SUPABASE_URL = "https://x.supabase.co";
-  process.env.WEFT_SUPABASE_ANON_KEY = "anon";
-  assert.deepEqual(resolveTransportByName("  SUPABASE "), {
+  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  assert.deepEqual(resolveTransportByName("  SUPABASE ", { baseDir: weftHome }), {
     kind: "supabase",
     url: "https://x.supabase.co",
     anonKey: "anon",
   });
 });
 
+test("resolveTransportByName throws an actionable error when supabase isn't configured yet", () => {
+  assert.throws(() => resolveTransportByName("supabase", { baseDir: weftHome }), /weft set-transport supabase/);
+});
+
+test("resolveTransportByName throws if the persisted config is a different kind", () => {
+  saveTransportConfig({ kind: "devtunnel" }, { baseDir: weftHome });
+  assert.throws(() => resolveTransportByName("supabase", { baseDir: weftHome }), /weft set-transport supabase/);
+});
+
 test("resolveTransportByName rejects local/webpubsub/devtunnel — hidden from this user-facing path", () => {
   for (const hidden of ["local", "webpubsub", "devtunnel", "bluetooth"]) {
-    assert.throws(() => resolveTransportByName(hidden), (err) => {
+    assert.throws(() => resolveTransportByName(hidden, { baseDir: weftHome }), (err) => {
       assert.match(err.message, new RegExp(`unknown transport "${hidden}"`));
       for (const name of SUPPORTED_TRANSPORT_NAMES) assert.match(err.message, new RegExp(name));
       return true;
@@ -104,8 +82,7 @@ test("resolveTransportByName rejects local/webpubsub/devtunnel — hidden from t
 });
 
 test("resolveTransportForChannel passes non-devtunnel descriptors through unchanged", async () => {
-  process.env.WEFT_SUPABASE_URL = "https://x.supabase.co";
-  process.env.WEFT_SUPABASE_ANON_KEY = "anon";
+  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
   const descriptor = await resolveTransportForChannel({ baseDir: weftHome, channelId: "chan-1" });
   assert.deepEqual(descriptor, { kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" });
 });

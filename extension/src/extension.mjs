@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, unlinkSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { parseEnv } from "node:util";
 import QRCode from "qrcode";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
@@ -16,9 +13,8 @@ import {
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
-import { weftHome } from "./projects.mjs";
 
-// Names accepted by `/weft <name>` — the sync-resolvable ones (env/config-backed) plus the async,
+// Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async,
 // self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
 // transportFactory's own SUPPORTED_TRANSPORT_NAMES because devtunnel isn't a plain descriptor
 // resolution: it spins up a local relay server + a real cloud tunnel on first use.
@@ -37,55 +33,20 @@ const ui = {
   dim: paint("2"),
 };
 
-// Best-effort: load SUPABASE_URL / SUPABASE_ANON_KEY / WEFT_TRANSPORT from a colocated
-// `.env` so operators don't have to export them by hand before every `copilot`.
-// Already-exported shell vars always win; a missing/unreadable file is a silent no-op.
-// Never commit a real `.env` (it is gitignored).
-function loadLocalEnv() {
-  if (typeof parseEnv !== "function") return;
-  const here = (() => {
-    try {
-      return dirname(fileURLToPath(import.meta.url));
-    } catch {
-      return null;
-    }
-  })();
-  // ~/.weft/.env is the canonical, user-facing config location (kept alongside projects.json /
-  // transport.json — see projects.mjs's weftHome()) so ~/.copilot/extensions/weft only ever
-  // holds installed CODE, never user config. The old install-dir .env (next to the shipped
-  // extension) and a launch-cwd .env remain as fallbacks for installs made before this split —
-  // all three are merged (we do NOT stop after the first readable file) and ~/.weft wins ties.
-  // Any already-exported process env still wins per key (see the collision note in
-  // createTransport for why Weft uses WEFT_SUPABASE_* rather than generic SUPABASE_*).
-  const candidates = [join(weftHome(), ".env")];
-  if (here) candidates.push(join(here, ".env"));
-  candidates.push(join(process.cwd(), ".env"));
-  for (const file of candidates) {
-    try {
-      const parsed = parseEnv(readFileSync(file, "utf8"));
-      for (const [k, v] of Object.entries(parsed)) {
-        if (process.env[k] === undefined) process.env[k] = v;
-      }
-    } catch {
-      // No readable .env here; try the next candidate.
-    }
-  }
-}
-loadLocalEnv();
-
 const handedOffIdentity = await loadIdentityFromFile(process.env.WEFT_IDENTITY_FILE);
 const identityFileWasPresent = Boolean(handedOffIdentity);
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
 const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
-// Resolved once from this laptop's own env (WEFT_TRANSPORT / WEFT_SUPABASE_* / WEFT_WEBPUBSUB_*)
-// or the persisted `weft set-transport` default, and stamped into the QR below so the phone
-// builds a matching transport at connect time, with no pre-baked config of its own. A
-// misconfigured transport (e.g. WEFT_TRANSPORT=webpubsub without WEFT_WEBPUBSUB_NEGOTIATE_URL) is
-// not something pairing can work around, so this fails fast at load with a clear, actionable
-// error rather than surfacing as a confusing retry-loop timeout later. resolveTransportForChannel
-// (not the plain resolveTransportDescriptor) so a persisted default of "devtunnel" gets expanded
-// into a real, connectable descriptor (spawns/reuses the shared relay — see devtunnel.mjs) right
-// here at boot, not just when a user explicitly runs `/weft devtunnel` for the session.
+// Resolved once from the single ~/.weft/weft.config.json config file written by `weft
+// set-transport` (see transportFactory.mjs — there is no env var / .env fallback, so a
+// reinstall/rebuild of the extension can never silently override this), and stamped into the QR
+// below so the phone builds a matching transport at connect time, with no pre-baked config of its
+// own. An unconfigured transport fails fast at load with a clear, actionable error (telling the
+// user to run `weft set-transport`) rather than surfacing as a confusing retry-loop timeout later.
+// resolveTransportForChannel (not the plain resolveTransportDescriptor) so a persisted default of
+// "devtunnel" gets expanded into a real, connectable descriptor (spawns/reuses the shared relay —
+// see devtunnel.mjs) right here at boot, not just when a user explicitly runs `/weft devtunnel`
+// for the session.
 // `let`, not `const` — `/weft <transport>` (see switchTransport) overrides this for just the
 // running session without touching the persisted device-wide default.
 let transportDescriptor = await resolveTransportForChannel({ channelId });

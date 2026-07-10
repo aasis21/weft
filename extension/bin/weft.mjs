@@ -5,7 +5,7 @@ import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
-import { loadLocalEnv, resolveTransportDescriptor } from "../src/transportFactory.mjs";
+import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
 import { clearTransportConfig, saveTransportConfig } from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 
@@ -66,7 +66,6 @@ try {
 }
 
 async function start() {
-  loadLocalEnv();
   const lock = acquireLock();
   let released = false;
   const release = () => {
@@ -316,9 +315,10 @@ function describeTransport(descriptor) {
 
 // Only "supabase" and "devtunnel" are offered here — Weft's two supported, documented transports.
 // "local"/"webpubsub" remain fully implemented (transportConfig.mjs, transportFactory.mjs) for
-// internal testing / advanced WEFT_TRANSPORT env overrides, just no longer surfaced by this
-// command's usage text or accepted kinds, so users are never offered an option Weft doesn't
-// actually support end-to-end.
+// internal testing only (saveTransportConfig called directly, not through this CLI), just no
+// longer surfaced by this command's usage text or accepted kinds, so users are never offered an
+// option Weft doesn't actually support end-to-end. Persisted to the single ~/.weft/weft.config.json
+// file — there is no env var (WEFT_TRANSPORT) path anymore.
 function setTransport(args) {
   const [kind, ...rest] = args;
   const flags = parseFlags(rest);
@@ -339,7 +339,7 @@ function setTransport(args) {
     );
   } else if (kind === "clear") {
     clearTransportConfig();
-    console.log("Cleared the configured transport; falling back to env vars / the default (supabase).");
+    console.log("Cleared the configured transport. Run `weft set-transport` again to choose one before pairing.");
     return;
   } else {
     throw new Error("Usage: weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
@@ -348,13 +348,15 @@ function setTransport(args) {
 }
 
 function showTransport() {
-  loadLocalEnv();
-  const descriptor = resolveTransportDescriptor();
-  const source = process.env.WEFT_TRANSPORT
-    ? "WEFT_TRANSPORT env var"
-    : "weft set-transport (or the built-in default)";
+  let descriptor;
+  try {
+    descriptor = resolveTransportDescriptor();
+  } catch (err) {
+    console.log(err?.message ?? String(err));
+    return;
+  }
   console.log(`Current transport: ${describeTransport(descriptor)}`);
-  console.log(c.dim(`Source: ${source}`));
+  console.log(c.dim(`Source: ${join(weftHome(), "weft.config.json")}`));
 }
 
 function usage() {
@@ -366,5 +368,9 @@ function usage() {
   weft set-default <name>
   weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
   weft show-transport
-  weft help`);
+  weft help
+
+Config lives in a single file: ~/.weft/weft.config.json (written by \`weft set-transport\`).
+There is no .env / WEFT_TRANSPORT env var — reinstalling or rebuilding the extension never
+touches this file, so your chosen transport always survives.`);
 }

@@ -16,14 +16,15 @@ mkdir -p "$dest"
 cp "$bundle" "$dest/extension.mjs"
 echo "Installed extension.mjs -> $dest"
 
-if [ -f "$root/.env" ]; then
-  cp "$root/.env" "$dest/.env"
-  echo "Copied .env (relay credentials) next to the extension."
+# Transport is configured once, in a single file: ~/.weft/weft.config.json (via `weft
+# set-transport`) — never via .env / env vars, so re-running this script never overwrites it.
+weft_config="$HOME/.weft/weft.config.json"
+if [ -f "$weft_config" ]; then
+  echo "Existing transport config found at $weft_config — left untouched."
 else
-  echo "No .env at repo root. Create one next to $dest/extension.mjs with:"
-  echo "  WEFT_TRANSPORT=supabase"
-  echo "  WEFT_SUPABASE_URL=...   WEFT_SUPABASE_ANON_KEY=..."
-  echo "(or export those vars before 'copilot'). The extension auto-loads a colocated .env."
+  echo "No transport configured yet. Run:"
+  echo "  weft set-transport supabase --url <url> --anon-key <key>"
+  echo "(or 'weft set-transport devtunnel' for a self-hosted relay, no cloud account)."
 fi
 
 echo

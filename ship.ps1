@@ -16,11 +16,13 @@
     3. Build the mobile web app              (Vite -> mobile/dist, embedding the fresh
                                               extension.mjs + install.ps1/.sh + headers)
     4. Deploy mobile/dist to Netlify         (site `useweft`, production by default)
-    5. Install the extension on this laptop  (-> ~/.copilot/extensions/weft; .env goes to ~/.weft)
+    5. Install the extension on this laptop  (-> ~/.copilot/extensions/weft; transport config
+                                              stays untouched in ~/.weft/weft.config.json)
 
-  Relay creds are read from env at build/install time (mobile/.env.local for the web build,
-  the repo-root .env for the local extension — copied to ~/.weft/.env, never into
-  ~/.copilot/extensions/weft). Nothing secret is written into the repo.
+  Mobile web build reads relay creds from mobile/.env.local (Vite build-time only). The local
+  extension's transport is NOT env/`.env`-based at all: it is read exclusively from
+  ~/.weft/weft.config.json, written by `weft set-transport`, and this script never writes or
+  overwrites that file. Nothing secret is written into the repo.
 
 .PARAMETER Site         Netlify site name or id (default: useweft).
 .PARAMETER Draft        Deploy a Netlify preview (draft) instead of production.
@@ -159,22 +161,16 @@ node "%~dp0weft.mjs" %*
         } else {
             Warn "no $weftCliBundle - the standalone \`weft\` command was not (re)installed"
         }
-        # Canonical user-config location is ~/.weft/.env, so ~/.copilot/extensions/weft holds only
-        # installed code (see extension.mjs / transportFactory.mjs's loadLocalEnv). Clean up any
-        # .env this script left next to the extension in an older run.
+        # Transport lives in a single file, ~/.weft/weft.config.json, written only by `weft
+        # set-transport` — ship.ps1 never touches it, so reinstalling/rebuilding the extension can
+        # never silently overwrite (or be shadowed by) the user's chosen transport.
         $weftHome = Join-Path $env:USERPROFILE '.weft'
         New-Item -ItemType Directory -Force -Path $weftHome | Out-Null
-        $envFile = Join-Path $root '.env'
-        $legacyDestEnv = Join-Path $dest '.env'
-        if (Test-Path $envFile) {
-            Copy-Item $envFile (Join-Path $weftHome '.env') -Force
-            Ok "copied .env (relay credentials) -> $weftHome"
+        $weftConfig = Join-Path $weftHome 'weft.config.json'
+        if (Test-Path $weftConfig) {
+            Ok "transport config untouched -> $weftConfig"
         } else {
-            Warn "no .env at repo root - set WEFT_SUPABASE_URL / WEFT_SUPABASE_ANON_KEY / WEFT_TRANSPORT before 'copilot', or drop one at $weftHome\.env"
-        }
-        if (Test-Path $legacyDestEnv) {
-            Remove-Item $legacyDestEnv -Force
-            Ok "removed stale $legacyDestEnv (config now lives in $weftHome)"
+            Warn "no transport configured yet - run: weft set-transport supabase --url <url> --anon-key <key>"
         }
     } else { Info 'SkipInstall' }
 

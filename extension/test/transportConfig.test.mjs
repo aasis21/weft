@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clearTransportConfig, loadTransportConfig, saveTransportConfig } from "../src/transportConfig.mjs";
@@ -67,4 +67,20 @@ test("clearTransportConfig removes the persisted choice", () => {
 
 test("clearTransportConfig on an already-empty store is a no-op", () => {
   assert.doesNotThrow(() => clearTransportConfig({ baseDir: weftHome }));
+});
+
+test("saveTransportConfig merges into weft.config.json without clobbering other keys", () => {
+  writeFileSync(join(weftHome, "weft.config.json"), JSON.stringify({ someOtherSetting: 42 }));
+  saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
+  const raw = JSON.parse(readFileSync(join(weftHome, "weft.config.json"), "utf8"));
+  assert.deepEqual(raw, { someOtherSetting: 42, transport: { kind: "local" } });
+});
+
+test("clearTransportConfig removes only the transport key, keeping other config", () => {
+  writeFileSync(join(weftHome, "weft.config.json"), JSON.stringify({ someOtherSetting: 42 }));
+  saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
+  clearTransportConfig({ baseDir: weftHome });
+  const raw = JSON.parse(readFileSync(join(weftHome, "weft.config.json"), "utf8"));
+  assert.deepEqual(raw, { someOtherSetting: 42 });
+  assert.equal(loadTransportConfig({ baseDir: weftHome }), null);
 });
