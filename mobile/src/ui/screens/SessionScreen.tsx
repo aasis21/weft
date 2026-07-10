@@ -206,6 +206,7 @@ interface SessionScreenProps {
    *  to start a session on doesn't need the separate Devices screen. */
   devices?: ListenerDeviceState[];
   onStartOnDevice?(channelId: string): void;
+  onOpenDeviceDetails?(channelId: string): void;
   onVoiceModeChange?(channelId: string, active: boolean): void;
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
@@ -232,6 +233,7 @@ export function SessionScreen({
   onOpenDevices,
   devices,
   onStartOnDevice,
+  onOpenDeviceDetails,
   onVoiceModeChange,
   onRemoveSession,
   onRenameSession,
@@ -504,6 +506,7 @@ export function SessionScreen({
             onOpenDevices={onOpenDevices}
             devices={devices}
             onStartOnDevice={onStartOnDevice}
+            onOpenDeviceDetails={onOpenDeviceDetails}
             onRemove={requestRemove}
             onRename={onRenameSession}
             onPin={onPinSession}
@@ -800,6 +803,10 @@ export function SessionScreen({
           onStartOnDevice={(id) => {
             setDrawerOpen(false);
             onStartOnDevice?.(id);
+          }}
+          onOpenDeviceDetails={(id) => {
+            setDrawerOpen(false);
+            onOpenDeviceDetails?.(id);
           }}
           onRemove={requestRemove}
           onRename={onRenameSession}

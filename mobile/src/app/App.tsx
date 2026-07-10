@@ -345,6 +345,7 @@ export default function App(): JSX.Element {
       onOpenDevices={openDevices}
       devices={snapshot.devices}
       onStartOnDevice={(id) => openStart(id)}
+      onOpenDeviceDetails={(id) => openDeviceDetails(id)}
       onVoiceModeChange={handleVoiceModeChange}
       onRemoveSession={(id) => void sessionRuntime.remove(id)}
       onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}

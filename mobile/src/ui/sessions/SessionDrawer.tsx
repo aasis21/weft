@@ -17,6 +17,9 @@ interface SessionDrawerProps {
   devices?: ListenerDeviceState[];
   /** Tapping a device row (the common case) starts a new session on it directly. */
   onStartOnDevice?(channelId: string): void;
+  /** Tapping the device's avatar/name (not the row's ▻ start button) navigates to its detail
+   *  page instead of starting a session. Falls back to onStartOnDevice if not provided. */
+  onOpenDeviceDetails?(channelId: string): void;
   onRemove(channelId: string): void;
   onRename?(channelId: string, title: string): void;
   /** #163: pin/unpin a session (exempt from auto-delete + eviction preference). */
@@ -77,6 +80,7 @@ export function SessionDrawer({
   onOpenDevices,
   devices,
   onStartOnDevice,
+  onOpenDeviceDetails,
   onRemove,
   onRename,
   onPin,
@@ -222,19 +226,21 @@ export function SessionDrawer({
       : device.projects.length > 0
         ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
         : 'No projects yet';
+    const openDetails = (): void =>
+      onOpenDeviceDetails ? onOpenDeviceDetails(device.channelId) : onStartOnDevice?.(device.channelId);
     return (
       <div
         key={device.channelId}
         className="session-row device-drawer-row"
         role="button"
         tabIndex={0}
-        aria-label={`Start session on ${deviceLabel(device)}`}
-        onClick={() => onStartOnDevice?.(device.channelId)}
+        aria-label={`View details for ${deviceLabel(device)}`}
+        onClick={openDetails}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') onStartOnDevice?.(device.channelId);
+          if (e.key === 'Enter') openDetails();
           if (e.key === ' ' || e.key === 'Spacebar') {
             e.preventDefault();
-            onStartOnDevice?.(device.channelId);
+            openDetails();
           }
         }}
       >
