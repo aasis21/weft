@@ -203,6 +203,17 @@ export function DevicesScreen({
             {countLabel}
           </span>
         </div>
+        <span className="status-icons">
+          <button
+            className="icon-btn devices-add-btn"
+            type="button"
+            onClick={onScanListener}
+            aria-label="Add a new device"
+            title="Add a new device"
+          >
+            +
+          </button>
+        </span>
       </header>
 
       <div className="session-join-inner">

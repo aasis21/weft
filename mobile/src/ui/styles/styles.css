@@ -1453,6 +1453,12 @@ pre {
   text-decoration: underline;
 }
 
+.devices-add-btn {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .native-scan {
   position: relative;
   display: flex;
