@@ -21,6 +21,8 @@ import { createTransportFromDescriptor, resolveTransportForChannel } from "./tra
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
+import { getOrCreatePersistedIdentity } from "./pairingIdentity.mjs";
+import { isPersistentPairingEnabled } from "./transportConfig.mjs";
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
@@ -110,8 +112,20 @@ export function createListener({
     if (started) return api;
     started = true;
     stopped = false;
-    listenerKeyPair ??= await generateKeyPair();
-    listenerChannelId ??= randomChannelId();
+    if (!listenerKeyPair || !listenerChannelId) {
+      // `weft set-pairing persistent` opts a device into reusing the same channelId + keypair
+      // across every `weft start` run (see pairingIdentity.mjs) — the QR/pairing code stays
+      // identical, so an already-paired phone reconnects without ever rescanning. Default
+      // (unset) stays forward-secret: a brand-new identity is minted every run.
+      if (isPersistentPairingEnabled()) {
+        const persisted = await getOrCreatePersistedIdentity();
+        listenerKeyPair ??= persisted.keyPair;
+        listenerChannelId ??= persisted.channelId;
+      } else {
+        listenerKeyPair ??= await generateKeyPair();
+        listenerChannelId ??= randomChannelId();
+      }
+    }
     // Resolve the descriptor BEFORE building the transport (not the other way around) so a
     // persisted "devtunnel" default is expanded into a real, connectable URL exactly once here —
     // createTransportFromDescriptor then builds off that same resolved value instead of each

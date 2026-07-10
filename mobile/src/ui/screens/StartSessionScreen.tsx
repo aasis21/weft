@@ -14,10 +14,7 @@ interface StartSessionScreenProps {
    *  instead of defaulting to the top of the sorted list. */
   initialChannelId?: string;
   onConnectDevice(channelId: string): void;
-  onRefreshProjects(channelId: string): void;
   onStart(channelId: string, opts: { projectName: string; mode: SpawnMode; name?: string }): Promise<void>;
-  onForget(channelId: string): Promise<void>;
-  onSetDefault(channelId: string): Promise<void>;
   onScanListener(): void;
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
   onManageDevices?(): void;
@@ -37,10 +34,7 @@ export function StartSessionScreen({
   devices,
   initialChannelId,
   onConnectDevice,
-  onRefreshProjects,
   onStart,
-  onForget,
-  onSetDefault,
   onScanListener,
   onManageDevices,
   onCancel,
@@ -53,7 +47,7 @@ export function StartSessionScreen({
 }: StartSessionScreenProps): JSX.Element {
   const [selectedId, setSelectedId] = useState<string>(initialChannelId ?? '');
   const [projectName, setProjectName] = useState('');
-  const [mode, setMode] = useState<SpawnMode>('default');
+  const [mode, setMode] = useState<SpawnMode>('allow-all');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -170,21 +164,6 @@ export function StartSessionScreen({
                 })}
               </div>
 
-              {selected ? (
-                <div className="device-actions start-device-actions">
-                  <button type="button" className="session-link-btn" onClick={() => void onRefreshProjects(selected.channelId)}>
-                    ↻ Refresh
-                  </button>
-                  {!selected.isDefault ? (
-                    <button type="button" className="session-link-btn" onClick={() => void onSetDefault(selected.channelId)}>
-                      ⭐ Make default
-                    </button>
-                  ) : null}
-                  <button type="button" className="session-link-btn danger" onClick={() => void onForget(selected.channelId)}>
-                    🗑 Forget
-                  </button>
-                </div>
-              ) : null}
             </section>
 
             <section className="start-section">
@@ -260,11 +239,6 @@ export function StartSessionScreen({
                 <button type="button" className="session-link-btn" onClick={onScanListener}>
                   Scan another listener QR
                 </button>
-                {onManageDevices ? (
-                  <button type="button" className="session-link-btn" onClick={onManageDevices}>
-                    Manage all devices
-                  </button>
-                ) : null}
               </div>
             </div>
           </>

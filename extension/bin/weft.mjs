@@ -6,8 +6,9 @@ import { join, resolve } from "node:path";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
 import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
-import { clearTransportConfig, saveTransportConfig } from "../src/transportConfig.mjs";
+import { clearTransportConfig, saveTransportConfig, savePairingMode } from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
+import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -57,12 +58,38 @@ try {
     setTransport(args);
   } else if (command === "show-transport") {
     showTransport();
+  } else if (command === "set-pairing") {
+    await setPairing(args);
+  } else if (command === "rotate-pairing") {
+    await rotatePairing();
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
 } catch (err) {
   console.error(err?.message ?? String(err));
   process.exitCode = 1;
+}
+
+async function setPairing([mode]) {
+  if (mode !== "persistent" && mode !== "ephemeral") {
+    throw new Error("Usage: weft set-pairing <persistent|ephemeral>");
+  }
+  savePairingMode(mode);
+  if (mode === "persistent") {
+    // Mint (or reuse) the persisted identity right away so `weft show-pairing`/`weft start`
+    // has something concrete to report immediately, rather than waiting for the next start.
+    await getOrCreatePersistedIdentity();
+    console.log("Pairing set to persistent: the same channel + key are reused across every 'weft start' and /weft session.");
+    console.log("An already-paired phone will reconnect without rescanning. Run 'weft rotate-pairing' to force a fresh code.");
+  } else {
+    clearPersistedIdentity();
+    console.log("Pairing set to ephemeral: a fresh channel + key are minted every run (forward-secret default).");
+  }
+}
+
+async function rotatePairing() {
+  await rotatePersistedIdentity();
+  console.log("Persisted pairing identity rotated — the next 'weft start' or /weft will show a new QR to (re)scan.");
 }
 
 async function start() {
@@ -368,9 +395,18 @@ function usage() {
   weft set-default <name>
   weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
   weft show-transport
+  weft set-pairing <persistent|ephemeral>
+  weft rotate-pairing
   weft help
 
 Config lives in a single file: ~/.weft/weft.config.json (written by \`weft set-transport\`).
 There is no .env / WEFT_TRANSPORT env var — reinstalling or rebuilding the extension never
-touches this file, so your chosen transport always survives.`);
+touches this file, so your chosen transport always survives.
+
+By default every \`weft start\` / /weft mints a brand-new channel + key (forward-secret, but
+means rescanning the QR every time). Run \`weft set-pairing persistent\` to reuse the same
+channel + key across every run instead — an already-paired phone then reconnects with no
+rescan. \`weft rotate-pairing\` forces a fresh one on demand; \`weft set-pairing ephemeral\`
+reverts to a new identity every run.`);
 }
+

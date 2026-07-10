@@ -14,6 +14,8 @@ interface DeviceDetailsScreenProps {
   activeId: string | null;
   /** Every session in the app; filtered here to the ones this device spawned. */
   sessions: SessionView[];
+  /** Every registered listener device, so the sidebar's "Devices" group stays visible here too. */
+  devices: ListenerDeviceState[];
   onRefreshProjects(channelId: string): void;
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
@@ -44,6 +46,7 @@ export function DeviceDetailsScreen({
   device,
   activeId,
   sessions,
+  devices,
   onRefreshProjects,
   onSetDefault,
   onForget,
@@ -183,6 +186,11 @@ export function DeviceDetailsScreen({
         <SessionDrawer
           sessions={sessions}
           activeId={activeId}
+          devices={devices}
+          onStartOnDevice={(id) => {
+            setDrawerOpen(false);
+            onStartOnDevice(id);
+          }}
           onSelect={(id) => {
             setDrawerOpen(false);
             onSelectSession(id);

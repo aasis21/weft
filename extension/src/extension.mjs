@@ -13,6 +13,8 @@ import {
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { provisionDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+import { getOrCreatePersistedIdentity } from "./pairingIdentity.mjs";
+import { isPersistentPairingEnabled } from "./transportConfig.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async,
 // self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
@@ -35,8 +37,13 @@ const ui = {
 
 const handedOffIdentity = await loadIdentityFromFile(process.env.WEFT_IDENTITY_FILE);
 const identityFileWasPresent = Boolean(handedOffIdentity);
-const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
-const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
+// `weft set-pairing persistent` opts this device into reusing the same channelId + keypair across
+// every `copilot` launch (see pairingIdentity.mjs) instead of minting a fresh one — skipped
+// entirely when a same-session handoff identity is present (e.g. after /clear), since that must
+// win regardless of the persistent-pairing setting.
+const persistedIdentity = handedOffIdentity || !isPersistentPairingEnabled() ? null : await getOrCreatePersistedIdentity();
+const laptopKeys = handedOffIdentity?.laptopKeys ?? persistedIdentity?.keyPair ?? (await generateKeyPair());
+const channelId = handedOffIdentity?.channelId ?? persistedIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
 // Resolved once from the single ~/.weft/weft.config.json config file written by `weft
 // set-transport` (see transportFactory.mjs — there is no env var / .env fallback, so a
 // reinstall/rebuild of the extension can never silently override this), and stamped into the QR
@@ -417,7 +424,14 @@ async function logPairing(session, payload, { full = false } = {}) {
         `${ui.lime("3")}  Approve the link on your phone — it confirms right here`,
         "",
         ui.dim("Can’t scan? Tap “Paste a code” in the app and paste this:"),
-        ui.dim(payload),
+        // Fenced as a code block (not just ui.dim(payload)) so the CLI's own markdown renderer
+        // treats it as literal text: a bare "https://..." inside the raw JSON was otherwise being
+        // auto-hyperlinked (OSC 8) by the renderer's markdown autolink pass, splicing escape
+        // sequences into the middle of the string and corrupting the exact bytes the user must
+        // copy/paste into the phone app.
+        "```",
+        payload,
+        "```",
         "",
         ui.dim(
           `Relay ${transport} · Channel ${channelShort} · End-to-end encrypted (AES-256-GCM), keys live only this session`,

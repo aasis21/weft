@@ -48,13 +48,6 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const handlePair = useCallback(async (raw: string): Promise<void> => {
-    const route = await sessionRuntime.addByQr(raw);
-    setAdding(false);
-    if (route.startsWith('listener:')) setStarting(true);
-    setShowLanding(false);
-  }, []);
-
   const openJoin = useCallback((manual = false): void => {
     window.history.replaceState(null, '');
     setError(null);
@@ -92,6 +85,15 @@ export default function App(): JSX.Element {
     setDeviceDetailsChannelId(channelId);
     window.history.pushState({ weftView: 'device-details', channelId } satisfies ModalHistoryState, '');
   }, []);
+
+  const handlePair = useCallback(async (raw: string): Promise<void> => {
+    const route = await sessionRuntime.addByQr(raw);
+    setAdding(false);
+    setShowLanding(false);
+    if (route.startsWith('listener:')) {
+      openDeviceDetails(route.slice('listener:'.length));
+    }
+  }, [openDeviceDetails]);
 
   const closeDeviceScreens = useCallback((): void => {
     window.history.replaceState(null, '');
@@ -219,6 +221,7 @@ export default function App(): JSX.Element {
           device={device}
           activeId={activeId}
           sessions={snapshot.sessions}
+          devices={snapshot.devices}
           onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
           onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
           onForget={async (id) => {
@@ -257,15 +260,12 @@ export default function App(): JSX.Element {
         devices={snapshot.devices}
         initialChannelId={startDeviceId}
         onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
-        onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
         onStart={async (id, opts) => {
           await sessionRuntime.spawnSession(id, opts);
           setStarting(false);
           setStartDeviceId(undefined);
           setShowLanding(false);
         }}
-        onForget={(id) => sessionRuntime.forgetDevice(id)}
-        onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
         onScanListener={() => openJoin(false)}
         onManageDevices={openDevices}
         onCancel={() => {

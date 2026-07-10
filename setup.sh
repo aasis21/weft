@@ -27,5 +27,17 @@ else
   echo "(or 'weft set-transport devtunnel' for a self-hosted relay, no cloud account)."
 fi
 
+# Remote "spawn a session" requests from the phone need a default project/folder to open. If
+# none is registered yet, ask once — leave blank to use the home directory (~). Re-running this
+# script never touches an existing default (weft.mjs's addProject only creates/updates by name).
+weft_bin="$root/extension/bin/weft.mjs"
+if node "$weft_bin" list-projects 2>/dev/null | grep -q "(default)"; then
+  echo "Default remote-session project already set — left untouched."
+else
+  read -r -p "Default folder for remote sessions started from the Weft app (blank = home directory, $HOME): " folder
+  folder="${folder:-$HOME}"
+  node "$weft_bin" add-project home "$folder" --default
+fi
+
 echo
 echo "Done. Start 'copilot'; Weft prints a pairing QR (or run /weft). Scan it from the Weft app."

@@ -244,6 +244,11 @@ export function DevicesScreen({
         <SessionDrawer
           sessions={sessions}
           activeId={activeId}
+          devices={devices}
+          onStartOnDevice={(id) => {
+            setDrawerOpen(false);
+            onStartOnDevice(id);
+          }}
           onSelect={(id) => {
             setDrawerOpen(false);
             onSelectSession(id);

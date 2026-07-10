@@ -27,6 +27,24 @@ try {
     Write-Host "(or 'weft set-transport devtunnel' for a self-hosted relay, no cloud account)." -ForegroundColor Yellow
   }
 
+  # Remote "spawn a session" requests from the phone need a default project/folder to open. If
+  # none is registered yet, ask once — leave blank to use the home directory (~). Re-running this
+  # script never touches an existing default (weft.mjs's addProject only creates/updates by name).
+  $weftBin = Join-Path $root "extension\bin\weft.mjs"
+  $existingDefault = $null
+  try {
+    $existingDefault = (node $weftBin list-projects 2>$null | Select-String "\(default\)")
+  } catch {
+    # best-effort; treat failures as "no default yet"
+  }
+  if (-not $existingDefault) {
+    $answer = Read-Host "Default folder for remote sessions started from the Weft app (blank = home directory, $HOME)"
+    $folder = if ([string]::IsNullOrWhiteSpace($answer)) { $HOME } else { $answer }
+    node $weftBin add-project home "$folder" --default
+  } else {
+    Write-Host "Default remote-session project already set — left untouched." -ForegroundColor Green
+  }
+
   Write-Host "`nDone. Start 'copilot' in any repo; Weft prints a pairing QR (or run /weft). Scan it from the Weft app." -ForegroundColor Cyan
 } finally {
   Pop-Location
