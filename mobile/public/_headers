@@ -8,13 +8,22 @@
 /extension.mjs
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: text/javascript; charset=utf-8
+/relayServerProcess.mjs
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/javascript; charset=utf-8
+/weft.mjs
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/javascript; charset=utf-8
+/weft-skill.md
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/markdown; charset=utf-8
 /install.ps1
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: text/plain; charset=utf-8
 /install.sh
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: text/plain; charset=utf-8
-/helm-debug.apk
+/weft-debug.apk
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: application/vnd.android.package-archive
 /app.html

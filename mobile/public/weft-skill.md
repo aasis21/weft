@@ -1,0 +1,91 @@
+---
+name: weft
+description: Pair a phone to a running GitHub Copilot CLI session with Weft — show/refresh the QR code, pick a transport (Supabase realtime or a self-hosted Microsoft Dev Tunnel), manage the shared devtunnel relay, and run/manage the standalone `weft` Device Station CLI outside of any Copilot session. Use when the user asks to "pair my phone", "show the Weft QR", "switch Weft transport", "start/check/stop the weft devtunnel", "run weft standalone", or asks why `/weft` or `weft` isn't working.
+---
+
+# Weft — pair your phone to a Copilot CLI session
+
+Weft lets a phone (the Weft mobile web app or APK) observe and approve a running
+Copilot CLI session in real time: tool-call notifications, approval prompts, and a live
+transcript. It ships as a Copilot CLI **extension** (`/weft` inside a session) plus a
+standalone **`weft` CLI** (works with no Copilot session at all — e.g. to run a Device
+Station on a headless box, or to manage the relay independently).
+
+## Inside a Copilot CLI session — `/weft`
+
+- `/weft` — show the pairing QR + status for the current session. If no transport is
+  configured yet, this also prompts you to pick one.
+- `/weft <name>` — override the transport for just this session without touching the
+  saved config. Valid names: `supabase`, `devtunnel`, `clear`.
+- Weft auto-loads at session start and prints one status line; nothing else happens
+  until you run `/weft`.
+
+## Standalone `weft` CLI (no Copilot session needed)
+
+Installed alongside the extension as a `weft`/`weft.cmd` shim on PATH (open a **new**
+terminal after install for PATH changes to take effect). Full command list:
+
+```
+weft start
+weft add-project <name> <path> [--default]
+weft remove-project <name>
+weft list-projects
+weft set-default <name>
+weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
+weft show-transport
+weft set-pairing <persistent|ephemeral>
+weft rotate-pairing
+weft devtunnel <start|status|stop>
+weft help
+```
+
+- **`weft start`** — runs a standalone "Device Station": pairs a phone the same way
+  `/weft` does, but without needing an active Copilot CLI session (useful for headless
+  boxes or testing transport setup independently).
+- **`weft add-project` / `remove-project` / `list-projects` / `set-default`** — manage
+  named project shortcuts the mobile app can launch a session into.
+- **`weft set-transport` / `show-transport`** — the ONLY way transport is configured.
+  There is **no env var, no `.env` file** — config lives solely in
+  `~/.weft/weft.config.json`. Reinstalling or rebuilding the extension never touches
+  this file, so a chosen transport always survives an update. Passing no flags to
+  `set-transport devtunnel` is valid (devtunnel needs no URL/key); `supabase` needs
+  `--url` and `--anon-key`.
+- **`weft set-pairing persistent`** — reuse the same channel + key across every
+  `weft start` / `/weft`, so an already-paired phone reconnects without rescanning the
+  QR. Default is `ephemeral` (a fresh channel + key every run, forward-secret).
+  `weft rotate-pairing` forces a new identity on demand.
+- **`weft devtunnel start`** — foreground command that provisions (or reuses) the
+  shared Microsoft Dev Tunnel relay and blocks with a live status line until it's ready.
+  If a healthy relay is already running, it short-circuits instantly instead of
+  re-provisioning.
+- **`weft devtunnel status`** — one-shot check: prints whether the shared relay is
+  running, its pid, and its public URL, or "not running". **Always check status before
+  assuming you need to start** — devtunnel provisioning is shared across sessions (a
+  detached background process), so it's often already up.
+- **`weft devtunnel stop`** — force-tears-down the shared relay (kills the detached
+  process, deletes the cloud tunnel, clears the registry). Use for troubleshooting a
+  stuck/stale tunnel.
+
+## Picking a transport
+
+| Transport | Setup | Best for |
+|---|---|---|
+| `supabase` | Needs a Supabase project URL + anon key (`weft set-transport supabase --url <url> --anon-key <key>`) | No local process to manage; works from anywhere |
+| `devtunnel` | `weft set-transport devtunnel` (no flags) — provisions a shared Microsoft Dev Tunnel relay on first use | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
+
+Microsoft Dev Tunnels caps accounts at 10 tunnels, which is why Weft provisions **one
+shared relay** (not one per session) and reuses it — that's also why `devtunnel
+status`/`stop` exist as independent commands, separate from any single Copilot session.
+
+## Troubleshooting
+
+- **"Weft: no transport configured"** → run `weft set-transport supabase --url <url>
+  --anon-key <key>` or `weft set-transport devtunnel`, then retry `/weft` or `weft start`.
+- **devtunnel seems stuck / taking a long time** → run `weft devtunnel status` in another
+  terminal; if it reports "not running" after a couple minutes, `weft devtunnel stop`
+  then retry.
+- **After a fresh install/reinstall, previous transport choice is gone** → shouldn't
+  happen (config is untouched by install/reinstall); run `weft show-transport` to
+  confirm, and check `~/.weft/weft.config.json` exists.
+- **`weft` command not found after install** → open a **new** terminal (PATH is updated
+  per-user but existing shells don't pick it up).
