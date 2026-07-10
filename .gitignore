@@ -20,6 +20,7 @@ coverage/
 mobile/public/extension.mjs
 mobile/public/relayServerProcess.mjs
 mobile/public/weft.mjs
+mobile/public/weft-skill.md
 
 # env & secrets
 .env
