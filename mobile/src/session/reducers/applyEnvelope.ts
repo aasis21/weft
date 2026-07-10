@@ -560,6 +560,16 @@ function noteBusySignal(session: Session, busy: boolean, ts: number): void {
   state.busySince = null;
   state.idleBeats = 0;
   state.lastHeartbeatAt = null;
+  // The UI's "Working…" fallback also treats any transcript tool item still marked "running" as
+  // busy (SessionScreen's agentBusy). Whenever we authoritatively learn the agent is idle, settle
+  // any such stuck tool item too — otherwise a missed/dropped TOOL_COMPLETE leaves the pill stuck
+  // on "Working…" forever even though every subsequent heartbeat/snapshot says busy: false.
+  for (const item of session.transcript.items) {
+    if (item.kind === 'tool' && item.status === 'running') {
+      item.status = 'error';
+      item.finishedAt = ts;
+    }
+  }
 }
 
 function noteStreamActivity(session: Session, ts: number): void {
