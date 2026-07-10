@@ -10,7 +10,7 @@ import { clearTransportConfig, saveTransportConfig, savePairingMode, isPersisten
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
 import {
-  provisionDevTunnelTransport,
+  ensureDevTunnelRelay,
   describeStage,
   healthyRegistryEntry,
   forceStopDevTunnel,
@@ -112,11 +112,6 @@ async function devtunnelCommand([sub, ...rest]) {
   throw new Error("Usage: weft devtunnel <start|status|stop>");
 }
 
-// Not tied to any real pairing session — this command only cares about provisioning the shared
-// relay/tunnel and reporting its base URL, so a fixed placeholder channelId satisfies
-// provisionDevTunnelTransport's signature without implying an actual pairing exists.
-const DIAGNOSTIC_CHANNEL_ID = "weft-cli-devtunnel-check";
-
 async function devtunnelStart() {
   printHeader("WEFT DEVTUNNEL");
   const status = createProvisionStatusLine();
@@ -132,14 +127,12 @@ async function devtunnelStart() {
   process.once("SIGINT", onSigint);
 
   try {
-    const descriptor = await provisionDevTunnelTransport({
-      channelId: DIAGNOSTIC_CHANNEL_ID,
+    const baseUrl = await ensureDevTunnelRelay({
       onProgress: (stage) => status.setStage(stage),
       onRetry: (attempt, maxAttempts) => status.setRetry(attempt, maxAttempts),
     });
     status.stop();
     if (interrupted) return;
-    const baseUrl = descriptor.url.split("?")[0];
     console.log(`${c.green("✓")} ${c.bold("devtunnel ready")}  ${c.dim(baseUrl)}`);
     console.log(c.dim("This shared relay stays up in the background and is reused by every `/weft devtunnel` and `weft start` on this machine."));
   } catch (err) {

@@ -167,6 +167,39 @@ test("provisionDevTunnelTransport spawns the shared relay, publishes a registry 
   }
 });
 
+test("ensureDevTunnelRelay provisions and reuses the shared relay without needing a channelId", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    const { ensureDevTunnelRelay } = await freshModule();
+
+    // No channelId anywhere — this is a channel-agnostic, machine-wide resource.
+    const baseUrl = await ensureDevTunnelRelay({ baseDir: homeDir });
+    assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
+
+    const registryPath = join(homeDir, "devtunnel.json");
+    await waitFor(() => existsSync(registryPath), "registry file to appear");
+    const entry = JSON.parse(readFileSync(registryPath, "utf8"));
+
+    // A second call reuses the already-published entry rather than spawning a second relay.
+    const second = await ensureDevTunnelRelay({ baseDir: homeDir });
+    assert.equal(second, baseUrl);
+    const entryAfterSecond = JSON.parse(readFileSync(registryPath, "utf8"));
+    assert.equal(entryAfterSecond.pid, entry.pid, "second call reused the same relay process");
+
+    await forceKill(entry.pid);
+    rmSync(registryPath, { force: true });
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
 test("the shared relay self-tears-down after its idle timeout with no connections", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));

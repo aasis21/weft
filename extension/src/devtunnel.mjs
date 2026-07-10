@@ -175,7 +175,12 @@ export async function healthyRegistryEntry(baseDir) {
 /**
  * Provision (or, in the common case, discover and reuse) the devtunnel transport for
  * `channelId`. Throws an actionable error if the CLI is missing or the user isn't logged in —
- * both are one-time, user-fixable setup steps, so `/weft devtunnel`'s caller is expected to
+/**
+ * Provisions (or, in the common case, discovers and reuses) the shared devtunnel relay itself —
+ * no channelId required, since the relay/tunnel is a single machine-wide resource shared across
+ * every pairing session (see the SHARED ACROSS SESSIONS note at the top of this file). Returns
+ * the relay's plain `wss://` base URL. Throws an actionable error if the CLI is missing or the
+ * user isn't logged in — both are one-time, user-fixable setup steps, so callers are expected to
  * surface err.message directly rather than retry.
  *
  * `onProgress(stage)` fires whenever the detached relay process's reported provisioning stage
@@ -185,11 +190,9 @@ export async function healthyRegistryEntry(baseDir) {
  * MAX_WAIT_MS) — the detached process itself is NOT respawned on retry, only re-polled, since it
  * keeps running/working in the background regardless of how long this call watches it.
  */
-export async function provisionDevTunnelTransport({ channelId, baseDir, onProgress, onRetry } = {}) {
-  if (!channelId) throw new Error("Weft: provisionDevTunnelTransport requires a channelId");
-
+export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}) {
   const existing = await healthyRegistryEntry(baseDir);
-  if (existing) return descriptorFor(existing.baseUrl, channelId);
+  if (existing) return existing.baseUrl;
 
   const bin = await findDevTunnelBinary();
   if (!bin) {
@@ -222,7 +225,7 @@ export async function provisionDevTunnelTransport({ channelId, baseDir, onProgre
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const entry = await pollForHealthyEntry({ baseDir, onProgress });
-      return descriptorFor(entry.baseUrl, channelId);
+      return entry.baseUrl;
     } catch (err) {
       if (attempt >= maxAttempts) {
         throw new Error(
@@ -235,6 +238,18 @@ export async function provisionDevTunnelTransport({ channelId, baseDir, onProgre
   }
   // Unreachable (loop always returns or throws), but keeps this function's return type honest.
   throw new Error("Weft: timed out waiting for the shared devtunnel relay to come up");
+}
+
+/**
+ * Thin wrapper over ensureDevTunnelRelay() for the actual pairing path: provisions/discovers the
+ * shared relay, then stamps `channelId` into the resulting descriptor's URL so this specific
+ * session's phone connects to the right room. `channelId` is ONLY needed for that final step —
+ * the relay/tunnel itself is a channel-agnostic, machine-wide resource (see ensureDevTunnelRelay).
+ */
+export async function provisionDevTunnelTransport({ channelId, baseDir, onProgress, onRetry } = {}) {
+  if (!channelId) throw new Error("Weft: provisionDevTunnelTransport requires a channelId");
+  const baseUrl = await ensureDevTunnelRelay({ baseDir, onProgress, onRetry });
+  return descriptorFor(baseUrl, channelId);
 }
 
 function descriptorFor(baseUrl, channelId) {
