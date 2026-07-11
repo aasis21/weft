@@ -32,6 +32,16 @@ export interface DerivedStatus {
  *
  * `busy` isn't on {@link SessionView}; the header passes it so a working turn reads "Working…".
  */
+/** True when a live session has a turn in flight (streaming text/reasoning, or a tool actively
+ *  running) — the signal that flips the pill from "Live" to "Working…". Shared by the header
+ *  and the sidebar rows so neither can disagree about which sessions are busy. */
+export function isSessionBusy(view: Pick<SessionView, 'status' | 'timeline'>): boolean {
+  return (
+    view.status === 'live' &&
+    (view.timeline.busy || view.timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'))
+  );
+}
+
 export function deriveStatus(view: Pick<SessionView, 'status' | 'cold' | 'error'>, opts: { busy?: boolean } = {}): DerivedStatus {
   const { status, cold, error } = view;
 

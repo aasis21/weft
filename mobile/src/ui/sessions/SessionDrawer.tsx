@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
-import { deriveStatus } from './sessionStatus';
+import { deriveStatus, isSessionBusy } from './sessionStatus';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 
@@ -277,7 +277,7 @@ export function SessionDrawer({
     const isActive = id === activeId;
     const pending = session.timeline.approvals.length;
     const activity = lastActivity(session);
-    const derived = deriveStatus(session);
+    const derived = deriveStatus(session, { busy: isSessionBusy(session) });
     const isDemo = session.meta.kind === 'demo';
     const confirming = confirmDeleteId === id;
     return (
