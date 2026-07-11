@@ -62,14 +62,20 @@ installed **code only**):
 # remove later with ./uninstall.ps1 / ./uninstall.sh
 ```
 
-Transport (Supabase vs. devtunnel) is configured once via `weft set-transport supabase
---url <url> --anon-key <key>` (or `weft set-transport devtunnel`), persisted to
-`~/.weft/weft.config.json` — the canonical, user-facing config location (alongside
-`projects.json`; see `weftHome()` in `extension/src/projects.mjs`). There is **no env var
-/ `.env`** for this at all (see `transportConfig.mjs` / `transportFactory.mjs`), so
+Transport (Supabase vs. devtunnel) is configured via two small files in `~/.weft/`:
+`weft.config.json` (the transport **pointer**, written by `weft set-transport`) and
+`supabase.json` (the Supabase URL + anon key, seeded by the installer with the hosted
+defaults and overwritten by `weft set-transport supabase --url <url> --anon-key <key>`).
+They sit alongside `projects.json` and the devtunnel registry (see `weftHome()` in
+`extension/src/projects.mjs`), and there is **no env var / `.env`** for either (see
+`transportConfig.mjs` / `transportFactory.mjs`). Because they're separate, `weft
+set-transport supabase` (no flags) just flips the pointer back after you've experimented
+with devtunnel — your creds are still on disk from the last install, no re-typing. And
 re-running `setup.ps1`/`setup.sh` (or the site installer) never silently resets or shadows
-whatever you've already configured — `setup.ps1`/`setup.sh` print a reminder to run `weft
-set-transport` if nothing is configured yet, and otherwise leave it untouched.
+whatever you've already configured — the installers only re-seed `supabase.json` if it's
+absent or you explicitly passed `-SupabaseUrl`/`-SupabaseKey` (or `-Force`), and
+`setup.ps1`/`setup.sh` print a reminder to run `weft set-transport` if no pointer is
+configured yet.
 
 **2. Get the app on your phone** — pick one:
 
@@ -80,7 +86,8 @@ set-transport` if nothing is configured yet, and otherwise leave it untouched.
   `camera=(self)` permissions policy so scanning works.
 - **Native APK (camera QR scan):** `cd mobile && npx cap sync android` then build/install
   via Android Studio (or `cd android && ./gradlew assembleDebug` and install the APK). The
-  build bakes in `VITE_WEFT_TRANSPORT=supabase` + the relay creds from `mobile/.env.local`.
+  build takes no env config — the phone learns the transport, URL, and anon key from the QR
+  it scans.
 - **Local dev server:** `cd mobile && npm run dev -- --host`, open the printed LAN URL on
   your phone (same in-browser camera scan + paste fallback as the hosted app).
 
@@ -119,8 +126,8 @@ planned follow-up.)
    ```sh
    weft set-transport supabase --url <your-project-url> --anon-key <your-anon-key>
    ```
-   and the mobile build's credentials via env (Vite build-time only, never committed):
-   - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+   The mobile side needs no extra wiring — it reads the URL + anon key straight from
+   whatever pairing QR the extension stamps (see [`hosting.md`](./hosting.md)).
 4. The caller constructs a `@supabase/supabase-js` client, calls
    `client.realtime.setAuth(anonKey)` (the anon key is the Realtime access token that RLS
    authorizes), and passes it to `createSupabaseTransport({ client, channelId })` (the
@@ -167,9 +174,10 @@ up Supabase for you either.
 
 ## Configuration reference
 
-Transport (Supabase vs. devtunnel) is **not** an env var — it's configured once via `weft
-set-transport` and persisted to `~/.weft/weft.config.json` (see
-[`hosting.md`](./hosting.md#configuring-the-extensions-transport)). The extension has a
+Transport (Supabase vs. devtunnel) is **not** an env var — it's configured via `weft
+set-transport` (pointer → `~/.weft/weft.config.json`) and, for Supabase, `weft
+set-transport supabase --url <url> --anon-key <key>` (creds → `~/.weft/supabase.json`;
+see [`hosting.md`](./hosting.md#configuring-the-extensions-transport)). The extension has a
 small number of *unrelated*, legitimate tuning env vars:
 
 | Env var | Used by | Meaning |
@@ -177,7 +185,6 @@ small number of *unrelated*, legitimate tuning env vars:
 | `WEFT_APPROVAL_TIMEOUT_MS` | extension | approval wait before auto-deny (default 120000) |
 | `WEFT_ELICITATION_TIMEOUT_MS` | extension | elicitation wait before auto-deny |
 | `WEFT_CHANNEL_ID` | extension | force a channel id (tests); otherwise random 128-bit |
-| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | mobile | relay credentials (Vite build-time) |
 
 ## Docs index
 

@@ -1,13 +1,8 @@
 # Netlify build config for the Weft web app (the hosted, install-free viewport).
 #
-# This drives a git-connected build. The runtime relay creds are NOT committed here:
-# set them as Netlify environment variables on the site (Site settings > Environment):
-#   VITE_WEFT_TRANSPORT = supabase
-#   VITE_SUPABASE_URL    = https://<ref>.supabase.co
-#   VITE_SUPABASE_ANON_KEY = sb_publishable_...   (client-safe publishable key by design)
-#
-# The publishable/anon key is meant to be embedded in clients; the relay is protected by
-# RLS on realtime.messages plus end-to-end AES-256-GCM, so a public web build is fine.
+# This drives a git-connected build. The mobile app takes NO build-time env config — the relay
+# URL + anon key travel in the pairing QR the phone scans (see mobile/src/lib/weftClient.ts
+# → createTransportFromDescriptor), so there is nothing sensitive to set on the site here.
 
 [build]
   # Repo root so npm workspaces resolve @aasis21/weft-shared before the mobile build.

@@ -30,22 +30,32 @@ You only need a free Supabase project.
 2. Enable Realtime; add RLS policies on `realtime.messages` that gate `private:weft:*`
    broadcast channels (see [`setup.md`](./setup.md)).
 3. Set rate limits / quotas appropriate to your usage.
-4. Point the clients at your project:
+4. Point the extension at your project (mobile takes no config — it reads the URL + anon key
+   from whatever pairing QR the extension stamps):
    - extension: `weft set-transport supabase --url <your-url> --anon-key <your-anon-key>`
-   - mobile: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is
 untrusted infrastructure: it routes ciphertext and learns only timing and channel ids.
 
 ## Configuring the extension's transport
 
-Unlike the mobile build (which bakes `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in at
-build time), the Copilot CLI extension has **no env var / `.env`** for this at all — it is
-configured once via `weft set-transport supabase --url <url> --anon-key <key>` (or `weft
-set-transport devtunnel`), persisted to `~/.weft/weft.config.json`, and read from nowhere
-else. This means reinstalling/rebuilding the extension can never silently reset or shadow
-your chosen transport — only `weft set-transport` (or the installer, on first run / when
-you explicitly pass `-Transport`) ever writes it.
+Unlike the mobile build (which takes no env config at all — the relay URL + anon key travel
+in the pairing QR the phone scans), the Copilot CLI extension has **no env var / `.env`**
+for this either — it is configured via two small files in `~/.weft/`:
+
+- `~/.weft/weft.config.json` — the transport **pointer** (`{"transport": {"kind":
+  "supabase"}}` or `"devtunnel"`), written by `weft set-transport`.
+- `~/.weft/supabase.json` — the Supabase URL + anon key (`{"url": "...", "anonKey":
+  "..."}`), seeded by the installer with the hosted defaults and overwritten by `weft
+  set-transport supabase --url <url> --anon-key <key>` when you want to point at your own
+  project.
+
+Keeping them separate means `weft set-transport supabase` (no flags) just flips the pointer
+back after you've experimented with devtunnel — your Supabase creds are still on disk from
+the last install, so you never have to re-type them. Both files are read from nowhere else,
+so reinstalling/rebuilding the extension can never silently reset or shadow your chosen
+transport — only `weft set-transport` (or the installer, on first run / when you explicitly
+pass `-Transport` / `-SupabaseUrl` / `-SupabaseKey`) ever writes them.
 
 > **Devtunnel transport is operator-run** — pairing (`/weft`, `weft start`) never spawns
 > the relay itself, exactly the way it never spins up a Supabase project for you. Bring the

@@ -1,20 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-// Single source of truth for the user's transport choice: ~/.weft/weft.config.json. Mirrors
-// projects.mjs's storage pattern (same ~/.weft home, same atomic-write-then-rename) so both the
-// Copilot CLI extension (extension.mjs) and the device-station CLI (weft.mjs) pick up whatever
-// transport the user configured via `weft set-transport`. There is NO env var override for this
-// (no WEFT_TRANSPORT, no .env) — a reinstall/rebuild only ever touches installed code under
-// ~/.copilot/extensions/weft, never this file, so it can never silently clobber the user's
-// choice. The config file is always read fresh; nothing here falls back to process.env.
+// Single source of truth for the user's transport CHOICE: ~/.weft/weft.config.json is a small
+// pointer file that only records which transport kind the user picked. The transport's own
+// connection details live in a sibling file named after the transport itself:
+//   - kind: "supabase"  → ~/.weft/supabase.json  ({url, anonKey})
+//   - kind: "devtunnel" → ~/.weft/devtunnel.json (runtime registry written by the relay child,
+//                                                  see devtunnel.mjs — not user config)
+// Mirrors projects.mjs's storage pattern (same ~/.weft home, same atomic-write-then-rename) so
+// both the Copilot CLI extension (extension.mjs) and the device-station CLI (weft.mjs) pick up
+// whatever transport the user configured via `weft set-transport`. There is NO env var override
+// for any of this (no WEFT_TRANSPORT, no .env) — a reinstall/rebuild only ever touches installed
+// code under ~/.copilot/extensions/weft, never these files, so it can never silently clobber the
+// user's choice or credentials. The config file is always read fresh; nothing here falls back to
+// process.env.
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { weftHome } from "./projects.mjs";
 
 const STORE_FILE = "weft.config.json";
+const SUPABASE_CREDS_FILE = "supabase.json";
 
 function storePath(baseDir) {
   return join(weftHome(baseDir), STORE_FILE);
+}
+
+function supabaseCredsPath(baseDir) {
+  return join(weftHome(baseDir), SUPABASE_CREDS_FILE);
 }
 
 function ensureDir(baseDir) {
@@ -30,14 +41,16 @@ function ensureDir(baseDir) {
 
 /** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. "local" is accepted
  * here for the harness/tests but not offered by any user-facing command (see
- * transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES). "devtunnel" persists as a bare marker (no
- * url yet): the actual shared-relay base URL is looked up from the running relay's registry file
- * at resolve time by resolveTransport() (see transportFactory.mjs), never stored. */
+ * transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES). Both "supabase" and "devtunnel" persist as
+ * bare markers (no connection details inline): supabase's url/anonKey live in the sibling
+ * supabase.json (see saveSupabaseCredentials below); devtunnel's live relay URL is looked up
+ * from the running relay's devtunnel.json at resolve time by resolveTransport() (see
+ * transportFactory.mjs), never stored. */
 function isValidTransportDescriptor(t) {
   if (!t || typeof t !== "object") return false;
   if (t.kind === "local") return true;
   if (t.kind === "devtunnel") return true;
-  if (t.kind === "supabase") return typeof t.url === "string" && typeof t.anonKey === "string";
+  if (t.kind === "supabase") return true;
   return false;
 }
 
@@ -80,22 +93,86 @@ export function loadTransportConfig({ baseDir } = {}) {
 }
 
 /** Persist a transport descriptor as the user's chosen default (`weft set-transport`). Merges
- * into weft.config.json rather than overwriting it, so other config keys survive. */
+ * into weft.config.json rather than overwriting it, so other config keys survive. For
+ * "supabase", the descriptor is a bare `{kind: "supabase"}` marker — url/anonKey are stored
+ * separately via saveSupabaseCredentials so the pointer and the creds have independent
+ * lifecycles (installer seeds the creds once; `set-transport supabase` flips the pointer
+ * without touching them; overrides pass fresh --url/--anon-key to overwrite the creds file). */
 export function saveTransportConfig(descriptor, { baseDir } = {}) {
   if (!isValidTransportDescriptor(descriptor)) {
     throw new Error(
       'Weft: invalid transport descriptor (kind must be "supabase" or "devtunnel" — or, for ' +
-        'harness/testing use, "local" — with the fields that kind requires)',
+        'harness/testing use, "local")',
     );
   }
   const config = loadConfig({ baseDir });
-  writeConfig({ ...config, transport: descriptor }, { baseDir });
-  return descriptor;
+  writeConfig({ ...config, transport: { kind: descriptor.kind } }, { baseDir });
+  return { kind: descriptor.kind };
 }
 
-/** Remove the persisted transport choice (other config keys are left untouched). There is no env
- * var / built-in default to fall back to for supabase credentials — after clearing, resolving a
- * transport requires running `weft set-transport` again. */
+/** Persist the Supabase URL + anon key to ~/.weft/supabase.json (atomic, 0600). This is the
+ * ONLY place these credentials are written; the pointer file (weft.config.json) never carries
+ * them. Both fields are required together — a partial write would leave the file in an
+ * unresolvable half-state at pairing time. */
+export function saveSupabaseCredentials({ url, anonKey }, { baseDir } = {}) {
+  if (typeof url !== "string" || !url.trim()) {
+    throw new Error("Weft: supabase url must be a non-empty string");
+  }
+  if (typeof anonKey !== "string" || !anonKey.trim()) {
+    throw new Error("Weft: supabase anonKey must be a non-empty string");
+  }
+  const dir = ensureDir(baseDir);
+  const file = join(dir, SUPABASE_CREDS_FILE);
+  const tmp = join(dir, `.supabase.${process.pid}.${randomUUID()}.tmp`);
+  writeFileSync(tmp, `${JSON.stringify({ url: url.trim(), anonKey: anonKey.trim() }, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(tmp, 0o600);
+  } catch {
+    // best-effort on Windows.
+  }
+  renameSync(tmp, file);
+  try {
+    chmodSync(file, 0o600);
+  } catch {
+    // best-effort on Windows.
+  }
+  return { url: url.trim(), anonKey: anonKey.trim() };
+}
+
+/** Read the persisted Supabase credentials, or null if the file is missing/unreadable/invalid.
+ * Callers that need to resolve a live transport should treat null as "credentials not
+ * installed" and throw an actionable, path-mentioning error — see transportFactory.mjs. */
+export function loadSupabaseCredentials({ baseDir } = {}) {
+  try {
+    const parsed = JSON.parse(readFileSync(supabaseCredsPath(baseDir), "utf8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.url !== "string" || typeof parsed.anonKey !== "string") return null;
+    return { url: parsed.url, anonKey: parsed.anonKey };
+  } catch {
+    return null;
+  }
+}
+
+/** Absolute path of the Supabase credentials file, for building actionable error messages. */
+export function supabaseCredentialsPath({ baseDir } = {}) {
+  return supabaseCredsPath(baseDir);
+}
+
+/** Delete ~/.weft/supabase.json outright. Not called on `set-transport clear` (clearing the
+ * pointer intentionally leaves stored creds in place so switching back is a one-liner); provided
+ * for tests and future explicit "forget credentials" commands. */
+export function clearSupabaseCredentials({ baseDir } = {}) {
+  try {
+    unlinkSync(supabaseCredsPath(baseDir));
+  } catch {
+    // Already absent — nothing to do.
+  }
+}
+
+/** Remove the persisted transport CHOICE (other config keys are left untouched, and stored
+ * Supabase credentials at ~/.weft/supabase.json are left in place — clearing the pointer is
+ * deliberately a lightweight action, not a "forget everything" nuke). After clearing, resolving
+ * a transport requires running `weft set-transport` again to pick a kind. */
 export function clearTransportConfig({ baseDir } = {}) {
   const config = loadConfig({ baseDir });
   if (!("transport" in config)) return;

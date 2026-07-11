@@ -47,11 +47,15 @@ weft help
 - **`weft add-project` / `remove-project` / `list-projects` / `set-default`** — manage
   named project shortcuts the mobile app can launch a session into.
 - **`weft set-transport` / `show-transport`** — the ONLY way transport is configured.
-  There is **no env var, no `.env` file** — config lives solely in
-  `~/.weft/weft.config.json`. Reinstalling or rebuilding the extension never touches
-  this file, so a chosen transport always survives an update. Passing no flags to
-  `set-transport devtunnel` is valid (devtunnel needs no URL/key); `supabase` needs
-  `--url` and `--anon-key`.
+  There is **no env var, no `.env` file** — config lives in two small files in `~/.weft/`:
+  `weft.config.json` (the transport **pointer**, one line: which kind you chose) and, for
+  Supabase, `supabase.json` (the URL + anon key). Reinstalling or rebuilding the extension
+  never touches either file, so a chosen transport always survives an update. Passing no
+  flags to `set-transport devtunnel` is valid (devtunnel needs no URL/key). For Supabase,
+  `--url` and `--anon-key` are **optional together**: `weft set-transport supabase` (no
+  flags) just flips the pointer and reuses whatever creds are already in `supabase.json`
+  (the installer seeds the hosted defaults there on install); `weft set-transport supabase
+  --url <url> --anon-key <key>` overwrites `supabase.json` and then flips the pointer.
 - **`weft set-pairing persistent`** — reuse the same channel + key across every
   `weft start` / `/weft`, so an already-paired phone reconnects without rescanning the
   QR. Default is `ephemeral` (a fresh channel + key every run, forward-secret).
@@ -84,7 +88,7 @@ weft help
 
 | Transport | Setup | Best for |
 |---|---|---|
-| `supabase` | Needs a Supabase project URL + anon key (`weft set-transport supabase --url <url> --anon-key <key>`) | No local process to manage; works from anywhere |
+| `supabase` | Installer seeds `~/.weft/supabase.json` with the hosted defaults. Point at your own project with `weft set-transport supabase --url <url> --anon-key <key>`, or just `weft set-transport supabase` (no flags) if the creds file is already there. | No local process to manage; works from anywhere |
 | `devtunnel` | `weft set-transport devtunnel` (no flags), **then** `weft devtunnel start` in a separate terminal before pairing. That terminal owns the relay — keep it open; every `/weft` / `weft start` elsewhere on the machine reuses it until you Ctrl+C or close it. | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
 
 Pairing (`/weft`, `weft start`) is symmetric across both transports: it just *uses* the
@@ -98,8 +102,12 @@ status`/`stop` exist as independent commands, separate from any single Copilot s
 
 ## Troubleshooting
 
-- **"Weft: no transport configured"** → run `weft set-transport supabase --url <url>
-  --anon-key <key>` or `weft set-transport devtunnel`, then retry `/weft` or `weft start`.
+- **"Weft: no transport configured"** — no pointer in `~/.weft/weft.config.json` yet. Run
+  `weft set-transport supabase` (reuses installer-seeded creds) or `weft set-transport
+  devtunnel`, then retry `/weft` or `weft start`.
+- **"Weft: supabase credentials file not found at ~/.weft/supabase.json"** — pointer says
+  supabase but the creds file isn't there. Run `weft set-transport supabase --url <url>
+  --anon-key <key>` to write it, or re-run the installer to seed the hosted defaults.
 - **"Weft: no devtunnel relay is running on this machine"** (with transport =
   `devtunnel`) → pairing never spawns the relay itself. Run `weft devtunnel start` in
   another terminal (blocks until healthy), then retry `/weft` (in-session, run `/weft

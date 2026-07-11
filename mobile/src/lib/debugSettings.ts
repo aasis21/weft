@@ -64,7 +64,6 @@ export function describeError(err: unknown, context: Record<string, string | und
   const lines = [
     `time: ${new Date().toISOString()}`,
     `platform: ${Capacitor.getPlatform()} (native=${Capacitor.isNativePlatform()})`,
-    `transport: ${import.meta.env.VITE_WEFT_TRANSPORT ?? 'local'}`,
     `userAgent: ${globalThis.navigator?.userAgent ?? 'n/a'}`,
     `online: ${globalThis.navigator?.onLine ?? 'n/a'}`,
     ...Object.entries(context)

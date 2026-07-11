@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveTransportDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "../src/transportFactory.mjs";
-import { saveTransportConfig } from "../src/transportConfig.mjs";
+import { saveTransportConfig, saveSupabaseCredentials, supabaseCredentialsPath } from "../src/transportConfig.mjs";
 
 let weftHome;
 
@@ -31,12 +31,29 @@ test("a persisted devtunnel choice is stored as a bare marker (url is provisione
   assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), { kind: "devtunnel" });
 });
 
-test("a persisted supabase choice resolves exactly as saved", () => {
-  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+test("a persisted supabase choice hydrates url + anonKey from ~/.weft/supabase.json", () => {
+  // The pointer file records only `{kind: "supabase"}`; the resolver reads the sibling
+  // supabase.json (written by the installer or `weft set-transport supabase --url X --anon-key Y`)
+  // and merges it in. This is what gets stamped into the pairing QR.
+  saveSupabaseCredentials({ url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveTransportConfig({ kind: "supabase" }, { baseDir: weftHome });
   assert.deepEqual(resolveTransportDescriptor({ baseDir: weftHome }), {
     kind: "supabase",
     url: "https://x.supabase.co",
     anonKey: "anon",
+  });
+});
+
+test("a persisted supabase pointer with no supabase.json throws a hard error naming the file", () => {
+  // Deliberately no saveSupabaseCredentials call. `weft set-transport supabase` (no flags) is
+  // legitimate as long as the file already exists (installer-seeded); if it doesn't, we don't
+  // silently fall back to anything — we say what's missing and where.
+  saveTransportConfig({ kind: "supabase" }, { baseDir: weftHome });
+  const expectedPath = supabaseCredentialsPath({ baseDir: weftHome });
+  assert.throws(() => resolveTransportDescriptor({ baseDir: weftHome }), (err) => {
+    assert.match(err.message, /supabase credentials file not found/);
+    assert.ok(err.message.includes(expectedPath), `error should include ${expectedPath}`);
+    return true;
   });
 });
 
@@ -45,7 +62,8 @@ test("resolveTransportByName only offers the user-facing transports (supabase)",
 });
 
 test("resolveTransportByName resolves supabase from the persisted config", () => {
-  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveSupabaseCredentials({ url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveTransportConfig({ kind: "supabase" }, { baseDir: weftHome });
   assert.deepEqual(resolveTransportByName("supabase", { baseDir: weftHome }), {
     kind: "supabase",
     url: "https://x.supabase.co",
@@ -54,7 +72,8 @@ test("resolveTransportByName resolves supabase from the persisted config", () =>
 });
 
 test("resolveTransportByName is case-insensitive and trims whitespace", () => {
-  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveSupabaseCredentials({ url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveTransportConfig({ kind: "supabase" }, { baseDir: weftHome });
   assert.deepEqual(resolveTransportByName("  SUPABASE ", { baseDir: weftHome }), {
     kind: "supabase",
     url: "https://x.supabase.co",
@@ -82,7 +101,8 @@ test("resolveTransportByName rejects local/devtunnel — hidden from this user-f
 });
 
 test("resolveTransport passes non-devtunnel descriptors through unchanged", async () => {
-  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveSupabaseCredentials({ url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
+  saveTransportConfig({ kind: "supabase" }, { baseDir: weftHome });
   const descriptor = await resolveTransport({ baseDir: weftHome });
   assert.deepEqual(descriptor, { kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" });
 });

@@ -50,8 +50,8 @@ export async function startDemoSession(): Promise<DemoSession> {
     transport: { kind: 'local' },
   });
   // The Demo/Simulator runs entirely in-process: force the phone side onto the same
-  // in-memory LocalTransport bus as the simulated laptop, regardless of the build's
-  // VITE_WEFT_TRANSPORT (which may be `supabase` for real pairing).
+  // in-memory LocalTransport bus as the simulated laptop, regardless of what a real pairing
+  // QR would specify.
   const phoneTransport = createLocalTransport({ channelId });
   const { client } = await pairSession(JSON.stringify(pairingPayload), { transport: phoneTransport });
   const { key: laptopKey } = await laptopPeer;

@@ -6,7 +6,7 @@ import {
   createSupabaseTransport,
   createRelayTransport,
 } from "@aasis21/weft-shared";
-import { loadTransportConfig } from "./transportConfig.mjs";
+import { loadTransportConfig, loadSupabaseCredentials, supabaseCredentialsPath } from "./transportConfig.mjs";
 import { resolveDevTunnelTransport } from "./devtunnel.mjs";
 
 /**
@@ -16,12 +16,15 @@ import { resolveDevTunnelTransport } from "./devtunnel.mjs";
  * pre-baked config. Nothing returned here is a secret: Supabase's anon key is meant to be public
  * (RLS enforces access on realtime.messages).
  *
- * The ONLY source of truth is ~/.weft/weft.config.json (see transportConfig.mjs), written by
- * `weft set-transport`. There is deliberately no env var override (no WEFT_TRANSPORT, no .env) —
- * a rebuild/reinstall only ever refreshes installed code under ~/.copilot/extensions/weft, never
- * this config file, so it can never silently overwrite (or be silently shadowed by a stray env
- * var/leftover .env for) the user's chosen transport. If nothing is configured yet, this throws
- * an actionable error rather than guessing a default.
+ * The ONLY source of truth for the transport CHOICE is ~/.weft/weft.config.json (see
+ * transportConfig.mjs), written by `weft set-transport`. Connection details for a chosen
+ * transport live in a sibling file named after it (~/.weft/supabase.json for the Supabase
+ * anon-key + URL; the running relay's ~/.weft/devtunnel.json for devtunnel). There is
+ * deliberately no env var override for any of this (no WEFT_TRANSPORT, no .env) — a
+ * rebuild/reinstall only ever refreshes installed code under ~/.copilot/extensions/weft, never
+ * these files, so it can never silently overwrite (or be silently shadowed by a stray env
+ * var/leftover .env for) the user's chosen transport or credentials. If nothing is configured
+ * yet, this throws an actionable error rather than guessing a default.
  *
  * This is "this device's default" — the one `/weft` (no arguments) pairs with. `/weft <name>`
  * overrides it for a single running session via resolveTransportByName below, without touching
@@ -29,12 +32,17 @@ import { resolveDevTunnelTransport } from "./devtunnel.mjs";
  */
 export function resolveTransportDescriptor({ baseDir } = {}) {
   const configured = loadTransportConfig({ baseDir });
-  if (configured) return configured;
-  throw new Error(
-    "Weft: no transport configured. Run `weft set-transport supabase --url <url> --anon-key " +
-      "<key>` (or `weft set-transport devtunnel` for a self-hosted relay, no cloud account) to " +
-      "choose one. This is stored once in ~/.weft/weft.config.json.",
-  );
+  if (!configured) {
+    throw new Error(
+      "Weft: no transport configured. Run `weft set-transport supabase` (or `weft set-transport " +
+        "devtunnel` for a self-hosted relay, no cloud account) to choose one. This is stored once " +
+        "in ~/.weft/weft.config.json.",
+    );
+  }
+  if (configured.kind === "supabase") {
+    return hydrateSupabaseDescriptor({ baseDir });
+  }
+  return configured;
 }
 
 /**
@@ -53,8 +61,9 @@ export const SUPPORTED_TRANSPORT_NAMES = ["supabase"];
  * user-facing message (listing the valid names) for anything else, so callers like /weft's
  * handler can surface it directly without re-deriving the allowed list themselves. Reads the
  * SAME persisted config as resolveTransportDescriptor — there is no env var path — so `/weft
- * supabase` only works once `weft set-transport supabase --url <url> --anon-key <key>` has
- * actually been run.
+ * supabase` only works once the pointer has been set with `weft set-transport supabase` (and,
+ * for supabase, once ~/.weft/supabase.json exists — the installer seeds it with the hosted
+ * defaults; `weft set-transport supabase --url <url> --anon-key <key>` overwrites it).
  */
 export function resolveTransportByName(transportName, { baseDir } = {}) {
   const normalized = String(transportName ?? "").trim().toLowerCase();
@@ -66,11 +75,30 @@ export function resolveTransportByName(transportName, { baseDir } = {}) {
   const configured = loadTransportConfig({ baseDir });
   if (configured?.kind !== normalized) {
     throw new Error(
-      `Weft: no ${normalized} transport configured. Run \`weft set-transport ${normalized} ` +
-        "--url <url> --anon-key <key>` first.",
+      `Weft: no ${normalized} transport configured. Run \`weft set-transport ${normalized}\` first.`,
     );
   }
+  if (normalized === "supabase") {
+    return hydrateSupabaseDescriptor({ baseDir });
+  }
   return configured;
+}
+
+// Reads ~/.weft/supabase.json and returns a fully-populated `{kind: "supabase", url, anonKey}`
+// descriptor. The credentials file is written separately from the pointer (installer seeds it
+// on install, `weft set-transport supabase --url X --anon-key Y` overwrites it) — so if the
+// pointer says "supabase" but the file is missing, that's a real config error, not a fallback
+// case: throw naming the exact file the caller needs to produce.
+function hydrateSupabaseDescriptor({ baseDir } = {}) {
+  const creds = loadSupabaseCredentials({ baseDir });
+  if (!creds) {
+    throw new Error(
+      `Weft: supabase credentials file not found at ${supabaseCredentialsPath({ baseDir })}. ` +
+        "Run `weft set-transport supabase --url <url> --anon-key <key>` to write it, or re-run " +
+        "the installer to seed the hosted defaults.",
+    );
+  }
+  return { kind: "supabase", url: creds.url, anonKey: creds.anonKey };
 }
 
 /** Build a live Transport from a resolved/parsed descriptor (see resolveTransportDescriptor). */

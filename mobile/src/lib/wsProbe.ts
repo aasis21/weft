@@ -1,5 +1,5 @@
 /**
- * Raw-WebSocket connectivity probes for the debug panel.
+ * Raw-WebSocket connectivity probe for the debug panel.
  *
  * The Supabase JS client (and Phoenix Channels underneath it) normalizes every connect failure
  * into a generic "channel error: transport failure" with no code or reason — by design, browsers
@@ -7,9 +7,11 @@
  * `CloseEvent` (numeric `code` + `reason`) or a plain `error` Event instead, which is enough to
  * tell "reached the server and got rejected" apart from "never left the device" (DNS/TLS/firewall).
  *
- * Two probes are run: a known-good public echo server (proves the WebView can open ANY external
- * WebSocket) and the app's actual configured Supabase Realtime endpoint (proves reachability of
- * the specific host, independent of the app's own auth/broadcast logic).
+ * A single probe against a known-good public echo server is enough: it proves the WebView can
+ * open ANY external WebSocket. The real relay endpoint isn't known until the user scans a
+ * pairing QR (mobile has no build-time transport config — everything comes from the scan; see
+ * `mobile/src/lib/weftClient.ts` → `createTransportFromDescriptor`), so there's nothing
+ * meaningful to probe pre-pair.
  */
 
 export interface ProbeResult {
@@ -65,18 +67,11 @@ function probeOne(label: string, url: string, timeoutMs = 8000): Promise<ProbeRe
   });
 }
 
-/** Runs both probes and renders a plain-text block for the debug panel's <pre>. */
+/** Runs the echo probe and renders a plain-text block for the debug panel's <pre>. */
 export async function runConnectivityProbe(): Promise<string> {
   const results: ProbeResult[] = [];
 
   results.push(await probeOne('public echo (wss://echo.websocket.org)', 'wss://echo.websocket.org'));
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-  if (supabaseUrl && anonKey) {
-    const wsUrl = `${supabaseUrl.replace(/^http/, 'ws')}/realtime/v1/websocket?apikey=${encodeURIComponent(anonKey)}&vsn=1.0.0`;
-    results.push(await probeOne('Supabase Realtime endpoint', wsUrl));
-  }
 
   return results
     .map((r) => `[${r.outcome.toUpperCase()}] ${r.label} (${r.ms}ms)\n  ${r.url}\n  ${r.detail}`)

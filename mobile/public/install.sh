@@ -16,8 +16,9 @@
 # Choose your transport non-interactively: WEFT_TRANSPORT=supabase|devtunnel
 #   curl -fsSL https://useweft.netlify.app/install.sh | WEFT_TRANSPORT=devtunnel bash
 #
-# Run-your-own relay overrides (env vars, used only to seed weft set-transport - not stored
-# as env vars anywhere):
+# Run-your-own relay overrides (env vars, written to ~/.weft/supabase.json - a sibling of
+# weft.config.json - so the pointer and the creds have independent lifecycles; not stored as
+# env vars anywhere):
 #   WEFT_SUPABASE_URL=https://xxx.supabase.co WEFT_SUPABASE_ANON_KEY=sb_publishable_xxx \
 #     bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"
 #
@@ -39,6 +40,12 @@ WEFT_CONFIG_PATH="$WEFT_HOME/weft.config.json"
 # must not change which relay we install.
 RELAY_URL="${WEFT_SUPABASE_URL:-https://jqzohxjouzxzawqqlifv.supabase.co}"
 RELAY_KEY="${WEFT_SUPABASE_ANON_KEY:-sb_publishable_Rf_bymYhJk9fF2Op4xKT0w_eaWLiyCY}"
+# Track whether the caller explicitly overrode either creds env var, so we know whether to
+# overwrite an existing ~/.weft/supabase.json (below in step 3). Defaulting to 0 keeps the
+# "installer only ever refreshes code" contract intact on plain re-runs.
+RELAY_CREDS_EXPLICIT=0
+[ -n "${WEFT_SUPABASE_URL:-}" ] && RELAY_CREDS_EXPLICIT=1
+[ -n "${WEFT_SUPABASE_ANON_KEY:-}" ] && RELAY_CREDS_EXPLICIT=1
 TOTAL_STEPS=6
 
 bold()   { printf '\033[1m%s\033[0m' "$1"; }
@@ -144,7 +151,33 @@ done
 
 if [ "$APPLY_TRANSPORT" = "1" ]; then
   if [ "$TRANSPORT" = "supabase" ]; then
-    node "$INSTALL_DIR/weft.mjs" set-transport supabase --url "$RELAY_URL" --anon-key "$RELAY_KEY" >/dev/null
+    # Seed ~/.weft/supabase.json BEFORE flipping the pointer, so `set-transport supabase`
+    # never has to complain about missing creds. We write the file directly (not via
+    # `weft set-transport supabase --url X --anon-key Y`) so the two decisions stay
+    # independent: overriding just the URL doesn't imply flipping the pointer, and flipping
+    # the pointer doesn't require re-typing the creds. Skip the write if the file already
+    # exists AND the caller didn't explicitly set WEFT_SUPABASE_URL/ANON_KEY AND WEFT_FORCE
+    # wasn't used - same contract as everywhere else in this script.
+    SUPABASE_CREDS_PATH="$WEFT_HOME/supabase.json"
+    if [ -f "$SUPABASE_CREDS_PATH" ] && [ "$RELAY_CREDS_EXPLICIT" != "1" ] && [ "$FORCE" != "1" ]; then
+      ok "Existing supabase credentials found -> $SUPABASE_CREDS_PATH - left untouched."
+    else
+      # Delegate to node for correct JSON escaping (URLs and keys can contain characters that
+      # would need careful shell quoting), and use a .tmp + mv so a crash mid-write can't leave
+      # a half-written creds file. chmod 600 mirrors what saveSupabaseCredentials does.
+      TMP_CREDS="$WEFT_HOME/.supabase.$$.$(date +%s).tmp"
+      node -e '
+        const fs = require("fs");
+        const [tmp, url, key] = process.argv.slice(1);
+        fs.writeFileSync(tmp, JSON.stringify({ url, anonKey: key }) + "\n", { mode: 0o600 });
+      ' "$TMP_CREDS" "$RELAY_URL" "$RELAY_KEY"
+      mv -f "$TMP_CREDS" "$SUPABASE_CREDS_PATH"
+      chmod 600 "$SUPABASE_CREDS_PATH" 2>/dev/null || true
+      ok "wrote supabase credentials -> $SUPABASE_CREDS_PATH"
+    fi
+    # Now flip the pointer. No --url/--anon-key needed - resolveTransportDescriptor reads
+    # supabase.json (which we just guaranteed exists) at pairing time.
+    node "$INSTALL_DIR/weft.mjs" set-transport supabase >/dev/null
   else
     node "$INSTALL_DIR/weft.mjs" set-transport devtunnel >/dev/null
   fi
