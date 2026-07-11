@@ -26,11 +26,11 @@ The reference public instance is provisioned and the migration applied + verifie
 | Auth | publishable/anon key (public by design); set via env, never committed |
 
 Credentials are configured via `weft set-transport supabase --url <url> --anon-key <key>`
-(persisted to `~/.weft/weft.config.json` — no env var / `.env` for the extension) and
-`mobile/.env.local` (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`) for the mobile build.
-The publishable key is safe to embed in clients; confidentiality rests on E2E encryption +
-channelId entropy (see the security note below). Self-hosters point these at their own
-project instead.
+(pointer at `~/.weft/weft.config.json`; creds at `~/.weft/supabase.json`; no env var / `.env`
+for the extension). The mobile app needs no separate wiring — it reads the URL + anon key
+straight from the pairing QR the extension stamps. The publishable key is safe to embed in
+clients; confidentiality rests on E2E encryption + channelId entropy (see the security note
+below). Self-hosters point the extension at their own project instead.
 
 **Verified live (2026-06):** a private `private:weft:*` channel subscribes and round-trips a
 broadcast; a true two-client send→receive works with production `self:false`; a

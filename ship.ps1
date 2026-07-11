@@ -23,10 +23,12 @@
                                               Copilot agent. NOT run by default — you must ask
                                               for it explicitly with -Install.
 
-  Mobile web build reads relay creds from mobile/.env.local (Vite build-time only). The local
-  extension's transport is NOT env/`.env`-based at all: it is read exclusively from
-  ~/.weft/weft.config.json, written by `weft set-transport`, and this script never writes or
-  overwrites that file. Nothing secret is written into the repo.
+  Neither the mobile web build nor the extension reads any env / `.env` for transport config.
+  The mobile app learns the transport, URL, and anon key from the pairing QR the phone scans.
+  The extension reads its transport pointer from ~/.weft/weft.config.json (written by
+  `weft set-transport`) and, for Supabase, its creds from ~/.weft/supabase.json (seeded by
+  the installer). This script never writes or overwrites either file. Nothing secret is
+  written into the repo.
 
 .PARAMETER Site         Netlify site name or id (default: useweft).
 .PARAMETER Draft        Deploy a Netlify preview (draft) instead of production.
