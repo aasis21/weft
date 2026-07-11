@@ -9,7 +9,7 @@ import {
   createRelayTransport,
 } from "@aasis21/weft-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
-import { provisionDevTunnelTransport } from "./devtunnel.mjs";
+import { resolveDevTunnelTransport } from "./devtunnel.mjs";
 
 /**
  * Resolve which transport + endpoint the laptop should use — no client is constructed here.
@@ -103,10 +103,13 @@ export function createTransportFromDescriptor(descriptor, { channelId }) {
   }
 
   if (descriptor.kind === "devtunnel") {
-    // descriptor.url already carries ?channelId=… (see devtunnel.mjs) so the relay server on the
-    // other end of the tunnel can room-match this socket with the phone's — createRelayTransport
-    // itself never puts channelId on the wire (see shared/transport-relay.mjs).
-    const socket = new WebSocket(descriptor.url);
+    // Same shape as the supabase branch above: the descriptor carries only connection info
+    // (`{kind, url: baseUrl}` — see resolveDevTunnelTransport), and channel/room selection is
+    // applied here at socket-construction time. The relay server on the other end of the tunnel
+    // (see relayServer.mjs) reads `?channelId=` from the incoming URL to room-match this socket
+    // with the phone's; createRelayTransport itself never puts channelId on the wire (see
+    // shared/transport-relay.mjs).
+    const socket = new WebSocket(withChannelId(descriptor.url, channelId));
     return createRelayTransport({ socket, channelId });
   }
 
@@ -118,19 +121,31 @@ export function createTransport({ channelId }) {
 }
 
 /**
- * Like resolveTransportDescriptor, but expands a persisted/env "devtunnel" choice into a real,
- * connectable descriptor (spawning/reusing the shared relay+tunnel — see devtunnel.mjs) since that
- * requires a channelId up front and can't happen inside the plain synchronous resolver. Every
- * caller that needs a descriptor it can actually connect with (as opposed to just displaying the
- * configured kind, e.g. `weft show-transport`) should call this instead of
- * resolveTransportDescriptor() directly.
+ * Like resolveTransportDescriptor, but expands a persisted "devtunnel" choice into a real,
+ * connectable descriptor by looking up the shared relay + tunnel that `weft devtunnel start`
+ * provisions on this machine (see devtunnel.mjs). Async because that lookup is a live probe of
+ * the running relay's registry file, which can't happen inside the plain synchronous resolver.
+ * Throws if no relay is running, so the pairing path stays symmetric with the Supabase transport
+ * (both just *use* the "server", they don't spawn it). No channelId here either, for the same
+ * symmetry reason — the returned descriptor is channel-agnostic and channelId only enters the
+ * picture at socket-construction time in createTransportFromDescriptor. Every caller that needs
+ * a descriptor it can actually connect with (as opposed to just displaying the configured kind,
+ * e.g. `weft show-transport`) should call this instead of resolveTransportDescriptor() directly.
  */
-export async function resolveTransportForChannel({ baseDir, channelId } = {}) {
+export async function resolveTransport({ baseDir } = {}) {
   const descriptor = resolveTransportDescriptor({ baseDir });
   if (descriptor.kind === "devtunnel") {
-    return provisionDevTunnelTransport({ channelId, baseDir });
+    return resolveDevTunnelTransport({ baseDir });
   }
   return descriptor;
+}
+
+/** Appends `?channelId=…` (or `&channelId=…` if the URL already has a query string) so a bare
+ * relay baseUrl becomes a room-scoped connect URL — see the devtunnel branch of
+ * createTransportFromDescriptor / mobile weftClient.ts, which both need identical behavior. */
+function withChannelId(baseUrl, channelId) {
+  const sep = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${sep}channelId=${encodeURIComponent(channelId)}`;
 }
 
 /**

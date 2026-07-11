@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Entry point for the SHARED devtunnel relay: spawned DETACHED by devtunnel.mjs's
-// provisionDevTunnelTransport() the first time any Weft CLI session on this machine requests the
-// `devtunnel` transport, and reused by every session (this one or any other) after that via the
-// registry file it publishes at ~/.weft/devtunnel.json. It owns the full lifecycle of ONE relay
-// server + ONE Dev Tunnel + the `devtunnel host` process:
+// ensureDevTunnelRelay() the first time a user runs `weft devtunnel start` on this machine, and
+// reused by every subsequent pairing session (this one or any other) via the registry file it
+// publishes at ~/.weft/devtunnel.json. It owns the full lifecycle of ONE relay server + ONE Dev
+// Tunnel + the `devtunnel host` process:
 //   - starts the local WS relay (relayServer.mjs)
 //   - creates + ports + hosts a Dev Tunnel pointed at that relay
 //   - publishes {pid, relayPort, tunnelId, baseUrl, startedAt} so other processes can find it

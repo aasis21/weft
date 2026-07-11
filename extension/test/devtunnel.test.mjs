@@ -2,9 +2,17 @@
 // Exercises devtunnel.mjs + relayServerProcess.mjs against a FAKE `devtunnel` CLI (a tiny Node
 // script invoked via a .cmd/shell shim) rather than the real one, so this suite runs anywhere
 // without a devtunnel install/login — the real CLI was separately verified end-to-end by hand
-// (see checkpoint notes). The shared relay is now a DETACHED child process, so these tests spawn
-// it for real (short idle timeouts via env overrides) and assert on the registry file it
+// (see checkpoint notes). The shared relay is a DETACHED child process, so these tests spawn it
+// for real (short idle timeouts via env overrides) and assert on the registry file it
 // publishes/clears, rather than importing in-process state.
+//
+// Two entry points are tested in parallel:
+//   - ensureDevTunnelRelay() is the spawn/wait path (only the standalone `weft devtunnel start`
+//     CLI calls it): CLI discovery, auto-login, stage progress, retry-across-cycles, exhaust.
+//   - resolveDevTunnelTransport() is the read-only pairing-path lookup: returns a descriptor if
+//     a healthy relay is already running (throws pointing at `weft devtunnel start` otherwise).
+//     Never spawns, never waits — symmetric with how the Supabase transport just uses whatever
+//     Supabase project the user configured.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from "node:fs";
@@ -104,16 +112,16 @@ test("findDevTunnelBinary resolves WEFT_DEVTUNNEL_BIN when it runs successfully"
   }
 });
 
-test("provisionDevTunnelTransport throws an actionable error when not logged in", async () => {
+test("ensureDevTunnelRelay throws an actionable error when not logged in", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
     const bin = makeFakeCli(dir);
     process.env.WEFT_DEVTUNNEL_BIN = bin;
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
-    const { provisionDevTunnelTransport } = await freshModule();
+    const { ensureDevTunnelRelay } = await freshModule();
     await assert.rejects(
-      provisionDevTunnelTransport({ channelId: "chan-1", baseDir: homeDir }),
+      ensureDevTunnelRelay({ baseDir: homeDir }),
       /devtunnel user login/,
     );
   } finally {
@@ -123,19 +131,33 @@ test("provisionDevTunnelTransport throws an actionable error when not logged in"
   }
 });
 
-test("provisionDevTunnelTransport spawns the shared relay, publishes a registry entry, and reuses it on a second call", async () => {
+test("resolveDevTunnelTransport throws with an actionable error when no relay is running", async () => {
+  // No CLI shim, no WEFT_DEVTUNNEL_BIN, no registry file — the pairing-path lookup must NEVER
+  // touch the CLI or try to spawn anything, so this should throw purely from finding no healthy
+  // registry entry. The error message must point the user at `weft devtunnel start`.
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  try {
+    const { resolveDevTunnelTransport } = await freshModule();
+    await assert.rejects(
+      resolveDevTunnelTransport({ baseDir: homeDir }),
+      /weft devtunnel start/,
+    );
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveDevTunnelTransport returns a channel-agnostic base-URL descriptor when the shared relay is already running", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
     const bin = makeFakeCli(dir);
     process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
-    const { provisionDevTunnelTransport } = await freshModule();
+    const { ensureDevTunnelRelay, resolveDevTunnelTransport } = await freshModule();
 
-    const first = await provisionDevTunnelTransport({ channelId: "chan-a", baseDir: homeDir });
-    assert.equal(first.kind, "devtunnel");
-    assert.equal(first.url, "wss://fake-abc123-9999.usw2.devtunnels.ms?channelId=chan-a");
-
+    // Prime the shared relay via the standalone-CLI path (what `weft devtunnel start` runs).
+    await ensureDevTunnelRelay({ baseDir: homeDir });
     const registryPath = join(homeDir, "devtunnel.json");
     await waitFor(() => existsSync(registryPath), "registry file to appear");
     const entry = JSON.parse(readFileSync(registryPath, "utf8"));
@@ -143,12 +165,20 @@ test("provisionDevTunnelTransport spawns the shared relay, publishes a registry 
     assert.ok(entry.relayPort);
     assert.equal(entry.baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
 
-    // Second call (different channelId, same "machine"/WEFT_HOME) should discover + reuse the
-    // already-published registry entry rather than spawning a second relay process.
-    const second = await provisionDevTunnelTransport({ channelId: "chan-b", baseDir: homeDir });
-    assert.equal(second.url, "wss://fake-abc123-9999.usw2.devtunnels.ms?channelId=chan-b");
+    // Pairing-path lookup returns a pure `{kind, url: baseUrl}` descriptor — no channelId baked
+    // in, exactly like the Supabase descriptor. channelId is applied by whoever constructs the
+    // WebSocket later (see transportFactory.mjs / mobile weftClient.ts).
+    const descriptor = await resolveDevTunnelTransport({ baseDir: homeDir });
+    assert.deepEqual(descriptor, {
+      kind: "devtunnel",
+      url: "wss://fake-abc123-9999.usw2.devtunnels.ms",
+    });
+
+    // A second lookup reuses the same running relay rather than spawning a second one.
+    const again = await resolveDevTunnelTransport({ baseDir: homeDir });
+    assert.deepEqual(again, descriptor);
     const entryAfterSecond = JSON.parse(readFileSync(registryPath, "utf8"));
-    assert.equal(entryAfterSecond.pid, entry.pid, "second call reused the same relay process");
+    assert.equal(entryAfterSecond.pid, entry.pid, "second lookup reused the same relay process");
 
     // Clean up the detached relay process this test spawned so it doesn't linger past the test
     // run. NOTE: we force-kill rather than asserting graceful self-teardown here — on Windows,
@@ -209,9 +239,9 @@ test("the shared relay self-tears-down after its idle timeout with no connection
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
     process.env.WEFT_DEVTUNNEL_IDLE_MS = "300";
     process.env.WEFT_DEVTUNNEL_CHECK_MS = "100";
-    const { provisionDevTunnelTransport } = await freshModule();
+    const { ensureDevTunnelRelay } = await freshModule();
 
-    await provisionDevTunnelTransport({ channelId: "chan-a", baseDir: homeDir });
+    await ensureDevTunnelRelay({ baseDir: homeDir });
     const registryPath = join(homeDir, "devtunnel.json");
     await waitFor(() => existsSync(registryPath), "registry file to appear");
 
@@ -228,7 +258,7 @@ test("the shared relay self-tears-down after its idle timeout with no connection
   }
 });
 
-test("provisionDevTunnelTransport reports stage progress via onProgress as the relay comes up", async () => {
+test("ensureDevTunnelRelay reports stage progress via onProgress as the relay comes up", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
@@ -238,16 +268,15 @@ test("provisionDevTunnelTransport reports stage progress via onProgress as the r
     // Slow each devtunnel-CLI step down just enough that the 100ms status-file poll observes
     // several distinct stages rather than racing straight to the final registry entry.
     process.env.FAKE_DEVTUNNEL_STAGE_DELAY_MS = "150";
-    const { provisionDevTunnelTransport } = await freshModule();
+    const { ensureDevTunnelRelay } = await freshModule();
 
     const stages = [];
-    const descriptor = await provisionDevTunnelTransport({
-      channelId: "chan-progress",
+    const baseUrl = await ensureDevTunnelRelay({
       baseDir: homeDir,
       onProgress: (stage) => stages.push(stage),
     });
 
-    assert.equal(descriptor.kind, "devtunnel");
+    assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
     assert.ok(stages.length > 0, "expected at least one stage progress callback");
     // Stages must appear in the order relayServerProcess.mjs publishes them (a subset is fine —
     // the exact ones observed depend on scheduling, but relative order must never regress).
@@ -273,7 +302,7 @@ test("provisionDevTunnelTransport reports stage progress via onProgress as the r
   }
 });
 
-test("provisionDevTunnelTransport retries across cycles without re-spawning the relay, then succeeds", async () => {
+test("ensureDevTunnelRelay retries across cycles without re-spawning the relay, then succeeds", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   const hostLog = join(dir, "host-calls.log");
@@ -288,18 +317,17 @@ test("provisionDevTunnelTransport retries across cycles without re-spawning the 
     process.env.FAKE_DEVTUNNEL_STAGE_DELAY_MS = "250";
     process.env.WEFT_DEVTUNNEL_TIMEOUT_MS = "400";
     process.env.WEFT_DEVTUNNEL_MAX_WAIT_MS = "10000";
-    const { provisionDevTunnelTransport } = await freshModule();
+    const { ensureDevTunnelRelay } = await freshModule();
 
     let retryCalls = 0;
-    const descriptor = await provisionDevTunnelTransport({
-      channelId: "chan-retry",
+    const baseUrl = await ensureDevTunnelRelay({
       baseDir: homeDir,
       onRetry: () => {
         retryCalls += 1;
       },
     });
 
-    assert.equal(descriptor.kind, "devtunnel");
+    assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
     assert.ok(retryCalls >= 1, "expected at least one retry cycle before success");
 
     // The detached relay process must only have been spawned once across all retry cycles — the
@@ -323,7 +351,7 @@ test("provisionDevTunnelTransport retries across cycles without re-spawning the 
   }
 });
 
-test("provisionDevTunnelTransport gives an actionable error after exhausting the max-wait ceiling", async () => {
+test("ensureDevTunnelRelay gives an actionable error after exhausting the max-wait ceiling", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   try {
@@ -335,10 +363,10 @@ test("provisionDevTunnelTransport gives an actionable error after exhausting the
     process.env.FAKE_DEVTUNNEL_STAGE_DELAY_MS = "2000";
     process.env.WEFT_DEVTUNNEL_TIMEOUT_MS = "200";
     process.env.WEFT_DEVTUNNEL_MAX_WAIT_MS = "600";
-    const { provisionDevTunnelTransport } = await freshModule();
+    const { ensureDevTunnelRelay } = await freshModule();
 
     await assert.rejects(
-      provisionDevTunnelTransport({ channelId: "chan-exhaust", baseDir: homeDir }),
+      ensureDevTunnelRelay({ baseDir: homeDir }),
       /weft devtunnel status|weft devtunnel start/,
     );
   } finally {
@@ -359,9 +387,9 @@ test("forceStopDevTunnel tears down a running relay and clears the registry", as
     const bin = makeFakeCli(dir);
     process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
-    const { provisionDevTunnelTransport, forceStopDevTunnel, healthyRegistryEntry } = await freshModule();
+    const { ensureDevTunnelRelay, forceStopDevTunnel, healthyRegistryEntry } = await freshModule();
 
-    await provisionDevTunnelTransport({ channelId: "chan-stop", baseDir: homeDir });
+    await ensureDevTunnelRelay({ baseDir: homeDir });
     const registryPath = join(homeDir, "devtunnel.json");
     await waitFor(() => existsSync(registryPath), "registry file to appear");
 

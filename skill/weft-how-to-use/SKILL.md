@@ -62,10 +62,12 @@ weft help
   time, defaulting to the hostname (press Enter to keep it). Persisted alongside the
   transport in `~/.weft/weft.config.json` — reinstalling/rebuilding never resets it.
   Restart `weft start` / `/weft` for a changed name to reach an already-open session.
-- **`weft devtunnel start`** — foreground command that provisions (or reuses) the
-  shared Microsoft Dev Tunnel relay and blocks with a live status line until it's ready.
-  If a healthy relay is already running, it short-circuits instantly instead of
-  re-provisioning.
+- **`weft devtunnel start`** — the ONLY command that provisions the shared Microsoft Dev
+  Tunnel relay. Foreground: shells out to the `devtunnel` CLI, auto-runs `devtunnel user
+  login -g` if needed, spawns a detached background relay+tunnel process, and blocks with
+  a live status line until it's healthy. If a healthy relay is already running, it
+  short-circuits instantly. **Run this before `/weft` / `weft start` when the transport is
+  `devtunnel`** — pairing itself never spawns the relay (see Picking a transport below).
 - **`weft devtunnel status`** — one-shot check: prints whether the shared relay is
   running, its pid, and its public URL, or "not running". **Always check status before
   assuming you need to start** — devtunnel provisioning is shared across sessions (a
@@ -79,7 +81,12 @@ weft help
 | Transport | Setup | Best for |
 |---|---|---|
 | `supabase` | Needs a Supabase project URL + anon key (`weft set-transport supabase --url <url> --anon-key <key>`) | No local process to manage; works from anywhere |
-| `devtunnel` | `weft set-transport devtunnel` (no flags) — provisions a shared Microsoft Dev Tunnel relay on first use | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
+| `devtunnel` | `weft set-transport devtunnel` (no flags), **then** `weft devtunnel start` in a separate terminal before pairing. The relay is a shared, machine-wide background process; one `start` covers every subsequent `/weft` / `weft start` on the machine until it idles out. | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
+
+Pairing (`/weft`, `weft start`) is symmetric across both transports: it just *uses* the
+"server" — Supabase for `supabase`, the local relay + tunnel for `devtunnel` — and never
+tries to spin it up for you. If the devtunnel relay isn't running when you pair, you get
+an actionable error pointing at `weft devtunnel start` (see Troubleshooting).
 
 Microsoft Dev Tunnels caps accounts at 10 tunnels, which is why Weft provisions **one
 shared relay** (not one per session) and reuses it — that's also why `devtunnel
@@ -89,9 +96,14 @@ status`/`stop` exist as independent commands, separate from any single Copilot s
 
 - **"Weft: no transport configured"** → run `weft set-transport supabase --url <url>
   --anon-key <key>` or `weft set-transport devtunnel`, then retry `/weft` or `weft start`.
-- **devtunnel seems stuck / taking a long time** → run `weft devtunnel status` in another
-  terminal; if it reports "not running" after a couple minutes, `weft devtunnel stop`
-  then retry.
+- **"Weft: no devtunnel relay is running on this machine"** (with transport =
+  `devtunnel`) → pairing never spawns the relay itself. Run `weft devtunnel start` in
+  another terminal (blocks until healthy), then retry `/weft` (in-session, run `/weft
+  devtunnel` to force a re-resolve) or `weft start`. Use `weft devtunnel status` first to
+  confirm whether one is already up (a single relay is shared across all sessions).
+- **devtunnel seems stuck / taking a long time on `weft devtunnel start`** → run `weft
+  devtunnel status` in another terminal; if it reports "not running" after a couple
+  minutes, `weft devtunnel stop` then retry.
 - **After a fresh install/reinstall, previous transport choice is gone** → shouldn't
   happen (config is untouched by install/reinstall); run `weft show-transport` to
   confirm, and check `~/.weft/weft.config.json` exists.

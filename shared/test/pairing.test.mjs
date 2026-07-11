@@ -21,10 +21,10 @@ test("buildPairingPayload accepts a devtunnel transport descriptor", () => {
   const payload = buildPairingPayload({
     channelId: "abc",
     publicKeyB64: "PUB",
-    transport: { kind: "devtunnel", url: "wss://example.devtunnels.ms?channelId=abc" },
+    transport: { kind: "devtunnel", url: "wss://example.devtunnels.ms" },
   });
   const parsed = parsePairingPayload(JSON.stringify(payload));
-  assert.deepEqual(parsed.transport, { kind: "devtunnel", url: "wss://example.devtunnels.ms?channelId=abc" });
+  assert.deepEqual(parsed.transport, { kind: "devtunnel", url: "wss://example.devtunnels.ms" });
 });
 
 test("buildPairingPayload requires a valid transport descriptor", () => {

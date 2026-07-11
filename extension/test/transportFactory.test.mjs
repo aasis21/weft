@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveTransportDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "../src/transportFactory.mjs";
+import { resolveTransportDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "../src/transportFactory.mjs";
 import { saveTransportConfig } from "../src/transportConfig.mjs";
 
 let weftHome;
@@ -81,53 +81,20 @@ test("resolveTransportByName rejects local/webpubsub/devtunnel — hidden from t
   }
 });
 
-test("resolveTransportForChannel passes non-devtunnel descriptors through unchanged", async () => {
+test("resolveTransport passes non-devtunnel descriptors through unchanged", async () => {
   saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
-  const descriptor = await resolveTransportForChannel({ baseDir: weftHome, channelId: "chan-1" });
+  const descriptor = await resolveTransport({ baseDir: weftHome });
   assert.deepEqual(descriptor, { kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" });
 });
 
-test("resolveTransportForChannel expands a persisted devtunnel marker into a real, provisioned descriptor", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
-  const FAKE_CLI_SCRIPT = `
-const args = process.argv.slice(2);
-const [cmd] = args;
-if (cmd === "--version") { console.log("fake 1.0"); process.exit(0); }
-if (args.join(" ") === "user show") { process.exit(0); }
-if (cmd === "create" && args.includes("--json")) {
-  console.log(JSON.stringify({ tunnel: { tunnelId: "fake-tunnel-id" } }));
-  process.exit(0);
-}
-if (cmd === "port") { process.exit(0); }
-if (cmd === "access") { process.exit(0); }
-if (cmd === "delete") { console.log("Deleted: fake-tunnel-id"); process.exit(0); }
-if (cmd === "host") {
-  console.log("Connect via browser: https://fake-abc123-9999.usw2.devtunnels.ms");
-  setInterval(() => {}, 1000);
-} else { process.exit(1); }
-`;
-  const scriptPath = join(dir, "fake-devtunnel.mjs");
-  writeFileSync(scriptPath, FAKE_CLI_SCRIPT);
-  const isWindows = process.platform === "win32";
-  const shimPath = join(dir, isWindows ? "devtunnel.cmd" : "devtunnel");
-  if (isWindows) {
-    writeFileSync(shimPath, `@echo off\r\nnode "${scriptPath}" %*\r\n`);
-  } else {
-    writeFileSync(shimPath, `#!/bin/sh\nexec node "${scriptPath}" "$@"\n`);
-    chmodSync(shimPath, 0o755);
-  }
-  process.env.WEFT_DEVTUNNEL_BIN = shimPath;
-  process.env.WEFT_DEVTUNNEL_IDLE_MS = "300";
-  process.env.WEFT_DEVTUNNEL_CHECK_MS = "100";
+test("resolveTransport routes a persisted devtunnel marker into resolveDevTunnelTransport (throws with `weft devtunnel start` hint when no relay is running)", async () => {
+  // Symmetric with the Supabase transport: pairing never spawns the "server". If the user hasn't
+  // brought the shared relay up via `weft devtunnel start`, this must fail fast with an actionable
+  // message rather than hang, retry, or try to invoke the devtunnel CLI. The full spawn/reuse
+  // behavior lives in ensureDevTunnelRelay and is covered by devtunnel.test.mjs.
   saveTransportConfig({ kind: "devtunnel" }, { baseDir: weftHome });
-  try {
-    const descriptor = await resolveTransportForChannel({ baseDir: weftHome, channelId: "chan-1" });
-    assert.equal(descriptor.kind, "devtunnel");
-    assert.equal(descriptor.url, "wss://fake-abc123-9999.usw2.devtunnels.ms?channelId=chan-1");
-  } finally {
-    delete process.env.WEFT_DEVTUNNEL_BIN;
-    delete process.env.WEFT_DEVTUNNEL_IDLE_MS;
-    delete process.env.WEFT_DEVTUNNEL_CHECK_MS;
-    rmSync(dir, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    resolveTransport({ baseDir: weftHome }),
+    /weft devtunnel start/,
+  );
 });

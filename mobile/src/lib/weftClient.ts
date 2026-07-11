@@ -274,16 +274,26 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
     return createWebPubSubTransport({ client, channelId });
   }
   if (descriptor.kind === 'devtunnel') {
-    // A Dev Tunnel (or any self-hosted relay/tunnel) URL is single-use and pairing-scoped, unlike
-    // Supabase's shared long-lived anon key — so it needs no per-channel negotiate step, and no
-    // caching across sessions. The URL already carries any access token (e.g. as a query param)
-    // baked in by the laptop when it minted the descriptor; the phone just connects to it as-is.
+    // Symmetric with the supabase branch above: the descriptor carries only the relay's base
+    // WebSocket URL (see extension-side resolveDevTunnelTransport), and channel/room selection
+    // is applied here at socket-construction time \u2014 exactly like createSupabaseTransport takes
+    // channelId as a separate arg. The relay server on the other end of the tunnel (see
+    // extension/src/relayServer.mjs) reads `?channelId=` from the incoming URL to room-match this
+    // socket with the laptop's; createRelayTransport itself never puts channelId on the wire.
     // React Native's global WebSocket is the standard-compliant socket createRelayTransport
     // expects (addEventListener/send/close/readyState).
-    const socket = new WebSocket(descriptor.url);
+    const socket = new WebSocket(withChannelId(descriptor.url, channelId));
     return createRelayTransport({ socket, channelId });
   }
   throw new Error(`Weft: unknown transport descriptor kind "${(descriptor as { kind: string }).kind}"`);
+}
+
+/** Appends `?channelId=\u2026` (or `&channelId=\u2026` if the URL already has a query string) so a bare
+ * relay baseUrl becomes a room-scoped connect URL \u2014 mirrors the same helper on the extension
+ * side (transportFactory.mjs) so both peers assemble identical URLs. */
+function withChannelId(baseUrl: string, channelId: string): string {
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${sep}channelId=${encodeURIComponent(channelId)}`;
 }
 
 /**

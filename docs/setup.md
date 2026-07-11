@@ -131,6 +131,36 @@ planned follow-up.)
 > before `subscribe()` and dispatches internally, so subscriptions added after `connect()`
 > still receive events. No subscribe-ordering constraint remains for cross-device use.
 
+## Pairing with the `devtunnel` transport
+
+The devtunnel transport is **operator-run** — the shared local relay + Microsoft Dev
+Tunnel is your responsibility to bring up, in exactly the same sense that the Supabase
+transport expects you to have already spun up a Supabase project. Pairing (`/weft`,
+`weft start`) never spawns the tunnel for you; it just reads the shared registry
+(`~/.weft/devtunnel.json`) and uses whatever's running.
+
+**Two-terminal flow** (after `weft set-transport devtunnel`):
+
+```sh
+# terminal 1 — bring up the shared relay (owns the devtunnel CLI, login, and lifecycle)
+weft devtunnel start          # blocks with a live status line until healthy
+
+# terminal 2 — pair as usual; /weft picks up the running relay
+copilot                       # then run /weft inside the session
+# or, standalone:
+weft start
+```
+
+The shared relay lives in a detached background process, so a single `weft devtunnel
+start` covers every session on the machine (any Copilot CLI, `weft start`, etc.) and
+self-tears-down after it's been idle a while. Use `weft devtunnel status` to check
+whether it's up before running `start` again — most of the time it already is.
+
+If you run `/weft` (or `weft start`) with `transport = devtunnel` and no relay is
+running, pairing fails fast with an actionable error pointing you at `weft devtunnel
+start`. This is deliberate — it mirrors how the Supabase transport won't try to spin
+up Supabase for you either.
+
 ## Configuration reference
 
 Transport (Supabase vs. devtunnel) is **not** an env var — it's configured once via `weft

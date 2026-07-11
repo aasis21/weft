@@ -72,7 +72,7 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
 | `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |
 | `weft show-name` | Print the device name currently in effect and where it came from. |
-| `weft devtunnel start` | Provision (or reuse) the shared devtunnel relay and watch live progress — no pairing session needed. |
+| `weft devtunnel start` | Bring up the shared devtunnel relay (prerequisite before pairing when the transport is `devtunnel`). Provisions on first run or reuses an already-running one; blocks with a live status line. |
 | `weft devtunnel status` | Check whether the shared devtunnel relay is running, without starting it. |
 | `weft devtunnel stop` | Tear down the shared devtunnel relay. |
 | `weft help` | Show usage. |

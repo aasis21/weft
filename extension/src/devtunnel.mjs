@@ -4,20 +4,25 @@
 // (Supabase/Web PubSub). This is the ONE place in Weft that shells out to the `devtunnel` CLI;
 // everything downstream (shared/transport-relay.mjs, the mobile devtunnel branch in
 // weftClient.ts) only ever sees a plain `wss://` URL and knows nothing about tunnels, tokens, or
-// the CLI. Access is anonymous-connect: the tunnel URL is short-lived/pairing-scoped and travels
-// inside the same QR as the (never-anonymous) end-to-end encryption keys, so — as transport.d.ts
-// calls out for the "devtunnel" descriptor kind — embedding it is safe even though it's not a
-// durable secret.
+// the CLI. Access is anonymous-connect: the relay's base URL is channel-agnostic and travels
+// inside the same QR as the (never-anonymous) end-to-end encryption keys, so — as
+// transport.d.ts calls out for the "devtunnel" descriptor kind — embedding it is safe even
+// though it's not a durable secret.
 //
-// SHARED ACROSS SESSIONS: Dev Tunnels are capped at 10 per account (a hard Microsoft quota), and
-// every `/weft devtunnel` call used to provision a brand-new tunnel — a handful of crashed/killed
-// sessions (which skip graceful shutdown) would leak tunnels toward that ceiling. So the actual
-// relay + tunnel now lives in a DETACHED child process (relayServerProcess.mjs) that outlives any
-// one CLI session, discoverable via a small registry file at ~/.weft/devtunnel.json (see
-// registryFile.mjs). The first `/weft devtunnel` anywhere on the machine spawns it; every
-// subsequent call (from this session or any other) just reuses it. Nothing here "owns" tearing it
-// down — relayServerProcess.mjs watches its own room occupancy and self-deletes the tunnel once
-// idle for a while, so no CLI session's shutdown (clean or crashed) needs to coordinate cleanup.
+// SHARED ACROSS SESSIONS + EXPLICIT LIFECYCLE: Dev Tunnels are capped at 10 per account (a hard
+// Microsoft quota), so Weft provisions ONE shared relay + tunnel per machine, living in a
+// DETACHED child process (relayServerProcess.mjs) that outlives any single CLI session and is
+// discoverable via a small registry file at ~/.weft/devtunnel.json (see registryFile.mjs).
+//
+// The pairing path (`/weft`, `weft start` → resolveDevTunnelTransport) is symmetric with the
+// Supabase transport: it just *uses* the relay, exactly like the Supabase client just uses a
+// cloud project. It never spawns, never logs in, never waits. The USER brings the relay up
+// explicitly via `weft devtunnel start` (which is the only caller of ensureDevTunnelRelay below);
+// if it isn't running, pairing throws an actionable error pointing at that command.
+//
+// Nothing here "owns" tearing the relay down either — relayServerProcess.mjs watches its own room
+// occupancy and self-deletes the tunnel once idle for a while, so no CLI session's shutdown
+// (clean or crashed) needs to coordinate cleanup.
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,9 +43,10 @@ const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mj
 // URL to come back before the registry read here sees a healthy entry — 20s cut this close on a
 // slow/loaded network. Bumped to 45s of headroom; still overridable per-machine via
 // WEFT_DEVTUNNEL_TIMEOUT_MS for anyone on a particularly slow connection. On top of that, the
-// whole provision now auto-retries (see provisionDevTunnelTransport) rather than hard-failing the
+// whole provision now auto-retries (see ensureDevTunnelRelay) rather than hard-failing the
 // instant one cycle elapses — WEFT_DEVTUNNEL_MAX_WAIT_MS caps how long that retrying continues
-// before finally giving up and pointing the user at the standalone `weft devtunnel` CLI.
+// before finally giving up and pointing the user at the standalone `weft devtunnel` CLI. These
+// only apply to the explicit `weft devtunnel start` path; the pairing path never waits.
 const PROVISION_TIMEOUT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_TIMEOUT_MS", 45_000);
 const MAX_WAIT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_MAX_WAIT_MS", 120_000);
 const REGISTRY_POLL_MS = 100;
@@ -173,9 +179,6 @@ export async function healthyRegistryEntry(baseDir) {
 }
 
 /**
- * Provision (or, in the common case, discover and reuse) the devtunnel transport for
- * `channelId`. Throws an actionable error if the CLI is missing or the user isn't logged in —
-/**
  * Provisions (or, in the common case, discovers and reuses) the shared devtunnel relay itself —
  * no channelId required, since the relay/tunnel is a single machine-wide resource shared across
  * every pairing session (see the SHARED ACROSS SESSIONS note at the top of this file). Returns
@@ -198,7 +201,7 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
   if (!bin) {
     throw new Error(
       "Weft: the devtunnel CLI isn't installed. Run `winget install Microsoft.devtunnel`, " +
-        "then `devtunnel user login -g`, and try /weft devtunnel again.",
+        "then `devtunnel user login -g`, and try `weft devtunnel start` again.",
     );
   }
   try {
@@ -241,19 +244,25 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
 }
 
 /**
- * Thin wrapper over ensureDevTunnelRelay() for the actual pairing path: provisions/discovers the
- * shared relay, then stamps `channelId` into the resulting descriptor's URL so this specific
- * session's phone connects to the right room. `channelId` is ONLY needed for that final step —
- * the relay/tunnel itself is a channel-agnostic, machine-wide resource (see ensureDevTunnelRelay).
+ * Read-only lookup for the pairing path: returns a devtunnel transport descriptor if a healthy
+ * shared relay is already running on this machine (i.e. the user ran `weft devtunnel start`
+ * earlier), or throws an actionable error pointing at that command if not. Fully symmetric with
+ * the Supabase transport: descriptor carries connection info only (`{kind, url: baseUrl}`), never
+ * a channelId — channel/room selection happens at socket-construction time in
+ * createTransportFromDescriptor (extension) / weftClient.ts (mobile), exactly like Supabase's
+ * `createSupabaseTransport({client, channelId})`. Does NOT shell out to the `devtunnel` CLI,
+ * spawn any process, or wait — for that, use ensureDevTunnelRelay() (only the standalone
+ * `weft devtunnel start` CLI should).
  */
-export async function provisionDevTunnelTransport({ channelId, baseDir, onProgress, onRetry } = {}) {
-  if (!channelId) throw new Error("Weft: provisionDevTunnelTransport requires a channelId");
-  const baseUrl = await ensureDevTunnelRelay({ baseDir, onProgress, onRetry });
-  return descriptorFor(baseUrl, channelId);
-}
-
-function descriptorFor(baseUrl, channelId) {
-  return { kind: "devtunnel", url: `${baseUrl}?channelId=${encodeURIComponent(channelId)}` };
+export async function resolveDevTunnelTransport({ baseDir } = {}) {
+  const entry = await healthyRegistryEntry(baseDir);
+  if (!entry) {
+    throw new Error(
+      "Weft: no devtunnel relay is running on this machine. Run `weft devtunnel start` first, " +
+        "then retry. (`weft devtunnel status` shows the current state.)",
+    );
+  }
+  return { kind: "devtunnel", url: entry.baseUrl };
 }
 
 // Spawns relayServerProcess.mjs DETACHED (survives this process's exit). A second caller racing
@@ -276,7 +285,7 @@ function spawnRelayServerProcess({ bin, baseDir }) {
 
 /** Polls for up to PROVISION_TIMEOUT_MS for a healthy registry entry, calling `onProgress(stage)`
  * whenever the interim DEVTUNNEL_STATUS_FILE's reported stage changes. Throws on timeout — the
- * caller (provisionDevTunnelTransport's retry loop) decides whether to give up or poll again. */
+ * caller (ensureDevTunnelRelay's retry loop) decides whether to give up or poll again. */
 async function pollForHealthyEntry({ baseDir, onProgress }) {
   let lastStage;
   const deadline = Date.now() + PROVISION_TIMEOUT_MS;

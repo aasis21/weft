@@ -137,7 +137,7 @@ describe('pairWithPublicKey with a devtunnel transport descriptor', () => {
     );
   });
 
-  it('builds a WebSocket from the descriptor url and hands it to createRelayTransport', async () => {
+  it('builds a WebSocket from the descriptor url (channelId appended at connect time) and hands it to createRelayTransport', async () => {
     const { pairWithPublicKey } = await import('../weftClient');
     const { createRelayTransport } = await import('@aasis21/weft-shared');
 
@@ -159,21 +159,60 @@ describe('pairWithPublicKey with a devtunnel transport descriptor', () => {
     };
     vi.mocked(createRelayTransport).mockReturnValue(fakeTransport as never);
 
+    // Descriptor carries only the relay's base URL now — no channelId baked in, symmetric with
+    // the Supabase descriptor. weftClient's devtunnel branch appends `?channelId=` at socket
+    // construction time (same helper the extension side uses in transportFactory.mjs).
     await expect(
       pairWithPublicKey({
         channelId: 'channel-relay',
         publicKeyB64: 'laptop-public-key',
-        transportDescriptor: { kind: 'devtunnel', url: 'wss://example.devtunnels.ms/?token=abc' },
+        transportDescriptor: { kind: 'devtunnel', url: 'wss://example.devtunnels.ms' },
       }),
     ).rejects.toThrow('connect failed');
 
-    expect(WebSocketMock).toHaveBeenCalledWith('wss://example.devtunnels.ms/?token=abc');
+    expect(WebSocketMock).toHaveBeenCalledWith('wss://example.devtunnels.ms?channelId=channel-relay');
     expect(createRelayTransport).toHaveBeenCalledWith({
       socket: fakeSocket,
       channelId: 'channel-relay',
     });
     // Failed handshake must still close the transport it opened (same as the local-transport case).
     expect(shared.close).toHaveBeenCalledTimes(1);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('preserves any pre-existing query string on the descriptor URL when appending channelId', async () => {
+    const { pairWithPublicKey } = await import('../weftClient');
+    const { createRelayTransport } = await import('@aasis21/weft-shared');
+
+    const fakeSocket = {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      send: vi.fn(),
+      close: vi.fn(),
+      readyState: 0,
+    };
+    const WebSocketMock = vi.fn(() => fakeSocket);
+    vi.stubGlobal('WebSocket', WebSocketMock);
+
+    vi.mocked(createRelayTransport).mockReturnValue({
+      connect: vi.fn(),
+      publish: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+      close: shared.close,
+    } as never);
+
+    await expect(
+      pairWithPublicKey({
+        channelId: 'chan-2',
+        publicKeyB64: 'laptop-public-key',
+        transportDescriptor: { kind: 'devtunnel', url: 'wss://example.devtunnels.ms/?token=abc' },
+      }),
+    ).rejects.toThrow('connect failed');
+
+    // `&channelId=…` (not `?channelId=…`) since the URL already has a `?token=` — guards against
+    // the naive concat breaking any future relay that ships a token or path param alongside.
+    expect(WebSocketMock).toHaveBeenCalledWith('wss://example.devtunnels.ms/?token=abc&channelId=chan-2');
 
     vi.unstubAllGlobals();
   });

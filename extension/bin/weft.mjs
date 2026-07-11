@@ -204,7 +204,7 @@ async function devtunnelStop() {
   console.log(`${c.green("✓")} Stopped the shared devtunnel relay${entry?.pid ? ` (was pid ${entry.pid})` : ""}.`);
 }
 
-// Live status line for `weft devtunnel start`, shown while provisionDevTunnelTransport works
+// Live status line for `weft devtunnel start`, shown while ensureDevTunnelRelay works
 // through its stages. Mirrors createStatusLine's spinner/redraw approach below, but renders
 // provisioning stage + retry-attempt text instead of device-connection state.
 function createProvisionStatusLine() {

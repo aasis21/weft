@@ -47,6 +47,12 @@ else. This means reinstalling/rebuilding the extension can never silently reset 
 your chosen transport — only `weft set-transport` (or the installer, on first run / when
 you explicitly pass `-Transport`) ever writes it.
 
+> **Devtunnel transport is operator-run** — pairing (`/weft`, `weft start`) never spawns
+> the relay itself, exactly the way it never spins up a Supabase project for you. Bring the
+> shared relay up first with `weft devtunnel start` (which owns the `devtunnel` CLI, login,
+> and lifecycle), then run `/weft`. If it isn't running, pairing fails fast with an error
+> pointing at that command. See [`setup.md`](./setup.md#pairing-with-the-devtunnel-transport).
+
 ## Operating a public instance
 
 If you run a relay for others, protect it operationally — none of this is the code

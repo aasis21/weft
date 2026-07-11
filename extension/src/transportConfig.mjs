@@ -32,8 +32,9 @@ function ensureDir(baseDir) {
  * "webpubsub" are intentionally no longer offered by any user-facing command (weft
  * set-transport, /weft <name>) — see transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES — but are
  * still accepted here so existing persisted configs / tests keep working. "devtunnel" persists as
- * a bare marker (no url yet): the actual shared-relay URL is provisioned fresh per channelId at
- * resolve time by resolveTransportForChannel(), never stored. */
+ * a bare marker (no url yet): the actual shared-relay base URL is looked up from the running
+ * relay's registry file at resolve time by resolveTransport() (see transportFactory.mjs), never
+ * stored. */
 function isValidTransportDescriptor(t) {
   if (!t || typeof t !== "object") return false;
   if (t.kind === "local") return true;

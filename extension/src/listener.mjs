@@ -18,7 +18,7 @@ import {
   spawnPairing,
   spawnResult,
 } from "@aasis21/weft-shared";
-import { createTransportFromDescriptor, resolveTransportForChannel } from "./transportFactory.mjs";
+import { createTransportFromDescriptor, resolveTransport } from "./transportFactory.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
@@ -156,7 +156,7 @@ export function createListener({
     // persisted "devtunnel" default is expanded into a real, connectable URL exactly once here —
     // createTransportFromDescriptor then builds off that same resolved value instead of each
     // re-resolving independently (which used to risk two separate devtunnel provisions).
-    listenerTransportDescriptor ??= await resolveTransportForChannel({ channelId: listenerChannelId });
+    listenerTransportDescriptor ??= await resolveTransport();
     listenerTransport ??= createTransportFromDescriptor(listenerTransportDescriptor, { channelId: listenerChannelId });
     pairingPayload = buildPairingPayload({
       channelId: listenerChannelId,
@@ -455,7 +455,7 @@ export function createListener({
           buildPairingPayload({
             channelId: newChannelId,
             publicKeyB64,
-            transport: listenerTransportDescriptor ?? (await resolveTransportForChannel({ channelId: newChannelId })),
+            transport: listenerTransportDescriptor ?? (await resolveTransport()),
             kind: PAIR_KIND.SESSION,
           }),
           sessionName,

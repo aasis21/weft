@@ -10,14 +10,14 @@ import {
   buildPairingPayload,
   listenForPeers,
 } from "@aasis21/weft-shared";
-import { createTransportFromDescriptor, resolveTransportByName, resolveTransportForChannel, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
+import { createTransportFromDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
-import { provisionDevTunnelTransport, stopDevTunnel, describeStage } from "./devtunnel.mjs";
+import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 
-// Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async,
-// self-provisioning "devtunnel" path (see switchTransport below). Kept separate from
-// transportFactory's own SUPPORTED_TRANSPORT_NAMES because devtunnel isn't a plain descriptor
-// resolution: it spins up a local relay server + a real cloud tunnel on first use.
+// Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
+// "devtunnel" path (see switchTransport below). Kept separate from transportFactory's own
+// SUPPORTED_TRANSPORT_NAMES because devtunnel isn't a plain descriptor resolution: it needs to
+// look up the shared, machine-wide relay + tunnel that `weft devtunnel start` provisions.
 const WEFT_COMMAND_TRANSPORT_NAMES = [...SUPPORTED_TRANSPORT_NAMES, "devtunnel"];
 
 // Minimal ANSI styling for the pairing banner. The Copilot CLI forwards ANSI straight to the
@@ -50,23 +50,24 @@ const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID |
 // below so the phone builds a matching transport at connect time, with no pre-baked config of its
 // own. An unconfigured transport fails fast at load with a clear, actionable error (telling the
 // user to run `weft set-transport`) rather than surfacing as a confusing retry-loop timeout later.
-// resolveTransportForChannel (not the plain resolveTransportDescriptor) so a persisted default of
-// "devtunnel" gets expanded into a real, connectable descriptor (spawns/reuses the shared relay —
-// see devtunnel.mjs) right here at boot, not just when a user explicitly runs `/weft devtunnel`
-// for the session.
+// resolveTransport (not the plain resolveTransportDescriptor) so a persisted default of
+// "devtunnel" gets expanded via a probe of the machine-wide shared relay right here at boot —
+// see devtunnel.mjs's resolveDevTunnelTransport. That lookup is channel-agnostic (channelId is
+// applied at socket-construction time in createTransportFromDescriptor, mirroring how Supabase's
+// createSupabaseTransport takes channelId as a separate arg).
 // `let`, not `const` — `/weft <transport>` (see switchTransport) overrides this for just the
 // running session without touching the persisted device-wide default.
 //
-// A misbehaving devtunnel (CLI missing, not logged in, or the shared relay not coming up within
-// PROVISION_TIMEOUT_MS — see devtunnel.mjs) must NOT crash the whole extension at load: that would
-// take down the entire Copilot session over a Weft-only feature. So this is caught here; a null
-// transportDescriptor just means pairing isn't available yet. The error is surfaced via
-// session.log once `session` exists (see below `if (transportSetupError)` block), and the user can
-// retry any time with `/weft <name>` (switchTransport already has its own try/catch).
+// A missing devtunnel relay (the user hasn't run `weft devtunnel start` yet) must NOT crash the
+// whole extension at load: that would take down the entire Copilot session over a Weft-only
+// feature. So this is caught here; a null transportDescriptor just means pairing isn't available
+// yet. The error is surfaced via session.log once `session` exists (see below
+// `if (transportSetupError)` block), and the user can retry any time with `/weft <name>`
+// (switchTransport already has its own try/catch).
 let transportDescriptor = null;
 let transportSetupError = null;
 try {
-  transportDescriptor = await resolveTransportForChannel({ channelId });
+  transportDescriptor = await resolveTransport();
 } catch (err) {
   transportSetupError = err;
 }
@@ -120,27 +121,14 @@ const showPairing = async (context) => {
 // the running session — it never writes to the persisted `weft set-transport` config.
 async function switchTransport(name) {
   const normalized = name.trim().toLowerCase();
-  if (normalized === "devtunnel") {
-    session.log?.("Weft: setting up a devtunnel (first run creates a tunnel; this can take a couple of minutes)…", {
-      ephemeral: false,
-    });
-  }
   let descriptor;
   try {
     descriptor =
       normalized === "devtunnel"
-        ? await provisionDevTunnelTransport({
-            channelId,
-            // Surfaces real progress instead of silence — see devtunnel.mjs's STAGE_LABELS.
-            onProgress: (stage) => session.log?.(`Weft: ${describeStage(stage)}`, { ephemeral: false }),
-            // A 45s cycle elapsed with no success yet; the detached relay keeps working in the
-            // background regardless, so just let the user know we're still watching it rather
-            // than failing outright (provisionDevTunnelTransport caps this at ~2 minutes total).
-            onRetry: (attempt, maxAttempts) =>
-              session.log?.(`Weft: still setting up the devtunnel (attempt ${attempt + 1}/${maxAttempts})…`, {
-                ephemeral: false,
-              }),
-          })
+        ? // Read-only lookup of the shared, machine-wide relay the user brought up with
+          // `weft devtunnel start` — no spawn, no wait. Throws with an actionable message if
+          // that command hasn't been run yet, which the catch below surfaces to the session log.
+          await resolveDevTunnelTransport()
         : resolveTransportByName(normalized);
   } catch (err) {
     session.log?.(`Weft: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
