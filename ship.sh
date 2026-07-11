@@ -62,7 +62,7 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   [ -f "$ext_bundle" ] || { echo "extension build did not produce $ext_bundle" >&2; exit 1; }
   ok "extension/dist/extension.mjs"
   [ -f "$relay_bundle" ] || { echo "extension build did not produce $relay_bundle" >&2; exit 1; }
-  ok "extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)"
+  ok "extension/dist/relayServerProcess.mjs  (spawned as an attached child by the shared devtunnel relay)"
   [ -f "$weft_cli_bundle" ] || { echo "extension build did not produce $weft_cli_bundle" >&2; exit 1; }
   ok "extension/dist/weft.mjs  (standalone Device Station CLI, no repo checkout needed)"
 

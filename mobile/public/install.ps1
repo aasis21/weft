@@ -150,9 +150,10 @@ StepHeader 2 $TOTAL_STEPS 'Downloading Weft bundles'
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Invoke-WebRequest -Uri "$base/extension.mjs" -OutFile (Join-Path $InstallDir 'extension.mjs') -UseBasicParsing
 Ok "extension.mjs -> $InstallDir  $(Dim '(the Copilot CLI extension itself)')"
-# relayServerProcess.mjs is spawned as a DETACHED sibling process by devtunnel.mjs (resolved next
-# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can outlive any one CLI
-# session — must always be installed alongside extension.mjs, not just on first install.
+# relayServerProcess.mjs is spawned as an ATTACHED sibling process by devtunnel.mjs (resolved next
+# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can be brought up and torn
+# down by an ordinary `weft devtunnel start` terminal — must always be installed alongside
+# extension.mjs, not just on first install.
 Invoke-WebRequest -Uri "$base/relayServerProcess.mjs" -OutFile (Join-Path $InstallDir 'relayServerProcess.mjs') -UseBasicParsing
 Ok "relayServerProcess.mjs -> $InstallDir  $(Dim '(shared devtunnel relay, only spawned if you use devtunnel)')"
 # weft.mjs is a fully standalone bundle (no dependency on the rest of this repo/extension) —

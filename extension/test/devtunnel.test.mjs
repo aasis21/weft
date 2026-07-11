@@ -2,13 +2,15 @@
 // Exercises devtunnel.mjs + relayServerProcess.mjs against a FAKE `devtunnel` CLI (a tiny Node
 // script invoked via a .cmd/shell shim) rather than the real one, so this suite runs anywhere
 // without a devtunnel install/login — the real CLI was separately verified end-to-end by hand
-// (see checkpoint notes). The shared relay is a DETACHED child process, so these tests spawn it
-// for real (short idle timeouts via env overrides) and assert on the registry file it
-// publishes/clears, rather than importing in-process state.
+// (see checkpoint notes). The shared relay is an ATTACHED child process whose lifetime is tied
+// to the parent (test) process, so these tests spawn it for real and assert on the registry
+// file it publishes/clears, rather than importing in-process state; each test force-kills its
+// spawned child in its finally block so the test process can exit cleanly.
 //
 // Two entry points are tested in parallel:
 //   - ensureDevTunnelRelay() is the spawn/wait path (only the standalone `weft devtunnel start`
 //     CLI calls it): CLI discovery, auto-login, stage progress, retry-across-cycles, exhaust.
+//     Returns `{ baseUrl, child }` — the caller owns the child's lifetime.
 //   - resolveDevTunnelTransport() is the read-only pairing-path lookup: returns a descriptor if
 //     a healthy relay is already running (throws pointing at `weft devtunnel start` otherwise).
 //     Never spawns, never waits — symmetric with how the Supabase transport just uses whatever
@@ -180,13 +182,13 @@ test("resolveDevTunnelTransport returns a channel-agnostic base-URL descriptor w
     const entryAfterSecond = JSON.parse(readFileSync(registryPath, "utf8"));
     assert.equal(entryAfterSecond.pid, entry.pid, "second lookup reused the same relay process");
 
-    // Clean up the detached relay process this test spawned so it doesn't linger past the test
-    // run. NOTE: we force-kill rather than asserting graceful self-teardown here — on Windows,
+    // Clean up the relay child process this test spawned so the test-runner process can exit
+    // cleanly. NOTE: we force-kill rather than asserting graceful teardown here — on Windows,
     // process.kill(pid, "SIGTERM") from another process unconditionally terminates the target
     // immediately rather than delivering a real signal the target can handle (Windows has no
-    // POSIX signals), so a manually-triggered graceful shutdown isn't reliably testable this way.
-    // Self-teardown via the idle timer (the ACTUAL production cleanup path) is covered by the
-    // next test instead.
+    // POSIX signals), so a manually-triggered graceful shutdown isn't reliably testable this
+    // way. The `forceStopDevTunnel tears down…` test below covers the actual production
+    // cleanup path (which uses taskkill directly for exactly this reason).
     await forceKill(entry.pid);
     rmSync(registryPath, { force: true });
   } finally {
@@ -207,16 +209,19 @@ test("ensureDevTunnelRelay provisions and reuses the shared relay without needin
     const { ensureDevTunnelRelay } = await freshModule();
 
     // No channelId anywhere — this is a channel-agnostic, machine-wide resource.
-    const baseUrl = await ensureDevTunnelRelay({ baseDir: homeDir });
+    const { baseUrl, child } = await ensureDevTunnelRelay({ baseDir: homeDir });
     assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
+    assert.ok(child, "first ensureDevTunnelRelay call owns the spawned child");
 
     const registryPath = join(homeDir, "devtunnel.json");
     await waitFor(() => existsSync(registryPath), "registry file to appear");
     const entry = JSON.parse(readFileSync(registryPath, "utf8"));
 
-    // A second call reuses the already-published entry rather than spawning a second relay.
+    // A second call reuses the already-published entry rather than spawning a second relay —
+    // and correspondingly returns `child: null`, signalling the caller doesn't own anything.
     const second = await ensureDevTunnelRelay({ baseDir: homeDir });
-    assert.equal(second, baseUrl);
+    assert.equal(second.baseUrl, baseUrl);
+    assert.equal(second.child, null, "second call must not spawn (returns child: null)");
     const entryAfterSecond = JSON.parse(readFileSync(registryPath, "utf8"));
     assert.equal(entryAfterSecond.pid, entry.pid, "second call reused the same relay process");
 
@@ -225,34 +230,6 @@ test("ensureDevTunnelRelay provisions and reuses the shared relay without needin
   } finally {
     delete process.env.WEFT_DEVTUNNEL_BIN;
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(homeDir, { recursive: true, force: true });
-  }
-});
-
-test("the shared relay self-tears-down after its idle timeout with no connections", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
-  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
-  try {
-    const bin = makeFakeCli(dir);
-    process.env.WEFT_DEVTUNNEL_BIN = bin;
-    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
-    process.env.WEFT_DEVTUNNEL_IDLE_MS = "300";
-    process.env.WEFT_DEVTUNNEL_CHECK_MS = "100";
-    const { ensureDevTunnelRelay } = await freshModule();
-
-    await ensureDevTunnelRelay({ baseDir: homeDir });
-    const registryPath = join(homeDir, "devtunnel.json");
-    await waitFor(() => existsSync(registryPath), "registry file to appear");
-
-    // Nobody ever connects to the relay in this test — it should self-idle-out and clean up
-    // its own registry entry without any external teardown call.
-    await waitFor(() => !existsSync(registryPath), "registry file to be cleared by self idle-teardown", 10_000);
-  } finally {
-    delete process.env.WEFT_DEVTUNNEL_BIN;
-    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
-    delete process.env.WEFT_DEVTUNNEL_IDLE_MS;
-    delete process.env.WEFT_DEVTUNNEL_CHECK_MS;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
@@ -271,7 +248,7 @@ test("ensureDevTunnelRelay reports stage progress via onProgress as the relay co
     const { ensureDevTunnelRelay } = await freshModule();
 
     const stages = [];
-    const baseUrl = await ensureDevTunnelRelay({
+    const { baseUrl } = await ensureDevTunnelRelay({
       baseDir: homeDir,
       onProgress: (stage) => stages.push(stage),
     });
@@ -320,7 +297,7 @@ test("ensureDevTunnelRelay retries across cycles without re-spawning the relay, 
     const { ensureDevTunnelRelay } = await freshModule();
 
     let retryCalls = 0;
-    const baseUrl = await ensureDevTunnelRelay({
+    const { baseUrl } = await ensureDevTunnelRelay({
       baseDir: homeDir,
       onRetry: () => {
         retryCalls += 1;
@@ -330,7 +307,7 @@ test("ensureDevTunnelRelay retries across cycles without re-spawning the relay, 
     assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
     assert.ok(retryCalls >= 1, "expected at least one retry cycle before success");
 
-    // The detached relay process must only have been spawned once across all retry cycles — the
+    // The relay child process must only have been spawned once across all retry cycles — the
     // fake CLI's "host" subcommand logs one line per invocation.
     const hostCalls = existsSync(hostLog) ? readFileSync(hostLog, "utf8").trim().split("\n").filter(Boolean) : [];
     assert.equal(hostCalls.length, 1, "expected the relay child process to be spawned exactly once");
@@ -367,7 +344,7 @@ test("ensureDevTunnelRelay gives an actionable error after exhausting the max-wa
 
     await assert.rejects(
       ensureDevTunnelRelay({ baseDir: homeDir }),
-      /weft devtunnel status|weft devtunnel start/,
+      /re-run `weft devtunnel start`/,
     );
   } finally {
     delete process.env.WEFT_DEVTUNNEL_BIN;

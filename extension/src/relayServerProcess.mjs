@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-// Entry point for the SHARED devtunnel relay: spawned DETACHED by devtunnel.mjs's
-// ensureDevTunnelRelay() the first time a user runs `weft devtunnel start` on this machine, and
-// reused by every subsequent pairing session (this one or any other) via the registry file it
-// publishes at ~/.weft/devtunnel.json. It owns the full lifecycle of ONE relay server + ONE Dev
-// Tunnel + the `devtunnel host` process:
+// Entry point for the SHARED devtunnel relay: spawned as an ATTACHED child by devtunnel.mjs's
+// ensureDevTunnelRelay() when a user runs `weft devtunnel start` on this machine, and reused by
+// every subsequent pairing session (this one or any other) via the registry file it publishes at
+// ~/.weft/devtunnel.json. It owns the full lifecycle of ONE relay server + ONE Dev Tunnel + the
+// `devtunnel host` process:
 //   - starts the local WS relay (relayServer.mjs)
 //   - creates + ports + hosts a Dev Tunnel pointed at that relay
 //   - publishes {pid, relayPort, tunnelId, baseUrl, startedAt} so other processes can find it
-//   - watches its own room occupancy; once nobody has been connected for IDLE_TIMEOUT_MS, deletes
-//     the cloud tunnel, clears the registry file, and exits
-// No CLI session's shutdown owns tearing this down — it tears itself down. This keeps Weft's
-// no-daemon philosophy intact in spirit: nothing is started eagerly or run as an installed
-// service, it's just a plain child process that happens to detach and self-manage its own exit.
+//   - lives as long as its parent `weft devtunnel start` terminal is open; on SIGINT/SIGTERM
+//     (Ctrl+C, terminal close, or `weft devtunnel stop` from anywhere) tears down the cloud
+//     tunnel, clears the registry files, and exits
+// The parent CLI is the primary owner (see devtunnel.mjs's forceStopDevTunnel — that's what the
+// parent's Ctrl+C handler calls); these signal handlers are the POSIX safety net for the case
+// where the parent dies uncleanly (kill -9) and the OS delivers SIGHUP down the process group.
 import { fileURLToPath } from "node:url";
 import { startRelayServer } from "./relayServer.mjs";
 import { findDevTunnelBinary, killProcessTree, run, DEVTUNNEL_REGISTRY_FILE, DEVTUNNEL_STATUS_FILE } from "./devtunnel.mjs";
 import { clearRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { spawn } from "node:child_process";
 
-const IDLE_TIMEOUT_MS = Number(process.env.WEFT_DEVTUNNEL_IDLE_MS) || 5 * 60_000;
-const IDLE_CHECK_MS = Number(process.env.WEFT_DEVTUNNEL_CHECK_MS) || 30_000;
 const HOST_STARTUP_TIMEOUT_MS = 20_000;
 
 // Publishes the current provisioning stage to DEVTUNNEL_STATUS_FILE (see devtunnel.mjs's
@@ -43,11 +42,8 @@ export async function main() {
 
   let tunnelId;
   let host;
-  let idleTimer;
-  let lastNonIdleAt = Date.now();
 
   const teardown = async () => {
-    if (idleTimer) clearInterval(idleTimer);
     if (host) await killProcessTree(host);
     await relay.close().catch(() => {});
     if (tunnelId) {
@@ -109,18 +105,12 @@ export async function main() {
   );
   clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir: process.env.WEFT_HOME });
 
-  idleTimer = setInterval(() => {
-    if (relay.totalConnections() > 0) {
-      lastNonIdleAt = Date.now();
-      return;
-    }
-    if (Date.now() - lastNonIdleAt >= IDLE_TIMEOUT_MS) {
-      void teardown().then(() => process.exit(0));
-    }
-  }, IDLE_CHECK_MS);
-  idleTimer.unref?.();
-
-  for (const sig of ["SIGINT", "SIGTERM"]) {
+  // Safety-net signal handlers: the parent CLI's Ctrl+C handler is the primary teardown path
+  // (it calls devtunnel.mjs's forceStopDevTunnel — which taskkills this process and does the
+  // same cleanup itself, needed on Windows where forwarded signals aren't real). These fire
+  // only when the OS delivers a signal directly (POSIX SIGHUP from a dying parent terminal,
+  // or a graceful `kill <pid>`), so we can still exit cleanly instead of leaving orphans.
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(sig, () => {
       void teardown().then(() => process.exit(0));
     });

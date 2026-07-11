@@ -23,13 +23,14 @@ await build({
   logLevel: "info",
 });
 
-// devtunnel.mjs spawns relayServerProcess.mjs as a DETACHED sibling file (resolved relative to
-// its own import.meta.url at runtime — see devtunnel.mjs's RELAY_SERVER_PROCESS_PATH) so the
-// shared devtunnel relay/tunnel can outlive any one CLI session. Since the main bundle above
-// inlines everything into a single extension.mjs, that sibling file has to be produced (and
-// installed) as ITS OWN standalone bundle — otherwise "./relayServerProcess.mjs" resolves to a
-// file that was never written to disk. Must be built with the same bundle:true/platform/format so
-// it has zero dependency on files outside dist/ once installed.
+// devtunnel.mjs spawns relayServerProcess.mjs as a sibling file (resolved relative to its own
+// import.meta.url at runtime — see devtunnel.mjs's RELAY_SERVER_PROCESS_PATH) so the shared
+// devtunnel relay/tunnel can be brought up and torn down by an ordinary `weft devtunnel start`
+// terminal. Since the main bundle above inlines everything into a single extension.mjs, that
+// sibling file has to be produced (and installed) as ITS OWN standalone bundle — otherwise
+// "./relayServerProcess.mjs" resolves to a file that was never written to disk. Must be built
+// with the same bundle:true/platform/format so it has zero dependency on files outside dist/
+// once installed.
 await build({
   entryPoints: ["src/relayServerProcess.mjs"],
   outfile: "dist/relayServerProcess.mjs",

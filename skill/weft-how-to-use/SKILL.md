@@ -64,24 +64,28 @@ weft help
   Restart `weft start` / `/weft` for a changed name to reach an already-open session.
 - **`weft devtunnel start`** — the ONLY command that provisions the shared Microsoft Dev
   Tunnel relay. Foreground: shells out to the `devtunnel` CLI, auto-runs `devtunnel user
-  login -g` if needed, spawns a detached background relay+tunnel process, and blocks with
-  a live status line until it's healthy. If a healthy relay is already running, it
-  short-circuits instantly. **Run this before `/weft` / `weft start` when the transport is
-  `devtunnel`** — pairing itself never spawns the relay (see Picking a transport below).
+  login -g` if needed, spawns the relay+tunnel as a child of this terminal, and blocks
+  with a live status line until it's healthy — then keeps blocking. **This terminal owns
+  the relay's lifetime**: keep it open for as long as you want the tunnel up; Ctrl+C (or
+  closing the terminal) stops the relay and deletes the cloud tunnel. If a healthy relay
+  is already running (from another terminal), this one attaches as a watcher and exits
+  its watcher on Ctrl+C without disturbing the relay. **Run this before `/weft` /
+  `weft start` when the transport is `devtunnel`** — pairing itself never spawns the
+  relay (see Picking a transport below).
 - **`weft devtunnel status`** — one-shot check: prints whether the shared relay is
   running, its pid, and its public URL, or "not running". **Always check status before
-  assuming you need to start** — devtunnel provisioning is shared across sessions (a
-  detached background process), so it's often already up.
-- **`weft devtunnel stop`** — force-tears-down the shared relay (kills the detached
-  process, deletes the cloud tunnel, clears the registry). Use for troubleshooting a
-  stuck/stale tunnel.
+  assuming you need to start** — devtunnel provisioning is shared across sessions on a
+  machine, so if any terminal is already running `weft devtunnel start` it's already up.
+- **`weft devtunnel stop`** — force-tears-down the shared relay from anywhere (kills the
+  child process tree, deletes the cloud tunnel, clears the registry). Use it when you
+  want to stop the tunnel without switching back to the owning terminal.
 
 ## Picking a transport
 
 | Transport | Setup | Best for |
 |---|---|---|
 | `supabase` | Needs a Supabase project URL + anon key (`weft set-transport supabase --url <url> --anon-key <key>`) | No local process to manage; works from anywhere |
-| `devtunnel` | `weft set-transport devtunnel` (no flags), **then** `weft devtunnel start` in a separate terminal before pairing. The relay is a shared, machine-wide background process; one `start` covers every subsequent `/weft` / `weft start` on the machine until it idles out. | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
+| `devtunnel` | `weft set-transport devtunnel` (no flags), **then** `weft devtunnel start` in a separate terminal before pairing. That terminal owns the relay — keep it open; every `/weft` / `weft start` elsewhere on the machine reuses it until you Ctrl+C or close it. | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
 
 Pairing (`/weft`, `weft start`) is symmetric across both transports: it just *uses* the
 "server" — Supabase for `supabase`, the local relay + tunnel for `devtunnel` — and never

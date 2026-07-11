@@ -151,10 +151,14 @@ copilot                       # then run /weft inside the session
 weft start
 ```
 
-The shared relay lives in a detached background process, so a single `weft devtunnel
-start` covers every session on the machine (any Copilot CLI, `weft start`, etc.) and
-self-tears-down after it's been idle a while. Use `weft devtunnel status` to check
-whether it's up before running `start` again — most of the time it already is.
+The shared relay is a child of the terminal that ran `weft devtunnel start` — keep that
+terminal open for as long as you want the tunnel up; Ctrl+C (or closing it) stops the
+relay and deletes the cloud tunnel. Every other session on the machine (any Copilot CLI,
+`weft start`, etc.) discovers and reuses it via `~/.weft/devtunnel.json`. Running
+`weft devtunnel start` from a second terminal attaches as a watcher — its Ctrl+C only
+exits the watcher, it doesn't touch the running relay. Use `weft devtunnel status` to
+check whether one's already up before opening a new owning terminal, and
+`weft devtunnel stop` from anywhere to force it down.
 
 If you run `/weft` (or `weft start`) with `transport = devtunnel` and no relay is
 running, pairing fails fast with an actionable error pointing you at `weft devtunnel

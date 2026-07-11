@@ -76,7 +76,7 @@ try {
         if (-not (Test-Path $extBundle)) { throw "extension build did not produce $extBundle" }
         Ok 'extension/dist/extension.mjs'
         if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
-        Ok 'extension/dist/relayServerProcess.mjs  (spawned detached for the shared devtunnel relay)'
+        Ok 'extension/dist/relayServerProcess.mjs  (spawned as an attached child by the shared devtunnel relay)'
         if (-not (Test-Path $weftCliBundle)) { throw "extension build did not produce $weftCliBundle" }
         Ok 'extension/dist/weft.mjs  (standalone Device Station CLI, no repo checkout needed)'
 

@@ -9,20 +9,21 @@
 // transport.d.ts calls out for the "devtunnel" descriptor kind — embedding it is safe even
 // though it's not a durable secret.
 //
-// SHARED ACROSS SESSIONS + EXPLICIT LIFECYCLE: Dev Tunnels are capped at 10 per account (a hard
-// Microsoft quota), so Weft provisions ONE shared relay + tunnel per machine, living in a
-// DETACHED child process (relayServerProcess.mjs) that outlives any single CLI session and is
-// discoverable via a small registry file at ~/.weft/devtunnel.json (see registryFile.mjs).
+// SHARED ACROSS SESSIONS + TERMINAL-OWNED LIFECYCLE: Dev Tunnels are capped at 10 per account (a
+// hard Microsoft quota), so Weft provisions ONE shared relay + tunnel per machine, living in a
+// child process (relayServerProcess.mjs) whose lifetime is tied to the terminal that ran
+// `weft devtunnel start`. Every other consumer (`weft start`, `/weft` in a Copilot session)
+// discovers it via a small registry file at ~/.weft/devtunnel.json (see registryFile.mjs).
+// Close that terminal (or Ctrl+C, or `weft devtunnel stop` from anywhere) → relay dies, cloud
+// tunnel is deleted, registry cleared. No idle self-teardown: the terminal is the visible,
+// explicit owner, exactly like `ngrok` / `cloudflared tunnel` — nothing lingers in the
+// background silently.
 //
 // The pairing path (`/weft`, `weft start` → resolveDevTunnelTransport) is symmetric with the
 // Supabase transport: it just *uses* the relay, exactly like the Supabase client just uses a
 // cloud project. It never spawns, never logs in, never waits. The USER brings the relay up
 // explicitly via `weft devtunnel start` (which is the only caller of ensureDevTunnelRelay below);
 // if it isn't running, pairing throws an actionable error pointing at that command.
-//
-// Nothing here "owns" tearing the relay down either — relayServerProcess.mjs watches its own room
-// occupancy and self-deletes the tunnel once idle for a while, so no CLI session's shutdown
-// (clean or crashed) needs to coordinate cleanup.
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -38,7 +39,7 @@ export const DEVTUNNEL_REGISTRY_FILE = "devtunnel.json";
 // so a poller here can show real progress instead of silence for the whole provisioning window.
 export const DEVTUNNEL_STATUS_FILE = "devtunnel-status.json";
 const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mjs", import.meta.url));
-// First-ever provision on a machine has to: spawn the detached relay process, have IT shell out to
+// First-ever provision on a machine has to: spawn the relay child process, have IT shell out to
 // `devtunnel host` (a real network call to Microsoft's tunnel service), and wait for that tunnel's
 // URL to come back before the registry read here sees a healthy entry — 20s cut this close on a
 // slow/loaded network. Bumped to 45s of headroom; still overridable per-machine via
@@ -179,23 +180,26 @@ export async function healthyRegistryEntry(baseDir) {
 }
 
 /**
- * Provisions (or, in the common case, discovers and reuses) the shared devtunnel relay itself —
- * no channelId required, since the relay/tunnel is a single machine-wide resource shared across
- * every pairing session (see the SHARED ACROSS SESSIONS note at the top of this file). Returns
- * the relay's plain `wss://` base URL. Throws an actionable error if the CLI is missing or the
- * user isn't logged in — both are one-time, user-fixable setup steps, so callers are expected to
+ * Provisions (or discovers and attaches to) the shared devtunnel relay itself — no channelId
+ * required, since the relay/tunnel is a single machine-wide resource shared across every pairing
+ * session (see the SHARED ACROSS SESSIONS note at the top of this file). Returns
+ * `{ baseUrl, child }` where `child` is the spawned relay ChildProcess if this call brought the
+ * relay up (so the caller owns its lifetime — `weft devtunnel start` blocks on `child.exit`), or
+ * `null` if a healthy relay was already running (so the caller is just watching, and should not
+ * kill anything on its own Ctrl+C). Throws an actionable error if the CLI is missing or the user
+ * isn't logged in — both are one-time, user-fixable setup steps, so callers are expected to
  * surface err.message directly rather than retry.
  *
- * `onProgress(stage)` fires whenever the detached relay process's reported provisioning stage
- * changes (see STAGE_LABELS) — lets a caller (extension.mjs's session.log, or the standalone CLI's
- * live status line) show real progress instead of silence. `onRetry(attempt, maxAttempts)` fires
- * each time one PROVISION_TIMEOUT_MS cycle elapses without success and another begins (see
- * MAX_WAIT_MS) — the detached process itself is NOT respawned on retry, only re-polled, since it
- * keeps running/working in the background regardless of how long this call watches it.
+ * `onProgress(stage)` fires whenever the relay child's reported provisioning stage changes (see
+ * STAGE_LABELS) — lets a caller (the standalone CLI's live status line) show real progress
+ * instead of silence. `onRetry(attempt, maxAttempts)` fires each time one PROVISION_TIMEOUT_MS
+ * cycle elapses without success and another begins (see MAX_WAIT_MS) — the child process itself
+ * is NOT respawned on retry, only re-polled, since it keeps running/working regardless of how
+ * long we watch it.
  */
 export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}) {
   const existing = await healthyRegistryEntry(baseDir);
-  if (existing) return existing.baseUrl;
+  if (existing) return { baseUrl: existing.baseUrl, child: null };
 
   const bin = await findDevTunnelBinary();
   if (!bin) {
@@ -219,21 +223,26 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
     }
   }
 
-  // Spawn the detached relay exactly once, no matter how many PROVISION_TIMEOUT_MS cycles the
-  // retry loop below runs — it outlives this call and keeps working regardless of how long we
-  // watch it, so a later cycle just needs to re-poll, not re-spawn.
-  spawnRelayServerProcess({ bin, baseDir });
+  // Spawn the relay child exactly once, no matter how many PROVISION_TIMEOUT_MS cycles the retry
+  // loop below runs — it keeps working regardless of how long we poll for its registry entry, so
+  // a later cycle just needs to re-poll, not re-spawn.
+  const child = spawnRelayServerProcess({ bin, baseDir });
 
   const maxAttempts = Math.max(1, Math.ceil(MAX_WAIT_MS / PROVISION_TIMEOUT_MS));
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const entry = await pollForHealthyEntry({ baseDir, onProgress });
-      return entry.baseUrl;
+      return { baseUrl: entry.baseUrl, child };
     } catch (err) {
       if (attempt >= maxAttempts) {
+        // Exhaust path: the child never published a healthy registry entry. Tear it (and any
+        // half-provisioned cloud tunnel) down before throwing, otherwise the attached child
+        // would keep our parent's event loop alive forever after the CLI already gave up.
+        await forceStopDevTunnel({ baseDir }).catch(() => {});
+        try { child.kill(); } catch { /* best-effort */ }
         throw new Error(
-          "Weft: devtunnel is taking longer than usual to set up. It may still finish in the " +
-            "background — run `weft devtunnel status` to check, or `weft devtunnel start` to watch it live.",
+          "Weft: devtunnel is taking longer than usual to come up on this machine. Check your " +
+            "network + `devtunnel user login -g`, then re-run `weft devtunnel start`.",
         );
       }
       onRetry?.(attempt, maxAttempts);
@@ -265,22 +274,23 @@ export async function resolveDevTunnelTransport({ baseDir } = {}) {
   return { kind: "devtunnel", url: entry.baseUrl };
 }
 
-// Spawns relayServerProcess.mjs DETACHED (survives this process's exit). A second caller racing
-// this one (e.g. two `/weft devtunnel` calls on different machines' sessions at nearly the same
-// moment) will each spawn their own process — a harmless, self-resolving race:
-// relayServerProcess.mjs's own registry write is atomic, and either process type ends up as a
-// temporarily-unused, soon-to-self-idle-out relay, not a correctness problem for pairing itself.
+// Spawns relayServerProcess.mjs as an ATTACHED child (NOT detached): its lifetime is tied to
+// this Node process, whose lifetime in turn is tied to the terminal that ran `weft devtunnel
+// start`. stdio is fully ignored — the parent CLI prints its own status line (see bin/weft.mjs's
+// devtunnelStart), so the child's own progress goes through DEVTUNNEL_STATUS_FILE, not stdout,
+// and any host-process output stays out of the user's terminal. A second caller racing this one
+// (e.g. two `weft devtunnel start` terminals opened simultaneously) will each spawn their own
+// child — a harmless race: relayServerProcess.mjs's own registry write is atomic, and the loser
+// ends up as a temporarily-unused relay that the parent kills on Ctrl+C, not a correctness
+// problem for pairing itself.
 function spawnRelayServerProcess({ bin, baseDir }) {
   const env = { ...process.env };
   if (baseDir) env.WEFT_HOME = baseDir;
   if (bin) env.WEFT_DEVTUNNEL_BIN = bin;
-  const child = spawn(process.execPath, [RELAY_SERVER_PROCESS_PATH], {
-    detached: true,
+  return spawn(process.execPath, [RELAY_SERVER_PROCESS_PATH], {
     stdio: "ignore",
     env,
   });
-  child.unref();
-  return child;
 }
 
 /** Polls for up to PROVISION_TIMEOUT_MS for a healthy registry entry, calling `onProgress(stage)`
@@ -305,9 +315,11 @@ async function pollForHealthyEntry({ baseDir, onProgress }) {
 /**
  * Force-tears-down the shared relay + tunnel right now: kills the relay process tree (if its
  * registered pid is alive), best-effort deletes the cloud tunnel, and clears both registry files.
- * Unlike stopDevTunnel() below (a deliberate no-op for normal shutdown), this is an explicit,
- * user-initiated action — the standalone `weft devtunnel stop` CLI command — for troubleshooting
- * a stuck/misbehaving shared relay.
+ * This is both the standalone `weft devtunnel stop` CLI command AND the primary cleanup path
+ * `weft devtunnel start`'s own Ctrl+C handler runs — uniform across platforms because it uses
+ * taskkill/process.kill directly rather than trying to deliver a signal the child can handle
+ * (Windows has no POSIX signals, so a forwarded SIGTERM would just force-kill the child without
+ * running its cleanup handlers anyway).
  */
 export async function forceStopDevTunnel({ baseDir } = {}) {
   const entry = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
@@ -347,10 +359,9 @@ export async function forceStopDevTunnel({ baseDir } = {}) {
 }
 
 /**
- * No-op by design: the shared relay + tunnel (relayServerProcess.mjs) is a DETACHED process that
- * outlives any single CLI session and tears itself down on its own idle timer (see that file) —
- * no session's shutdown owns or coordinates that lifecycle anymore. Kept exported so
- * extension.mjs's existing shutdown() call site doesn't need special-casing.
+ * No-op by design: `/weft` in a Copilot session (extension.mjs) never owns the shared relay —
+ * only the terminal that ran `weft devtunnel start` does. Kept exported so extension.mjs's
+ * existing shutdown() call site doesn't need special-casing; delete both together if you ever do.
  */
 export async function stopDevTunnel() {
   // Intentionally empty.

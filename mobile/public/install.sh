@@ -108,9 +108,10 @@ step 2 "Downloading Weft bundles"
 mkdir -p "$INSTALL_DIR"
 curl -fsSL "$BASE/extension.mjs" -o "$INSTALL_DIR/extension.mjs"
 ok "extension.mjs -> $INSTALL_DIR  (the Copilot CLI extension itself)"
-# relayServerProcess.mjs is spawned as a DETACHED sibling process by devtunnel.mjs (resolved next
-# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can outlive any one CLI
-# session - must always be installed alongside extension.mjs, not just on first install.
+# relayServerProcess.mjs is spawned as an ATTACHED sibling process by devtunnel.mjs (resolved next
+# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can be brought up and torn
+# down by an ordinary `weft devtunnel start` terminal — must always be installed alongside
+# extension.mjs, not just on first install.
 curl -fsSL "$BASE/relayServerProcess.mjs" -o "$INSTALL_DIR/relayServerProcess.mjs"
 ok "relayServerProcess.mjs -> $INSTALL_DIR  (shared devtunnel relay, only spawned if you use devtunnel)"
 curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"

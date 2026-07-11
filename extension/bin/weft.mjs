@@ -133,45 +133,89 @@ async function devtunnelCommand([sub, ...rest]) {
 async function devtunnelStart() {
   printHeader("WEFT DEVTUNNEL");
 
-  // Check first rather than always going through the spinner/provisioning path — a healthy
-  // relay is already channel-agnostic and shared machine-wide, so if one's already up there's
-  // nothing to "start"; just report it instead of implying fresh setup work is happening.
+  // Provision-and-own vs attach-and-watch: ensureDevTunnelRelay returns `child: null` iff a
+  // healthy relay was already running on this machine — this terminal then just watches, and
+  // Ctrl+C exits the watcher without touching the relay. Otherwise `child` is the ChildProcess
+  // this terminal spawned, whose lifetime is now tied to it (Ctrl+C or terminal close → tear it
+  // all down, including the cloud tunnel).
+  const status = createProvisionStatusLine();
   const existing = await healthyRegistryEntry();
+  let child = null;
+  let baseUrl;
+
   if (existing) {
-    console.log(`${c.green("✓")} ${c.bold("devtunnel already running")}  ${c.dim(existing.baseUrl)}`);
-    console.log(c.dim(`pid ${existing.pid} · reused by every `) + "`/weft devtunnel`" + c.dim(" and ") + "`weft start`" + c.dim(" on this machine — run `weft devtunnel stop` to tear it down."));
+    baseUrl = existing.baseUrl;
+    console.log(`${c.green("✓")} ${c.bold("devtunnel already running")}  ${c.dim(baseUrl)}`);
+    console.log(c.dim(`pid ${existing.pid} · owned by another terminal — this one is just watching.`));
+    console.log(c.dim("Ctrl+C exits the watcher; the relay keeps running until its owning terminal closes."));
+    await watchExistingRelay(existing.pid);
     return;
   }
 
-  const status = createProvisionStatusLine();
   status.start();
-
-  let interrupted = false;
-  const onSigint = () => {
-    interrupted = true;
-    status.stop();
-    console.log(c.dim("\nStopped watching — the shared relay keeps running in the background; re-run this command anytime."));
-    process.exit(0);
-  };
-  process.once("SIGINT", onSigint);
-
   try {
-    const baseUrl = await ensureDevTunnelRelay({
+    const result = await ensureDevTunnelRelay({
       onProgress: (stage) => status.setStage(stage),
       onRetry: (attempt, maxAttempts) => status.setRetry(attempt, maxAttempts),
     });
     status.stop();
-    if (interrupted) return;
-    console.log(`${c.green("✓")} ${c.bold("devtunnel ready")}  ${c.dim(baseUrl)}`);
-    console.log(c.dim("This shared relay stays up in the background and is reused by every `/weft devtunnel` and `weft start` on this machine."));
+    baseUrl = result.baseUrl;
+    child = result.child;
   } catch (err) {
     status.stop();
-    if (interrupted) return;
     console.error(`${c.red("✗")} ${err?.message ?? err}`);
     process.exitCode = 1;
-  } finally {
-    process.off("SIGINT", onSigint);
+    return;
   }
+
+  console.log(`${c.green("✓")} ${c.bold("devtunnel ready")}  ${c.dim(baseUrl)}`);
+  console.log(c.dim("This terminal owns the relay. Keep it open — every `weft start` and `/weft`"));
+  console.log(c.dim("on this machine will use this tunnel. Ctrl+C stops the relay and deletes the cloud tunnel."));
+  await ownAndBlock(child);
+}
+
+// The owning terminal blocks on child.exit; a Ctrl+C (or SIGTERM) triggers forceStopDevTunnel
+// rather than a bare child.kill() because on Windows a forwarded signal is an immediate hard-kill
+// that bypasses the child's own cleanup handler — forceStopDevTunnel does the cleanup itself
+// (taskkill, delete cloud tunnel, clear registry), which is cross-platform correct.
+async function ownAndBlock(child) {
+  let shuttingDown = false;
+  const stop = async (label) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(c.dim(`\nStopping relay (${label})…`));
+    try {
+      await forceStopDevTunnel();
+    } catch (err) {
+      console.error(c.red(`teardown failed: ${err?.message ?? err}`));
+    }
+  };
+  process.once("SIGINT", () => void stop("SIGINT"));
+  process.once("SIGTERM", () => void stop("SIGTERM"));
+
+  await new Promise((resolve) => child.once("exit", () => resolve()));
+  console.log(`${c.green("✓")} ${c.bold("relay stopped")} ${c.dim("· cloud tunnel released.")}`);
+}
+
+// The watching terminal polls the owning pid every second; when it disappears (owner closed
+// their terminal, or ran `weft devtunnel stop`), we exit the watcher cleanly. Ctrl+C in this
+// terminal exits the watcher without disturbing the relay — this is the "attach" path.
+async function watchExistingRelay(pid) {
+  await new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (!isPidAlive(pid)) {
+        clearInterval(interval);
+        console.log(`\n${c.yellow("○")} ${c.bold("relay stopped")} ${c.dim(`(pid ${pid} exited).`)}`);
+        resolve();
+      }
+    }, 1000);
+    interval.unref?.();
+    process.once("SIGINT", () => {
+      clearInterval(interval);
+      console.log(c.dim("\nExiting watcher — relay keeps running (owned by another terminal)."));
+      resolve();
+    });
+  });
 }
 
 async function devtunnelStatus() {

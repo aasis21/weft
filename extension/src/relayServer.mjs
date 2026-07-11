@@ -65,9 +65,8 @@ export function startRelayServer({ port = 0 } = {}) {
     roomSize(channelId) {
       return rooms.get(channelId)?.size ?? 0;
     },
-    /** Total sockets connected across every room — used by relayServerProcess.mjs's idle timer to
-     * decide whether the shared devtunnel relay is currently in use by anyone, not just this
-     * process's own session. */
+    /** Total sockets connected across every room — kept as a diagnostic (used by tests and by
+     * ad-hoc probes into whether the shared devtunnel relay is currently carrying traffic). */
     totalConnections() {
       return wss.clients.size;
     },
