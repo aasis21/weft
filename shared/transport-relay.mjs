@@ -13,12 +13,12 @@
 // readyState surface — both the `ws` npm package and the browser/React Native global WebSocket
 // qualify) pointed at the tunnel/relay URL (including any access token, e.g. as a query param)
 // *before* calling this factory. This keeps shared/ at zero runtime dependencies and mirrors
-// transport-supabase.mjs / transport-webpubsub.mjs's "caller passes in an already-constructed
-// client" convention — auth/tunnel lifecycle never lives in shared/.
+// transport-supabase.mjs's "caller passes in an already-constructed client" convention —
+// auth/tunnel lifecycle never lives in shared/.
 //
 // Wire format: publish(event, envelope) -> socket.send(JSON.stringify({ event, envelope })),
-// the same {event, envelope} frame transport-webpubsub.mjs uses, so a server-side relay can stay
-// a dumb byte/JSON forwarder.
+// a simple {event, envelope} JSON frame so a server-side relay can stay a dumb byte/JSON
+// forwarder.
 
 const WS_OPEN = 1; // WebSocket.OPEN — hard-coded so this file needs no DOM/ws lib types.
 
@@ -71,7 +71,7 @@ export function createRelayTransport({ socket, channelId } = {}) {
   }
 
   // Registered once, up front, so delivery is independent of subscribe()/connect() ordering
-  // (matches transport-supabase.mjs / transport-webpubsub.mjs's catch-all listener).
+  // (matches transport-supabase.mjs's catch-all listener).
   socket.addEventListener("message", (e) => {
     if (closed) return;
     let parsed;

@@ -71,8 +71,8 @@ test("resolveTransportByName throws if the persisted config is a different kind"
   assert.throws(() => resolveTransportByName("supabase", { baseDir: weftHome }), /weft set-transport supabase/);
 });
 
-test("resolveTransportByName rejects local/webpubsub/devtunnel — hidden from this user-facing path", () => {
-  for (const hidden of ["local", "webpubsub", "devtunnel", "bluetooth"]) {
+test("resolveTransportByName rejects local/devtunnel — hidden from this user-facing path", () => {
+  for (const hidden of ["local", "devtunnel", "bluetooth"]) {
     assert.throws(() => resolveTransportByName(hidden, { baseDir: weftHome }), (err) => {
       assert.match(err.message, new RegExp(`unknown transport "${hidden}"`));
       for (const name of SUPPORTED_TRANSPORT_NAMES) assert.match(err.message, new RegExp(name));

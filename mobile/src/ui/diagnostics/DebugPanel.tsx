@@ -16,7 +16,7 @@ export interface DebugDetail {
   pinned?: boolean;
   /** #163 lifecycle: evicted from the warm pool (no live socket) — "Archived". */
   cold?: boolean;
-  /** Transport kind this session is currently paired over (local/supabase/webpubsub/devtunnel) —
+  /** Transport kind this session is currently paired over (local/supabase/devtunnel) —
    *  see SessionMeta.transport / TransportDescriptor in shared/transport.d.ts. Undefined for
    *  sessions restored before this field existed, until their next re-pair. */
   transport?: string;

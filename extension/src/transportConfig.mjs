@@ -28,19 +28,16 @@ function ensureDir(baseDir) {
   return dir;
 }
 
-/** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. "local" and
- * "webpubsub" are intentionally no longer offered by any user-facing command (weft
- * set-transport, /weft <name>) — see transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES — but are
- * still accepted here so existing persisted configs / tests keep working. "devtunnel" persists as
- * a bare marker (no url yet): the actual shared-relay base URL is looked up from the running
- * relay's registry file at resolve time by resolveTransport() (see transportFactory.mjs), never
- * stored. */
+/** Same shape validation as shared/pairing.mjs's isValidTransportDescriptor. "local" is accepted
+ * here for the harness/tests but not offered by any user-facing command (see
+ * transportFactory.mjs's SUPPORTED_TRANSPORT_NAMES). "devtunnel" persists as a bare marker (no
+ * url yet): the actual shared-relay base URL is looked up from the running relay's registry file
+ * at resolve time by resolveTransport() (see transportFactory.mjs), never stored. */
 function isValidTransportDescriptor(t) {
   if (!t || typeof t !== "object") return false;
   if (t.kind === "local") return true;
   if (t.kind === "devtunnel") return true;
   if (t.kind === "supabase") return typeof t.url === "string" && typeof t.anonKey === "string";
-  if (t.kind === "webpubsub") return typeof t.negotiateUrl === "string";
   return false;
 }
 
@@ -88,7 +85,7 @@ export function saveTransportConfig(descriptor, { baseDir } = {}) {
   if (!isValidTransportDescriptor(descriptor)) {
     throw new Error(
       'Weft: invalid transport descriptor (kind must be "supabase" or "devtunnel" — or, for ' +
-        'internal/testing use, "local"/"webpubsub" — with the fields that kind requires)',
+        'harness/testing use, "local" — with the fields that kind requires)',
     );
   }
   const config = loadConfig({ baseDir });

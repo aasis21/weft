@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createClient } from "@supabase/supabase-js";
-import { WebPubSubClient } from "@azure/web-pubsub-client";
 import WebSocket from "ws";
 import {
   createLocalTransport,
   createSupabaseTransport,
-  createWebPubSubTransport,
   createRelayTransport,
 } from "@aasis21/weft-shared";
 import { loadTransportConfig } from "./transportConfig.mjs";
@@ -16,8 +14,7 @@ import { resolveDevTunnelTransport } from "./devtunnel.mjs";
  * This descriptor is (a) fed into createTransportFromDescriptor to build the real transport, and
  * (b) stamped into the pairing QR so the phone builds the SAME transport at runtime with zero
  * pre-baked config. Nothing returned here is a secret: Supabase's anon key is meant to be public
- * (RLS enforces access) and Web PubSub's negotiateUrl is just an endpoint — the actual
- * per-connection token is minted separately by that endpoint, never carried here.
+ * (RLS enforces access on realtime.messages).
  *
  * The ONLY source of truth is ~/.weft/weft.config.json (see transportConfig.mjs), written by
  * `weft set-transport`. There is deliberately no env var override (no WEFT_TRANSPORT, no .env) —
@@ -46,9 +43,8 @@ export function resolveTransportDescriptor({ baseDir } = {}) {
  * Supabase (hosted, zero-config) and devtunnel (self-hosted local relay, no cloud account) — see
  * WEFT_COMMAND_TRANSPORT_NAMES in extension.mjs, which adds "devtunnel" back in for the /weft
  * command specifically since it needs a channelId to provision and can't go through the plain
- * resolveTransportByName() below. "local" and "webpubsub" remain fully implemented
- * (createTransportFromDescriptor) for internal/testing use — they're just no longer offered or
- * documented anywhere a user would see them, and have no env-based construction path anymore.
+ * resolveTransportByName() below. "local" remains fully implemented (createTransportFromDescriptor)
+ * for the harness/tests, but is not offered by any user-facing command.
  */
 export const SUPPORTED_TRANSPORT_NAMES = ["supabase"];
 
@@ -80,16 +76,6 @@ export function resolveTransportByName(transportName, { baseDir } = {}) {
 /** Build a live Transport from a resolved/parsed descriptor (see resolveTransportDescriptor). */
 export function createTransportFromDescriptor(descriptor, { channelId }) {
   if (descriptor.kind === "local") return createLocalTransport({ channelId });
-
-  if (descriptor.kind === "webpubsub") {
-    // Web PubSub tokens are short-lived, unlike the long-lived Supabase anon key below — the
-    // credential's getClientAccessUrl() lets the SDK transparently re-negotiate on reconnect.
-    const client = new WebPubSubClient({
-      getClientAccessUrl: () =>
-        fetchWebPubSubClientAccessUrl(descriptor.negotiateUrl, channelId),
-    });
-    return createWebPubSubTransport({ client, channelId });
-  }
 
   if (descriptor.kind === "supabase") {
     const client = createClient(descriptor.url, descriptor.anonKey, {
@@ -146,19 +132,4 @@ export async function resolveTransport({ baseDir } = {}) {
 function withChannelId(baseUrl, channelId) {
   const sep = baseUrl.includes("?") ? "&" : "?";
   return `${baseUrl}${sep}channelId=${encodeURIComponent(channelId)}`;
-}
-
-/**
- * Calls a self-hosted negotiate endpoint (e.g. an Azure Function) which holds the Web
- * PubSub connection string secret and mints a short-lived client access URL scoped to this
- * channel's group.
- */
-async function fetchWebPubSubClientAccessUrl(negotiateUrl, channelId) {
-  const response = await fetch(`${negotiateUrl}?channelId=${encodeURIComponent(channelId)}`);
-  if (!response.ok) {
-    throw new Error(`Weft: Web PubSub negotiate failed with status ${response.status}`);
-  }
-  const { url } = await response.json();
-  if (!url) throw new Error('Weft: Web PubSub negotiate response missing "url"');
-  return url;
 }

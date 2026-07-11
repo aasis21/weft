@@ -8,7 +8,6 @@ export { SecureChannel } from "./channel.mjs";
 export {
   createLocalTransport,
   createSupabaseTransport,
-  createWebPubSubTransport,
   createRelayTransport,
 } from "./transport.mjs";
 export { _resetLocalBus } from "./transport-local.mjs";

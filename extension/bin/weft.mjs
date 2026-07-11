@@ -572,18 +572,16 @@ function parseFlags(args) {
 function describeTransport(descriptor) {
   if (descriptor.kind === "supabase") return `supabase (${descriptor.url})`;
   if (descriptor.kind === "devtunnel") return "devtunnel (shared local relay via Microsoft Dev Tunnels — no cloud account)";
-  // "local"/"webpubsub" are internal/testing-only kinds, kept working but never offered by this
-  // CLI's own set-transport command — still describe them plainly if somehow configured directly.
+  // "local" is a harness/test-only kind, never offered by this CLI's own set-transport command
+  // — still describe it plainly if somehow configured directly (e.g. by a test).
   if (descriptor.kind === "local") return "local (same-machine, no relay)";
-  if (descriptor.kind === "webpubsub") return `webpubsub (${descriptor.negotiateUrl})`;
   return descriptor.kind;
 }
 
 // Only "supabase" and "devtunnel" are offered here — Weft's two supported, documented transports.
-// "local"/"webpubsub" remain fully implemented (transportConfig.mjs, transportFactory.mjs) for
-// internal testing only (saveTransportConfig called directly, not through this CLI), just no
-// longer surfaced by this command's usage text or accepted kinds, so users are never offered an
-// option Weft doesn't actually support end-to-end. Persisted to the single ~/.weft/weft.config.json
+// "local" remains fully implemented (transportConfig.mjs, transportFactory.mjs) for the harness/
+// tests only (saveTransportConfig called directly, not through this CLI), just not surfaced by
+// this command's usage text or accepted kinds. Persisted to the single ~/.weft/weft.config.json
 // file — there is no env var (WEFT_TRANSPORT) path anymore.
 function setTransport(args) {
   const [kind, ...rest] = args;

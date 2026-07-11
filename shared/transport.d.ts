@@ -11,8 +11,7 @@ export type Unsubscribe = () => void;
  * The laptop resolves this from its own env at pairing time and stamps it into the QR
  * (see pairing.d.ts PairingPayload.transport) so the phone builds a matching transport at
  * runtime, with zero pre-baked config of its own. Nothing here is a credential: Supabase's
- * anon key is meant to be public (RLS enforces access), and Web PubSub's actual per-connection
- * token is minted separately by the negotiate endpoint, never carried in the descriptor.
+ * anon key is meant to be public (RLS enforces access on realtime.messages).
  * "devtunnel" is the one exception — its url is the base WebSocket URL of a self-hosted relay
  * exposed through a Microsoft Dev Tunnel (or any equivalent tunnel/reverse-proxy) with anonymous
  * connect access. It's channel-agnostic (channel/room selection is applied at socket-construction
@@ -24,7 +23,6 @@ export type Unsubscribe = () => void;
 export type TransportDescriptor =
   | { kind: "local" }
   | { kind: "supabase"; url: string; anonKey: string }
-  | { kind: "webpubsub"; negotiateUrl: string }
   | { kind: "devtunnel"; url: string };
 
 /** Live connection state of the underlying socket, reported after connect(). */
@@ -51,9 +49,6 @@ export function createLocalTransport(opts: {
 
 /** Phase 2 (p2-relay): pass a SupabaseClient from @supabase/supabase-js. */
 export function createSupabaseTransport(opts: { client: unknown; channelId: string }): Transport;
-
-/** Pass an already-constructed WebPubSubClient from @azure/web-pubsub-client (not yet started). */
-export function createWebPubSubTransport(opts: { client: unknown; channelId: string }): Transport;
 
 /**
  * Pass an already-constructed, already-authenticated WebSocket (the `ws` package, or the

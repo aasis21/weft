@@ -34,14 +34,6 @@ test("save/load round-trips a supabase descriptor", () => {
   });
 });
 
-test("save/load round-trips a webpubsub descriptor", () => {
-  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://neg.example/api" }, { baseDir: weftHome });
-  assert.deepEqual(loadTransportConfig({ baseDir: weftHome }), {
-    kind: "webpubsub",
-    negotiateUrl: "https://neg.example/api",
-  });
-});
-
 test("saveTransportConfig rejects an invalid descriptor", () => {
   assert.throws(() => saveTransportConfig({ kind: "bogus" }, { baseDir: weftHome }), /invalid transport descriptor/);
   assert.throws(
@@ -52,10 +44,11 @@ test("saveTransportConfig rejects an invalid descriptor", () => {
 
 test("a second save overwrites the first", () => {
   saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
-  saveTransportConfig({ kind: "webpubsub", negotiateUrl: "https://neg.example/api" }, { baseDir: weftHome });
+  saveTransportConfig({ kind: "supabase", url: "https://x.supabase.co", anonKey: "anon" }, { baseDir: weftHome });
   assert.deepEqual(loadTransportConfig({ baseDir: weftHome }), {
-    kind: "webpubsub",
-    negotiateUrl: "https://neg.example/api",
+    kind: "supabase",
+    url: "https://x.supabase.co",
+    anonKey: "anon",
   });
 });
 

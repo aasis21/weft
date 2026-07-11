@@ -1,12 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { WebPubSubClient } from '@azure/web-pubsub-client';
 import { Capacitor } from '@capacitor/core';
 import {
   EVENT_TYPE,
   SecureChannel,
   createLocalTransport,
   createSupabaseTransport,
-  createWebPubSubTransport,
   createRelayTransport,
   generateKeyPair,
   isValidEnvelope,
@@ -263,16 +261,6 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
     const client = getSupabaseClient(descriptor.url, descriptor.anonKey);
     return createSupabaseTransport({ client, channelId });
   }
-  if (descriptor.kind === 'webpubsub') {
-    // One client access URL per channel — Web PubSub tokens are short-lived and scoped by the
-    // negotiate endpoint, unlike the shared, long-lived Supabase anon key above. Passing a
-    // WebPubSubClientCredential (not a bare string) lets the SDK re-negotiate transparently on
-    // reconnect/token expiry instead of failing once the token lapses.
-    const client = new WebPubSubClient({
-      getClientAccessUrl: () => fetchWebPubSubClientAccessUrl(descriptor.negotiateUrl, channelId),
-    });
-    return createWebPubSubTransport({ client, channelId });
-  }
   if (descriptor.kind === 'devtunnel') {
     // Symmetric with the supabase branch above: the descriptor carries only the relay's base
     // WebSocket URL (see extension-side resolveDevTunnelTransport), and channel/room selection
@@ -294,22 +282,6 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
 function withChannelId(baseUrl: string, channelId: string): string {
   const sep = baseUrl.includes('?') ? '&' : '?';
   return `${baseUrl}${sep}channelId=${encodeURIComponent(channelId)}`;
-}
-
-/**
- * Calls the caller-hosted negotiate endpoint (e.g. an Azure Function) which holds the Web
- * PubSub connection string secret and mints a short-lived client access URL scoped to this
- * channel's group. Passed to WebPubSubClient as a token provider so the SDK can transparently
- * re-negotiate on reconnect/token expiry.
- */
-async function fetchWebPubSubClientAccessUrl(negotiateUrl: string, channelId: string): Promise<string> {
-  const response = await fetch(`${negotiateUrl}?channelId=${encodeURIComponent(channelId)}`);
-  if (!response.ok) {
-    throw new Error(`Weft: Web PubSub negotiate failed with status ${response.status}`);
-  }
-  const { url } = (await response.json()) as { url?: string };
-  if (!url) throw new Error('Weft: Web PubSub negotiate response missing "url"');
-  return url;
 }
 
 function wrapChannel(channelId: string, channel: SecureChannel): WeftClient {

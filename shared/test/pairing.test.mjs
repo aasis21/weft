@@ -49,7 +49,7 @@ test("parsePairingPayload rejects a missing or malformed transport descriptor", 
     /invalid pairing/,
   );
   assert.throws(
-    () => parsePairingPayload({ v: 1, channelId: "abc", pub: "PUB", transport: { kind: "webpubsub" } }),
+    () => parsePairingPayload({ v: 1, channelId: "abc", pub: "PUB", transport: { kind: "bogus" } }),
     /invalid pairing/,
   );
 });

@@ -7,7 +7,6 @@ export type { SecureChannelIdentity, Envelope } from "./channel";
 export {
   createLocalTransport,
   createSupabaseTransport,
-  createWebPubSubTransport,
   createRelayTransport,
   _resetLocalBus,
 } from "./transport";
