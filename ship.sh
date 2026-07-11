@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One command to ship Weft: build -> refresh the hosted "site bits" -> deploy to
-# Netlify -> install the extension on THIS laptop. Optionally git push.
+# Netlify. Optionally install on THIS laptop (--install) and/or git push (--push).
 # See ship.ps1 for the Windows/PowerShell version and full docs.
 #
 # Pipeline (the order matters: the mobile build must run AFTER the fresh extension
@@ -10,19 +10,24 @@
 #                                deploy-time artifact the hosted install.sh downloads)
 #   3. Build the mobile web app (Vite      -> mobile/dist)
 #   4. Deploy mobile/dist to Netlify (site useweft, production by default)
-#   5. Install the extension    (-> ~/.copilot/extensions/weft; transport config stays
-#                                untouched in ~/.weft/weft.config.json)
+#   5. [opt-in, --install]      Install the extension (-> ~/.copilot/extensions/weft;
+#                                transport config stays untouched in ~/.weft/weft.config.json).
+#                                NOT run by default — pass --install explicitly when you
+#                                want to update the local Copilot CLI extension (which
+#                                requires a `copilot` restart or an agent `extensions_reload`
+#                                call to hot-load the new bundle).
 #
 # Usage:
-#   ./ship.sh                     # build + refresh + deploy prod + install on this laptop
+#   ./ship.sh                     # build + refresh + deploy prod (does NOT touch this laptop)
 #   ./ship.sh --draft             # Netlify preview deploy instead of production
+#   ./ship.sh --install           # also install into ~/.copilot/extensions/weft
 #   ./ship.sh --push              # also `git push` the current branch
-#   ./ship.sh --skip-deploy       # build + install locally only
+#   ./ship.sh --skip-deploy --install  # build + install locally only
 #   ./ship.sh --site my-site      # target a different Netlify site
 set -euo pipefail
 
 SITE="137f2a7d-1dcf-43bd-8c0e-fdaec08835a7"  # useweft (id; name lookup is flaky from a workspace root)
-DRAFT=0; PUSH=0; SKIP_BUILD=0; SKIP_DEPLOY=0; SKIP_INSTALL=0
+DRAFT=0; PUSH=0; SKIP_BUILD=0; SKIP_DEPLOY=0; INSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --site) SITE="$2"; shift 2;;
@@ -30,8 +35,8 @@ while [ $# -gt 0 ]; do
     --push) PUSH=1; shift;;
     --skip-build) SKIP_BUILD=1; shift;;
     --skip-deploy) SKIP_DEPLOY=1; shift;;
-    --skip-install) SKIP_INSTALL=1; shift;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0;;
+    --install) INSTALL=1; shift;;
+    -h|--help) sed -n '2,25p' "$0"; exit 0;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
@@ -109,7 +114,7 @@ else
   info "skip-deploy"
 fi
 
-if [ "$SKIP_INSTALL" -eq 0 ]; then
+if [ "$INSTALL" -eq 1 ]; then
   cyan "Installing extension on this laptop (~/.copilot/extensions/weft)"
   [ -f "$ext_bundle" ] || { echo "no $ext_bundle to install - drop --skip-build" >&2; exit 1; }
   dest="$HOME/.copilot/extensions/weft"
@@ -153,7 +158,7 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
     warn "no transport configured yet - run: weft set-transport supabase --url <url> --anon-key <key>"
   fi
 else
-  info "skip-install"
+  info "not installing locally (pass --install to update ~/.copilot/extensions/weft and reload the running Copilot CLI)"
 fi
 
 if [ "$PUSH" -eq 1 ]; then
@@ -167,4 +172,4 @@ if [ "$SKIP_DEPLOY" -eq 0 ] && [ "$DRAFT" -eq 0 ]; then
   printf '\033[32m  Site:      https://useweft.netlify.app\033[0m\n'
   printf '\033[32m  Installer: curl -fsSL https://useweft.netlify.app/install.sh | bash\033[0m\n'
 fi
-[ "$SKIP_INSTALL" -eq 0 ] && printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'
+[ "$INSTALL" -eq 1 ] && printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'

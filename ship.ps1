@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   One command to ship Weft: build -> refresh the hosted "site bits" -> deploy to
-  Netlify -> install the extension on THIS laptop. Optionally git push.
+  Netlify. Optionally install on THIS laptop (-Install) and/or git push (-Push).
 
 .DESCRIPTION
   Runs the whole release pipeline the docs describe, in the only order that is correct
@@ -16,8 +16,12 @@
     3. Build the mobile web app              (Vite -> mobile/dist, embedding the fresh
                                               extension.mjs + install.ps1/.sh + headers)
     4. Deploy mobile/dist to Netlify         (site `useweft`, production by default)
-    5. Install the extension on this laptop  (-> ~/.copilot/extensions/weft; transport config
-                                              stays untouched in ~/.weft/weft.config.json)
+    5. [opt-in, -Install]                    Install the extension on this laptop
+                                              (-> ~/.copilot/extensions/weft; transport config
+                                              stays untouched in ~/.weft/weft.config.json).
+                                              Also prints the hot-reload hint for a running
+                                              Copilot agent. NOT run by default — you must ask
+                                              for it explicitly with -Install.
 
   Mobile web build reads relay creds from mobile/.env.local (Vite build-time only). The local
   extension's transport is NOT env/`.env`-based at all: it is read exclusively from
@@ -29,14 +33,19 @@
 .PARAMETER Push         Run `git push` for the current branch after a successful pipeline.
 .PARAMETER SkipBuild    Reuse the existing extension/dist + mobile/dist (no rebuild).
 .PARAMETER SkipDeploy   Skip the Netlify deploy step.
-.PARAMETER SkipInstall  Skip the local ~/.copilot install step.
+.PARAMETER Install      Also install into ~/.copilot/extensions/weft and print the reload hint.
+                        OFF by default — pass it explicitly when you want to update the local
+                        Copilot CLI extension (which requires a `copilot` restart or an agent
+                        `extensions_reload` call to hot-load the new bundle).
 
 .EXAMPLE
-  ./ship.ps1                      # build + refresh + deploy prod + install on this laptop
+  ./ship.ps1                      # build + refresh + deploy prod (does NOT touch this laptop)
 .EXAMPLE
   ./ship.ps1 -Draft              # same, but a Netlify preview deploy (safe dry run of the site)
 .EXAMPLE
-  ./ship.ps1 -SkipDeploy -Push   # build + install locally + push code, no site deploy
+  ./ship.ps1 -Install            # build + refresh + deploy prod + install on this laptop
+.EXAMPLE
+  ./ship.ps1 -SkipDeploy -Install -Push   # build + install locally + push code, no site deploy
 #>
 [CmdletBinding()]
 param(
@@ -45,7 +54,7 @@ param(
     [switch]$Push,
     [switch]$SkipBuild,
     [switch]$SkipDeploy,
-    [switch]$SkipInstall
+    [switch]$Install
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,7 +145,7 @@ try {
         Ok "$kind deploy complete"
     } else { Info 'SkipDeploy' }
 
-    if (-not $SkipInstall) {
+    if ($Install) {
         Step 'Installing extension on this laptop (~/.copilot/extensions/weft)'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle to install - drop -SkipBuild" }
         $dest = Join-Path $env:USERPROFILE '.copilot\extensions\weft'
@@ -189,7 +198,7 @@ node "%~dp0weft.mjs" %*
         } else {
             Warn "no transport configured yet - run: weft set-transport supabase --url <url> --anon-key <key>"
         }
-    } else { Info 'SkipInstall' }
+    } else { Info 'Not installing locally (pass -Install to update ~/.copilot/extensions/weft and reload the running Copilot CLI)' }
 
     if ($Push) {
         Step 'git push (current branch)'
@@ -203,7 +212,7 @@ node "%~dp0weft.mjs" %*
         Write-Host '  Site:      https://useweft.netlify.app' -ForegroundColor Green
         Write-Host '  Installer: irm https://useweft.netlify.app/install.ps1 | iex' -ForegroundColor Green
     }
-    if (-not $SkipInstall) {
+    if ($Install) {
         # ship.ps1 can only refresh the files in ~/.copilot/extensions/weft; the running Copilot
         # CLI still holds the OLD bundle in memory. When this script is run BY the Copilot agent,
         # the agent should immediately call its `extensions_reload` tool to hot-load the new
