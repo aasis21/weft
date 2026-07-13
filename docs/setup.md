@@ -64,12 +64,12 @@ installed **code only**):
 
 Transport (Supabase vs. devtunnel) is configured via two small files in `~/.weft/`:
 `weft.config.json` (the transport **pointer**, written by `weft set-transport`) and
-`supabase.json` (the Supabase URL + anon key, seeded by the installer with the hosted
-defaults and overwritten by `weft set-transport supabase --url <url> --anon-key <key>`).
+`supabase.json` (the Supabase URL + anon key, seeded by the installer — with the hosted
+defaults, or with your own project's creds if you pass `-SupabaseUrl`/`-SupabaseKey`).
 They sit alongside `projects.json` and the devtunnel registry (see `weftHome()` in
 `extension/src/projects.mjs`), and there is **no env var / `.env`** for either (see
 `transportConfig.mjs` / `transportFactory.mjs`). Because they're separate, `weft
-set-transport supabase` (no flags) just flips the pointer back after you've experimented
+set-transport supabase` (which takes no keys) just flips the pointer back after you've experimented
 with devtunnel — your creds are still on disk from the last install, no re-typing. And
 re-running `setup.ps1`/`setup.sh` (or the site installer) never silently resets or shadows
 whatever you've already configured — the installers only re-seed `supabase.json` if it's
@@ -122,9 +122,14 @@ planned follow-up.)
    this migration is applied** (see [`security.md`](./security.md) and
    [`supabase/README.md`](../supabase/README.md)).
 3. Wire up the extension's transport (no env var, no `.env` — see
-   [`hosting.md`](./hosting.md#configuring-the-extensions-transport)):
+   [`hosting.md`](./hosting.md#configuring-the-extensions-transport)). Supply your project's
+   creds at install time, then select the transport:
    ```sh
-   weft set-transport supabase --url <your-project-url> --anon-key <your-anon-key>
+   # bash installer: seed your own project's creds
+   WEFT_SUPABASE_URL=<your-project-url> WEFT_SUPABASE_ANON_KEY=<your-anon-key> \
+     curl -fsSL https://useweft.netlify.app/install.sh | bash
+   # (or edit ~/.weft/supabase.json directly), then:
+   weft set-transport supabase
    ```
    The mobile side needs no extra wiring — it reads the URL + anon key straight from
    whatever pairing QR the extension stamps (see [`hosting.md`](./hosting.md)).
@@ -175,8 +180,9 @@ up Supabase for you either.
 ## Configuration reference
 
 Transport (Supabase vs. devtunnel) is **not** an env var — it's configured via `weft
-set-transport` (pointer → `~/.weft/weft.config.json`) and, for Supabase, `weft
-set-transport supabase --url <url> --anon-key <key>` (creds → `~/.weft/supabase.json`;
+set-transport` (pointer → `~/.weft/weft.config.json`) and, for Supabase, the creds file
+`~/.weft/supabase.json` seeded by the installer (`-SupabaseUrl`/`-SupabaseKey` or
+`WEFT_SUPABASE_URL`/`WEFT_SUPABASE_ANON_KEY` to use your own project;
 see [`hosting.md`](./hosting.md#configuring-the-extensions-transport)). The extension has a
 small number of *unrelated*, legitimate tuning env vars:
 

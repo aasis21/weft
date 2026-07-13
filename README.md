@@ -64,7 +64,9 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 
 Weft pairs over one of two relays — both only ever carry end-to-end-encrypted
 envelopes (ECDH → AES-256-GCM), so the relay is untrusted infrastructure that learns
-only timing and channel ids. Pick with `weft set-transport`.
+only timing and channel ids. Pick with `weft set-transport` — and switch anytime,
+since the installer seeds the hosted Supabase creds no matter which one you chose,
+so flipping back to `supabase` never needs a URL or key.
 
 | Transport | What it is | Set it up |
 |---|---|---|

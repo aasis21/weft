@@ -471,7 +471,7 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
         <ul>
           <li>Nothing in the path but your two devices and a tunnel you own</li>
           <li><code>weft devtunnel start</code> owns login + lifecycle; pairing just attaches</li>
-          <li>Same end-to-end encryption — the tunnel is untrusted too</li>
+          <li>Changed your mind? <code>weft set-transport supabase</code> flips back — no keys, ever</li>
         </ul>
         <div class="tcard-cmd"><span class="c"># switch, then bring the shared relay up</span>
 <span class="p">$</span>weft set-transport devtunnel
@@ -479,7 +479,9 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
       </div>
     </div>
     <p class="tnote">Either way, pairing and every message are <b>AES-256-GCM encrypted</b> — the
-      relay is untrusted infrastructure that learns only timing and channel ids.</p>
+      relay is untrusted infrastructure that learns only timing and channel ids. The installer
+      seeds the hosted Supabase creds whichever transport you pick, so <code>weft set-transport</code>
+      flips between the two anytime — no URL, no key.</p>
   </section>
 
   <section id="install">

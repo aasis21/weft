@@ -31,8 +31,11 @@ You only need a free Supabase project.
    broadcast channels (see [`setup.md`](./setup.md)).
 3. Set rate limits / quotas appropriate to your usage.
 4. Point the extension at your project (mobile takes no config — it reads the URL + anon key
-   from whatever pairing QR the extension stamps):
-   - extension: `weft set-transport supabase --url <your-url> --anon-key <your-anon-key>`
+   from whatever pairing QR the extension stamps). The `weft` CLI has no keys-on-the-command-line
+   option; instead, supply your project's creds at install time or write them to disk directly:
+   - installer (PowerShell): `... -SupabaseUrl <your-url> -SupabaseKey <your-anon-key>`
+   - installer (bash): `WEFT_SUPABASE_URL=<your-url> WEFT_SUPABASE_ANON_KEY=<your-anon-key> ...`
+   - or edit `~/.weft/supabase.json` (`{"url": "...", "anonKey": "..."}`) and run `weft set-transport supabase`
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is
 untrusted infrastructure: it routes ciphertext and learns only timing and channel ids.
@@ -46,14 +49,15 @@ for this either — it is configured via two small files in `~/.weft/`:
 - `~/.weft/weft.config.json` — the transport **pointer** (`{"transport": {"kind":
   "supabase"}}` or `"devtunnel"`), written by `weft set-transport`.
 - `~/.weft/supabase.json` — the Supabase URL + anon key (`{"url": "...", "anonKey":
-  "..."}`), seeded by the installer with the hosted defaults and overwritten by `weft
-  set-transport supabase --url <url> --anon-key <key>` when you want to point at your own
-  project.
+  "..."}`), seeded by the installer — with the hosted defaults, or with your own project's
+  creds if you pass `-SupabaseUrl`/`-SupabaseKey` (PowerShell) or `WEFT_SUPABASE_URL`/
+  `WEFT_SUPABASE_ANON_KEY` (bash). Edit this file directly to repoint at another project.
 
-Keeping them separate means `weft set-transport supabase` (no flags) just flips the pointer
-back after you've experimented with devtunnel — your Supabase creds are still on disk from
-the last install, so you never have to re-type them. Both files are read from nowhere else,
-so reinstalling/rebuilding the extension can never silently reset or shadow your chosen
+Keeping them separate means `weft set-transport supabase` never takes keys — it just flips the
+pointer back after you've experimented with devtunnel, and your Supabase creds are still on
+disk from the last install (the installer seeds them regardless of which transport you picked),
+so you never have to re-type them. Both files are read from nowhere else, so
+reinstalling/rebuilding the extension can never silently reset or shadow your chosen
 transport — only `weft set-transport` (or the installer, on first run / when you explicitly
 pass `-Transport` / `-SupabaseUrl` / `-SupabaseKey`) ever writes them.
 
