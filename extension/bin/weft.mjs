@@ -353,7 +353,7 @@ async function start() {
 
   printHeader(`WEFT DEVICE STATION — ${loadDeviceName() ?? hostname()}`);
   console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions."));
-  console.log(c.dim(`Diagnostic log: ${stationLogPath()}\n`));
+  console.log(c.dim(`Diagnostic log: ${stationLogPath()}`));
 
   await ensureAtLeastOneProject();
 
@@ -365,11 +365,10 @@ async function start() {
     heartbeatMs: listener.heartbeatMs,
   });
 
-  console.log(`${c.bold("1.")} Scan the QR code below with the Weft app to pair your phone:\n`);
+  console.log(`\n${c.bold("1.")} Scan the QR code below with the Weft app to pair your phone:`);
   const qr = (await QRCode.toString(JSON.stringify(listener.pairingPayload), { type: "terminal", small: true })).replace(/\n+$/, "");
   console.log(qr);
-  console.log();
-  console.log(`${c.bold("2.")} These identify this station for the pairing/session comms:\n`);
+  console.log(`\n${c.bold("2.")} These identify this station for the pairing/session comms:`);
   console.log(`   ${c.cyan("Device ID")}   ${c.bold(listener.deviceId)}`);
   console.log(`   ${c.cyan("Channel ID")}  ${c.bold(listener.channelId)}`);
   const transport = transportIdentity(listener.transportDescriptor);
@@ -390,10 +389,10 @@ async function start() {
           : " — a fresh channel/key every start; re-scan the QR each time (run `weft set-pairing persistent` to change).",
       ),
   );
-  console.log(`   ${c.dim(`Heartbeat every ${Math.round(listener.heartbeatMs / 1000)}s keeps the pairing alive.`)}\n`);
-  console.log(`${c.bold("3.")} Projects available to spawn sessions in:\n`);
+  console.log(`   ${c.dim(`Heartbeat every ${Math.round(listener.heartbeatMs / 1000)}s keeps the pairing alive.`)}`);
+  console.log(`\n${c.bold("3.")} Projects available to spawn sessions in:`);
   printProjects(listProjects());
-  console.log(c.dim("   Hint: add projects with `weft add-project <name> <path> --default`.\n"));
+  console.log(c.dim("   Hint: add projects with `weft add-project <name> <path> --default`."));
   // optimisticallyBound: the listener is ALREADY sending heartbeats to this phone's remembered
   // channel — we aren't actually waiting on anything from it, so say so plainly instead of
   // "reconnecting"/"waiting" wording that implies we're blocked. The live status line below
@@ -405,13 +404,13 @@ async function start() {
       ? "reconnecting a previously-paired phone…"
       : "waiting for phone to connect…";
   console.log(
-    `${c.bold("4.")} ${
+    `\n${c.bold("4.")} ${
       optimisticallyBound
         ? "Already sending heartbeats on the last-known channel — your phone attaches silently, no waiting"
         : persistent && everConnected
           ? "Reconnecting — this phone paired here before, so it should attach automatically"
           : "Waiting for your phone to connect"
-    }…\n`,
+    }…`,
   );
   status.setIdleLabel(idleLabel);
   status.start();

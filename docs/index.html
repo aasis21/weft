@@ -526,15 +526,24 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
     <header class="section-head reveal">
       <span class="kicker">06 · Commands</span>
       <h2>Everything you can <em>say</em>.</h2>
+      <p class="section-lede"><b><code>/weft</code></b>, inside a live Copilot session, mirrors
+        <em>that</em> session to your phone. <b><code>weft start</code></b> runs a standalone
+        Device Station your phone drives to spawn fresh sessions in your registered projects.
+        Station pairings can be <b>ephemeral</b> (a new QR each start — the default) or
+        <b>persistent</b> (reconnect with no rescan); a <code>/weft</code> pairing is always
+        per-session.</p>
     </header>
     <table class="cmds reveal">
       <tbody>
-        <tr><td>weft start</td><td>Start the Device Station and print a QR to pair from your phone.</td></tr>
+        <tr><td>/weft [supabase|devtunnel]</td><td>In a Copilot session: pair your phone to the current session. Optional arg overrides the transport for this session only.</td></tr>
+        <tr><td>weft start</td><td>Start the standalone Device Station and print a QR to pair from your phone.</td></tr>
         <tr><td>weft add-project &lt;name&gt; &lt;path&gt;</td><td>Register a project directory Weft can launch sessions in.</td></tr>
         <tr><td>weft remove-project &lt;name&gt;</td><td>Forget a registered project.</td></tr>
         <tr><td>weft list-projects</td><td>List registered projects and which one is default.</td></tr>
         <tr><td>weft set-default &lt;name&gt;</td><td>Choose the project a bare pairing launches into.</td></tr>
         <tr><td>weft set-transport &lt;supabase|devtunnel|clear&gt;</td><td>Choose (or clear) the pairing transport.</td></tr>
+        <tr><td>weft set-pairing &lt;persistent|ephemeral&gt;</td><td>Device Station: reuse one channel/key across restarts (persistent) or mint a fresh one each start (ephemeral, the default).</td></tr>
+        <tr><td>weft rotate-pairing</td><td>Device Station: force a brand-new persistent channel/key, invalidating the old QR.</td></tr>
         <tr><td>weft show-transport</td><td>Print the transport currently in effect and where it came from.</td></tr>
         <tr><td>weft set-name &lt;name&gt;</td><td>Set the display name this device shows to your phone. Defaults to your OS hostname.</td></tr>
         <tr><td>weft show-name</td><td>Print the device name currently in effect and where it came from.</td></tr>

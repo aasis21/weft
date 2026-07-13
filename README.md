@@ -77,16 +77,44 @@ See [`docs/hosting.md`](docs/hosting.md) for self-hosting, RLS, and operating a 
 
 ---
 
+## Pairing
+
+There are two ways to put a session on your phone, plus a choice of how long a pairing lasts.
+
+**`/weft` — mirror the session you're in.** Run it inside a live `copilot` terminal (the
+extension auto-loads there). It pairs your phone to *that exact session* and relays its token
+stream, diffs, and native approval prompts as they happen. Append a transport to override it for
+this session only: `/weft supabase` or `/weft devtunnel`.
+
+**`weft start` — a standalone Device Station.** Run it in its own terminal, before any Copilot
+session exists. Your phone pairs to the station and *spawns* new Copilot sessions in the projects
+you've registered (`weft add-project`) — one station, many sessions, driven from your pocket.
+
+**Pairing modes** apply to the standalone station only (`/weft` is always per-session — a fresh
+channel and key that die with the session):
+
+| Mode | Behaviour | Set it |
+|---|---|---|
+| **ephemeral** (default) | A fresh channel + key on every `weft start`; re-scan the QR each time. | `weft set-pairing ephemeral` |
+| **persistent** | The same channel + key are reused across restarts, so an already-paired phone reconnects with no rescan. | `weft set-pairing persistent` |
+
+Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidates the old QR — e.g. after losing a phone).
+
+---
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `weft start` | Start the Device Station and print a QR to pair from your phone. |
+| `/weft [supabase\|devtunnel]` | *(inside a Copilot session)* Pair your phone to the current session; optional arg overrides the transport for this session only. |
+| `weft start` | Start the standalone Device Station and print a QR to pair from your phone. |
 | `weft add-project <name> <path> [--default]` | Register a project directory Weft can launch sessions in. |
 | `weft remove-project <name>` | Forget a registered project. |
 | `weft list-projects` | List registered projects and which one is default. |
 | `weft set-default <name>` | Choose the project a bare pairing launches into. |
 | `weft set-transport <supabase\|devtunnel\|clear>` | Choose (or clear) the pairing transport. |
+| `weft set-pairing <persistent\|ephemeral>` | *(Device Station)* Reuse one channel/key across restarts (persistent) or mint a fresh one each start (ephemeral, the default). |
+| `weft rotate-pairing` | *(Device Station)* Force a brand-new persistent channel/key, invalidating the old QR. |
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
 | `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |
 | `weft show-name` | Print the device name currently in effect and where it came from. |
@@ -207,7 +235,6 @@ npm run test:e2e -w @aasis21/weft-mobile   # build dist/ + run the Playwright jo
 ---
 
 ## Status
-
 
 **v1 built end-to-end, with a live hosted relay and web app.** The shared contracts (E2E
 crypto, pairing handshake, message protocol, pluggable transport), the CLI extension
