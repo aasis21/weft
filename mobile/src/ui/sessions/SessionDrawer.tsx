@@ -90,7 +90,23 @@ export function SessionDrawer({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Bumped on a timer / focus so relative "N ago" labels re-render even for idle rows that
+  // receive no new events (fmtRelative reads Date.now() only at render time).
+  const [, forceTick] = useState(0);
   onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const tick = (): void => forceTick((n) => (n + 1) % 1_000_000);
+    const interval = window.setInterval(tick, 30_000);
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // Row actions are collapsed behind a "⋮" menu (pin/archive/rename); only delete stays as a
   // direct "✕" icon on the row. Close that menu on any click outside a row's menu wrapper.
@@ -116,27 +132,53 @@ export function SessionDrawer({
   const cancelRename = (): void => setEditingId(null);
 
   const filteredSessions = useMemo(() => {
-    // Filter search box removed for now (#see chat request) — sidebar just shows all sessions,
-    // stably ordered by when each session's QR was last scanned. Deliberately NOT by last
-    // activity, so incoming events/heartbeats never reshuffle the list under the user. A
-    // re-scan bumps scannedAt so that card jumps to the top. Fall back to addedAt for
-    // legacy/demo cards without a scan time.
+    // Filter search box removed for now (#see chat request) — sidebar just shows all sessions.
+    // Order: pinned first (their whole point is to stay reachable), then stably by when each
+    // session's QR was last scanned. Deliberately NOT by last activity, so incoming
+    // events/heartbeats never reshuffle the list under the user. A re-scan bumps scannedAt so
+    // that card jumps to the top. Fall back to addedAt for legacy/demo cards without a scan time.
     const scannedAt = (s: SessionView): number => s.meta.scannedAt ?? s.meta.addedAt ?? 0;
-    return [...sessions].sort((a, b) => scannedAt(b) - scannedAt(a));
+    return [...sessions].sort((a, b) => {
+      const pinDelta = Number(b.pinned ?? false) - Number(a.pinned ?? false);
+      if (pinDelta !== 0) return pinDelta;
+      return scannedAt(b) - scannedAt(a);
+    });
   }, [sessions]);
 
-  // #163: split the (already stably-sorted) list into Active vs Archived using the shared status
-  // derivation, so the sidebar mirrors the detail-header pill exactly.
-  const { activeGroup, archivedGroup } = useMemo(() => {
+  // #163: split the (already stably-sorted) list using the shared status derivation, so the
+  // sidebar mirrors the detail-header pill exactly. Three buckets so "something broke" (Offline,
+  // an error the user may want to act on) is never mixed in with the calm "Archived" cooldown.
+  const { activeGroup, offlineGroup, archivedGroup } = useMemo(() => {
     const activeGroup: SessionView[] = [];
+    const offlineGroup: SessionView[] = [];
     const archivedGroup: SessionView[] = [];
     for (const s of filteredSessions) {
-      (deriveStatus(s).active ? activeGroup : archivedGroup).push(s);
+      const derived = deriveStatus(s);
+      if (derived.active) activeGroup.push(s);
+      else if (derived.tone === 'error') offlineGroup.push(s);
+      else archivedGroup.push(s);
     }
-    return { activeGroup, archivedGroup };
+    return { activeGroup, offlineGroup, archivedGroup };
   }, [filteredSessions]);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Auto-dismiss the inline "Delete?" confirm on any click outside its own controls (selecting
+  // another row, opening a menu, tapping the scrim) — mirrors the row-menu behaviour so a primed
+  // destructive control never lingers. Uses the capture phase because the drawer <aside>
+  // stopPropagation()s bubbling clicks, which would otherwise hide in-drawer clicks from a
+  // bubble-phase document listener. The confirm's own ✓/✕ buttons live inside .row-confirm, so
+  // this never fires on the click that would confirm or cancel it.
+  useEffect(() => {
+    if (!confirmDeleteId) return;
+    const handleDocClick = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.row-confirm')) return;
+      setConfirmDeleteId(null);
+    };
+    document.addEventListener('click', handleDocClick, true);
+    return () => document.removeEventListener('click', handleDocClick, true);
+  }, [confirmDeleteId]);
 
   useEffect(() => {
     // Docked (desktop, always-visible) sidebar is not a modal: it must not steal focus on
@@ -224,6 +266,7 @@ export function SessionDrawer({
       : device.projects.length > 0
         ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
         : 'No projects yet';
+    const opensDetails = Boolean(onOpenDeviceDetails);
     const openDetails = (): void =>
       onOpenDeviceDetails ? onOpenDeviceDetails(device.channelId) : onStartOnDevice?.(device.channelId);
     return (
@@ -232,7 +275,11 @@ export function SessionDrawer({
         className="session-row device-drawer-row"
         role="button"
         tabIndex={0}
-        aria-label={`View details for ${deviceLabel(device)}`}
+        aria-label={
+          opensDetails
+            ? `View details for ${deviceLabel(device)}`
+            : `Start a session on ${deviceLabel(device)}`
+        }
         onClick={openDetails}
         onKeyDown={(e) => {
           if (e.key === 'Enter') openDetails();
@@ -376,6 +423,7 @@ export function SessionDrawer({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
+                    setConfirmDeleteId(null);
                     setOpenMenuId(openMenuId === id ? null : id);
                   }}
                   title="More actions"
@@ -494,6 +542,12 @@ export function SessionDrawer({
                 </div>
               ) : null}
               {activeGroup.map(renderRow)}
+              {offlineGroup.length > 0 ? (
+                <div className="drawer-group-head drawer-group-head-offline">
+                  Offline <span className="drawer-group-count">{offlineGroup.length}</span>
+                </div>
+              ) : null}
+              {offlineGroup.map(renderRow)}
               {archivedGroup.length > 0 ? (
                 <div className="drawer-group-head">
                   Archived <span className="drawer-group-count">{archivedGroup.length}</span>

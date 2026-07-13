@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
@@ -129,7 +129,7 @@ describe('SessionDrawer', () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it('groups sessions into Active/Archived, shows a status pill per row, and marks pinned rows (#163)', async () => {
+  it('groups sessions into Active/Offline/Archived, shows a status pill per row, and marks pinned rows (#163)', async () => {
     const user = userEvent.setup();
     const onPin = vi.fn();
     const onArchive = vi.fn();
@@ -151,11 +151,15 @@ describe('SessionDrawer', () => {
       />,
     );
 
-    // Two group headers with counts: 1 Active (Live One), 2 not-Active (Cold One archived, Broken One offline).
+    // Three group headers, one row each: Active (Live One), Offline (Broken One, error tone
+    // split out of Archived so a broken session is never buried with calm cold ones), Archived
+    // (Cold One).
     const activeHead = screen.getByText('Active', { selector: '.drawer-group-head' });
+    const offlineHead = screen.getByText('Offline', { selector: '.drawer-group-head' });
     const archivedHead = screen.getByText('Archived', { selector: '.drawer-group-head' });
     expect(activeHead.textContent).toContain('1');
-    expect(archivedHead.textContent).toContain('2');
+    expect(offlineHead.textContent).toContain('1');
+    expect(archivedHead.textContent).toContain('1');
 
     // Per-row pills reflect deriveStatus.
     expect(screen.getByText('Live One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Live');
@@ -168,6 +172,59 @@ describe('SessionDrawer', () => {
     await user.click(within(coldRow).getByRole('button', { name: 'More actions' }));
     await user.click(within(coldRow).getByRole('menuitem', { name: 'Unpin session' }));
     expect(onPin).toHaveBeenCalledWith('cold', false);
+  });
+
+  it('floats pinned sessions to the top of their group regardless of scan order (#pin-float)', () => {
+    render(
+      <SessionDrawer
+        sessions={[
+          session('a', 'Alpha', 3_000, { status: 'idle' }),
+          session('b', 'Bravo', 2_000, { status: 'idle' }),
+          session('c', 'Charlie', 1_000, { status: 'idle', pinned: true }),
+        ]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const titles = screen
+      .getAllByRole('button')
+      .filter((row) => row.classList.contains('session-row'))
+      .map((row) => {
+        const text = row.querySelector('.session-title')?.textContent ?? '';
+        return ['Charlie', 'Alpha', 'Bravo'].find((name) => text.includes(name));
+      });
+    // Charlie is oldest by scan time but pinned, so it leads; the rest stay newest-first.
+    expect(titles).toEqual(['Charlie', 'Alpha', 'Bravo']);
+  });
+
+  it('auto-dismisses the delete confirm when clicking elsewhere (#delete-confirm)', async () => {
+    const user = userEvent.setup();
+    render(
+      <SessionDrawer
+        sessions={[
+          session('a', 'Alpha', 2_000, { status: 'idle' }),
+          session('b', 'Bravo', 1_000, { status: 'idle' }),
+        ]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const alphaRow = screen.getByText('Alpha').closest('.session-row') as HTMLElement;
+    await user.click(within(alphaRow).getByRole('button', { name: /delete session/i }));
+    expect(within(alphaRow).getByText('Delete?')).toBeInTheDocument();
+    // Clicking another row dismisses the primed confirm instead of leaving it armed.
+    await user.click(screen.getByText('Bravo'));
+    await waitFor(() =>
+      expect(within(alphaRow).queryByText('Delete?')).not.toBeInTheDocument(),
+    );
   });
 
   it('fires add and close controls', async () => {
