@@ -19,6 +19,7 @@ import {
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
 import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
+import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -49,9 +50,11 @@ function printHeader(title) {
 // default --unhandled-rejections=throw behavior taking the whole station down.
 process.on("unhandledRejection", (reason) => {
   console.error(`\n${c.red("✗ unhandled rejection (station kept running):")}`, reason?.stack ?? reason);
+  appendStationLog("process.unhandled_rejection", { error: reason?.stack ?? String(reason) }, { level: "error" });
 });
 process.on("uncaughtException", (err) => {
   console.error(`\n${c.red("✗ uncaught exception (station kept running):")}`, err?.stack ?? err);
+  appendStationLog("process.uncaught_exception", { error: err?.stack ?? String(err) }, { level: "error" });
 });
 
 try {
@@ -304,32 +307,62 @@ async function start() {
     lock.release();
   };
 
+  // Turn on the persistent station log for this process (see stationLog.mjs). Only the standalone
+  // `weft start` station does this — the in-session /weft path logs to the Copilot session log
+  // instead — so the shared transport/socket code that calls appendStationLog stays silent there.
+  enableStationLog();
+  appendStationLog("station.start", { pid: process.pid, device: loadDeviceName() ?? hostname() });
+
   const status = createStatusLine();
   const listener = createListener({
-    onDeviceConnected: () => status.setConnected(true),
-    onDeviceDisconnected: () => status.setConnected(false),
-    onHeartbeat: () => status.pulse(),
+    onDeviceConnected: (peer) => {
+      status.setConnected(true);
+      appendStationLog("device.connected", { phone: peer?.senderName ?? peer?.deviceId ?? "unknown" });
+    },
+    onDeviceDisconnected: () => {
+      status.setConnected(false);
+      appendStationLog("device.disconnected", {}, { level: "warn" });
+    },
+    onHeartbeat: () => {
+      status.pulse();
+      appendStationLog("heartbeat", {});
+    },
     // Persistent mode + a known-returning phone: the listener is ALREADY sending heartbeats to
     // the last-known channel before this run's phone has said anything — show that as
     // "connected" right away instead of a "waiting/reconnecting" spinner, since we're genuinely
     // not waiting on the phone for anything at this point.
-    onOptimisticBind: () => status.setConnected(true),
-    onSpawnRequest: ({ projectName, mode, name }) =>
-      status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${projectName || "default project"} ${c.dim(`[${mode}]`)}`),
-    onSpawnResult: ({ ok, error, name, projectName }) =>
+    onOptimisticBind: () => {
+      status.setConnected(true);
+      appendStationLog("device.optimistic_bind", {});
+    },
+    onControl: ({ subtype }) => appendStationLog("phone.control", { subtype: subtype ?? "unknown" }),
+    onSpawnRequest: ({ projectName, mode, name }) => {
+      status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${projectName || "default project"} ${c.dim(`[${mode}]`)}`);
+      appendStationLog("spawn.request", { name: name || "(unnamed)", project: projectName || "default", mode });
+    },
+    onSpawnResult: ({ ok, error, name, projectName }) => {
       status.log(
         ok
           ? `${c.green("✓")} Session started: ${c.bold(name)} ${c.dim(`(${projectName})`)}`
           : `${c.red("✗")} Session failed${projectName ? ` (${projectName})` : ""}: ${error}`,
-      ),
+      );
+      appendStationLog("spawn.result", { ok, name, project: projectName, error }, { level: ok ? "info" : "warn" });
+    },
   });
 
   printHeader(`WEFT DEVICE STATION — ${loadDeviceName() ?? hostname()}`);
-  console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions.\n"));
+  console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions."));
+  console.log(c.dim(`Diagnostic log: ${stationLogPath()}\n`));
 
   await ensureAtLeastOneProject();
 
   await listener.start();
+  appendStationLog("station.ready", {
+    channelId: listener.channelId,
+    device: listener.deviceName,
+    pairing: isPersistentPairingEnabled() ? "persistent" : "ephemeral",
+    heartbeatMs: listener.heartbeatMs,
+  });
 
   console.log(`${c.bold("1.")} Scan the QR code below with the Weft app to pair your phone:\n`);
   const qr = (await QRCode.toString(JSON.stringify(listener.pairingPayload), { type: "terminal", small: true })).replace(/\n+$/, "");
@@ -378,6 +411,7 @@ async function start() {
   status.start();
 
   const shutdown = async (signal) => {
+    appendStationLog("station.stop", { signal: signal ?? "exit" });
     status.stop();
     await listener.stop();
     release();

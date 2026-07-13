@@ -93,6 +93,10 @@ export function createListener({
   onOptimisticBind = null,
   onSpawnRequest = null,
   onSpawnResult = null,
+  // Fired at the top of handleControl for every decrypted control message a bound phone sends
+  // (PROJECT_LIST_REQUEST, SPAWN_SESSION, FORGET_DEVICE) — lets a host (e.g. the station log)
+  // record incoming phone traffic without this module knowing anything about logging.
+  onControl = null,
 } = {}) {
   let listenerTransport = transport;
   // Resolved once from env (or caller-provided, e.g. tests supplying a matching descriptor
@@ -406,6 +410,11 @@ export function createListener({
 
   async function handleControl(envelope) {
     if (stopped || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
+    try {
+      onControl?.({ subtype: envelope.eventSubtype ?? null });
+    } catch {
+      // best-effort UI/log hook
+    }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST_REQUEST) {
       await sendProjectList();
       return;

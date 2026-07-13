@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import WebSocket from "ws";
+import { appendStationLog } from "./stationLog.mjs";
 
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;
@@ -77,6 +78,7 @@ export function createReconnectingSocket(url, {
     if (closedByUser || reconnectTimer) return;
     const delay = backoff;
     backoff = Math.min(backoff * 2, maxBackoffMs);
+    appendStationLog("transport.reconnect_scheduled", { kind: "devtunnel", delayMs: delay }, { level: "warn" });
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
@@ -99,6 +101,7 @@ export function createReconnectingSocket(url, {
       if (closedByUser) return;
       backoff = minBackoffMs; // Reset backoff on a healthy connection.
       startPing();
+      appendStationLog("transport.connected", { kind: "devtunnel" });
       emit("open", {});
     });
     socket.addEventListener("message", (e) => {
@@ -108,6 +111,7 @@ export function createReconnectingSocket(url, {
     socket.addEventListener("close", (e) => {
       clearPing();
       if (closedByUser) return;
+      appendStationLog("transport.disconnected", { kind: "devtunnel", reason: e?.reason || "close" }, { level: "warn" });
       emit("close", e);
       scheduleReconnect();
     });
