@@ -60,6 +60,21 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 
 ---
 
+## Transports
+
+Weft pairs over one of two relays — both only ever carry end-to-end-encrypted
+envelopes (ECDH → AES-256-GCM), so the relay is untrusted infrastructure that learns
+only timing and channel ids. Pick with `weft set-transport`.
+
+| Transport | What it is | Set it up |
+|---|---|---|
+| **Supabase** (default) | A Supabase Realtime channel. The installer seeds Weft's **hosted relay** (zero-config — no account, no project to create). Prefer your own? Point Weft at any Supabase project. | `weft set-transport supabase` (hosted default), or `weft set-transport supabase --url <url> --anon-key <key>` for your own |
+| **Dev tunnel** (bring your own) | A [Visual Studio Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) you run yourself — a private relay under your own account, **no third party in the path**. You bring it up; pairing attaches to it. | `weft set-transport devtunnel`, then `weft devtunnel start` before pairing |
+
+See [`docs/hosting.md`](docs/hosting.md) for self-hosting, RLS, and operating a relay.
+
+---
+
 ## Commands
 
 | Command | What it does |
