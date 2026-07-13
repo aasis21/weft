@@ -129,6 +129,12 @@ const DEVICE_OFFLINE_AFTER_MS = 180_000;
  *  foreground/restart, yet a genuinely-unreachable relay isn't hammered every tick. Matches the
  *  connect timeout (weftClient CONNECT_TIMEOUT_MS) so a failed attempt fully settles before retry. */
 const DEVICE_RECONNECT_BACKOFF_MS = 15_000;
+/** Fail-safe window after a `project_list_request` is sent: while a request is outstanding, extra
+ *  refreshProjects triggers (boot auto-reconnect + watchdog self-heal + attachListener's trailing
+ *  refresh + a manual pull all firing within seconds of a reconnect) are collapsed into the one
+ *  in-flight request instead of each sending a duplicate. If the reply is dropped, the marker
+ *  auto-clears after this window so refreshes can't wedge forever. */
+const PROJECT_LIST_INFLIGHT_MS = 8_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
 const RESUME_DEBOUNCE_MS = 500;
 const MAX_WARM_SESSIONS = 50;
@@ -235,6 +241,9 @@ export class SessionRuntime {
   /** Per-device throttle stamps (ms) for the watchdog's self-heal reconnect, so a wedged offline
    *  device is re-established on a backoff (DEVICE_RECONNECT_BACKOFF_MS) without hammering the relay. */
   private readonly deviceReconnectAt = new Map<string, number>();
+  /** Per-device fail-safe timers for an outstanding `project_list_request` (see
+   *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
+  private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
@@ -1001,19 +1010,40 @@ export class SessionRuntime {
   }
 
   async refreshProjects(channelId: string): Promise<void> {
-    await this.connectDevice(channelId);
-    const ctrl = this.listenerController(channelId);
-    if (!ctrl?.client) return;
-    this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
+    // Collapse overlapping refresh triggers into a single in-flight project_list_request. A single
+    // reconnect fans out to boot auto-reconnect + watchdog self-heal + attachListener's trailing
+    // refresh (+ a manual pull), and connectDevice short-circuits once healthy, so without this
+    // guard every trigger sends a duplicate request on the same client (5 in ~1min observed). The
+    // marker is set synchronously (before the awaited connectDevice) so concurrent callers dedupe;
+    // it clears when the PROJECT_LIST reply lands (onListenerMessage), on a new attach
+    // (attachListener), or after PROJECT_LIST_INFLIGHT_MS so a dropped reply can't wedge refreshes.
+    if (this.projectListInflight.has(channelId)) return;
+    const failSafe = setTimeout(() => this.projectListInflight.delete(channelId), PROJECT_LIST_INFLIGHT_MS);
+    (failSafe as { unref?: () => void }).unref?.();
+    this.projectListInflight.set(channelId, failSafe);
     try {
+      await this.connectDevice(channelId);
+      const ctrl = this.listenerController(channelId);
+      if (!ctrl?.client) {
+        this.clearProjectListInflight(channelId);
+        return;
+      }
+      this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
       const message = projectListRequest();
       this.recordDeviceEvent(channelId, 'out', message);
       await ctrl.client.send(message);
     } catch (err) {
+      this.clearProjectListInflight(channelId);
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not request projects.'), connected: false }),
       );
     }
+  }
+
+  private clearProjectListInflight(channelId: string): void {
+    const timer = this.projectListInflight.get(channelId);
+    if (timer) clearTimeout(timer);
+    this.projectListInflight.delete(channelId);
   }
 
   async spawnSession(channelId: string, opts: SpawnRequestOptions): Promise<string> {
@@ -1109,6 +1139,9 @@ export class SessionRuntime {
       stopStatus();
     };
     this.store.dispatch(deviceErrorSet({ channelId, error: undefined, connected: true }));
+    // Fresh client: drop any stale in-flight marker from the previous (now-closed) socket so this
+    // genuine (re)attach always issues exactly one project_list_request.
+    this.clearProjectListInflight(channelId);
     void this.refreshProjects(channelId);
   }
 
@@ -1117,6 +1150,7 @@ export class SessionRuntime {
       const { removedChannelIds, merged } = await reconcileDeviceId(channelId, deviceId);
       this.store.dispatch(deviceReconciled({ channelId, removedChannelIds, merged }));
       for (const dead of removedChannelIds) {
+        this.clearProjectListInflight(dead);
         this.listenerController(dead)?.dispose();
         this.listenerControllers.delete(dead);
       }
@@ -1137,6 +1171,7 @@ export class SessionRuntime {
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST) {
       const msg = message.msg as ProjectListMsg;
+      this.clearProjectListInflight(channelId);
       this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
       // The listener's deviceId is stable across `weft start` restarts even though this

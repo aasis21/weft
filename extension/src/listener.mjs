@@ -530,6 +530,11 @@ export function createListener({
     get heartbeatMs() {
       return heartbeatMs;
     },
+    // The resolved transport descriptor (kind + endpoint) this station is listening on — surfaced
+    // on the `weft start` banner (and mirrored on the phone) so both ends show the same relay.
+    get transportDescriptor() {
+      return listenerTransportDescriptor;
+    },
     // Persistent-pairing-only signal (null in ephemeral mode) — true if a phone had already
     // bound to this exact persisted channel/keypair before THIS run started, so a host UI can
     // show "reconnecting a known phone" instead of "waiting for the first scan".

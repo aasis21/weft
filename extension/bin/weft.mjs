@@ -19,6 +19,7 @@ import {
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
 import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
+import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
 
 const [, , command, ...args] = process.argv;
@@ -371,6 +372,11 @@ async function start() {
   console.log(`${c.bold("2.")} These identify this station for the pairing/session comms:\n`);
   console.log(`   ${c.cyan("Device ID")}   ${c.bold(listener.deviceId)}`);
   console.log(`   ${c.cyan("Channel ID")}  ${c.bold(listener.channelId)}`);
+  const transport = transportIdentity(listener.transportDescriptor);
+  console.log(
+    `   ${c.cyan("Transport")}   ${c.bold(transport.kind)}  ${c.dim(transport.id)}` +
+      c.dim(" — the phone shows this same id under its device comms identifiers."),
+  );
   const persistent = isPersistentPairingEnabled();
   const everConnected = listener.everConnectedBeforeThisRun === true;
   const optimisticallyBound = listener.optimisticallyBound === true;

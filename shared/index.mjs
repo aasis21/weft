@@ -11,3 +11,4 @@ export {
   createRelayTransport,
 } from "./transport.mjs";
 export { _resetLocalBus } from "./transport-local.mjs";
+export { transportIdentity } from "./transport-identity.mjs";

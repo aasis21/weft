@@ -11,3 +11,5 @@ export {
   _resetLocalBus,
 } from "./transport";
 export type { Transport, Unsubscribe, TransportDescriptor } from "./transport";
+export { transportIdentity } from "./transport-identity";
+export type { TransportIdentity } from "./transport-identity";

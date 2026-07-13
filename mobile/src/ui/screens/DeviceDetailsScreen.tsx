@@ -8,6 +8,7 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
+import { transportIdentity } from '@aasis21/weft-shared';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -170,10 +171,15 @@ export function DeviceDetailsScreen({
               <dt>Latest channel ID</dt>
               <dd className="mono">{device.channelId}</dd>
             </div>
+            <div className="device-id-row">
+              <dt>Transport</dt>
+              <dd className="mono">{transportIdentity(device.transport).label}</dd>
+            </div>
           </dl>
           <p className="device-card-sub">
             Device ID is stable across <code>weft start</code> restarts; the channel ID is a
-            fresh pairing channel minted every run, for forward secrecy.
+            fresh pairing channel minted every run, for forward secrecy. Transport is the relay
+            this device pairs over — it matches the <code>Transport</code> line on <code>weft start</code>.
           </p>
         </details>
       </div>
