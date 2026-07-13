@@ -51,7 +51,8 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
   on Windows, or `WEFT_SUPABASE_URL=<url> WEFT_SUPABASE_ANON_KEY=<key> bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"` on Unix.
   Prefer building from source? Use [`setup.ps1` / `setup.sh`](docs/setup.md).
 - **Uninstall** — delete `~/.copilot/extensions/weft/`, `~/.copilot/skills/weft-how-to-use/`, and
-  `~/.weft/` (your config: `weft.config.json` — registered projects, transport choice).
+  `~/.weft/` (your config: `weft.config.json` — registered projects, transport choice, device
+  name — plus `supabase.json` — the relay URL + anon key when the transport is `supabase`).
 
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
 > [`aasis21/anya`](https://github.com/aasis21/anya), and
@@ -123,9 +124,10 @@ Three layers, one monorepo:
   it at runtime); everything else (e.g. `@supabase/supabase-js`, `shared/`) is bundled in.
 - Install copies `extension/dist/` into `~/.copilot/extensions/weft/`, where Copilot CLI
   auto-discovers it (see `setup.*` / `install.*`) — that directory holds installed **code
-  only**. All user config (relay `.env`, registered projects, transport choice) lives
-  separately in `~/.weft/` (see `weftHome()` in `extension/src/projects.mjs`). Crypto uses
-  Web Crypto — no native deps.
+  only**. All user config lives separately in `~/.weft/`: `weft.config.json` (registered
+  projects, transport choice, device name) and `supabase.json` (relay URL + anon key). There
+  is no `.env` / env-var override — reinstalling or rebuilding never touches either file, so
+  your chosen transport always survives. Crypto uses Web Crypto — no native deps.
 - For local development you do **not** need to install into `~/.copilot`: run the **harness**
   (`extension/harness/`) which drives the extension logic against `LocalTransport`.
 
