@@ -8,7 +8,7 @@ import readline from "node:readline/promises";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
 import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
-import { clearTransportConfig, saveTransportConfig, saveSupabaseCredentials, loadSupabaseCredentials, supabaseCredentialsPath, savePairingMode, isPersistentPairingEnabled, loadDeviceName, saveDeviceName } from "../src/transportConfig.mjs";
+import { clearTransportConfig, saveTransportConfig, loadSupabaseCredentials, supabaseCredentialsPath, savePairingMode, isPersistentPairingEnabled, loadDeviceName, saveDeviceName } from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
 import {
@@ -641,18 +641,6 @@ function printProjects(projects) {
   }
 }
 
-/** Parses `--flag value` pairs out of a CLI args array (case-insensitive flag names). */
-function parseFlags(args) {
-  const flags = {};
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (!arg.startsWith("--")) continue;
-    flags[arg.slice(2).toLowerCase()] = args[i + 1];
-    i += 1;
-  }
-  return flags;
-}
-
 function describeTransport(descriptor) {
   if (descriptor.kind === "supabase") return `supabase (${descriptor.url})`;
   if (descriptor.kind === "devtunnel") return "devtunnel (shared local relay via Microsoft Dev Tunnels — no cloud account)";
@@ -669,27 +657,15 @@ function describeTransport(descriptor) {
 // ~/.weft/weft.config.json file; Supabase creds live separately in ~/.weft/supabase.json so
 // flipping between kinds never destroys stored connection details.
 function setTransport(args) {
-  const [kind, ...rest] = args;
-  const flags = parseFlags(rest);
+  const [kind] = args;
   if (kind === "supabase") {
-    const url = flags.url;
-    const anonKey = flags["anon-key"];
-    const provided = (url ? 1 : 0) + (anonKey ? 1 : 0);
-    if (provided === 1) {
-      throw new Error("Usage: --url and --anon-key must be provided together (or omit both to reuse the credentials already at ~/.weft/supabase.json).");
-    }
-    if (provided === 2) {
-      // Explicit override: overwrite supabase.json with the caller's values. Both go through
-      // saveSupabaseCredentials's own trim + non-empty validation, so a `--url " "` fails loudly
-      // rather than silently poisoning the creds file.
-      saveSupabaseCredentials({ url, anonKey });
-    } else if (!loadSupabaseCredentials()) {
-      // No flags AND no existing creds file — nothing to point the pointer at. Refuse rather
-      // than write a dangling pointer that would just make `/weft` throw at pairing time.
+    // Weft ships with hosted Supabase credentials seeded by the installer, so picking supabase
+    // is a zero-config pointer flip — no url/anon-key to supply. If the creds file is somehow
+    // missing, refuse rather than write a dangling pointer that would just throw at pairing time.
+    if (!loadSupabaseCredentials()) {
       throw new Error(
-        `Weft: no supabase credentials found at ${supabaseCredentialsPath()}. ` +
-          "Provide them with `weft set-transport supabase --url <url> --anon-key <key>`, or " +
-          "re-run the installer to seed the hosted defaults.",
+        `Weft: hosted supabase credentials not found at ${supabaseCredentialsPath()}. ` +
+          "Re-run the installer to seed them.",
       );
     }
     saveTransportConfig({ kind: "supabase" });
@@ -707,7 +683,7 @@ function setTransport(args) {
     console.log(c.dim(`(Stored supabase credentials at ${supabaseCredentialsPath()} were left in place — delete that file manually to forget them.)`));
     return;
   } else {
-    throw new Error("Usage: weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]");
+    throw new Error("Usage: weft set-transport <supabase|devtunnel|clear>");
   }
   console.log(`Transport set to ${kind}. This is stamped into every pairing QR, so re-pair your phone to pick it up.`);
 }
@@ -753,7 +729,7 @@ function usage() {
   weft remove-project <name>
   weft list-projects
   weft set-default <name>
-  weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
+  weft set-transport <supabase|devtunnel|clear>
   weft show-transport
   weft set-name <name>
   weft show-name
@@ -763,10 +739,10 @@ function usage() {
   weft help
 
 Your transport CHOICE lives in ~/.weft/weft.config.json (written by \`weft set-transport\`).
-Supabase's connection details (url + anon key) live separately in ~/.weft/supabase.json — the
-installer seeds it once with the hosted defaults, and \`weft set-transport supabase --url X
---anon-key Y\` overwrites it. There is no .env / WEFT_TRANSPORT env var — reinstalling or
-rebuilding the extension never touches either file, so your chosen transport always survives.
+Supabase's connection details live separately in ~/.weft/supabase.json — the installer seeds it
+once with Weft's hosted defaults, so \`weft set-transport supabase\` is a zero-config pointer flip.
+There is no .env / WEFT_TRANSPORT env var — reinstalling or rebuilding the extension never touches
+either file, so your chosen transport always survives.
 
 Your device's display name (shown to phones in the DEVICES list) defaults to your OS hostname
 until you set your own with \`weft set-name <name>\` — the installer offers this as an

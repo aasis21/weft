@@ -68,7 +68,7 @@ only timing and channel ids. Pick with `weft set-transport`.
 
 | Transport | What it is | Set it up |
 |---|---|---|
-| **Supabase** (default) | A Supabase Realtime channel. The installer seeds Weft's **hosted relay** (zero-config — no account, no project to create). Prefer your own? Point Weft at any Supabase project. | `weft set-transport supabase` (hosted default), or `weft set-transport supabase --url <url> --anon-key <key>` for your own |
+| **Supabase** (default) | A Supabase Realtime channel. The installer seeds Weft's **hosted relay** — zero-config, no account, no keys to supply. | `weft set-transport supabase` |
 | **Dev tunnel** (bring your own) | A [Visual Studio Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) you run yourself — a private relay under your own account, **no third party in the path**. You bring it up; pairing attaches to it. | `weft set-transport devtunnel`, then `weft devtunnel start` before pairing |
 
 See [`docs/hosting.md`](docs/hosting.md) for self-hosting, RLS, and operating a relay.
@@ -84,7 +84,7 @@ See [`docs/hosting.md`](docs/hosting.md) for self-hosting, RLS, and operating a 
 | `weft remove-project <name>` | Forget a registered project. |
 | `weft list-projects` | List registered projects and which one is default. |
 | `weft set-default <name>` | Choose the project a bare pairing launches into. |
-| `weft set-transport <supabase\|devtunnel\|clear> [--url <url>] [--anon-key <key>]` | Choose (or clear) the pairing transport. |
+| `weft set-transport <supabase\|devtunnel\|clear>` | Choose (or clear) the pairing transport. |
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
 | `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |
 | `weft show-name` | Print the device name currently in effect and where it came from. |

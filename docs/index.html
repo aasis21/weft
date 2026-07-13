@@ -368,17 +368,17 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
         <div class="phone-screen">
           <div class="wf-top">
             <span class="wf-live"><i class="wf-dot"></i> Live</span>
-            <span class="wf-proj">orders</span>
+            <span class="wf-proj">my-app</span>
             <span class="wf-lock">🔒 e2e</span>
           </div>
           <div class="wf-feed">
             <div class="wf-msg wf-user wf-a1">clean up the failing tests</div>
             <div class="wf-msg wf-bot wf-a2">On it — running the suite first.</div>
             <div class="wf-tool wf-a3"><i class="wf-spin"></i><b>Bash</b> <span class="cmd">npm test</span> <span class="wf-ok">✓</span></div>
-            <div class="wf-msg wf-bot wf-a4">2 failed. Fixed the assertion in <code>orders.test.ts</code>.</div>
+            <div class="wf-msg wf-bot wf-a4">2 failed. Fixed the assertion in <code>utils.test.ts</code>.</div>
             <div class="wf-approve">
               <div class="wf-ap-head">Approve command</div>
-              <div class="wf-ap-cmd">git commit -am "fix orders tests"</div>
+              <div class="wf-ap-cmd">git commit -am "fix failing tests"</div>
               <div class="wf-ap-btns">
                 <span class="wf-btn wf-deny">Deny</span>
                 <span class="wf-btn wf-allow">Allow<i class="wf-tap" aria-hidden="true"></i></span>
@@ -452,15 +452,15 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
         <span class="tcard-tag">Default · zero setup</span>
         <h3>Weft's hosted relay</h3>
         <p>Pairs over a Supabase Realtime channel the creator operates. The installer wires it up
-          for you — no account, no project to create. Because every payload is encrypted
+          for you — no account, no keys, nothing to configure. Because every payload is encrypted
           device-to-device, the relay only ever sees ciphertext.</p>
         <ul>
-          <li>Scan the QR and you're live — nothing to configure</li>
+          <li>Scan the QR and you're live — nothing to set up</li>
           <li>Publishable key + row-level security; the operator can't read your session</li>
-          <li>Prefer your own Supabase? Point Weft at any project, anytime</li>
+          <li>It's the default — you only run this to switch back from a dev tunnel</li>
         </ul>
-        <div class="tcard-cmd"><span class="c"># installer default — or aim at your own project</span>
-<span class="p">$</span>weft set-transport supabase --url &lt;url&gt; --anon-key &lt;key&gt;</div>
+        <div class="tcard-cmd"><span class="c"># the installer default — one word, no keys</span>
+<span class="p">$</span>weft set-transport supabase</div>
       </div>
       <div class="tcard reveal">
         <span class="tcard-tag">Self-hosted · no third party</span>

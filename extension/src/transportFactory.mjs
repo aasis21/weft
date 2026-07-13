@@ -63,7 +63,7 @@ export const SUPPORTED_TRANSPORT_NAMES = ["supabase"];
  * SAME persisted config as resolveTransportDescriptor — there is no env var path — so `/weft
  * supabase` only works once the pointer has been set with `weft set-transport supabase` (and,
  * for supabase, once ~/.weft/supabase.json exists — the installer seeds it with the hosted
- * defaults; `weft set-transport supabase --url <url> --anon-key <key>` overwrites it).
+ * defaults).
  */
 export function resolveTransportByName(transportName, { baseDir } = {}) {
   const normalized = String(transportName ?? "").trim().toLowerCase();
@@ -86,16 +86,14 @@ export function resolveTransportByName(transportName, { baseDir } = {}) {
 
 // Reads ~/.weft/supabase.json and returns a fully-populated `{kind: "supabase", url, anonKey}`
 // descriptor. The credentials file is written separately from the pointer (installer seeds it
-// on install, `weft set-transport supabase --url X --anon-key Y` overwrites it) — so if the
-// pointer says "supabase" but the file is missing, that's a real config error, not a fallback
-// case: throw naming the exact file the caller needs to produce.
+// on install) — so if the pointer says "supabase" but the file is missing, that's a real config
+// error, not a fallback case: throw naming the exact file the caller needs to produce.
 function hydrateSupabaseDescriptor({ baseDir } = {}) {
   const creds = loadSupabaseCredentials({ baseDir });
   if (!creds) {
     throw new Error(
       `Weft: supabase credentials file not found at ${supabaseCredentialsPath({ baseDir })}. ` +
-        "Run `weft set-transport supabase --url <url> --anon-key <key>` to write it, or re-run " +
-        "the installer to seed the hosted defaults.",
+        "Re-run the installer to seed the hosted defaults.",
     );
   }
   return { kind: "supabase", url: creds.url, anonKey: creds.anonKey };
