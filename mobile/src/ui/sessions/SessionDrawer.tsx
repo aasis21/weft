@@ -48,16 +48,10 @@ function fmtRelative(ts: number | null): string {
 }
 
 function lastActivity(session: SessionView): number | null {
-  const items = session.timeline.items;
-  let lastRealTs = 0;
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (item && (item.kind === 'user' || item.kind === 'assistant' || item.kind === 'tool')) {
-      lastRealTs = item.ts;
-      break;
-    }
-  }
-  return Math.max(lastRealTs, session.lastEventAt ?? 0) || null;
+  // Phone-domain only. `lastEventAt` is stamped on the phone as events arrive; timeline `item.ts`
+  // is the LAPTOP's clock, and feeding it to a `Date.now() - ts` age would misreport "N ago" (even
+  // negative "in the future") under cross-clock skew. Fall back to scan/add time (also phone-domain).
+  return session.lastEventAt ?? session.meta.scannedAt ?? session.meta.addedAt ?? null;
 }
 
 function turnCount(session: SessionView): number {

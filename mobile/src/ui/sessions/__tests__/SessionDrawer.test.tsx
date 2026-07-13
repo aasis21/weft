@@ -67,8 +67,10 @@ describe('SessionDrawer', () => {
     expect(within(rows[1]).getByText('1 approval')).toHaveClass('tag', 'alert');
   });
 
-  it('renders last active from real activity and ignores heartbeat-only pings', () => {
+  it('renders last active from real activity (lastEventAt) and ignores heartbeat-only pings', () => {
     vi.useFakeTimers({ now: 1_000_000 });
+    // lastEventAt is the phone-domain "real activity" marker — only bumped for unread activity,
+    // never for heartbeat pings. The age label reads from it, NOT the laptop-clock timeline item.ts.
     const activeTimeline: TimelineState = {
       ...emptyTimeline(),
       items: [{ kind: 'user', id: 'u1', text: 'hello', ts: 700_000 }],
@@ -82,7 +84,7 @@ describe('SessionDrawer', () => {
     render(
       <SessionDrawer
         sessions={[
-          session('active', 'Worker', 2_000, { timeline: activeTimeline, cwd: '' }),
+          session('active', 'Worker', 2_000, { timeline: activeTimeline, cwd: '', lastEventAt: 700_000 }),
           session('heartbeat', 'Heartbeat Only', 1_000, { timeline: heartbeatOnlyTimeline, cwd: '' }),
         ]}
         activeId={null}

@@ -85,6 +85,11 @@ export interface EnvelopeBase {
   eventType: EventType;
   eventSubtype: string;
   ts: number;
+  /** Client-side receipt time (phone `Date.now()`), stamped by the mobile runtime the instant an
+   *  envelope is received. NOT a wire field — never set by a sender, never transmitted. Used for
+   *  phone-domain elapsed-time math (heartbeat liveness, witnessed-silence) so a skewed laptop clock
+   *  in `ts` can't be compared against the phone's clock. Falls back to `ts` when absent. */
+  receivedAt?: number;
   /** Stamped by SecureChannel on publish. */
   channelId?: string;
   sessionId?: string;

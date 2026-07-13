@@ -73,6 +73,28 @@ describe('session applyEnvelope', () => {
     expect(session.connection.busy).toBe(true);
   });
 
+  it('stamps heartbeat liveness from the phone-domain receivedAt, not the laptop ts (cross-clock)', () => {
+    const session = makeSession();
+    const phoneNow = 1_000_000;
+    const laptopSkew = phoneNow + 120_000; // laptop clock runs 2 min ahead
+
+    // Heartbeat carries the laptop's ts but is stamped with the phone's receipt time at the edge.
+    const beat = { ...at(B.heartbeat(1, null), laptopSkew), receivedAt: phoneNow };
+    applyEnvelope(session, beat);
+    expect(session.connection.lastHeartbeat).toBe(phoneNow);
+
+    // CHANNEL_UP and STATE_SNAPSHOT liveness are likewise phone-domain.
+    const up = { ...at(B.channelUp('ch-1', 'id-1', undefined, 't'), laptopSkew), receivedAt: phoneNow };
+    applyEnvelope(session, up);
+    expect(session.connection.lastHeartbeat).toBe(phoneNow);
+  });
+
+  it('falls back to ts for heartbeat liveness when receivedAt is absent (older/test paths)', () => {
+    const session = makeSession();
+    applyEnvelope(session, at(B.heartbeat(1, null), 42));
+    expect(session.connection.lastHeartbeat).toBe(42);
+  });
+
   it('tracks approval requests and dismisses them via the pure helper', () => {
     const session = makeSession();
     const req = at(B.approvalRequest('a1', 'shell', { cmd: 'pwd' }, [{ id: 'allow', label: 'Allow' }]), 20);

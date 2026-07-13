@@ -669,6 +669,12 @@ export class SessionRuntime {
     // acting on it could set a stale card back to 'live' with no live connection.
     if (ctrl.client !== client) return;
 
+    // Stamp a phone-local receipt time the instant we receive the envelope. All downstream
+    // elapsed-time math (heartbeat liveness in applyEnvelope, witnessed-silence) uses THIS, never
+    // `message.ts` — that field is the laptop's clock and comparing it to the phone's clock flaps
+    // sessions idle/offline (and skews "N ago") whenever the two machines' clocks disagree.
+    message.receivedAt = this.clock();
+
     const wasLive = before.connection.status === 'live';
     const prevCwd = before.meta.cwd;
     const prevSessionId = before.meta.sessionId;

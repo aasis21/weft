@@ -149,10 +149,15 @@ export function markInterrupted(session: Session, ts: number): void {
 }
 
 export function applyEnvelope(session: Session, message: EventEnvelope): void {
+  // Liveness clock: phone-local receipt time (set at the runtime edge) so heartbeat freshness is
+  // measured against the SAME clock the watchdog uses (`this.clock()`). Never `message.ts` here —
+  // that's the laptop's clock and cross-clock skew would flap the session idle/offline. Falls back
+  // to `message.ts` for older code paths / tests that don't stamp `receivedAt`.
+  const beatTs = message.receivedAt ?? message.ts;
   if (!(message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN)) {
     session.connection.status = 'live';
     session.connection.error = undefined;
-    if (session.connection.lastHeartbeat == null) session.connection.lastHeartbeat = message.ts;
+    if (session.connection.lastHeartbeat == null) session.connection.lastHeartbeat = beatTs;
   }
 
   switch (message.eventType) {
@@ -214,14 +219,14 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           applyRecentTurns(session, message.msg);
           return;
         case SUBTYPE.CONTROL.STATE_SNAPSHOT:
-          applyStateSnapshot(session, message.msg, message.ts);
+          applyStateSnapshot(session, message.msg, message.ts, beatTs);
           return;
         case SUBTYPE.CONTROL.CHANNEL_UP:
           if (message.sessionId && message.sessionId !== 'unknown-session') session.meta.sessionId = message.sessionId;
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
           if (!session.meta.renamed)
             session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
-          session.connection.lastHeartbeat = message.ts;
+          session.connection.lastHeartbeat = beatTs;
           session.connection.ended = false;
           session.connection.endedReason = undefined;
           session.connection.busy = false;
@@ -254,7 +259,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
             session.connection.busy = false;
             session.connection.busyFrom = message.ts;
           }
-          session.connection.lastHeartbeat = message.ts;
+          session.connection.lastHeartbeat = beatTs;
           session.connection.ended = false;
           session.history.latestTurnIndex = maxCursor(session.history.latestTurnIndex, beat.latestTurnIndex);
           return;
@@ -498,7 +503,7 @@ function highestTurnIndex(items: HistoryItem[]): number | null {
   return max;
 }
 
-function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number): void {
+function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number, beatTs: number): void {
   // Only honor an explicit boolean (mirrors HEARTBEAT); a null/absent busy must never clear a live
   // turn mid-flight (#99).
   if (typeof snap.busy === 'boolean') {
@@ -518,7 +523,7 @@ function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number
   // are stripped upstream (sessionRuntime.filterInFlight) so a just-answered card can't reappear (#79).
   session.requests.approvals = snap.approvals ?? [];
   session.requests.elicitations = snap.elicitations ?? [];
-  session.connection.lastHeartbeat = ts;
+  session.connection.lastHeartbeat = beatTs;
   session.connection.ended = false;
   session.history.latestTurnIndex = maxCursor(session.history.latestTurnIndex, snap.latestTurnIndex);
 }
