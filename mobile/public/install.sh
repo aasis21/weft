@@ -150,33 +150,33 @@ for p in "${LEGACY_ENV_PATHS[@]}"; do
 done
 
 if [ "$APPLY_TRANSPORT" = "1" ]; then
+  # Always seed ~/.weft/supabase.json with the hosted (or WEFT_SUPABASE_URL/ANON_KEY overridden)
+  # creds, REGARDLESS of the chosen transport. That way `weft set-transport supabase` later is
+  # truly zero-config even for a devtunnel-first install — the creds are already on disk, so the
+  # user never has to re-run the installer or hunt down a url + anon key to switch. We write the
+  # file directly (not via `weft set-transport`) so seeding creds and flipping the pointer stay
+  # independent. Skip the write if the file already exists AND the caller didn't explicitly set
+  # WEFT_SUPABASE_URL/ANON_KEY AND WEFT_FORCE wasn't used - same contract as everywhere else.
+  SUPABASE_CREDS_PATH="$WEFT_HOME/supabase.json"
+  if [ -f "$SUPABASE_CREDS_PATH" ] && [ "$RELAY_CREDS_EXPLICIT" != "1" ] && [ "$FORCE" != "1" ]; then
+    ok "Existing supabase credentials found -> $SUPABASE_CREDS_PATH - left untouched."
+  else
+    # Delegate to node for correct JSON escaping (URLs and keys can contain characters that
+    # would need careful shell quoting), and use a .tmp + mv so a crash mid-write can't leave
+    # a half-written creds file. chmod 600 mirrors what saveSupabaseCredentials does.
+    TMP_CREDS="$WEFT_HOME/.supabase.$$.$(date +%s).tmp"
+    node -e '
+      const fs = require("fs");
+      const [tmp, url, key] = process.argv.slice(1);
+      fs.writeFileSync(tmp, JSON.stringify({ url, anonKey: key }) + "\n", { mode: 0o600 });
+    ' "$TMP_CREDS" "$RELAY_URL" "$RELAY_KEY"
+    mv -f "$TMP_CREDS" "$SUPABASE_CREDS_PATH"
+    chmod 600 "$SUPABASE_CREDS_PATH" 2>/dev/null || true
+    ok "seeded supabase credentials -> $SUPABASE_CREDS_PATH (so 'weft set-transport supabase' works anytime)"
+  fi
+  # Flip the pointer to the chosen transport. supabase needs no --url/--anon-key -
+  # resolveTransportDescriptor reads supabase.json (just guaranteed to exist) at pairing time.
   if [ "$TRANSPORT" = "supabase" ]; then
-    # Seed ~/.weft/supabase.json BEFORE flipping the pointer, so `set-transport supabase`
-    # never has to complain about missing creds. We write the file directly (not via
-    # `weft set-transport supabase --url X --anon-key Y`) so the two decisions stay
-    # independent: overriding just the URL doesn't imply flipping the pointer, and flipping
-    # the pointer doesn't require re-typing the creds. Skip the write if the file already
-    # exists AND the caller didn't explicitly set WEFT_SUPABASE_URL/ANON_KEY AND WEFT_FORCE
-    # wasn't used - same contract as everywhere else in this script.
-    SUPABASE_CREDS_PATH="$WEFT_HOME/supabase.json"
-    if [ -f "$SUPABASE_CREDS_PATH" ] && [ "$RELAY_CREDS_EXPLICIT" != "1" ] && [ "$FORCE" != "1" ]; then
-      ok "Existing supabase credentials found -> $SUPABASE_CREDS_PATH - left untouched."
-    else
-      # Delegate to node for correct JSON escaping (URLs and keys can contain characters that
-      # would need careful shell quoting), and use a .tmp + mv so a crash mid-write can't leave
-      # a half-written creds file. chmod 600 mirrors what saveSupabaseCredentials does.
-      TMP_CREDS="$WEFT_HOME/.supabase.$$.$(date +%s).tmp"
-      node -e '
-        const fs = require("fs");
-        const [tmp, url, key] = process.argv.slice(1);
-        fs.writeFileSync(tmp, JSON.stringify({ url, anonKey: key }) + "\n", { mode: 0o600 });
-      ' "$TMP_CREDS" "$RELAY_URL" "$RELAY_KEY"
-      mv -f "$TMP_CREDS" "$SUPABASE_CREDS_PATH"
-      chmod 600 "$SUPABASE_CREDS_PATH" 2>/dev/null || true
-      ok "wrote supabase credentials -> $SUPABASE_CREDS_PATH"
-    fi
-    # Now flip the pointer. No --url/--anon-key needed - resolveTransportDescriptor reads
-    # supabase.json (which we just guaranteed exists) at pairing time.
     node "$INSTALL_DIR/weft.mjs" set-transport supabase >/dev/null
   else
     node "$INSTALL_DIR/weft.mjs" set-transport devtunnel >/dev/null

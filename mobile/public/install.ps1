@@ -35,8 +35,8 @@
 .PARAMETER SupabaseUrl
   The relay Supabase URL. Written to ~/.weft/supabase.json (kept next to weft.config.json so the
   pointer and the creds have independent lifecycles). The baked default points at the hosted
-  Weft relay; override this to point at your own Supabase project. Can also be changed later
-  with `weft set-transport supabase --url <url> --anon-key <key>`.
+  Weft relay; override this to point at your own Supabase project. Can also be changed later by
+  editing ~/.weft/supabase.json (or re-running this installer with -SupabaseUrl/-SupabaseKey).
 
 .PARAMETER SupabaseKey
   The relay publishable (anon) key. Written to ~/.weft/supabase.json alongside SupabaseUrl.
@@ -193,30 +193,30 @@ foreach ($p in $legacyEnvPaths) {
 }
 
 if ($applyTransport) {
+    # Always seed ~/.weft/supabase.json with the hosted (or -SupabaseUrl/-SupabaseKey overridden)
+    # creds, REGARDLESS of the chosen transport. That way `weft set-transport supabase` later is
+    # truly zero-config even for a devtunnel-first install — the creds are already on disk, so the
+    # user never has to re-run the installer or hunt down a url + anon key to switch. We write the
+    # file directly (not via `weft set-transport`) so seeding creds and flipping the pointer stay
+    # independent. Skip the write if the file already exists AND the caller didn't explicitly pass
+    # -SupabaseUrl/-SupabaseKey AND -Force wasn't used — same "installer only refreshes code"
+    # contract as everything else in this script.
+    $supabaseCredsPath = Join-Path $weftHome 'supabase.json'
+    $supabaseExplicit = $PSBoundParameters.ContainsKey('SupabaseUrl') -or $PSBoundParameters.ContainsKey('SupabaseKey')
+    if ((Test-Path $supabaseCredsPath) -and -not $supabaseExplicit -and -not $Force) {
+        Ok "Existing supabase credentials found -> $supabaseCredsPath — left untouched."
+    } else {
+        # Atomic write via .tmp + rename so a crash mid-write can't leave a half-written
+        # creds file. ConvertTo-Json handles quoting/escaping so we don't hand-craft JSON.
+        $tmp = Join-Path $weftHome (".supabase." + [Guid]::NewGuid().ToString('N') + '.tmp')
+        $json = ([pscustomobject]@{ url = $SupabaseUrl; anonKey = $SupabaseKey }) | ConvertTo-Json -Compress
+        [System.IO.File]::WriteAllText($tmp, $json + "`n")
+        Move-Item -Path $tmp -Destination $supabaseCredsPath -Force
+        Ok "seeded supabase credentials -> $supabaseCredsPath  $(Dim '(so `weft set-transport supabase` works anytime)')"
+    }
+    # Flip the pointer to the chosen transport. supabase needs no --url/--anon-key —
+    # resolveTransportDescriptor reads supabase.json (just guaranteed to exist) at pairing time.
     if ($Transport -eq 'supabase') {
-        # Seed ~/.weft/supabase.json BEFORE flipping the pointer, so `set-transport supabase`
-        # never has to complain about missing creds. We write this file directly (not via
-        # `weft set-transport supabase --url X --anon-key Y`) so the two decisions stay
-        # independent: overriding just the URL doesn't imply also flipping the pointer, and
-        # flipping the pointer doesn't require re-typing the creds. Skip the write if the file
-        # already exists AND the caller didn't explicitly pass -SupabaseUrl/-SupabaseKey AND
-        # -Force wasn't used — same "installer only ever refreshes code" contract as everything
-        # else in this script.
-        $supabaseCredsPath = Join-Path $weftHome 'supabase.json'
-        $supabaseExplicit = $PSBoundParameters.ContainsKey('SupabaseUrl') -or $PSBoundParameters.ContainsKey('SupabaseKey')
-        if ((Test-Path $supabaseCredsPath) -and -not $supabaseExplicit -and -not $Force) {
-            Ok "Existing supabase credentials found -> $supabaseCredsPath — left untouched."
-        } else {
-            # Atomic write via .tmp + rename so a crash mid-write can't leave a half-written
-            # creds file. ConvertTo-Json handles quoting/escaping so we don't hand-craft JSON.
-            $tmp = Join-Path $weftHome (".supabase." + [Guid]::NewGuid().ToString('N') + '.tmp')
-            $json = ([pscustomobject]@{ url = $SupabaseUrl; anonKey = $SupabaseKey }) | ConvertTo-Json -Compress
-            [System.IO.File]::WriteAllText($tmp, $json + "`n")
-            Move-Item -Path $tmp -Destination $supabaseCredsPath -Force
-            Ok "wrote supabase credentials -> $supabaseCredsPath"
-        }
-        # Now flip the pointer. No --url/--anon-key needed — resolveTransportDescriptor reads
-        # supabase.json (which we just guaranteed exists) at pairing time.
         & node $weftBin set-transport supabase | Out-Null
     } else {
         & node $weftBin set-transport devtunnel | Out-Null
