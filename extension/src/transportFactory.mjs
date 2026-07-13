@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createClient } from "@supabase/supabase-js";
-import WebSocket from "ws";
 import {
   createLocalTransport,
   createSupabaseTransport,
@@ -8,6 +7,7 @@ import {
 } from "@aasis21/weft-shared";
 import { loadTransportConfig, loadSupabaseCredentials, supabaseCredentialsPath } from "./transportConfig.mjs";
 import { resolveDevTunnelTransport } from "./devtunnel.mjs";
+import { createReconnectingSocket } from "./reconnectingSocket.mjs";
 
 /**
  * Resolve which transport + endpoint the laptop should use — no client is constructed here.
@@ -123,7 +123,12 @@ export function createTransportFromDescriptor(descriptor, { channelId }) {
     // (see relayServer.mjs) reads `?channelId=` from the incoming URL to room-match this socket
     // with the phone's; createRelayTransport itself never puts channelId on the wire (see
     // shared/transport-relay.mjs).
-    const socket = new WebSocket(withChannelId(descriptor.url, channelId));
+    //
+    // Unlike a raw one-shot `ws` socket, this self-healing wrapper reconnects with backoff and
+    // pings to keep the tunnel warm — matching supabase-js's self-reconnecting realtime socket —
+    // so an idle-dropped Dev Tunnel connection can no longer silently kill the Device Station
+    // with a "Detected unsettled top-level await" exit (see reconnectingSocket.mjs).
+    const socket = createReconnectingSocket(withChannelId(descriptor.url, channelId));
     return createRelayTransport({ socket, channelId });
   }
 
