@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { DebugEvent } from '@/lib/eventLog';
 
@@ -26,7 +26,15 @@ interface DebugPanelProps {
   events: DebugEvent[];
   title: string;
   detail?: DebugDetail;
+  /** Simple label/value identifiers shown under an "Identifiers" tab (used by the device view,
+   *  which has no session-shaped {@link DebugDetail} — just stable comms IDs + a note). */
+  identifiers?: DebugIdentifiers;
   onClose(): void;
+}
+
+export interface DebugIdentifiers {
+  rows: { label: string; value: string }[];
+  note?: string;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -97,8 +105,8 @@ function lifecycleSummary(detail: DebugDetail): string {
   return parts.join(' · ');
 }
 
-export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps): JSX.Element {
-  const [tab, setTab] = useState<'log' | 'detail'>('log');
+export function DebugPanel({ events, title, detail, identifiers, onClose }: DebugPanelProps): JSX.Element {
+  const [tab, setTab] = useState<'log' | 'detail' | 'identifiers'>('log');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const ordered = useMemo(() => [...events].reverse(), [events]);
   const toggle = (id: string): void => setExpanded((m) => ({ ...m, [id]: !m[id] }));
@@ -184,7 +192,7 @@ export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps):
           </button>
         </header>
 
-        {detail ? (
+        {detail || identifiers ? (
           <div className="debug-tabs" role="tablist" aria-label="Debug views">
             <button
               type="button"
@@ -195,15 +203,28 @@ export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps):
             >
               Event log
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === 'detail'}
-              className={`debug-tab ${tab === 'detail' ? 'active' : ''}`}
-              onClick={() => setTab('detail')}
-            >
-              Dev detail
-            </button>
+            {detail ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'detail'}
+                className={`debug-tab ${tab === 'detail' ? 'active' : ''}`}
+                onClick={() => setTab('detail')}
+              >
+                Dev detail
+              </button>
+            ) : null}
+            {identifiers ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'identifiers'}
+                className={`debug-tab ${tab === 'identifiers' ? 'active' : ''}`}
+                onClick={() => setTab('identifiers')}
+              >
+                Identifiers
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -237,6 +258,18 @@ export function DebugPanel({ events, title, detail, onClose }: DebugPanelProps):
             <dt>Latest event</dt>
             <dd>{fmtStamp(detail.lastEventAt)}</dd>
           </dl>
+        ) : identifiers && tab === 'identifiers' ? (
+          <div className="debug-identifiers">
+            <dl className="debug-detail" aria-label="Comms identifiers">
+              {identifiers.rows.map((row) => (
+                <Fragment key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd className="mono">{row.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+            {identifiers.note ? <p className="debug-id-note">{identifiers.note}</p> : null}
+          </div>
         ) : ordered.length === 0 ? (
           <p className="debug-empty">No events captured yet.</p>
         ) : (

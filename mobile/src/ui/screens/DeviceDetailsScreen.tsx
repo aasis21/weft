@@ -98,6 +98,17 @@ export function DeviceDetailsScreen({
             {lastSeen ? <span className="device-status-seen">· last seen {lastSeen}</span> : null}
           </span>
         </div>
+        <div className="status-icons">
+          <button
+            className="icon-btn debug-btn"
+            type="button"
+            onClick={() => setLogOpen(true)}
+            aria-label="Debug events"
+            title="Event log & comms identifiers"
+          >
+            <span className="debug-glyph" aria-hidden="true">{'{ }'}</span>
+          </button>
+        </div>
       </header>
 
       <div className="session-join-inner">
@@ -123,9 +134,6 @@ export function DeviceDetailsScreen({
                 Make default
               </button>
             ) : null}
-            <button type="button" className="session-link-btn" onClick={() => setLogOpen(true)}>
-              Event log ({device.events.length})
-            </button>
             <button type="button" className="session-link-btn danger" onClick={() => void onForget(device.channelId)}>
               Forget
             </button>
@@ -159,33 +167,25 @@ export function DeviceDetailsScreen({
             </ul>
           )}
         </section>
-
-        <details className="session-join-fallback device-card device-advanced">
-          <summary>Advanced: comms identifiers</summary>
-          <dl className="device-id-list">
-            <div className="device-id-row">
-              <dt>Device ID</dt>
-              <dd className="mono">{device.deviceId ?? '—'}</dd>
-            </div>
-            <div className="device-id-row">
-              <dt>Latest channel ID</dt>
-              <dd className="mono">{device.channelId}</dd>
-            </div>
-            <div className="device-id-row">
-              <dt>Transport</dt>
-              <dd className="mono">{transportIdentity(device.transport).label}</dd>
-            </div>
-          </dl>
-          <p className="device-card-sub">
-            Device ID is stable across <code>weft start</code> restarts; the channel ID is a
-            fresh pairing channel minted every run, for forward secrecy. Transport is the relay
-            this device pairs over — it matches the <code>Transport</code> line on <code>weft start</code>.
-          </p>
-        </details>
       </div>
 
       {logOpen ? (
-        <DebugPanel events={device.events} title={deviceLabel(device)} onClose={() => setLogOpen(false)} />
+        <DebugPanel
+          events={device.events}
+          title={deviceLabel(device)}
+          identifiers={{
+            rows: [
+              { label: 'Device ID', value: device.deviceId ?? '—' },
+              { label: 'Latest channel ID', value: device.channelId },
+              { label: 'Transport', value: transportIdentity(device.transport).label },
+            ],
+            note:
+              'Device ID is stable across weft start restarts; the channel ID is a fresh pairing ' +
+              'channel minted every run, for forward secrecy. Transport is the relay this device ' +
+              'pairs over — it matches the Transport line on weft start.',
+          }}
+          onClose={() => setLogOpen(false)}
+        />
       ) : null}
 
       {drawerOpen ? (

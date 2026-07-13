@@ -168,4 +168,34 @@ describe('DebugPanel', () => {
     render(<DebugPanel events={[]} title="t" onClose={vi.fn()} />);
     expect(screen.queryByRole('tab', { name: 'Dev detail' })).not.toBeInTheDocument();
   });
+
+  it('shows an Identifiers tab with label/value rows and a note when identifiers are provided', async () => {
+    const user = userEvent.setup();
+    render(
+      <DebugPanel
+        events={[ev({ id: 'a', dir: 'in', eventType: 'control', eventSubtype: 'projects' })]}
+        title="Devbox"
+        onClose={vi.fn()}
+        identifiers={{
+          rows: [
+            { label: 'Device ID', value: 'dev-abc' },
+            { label: 'Latest channel ID', value: 'chan-xyz' },
+            { label: 'Transport', value: 'Supabase' },
+          ],
+          note: 'Device ID is stable across weft start restarts.',
+        }}
+      />,
+    );
+
+    // Event log is the default tab; no session Dev detail tab here.
+    expect(screen.queryByRole('tab', { name: 'Dev detail' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Event log' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Identifiers' }));
+    expect(screen.getByText('Device ID')).toBeInTheDocument();
+    expect(screen.getByText('dev-abc')).toBeInTheDocument();
+    expect(screen.getByText('chan-xyz')).toBeInTheDocument();
+    expect(screen.getByText('Supabase')).toBeInTheDocument();
+    expect(screen.getByText('Device ID is stable across weft start restarts.')).toBeInTheDocument();
+  });
 });
