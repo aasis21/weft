@@ -377,6 +377,15 @@ export class SessionRuntime {
       if (activeId) warmIds.add(activeId);
     }
 
+    // #163 boot auto-archive: sessions whose *witnessed* silence already crossed the 2h archive
+    // window (but not the 2-day delete window handled above) start in the calm Archived state —
+    // cold, no live socket, out of the warm pool — rather than burning a reconnect on a laptop
+    // we last heard from hours ago. The user taps to reconnect. Active/pinned are spared.
+    const archivedIds = new Set(
+      stored.filter((s) => this.isArchiveEligible(s, activeId)).map((s) => s.pairing.channelId),
+    );
+    for (const id of archivedIds) warmIds.delete(id);
+
     for (const s of stored) {
       const channelId = s.pairing.channelId;
       allowTranscriptWrites(channelId);
@@ -386,6 +395,7 @@ export class SessionRuntime {
         timeline,
         eventsById.get(channelId) ?? [],
         warmIds.has(channelId) ? 'connecting' : 'idle',
+        archivedIds.has(channelId),
       );
       this.store.dispatch(sessionAdded(session));
       this.controllers.set(channelId, new ChannelController(channelId));
@@ -427,6 +437,7 @@ export class SessionRuntime {
     timeline: TimelineState,
     events: Session['debug'],
     status: Session['connection']['status'],
+    cold = false,
   ): Session {
     const channelId = stored.pairing.channelId;
     const cwd = timeline.cwd ?? stored.cwd;
@@ -462,6 +473,7 @@ export class SessionRuntime {
     };
     session.connection.mode = timeline.mode;
     session.connection.status = status;
+    session.connection.cold = cold;
     session.debug = events;
     return session;
   }
@@ -794,6 +806,10 @@ export class SessionRuntime {
     const ctrl = this.controllers.get(channelId);
     const session = this.session(channelId);
     if (!ctrl || !session || ctrl.ephemeral) return;
+    // Leave the warm pool so the foreground resume sweep + eviction stop treating it as a live
+    // member (an archived session must not be auto-revived on every foreground — the user taps to
+    // reconnect). Idempotent: eviction already splices the victim before calling here.
+    this.warmLru = this.warmLru.filter((id) => id !== channelId);
     ctrl.dispose();
     this.controllers.delete(channelId);
     this.registry.dispose(channelId);
@@ -802,6 +818,7 @@ export class SessionRuntime {
       this.store.dispatch(coldSet({ id: channelId, on: true }));
     }
     if (session.connection.busy) this.store.dispatch(busySet({ id: channelId, busy: false }));
+    this.persistLiveness(channelId, true);
   }
 
   private ensureConnected(channelId: string): void {
@@ -991,7 +1008,7 @@ export class SessionRuntime {
     // replacing it here is clean.
     if (ctrl.client && device.connected) return;
     ctrl.reconnecting = true;
-    this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
+    this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true, attempt: true }));
     try {
       // Reuse the phone's ORIGINAL keypair from registration (connectDeviceSession, mirroring
       // connectSession) rather than pairWithPublicKey's fresh-keypair full handshake — the
@@ -1353,6 +1370,20 @@ export class SessionRuntime {
     }
   }
 
+  /** True when a stored session should start (or be moved) in the calm **Archived** state (#163):
+   *  its *witnessed* silence exceeds AUTO_ARCHIVE_MS (2h) but not yet AUTO_DELETE_MS (2d, at which
+   *  point {@link isDeleteEligible} purges it instead). Pinned and the spared (active/last-active)
+   *  session are never auto-archived. Sessions never witnessed with a pulse are ineligible. */
+  private isArchiveEligible(s: StoredSession, spareId: string | null): boolean {
+    if (s.pinned) return false;
+    if (s.pairing.channelId === spareId) return false;
+    const beat = s.lastHeartbeatAt;
+    const witnessed = s.lastSubscribedAt;
+    if (beat == null || witnessed == null) return false;
+    const silence = witnessed - beat;
+    return silence > AUTO_ARCHIVE_MS && silence <= AUTO_DELETE_MS;
+  }
+
   async reconnect(channelId: string): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
@@ -1660,6 +1691,7 @@ export class SessionRuntime {
     if (this.watchdog !== null) return;
     this.watchdog = setInterval(() => {
       const now = this.clock();
+      const activeId = this.activeId();
       for (const session of selectAllSessions(this.store.getState())) {
         const ctrl = this.controllers.get(session.id);
         if (!ctrl || ctrl.ephemeral) continue;
@@ -1683,9 +1715,25 @@ export class SessionRuntime {
           continue;
         }
         ctrl.connectingSince = null;
+        const beat = session.connection.lastHeartbeat;
+        // Auto-archive (#163): once we've heard nothing from the laptop for AUTO_ARCHIVE_MS, drop
+        // to the calm Archived state (cold, socket released, out of the warm pool) regardless of
+        // whether the card is still Live/Quiet or already flipped to Offline. Runs before the
+        // live/idle guard so an Offline (error) card can still cool down. Never archive the card the
+        // user is viewing, a busy turn, or one already cold/ended.
+        if (
+          beat != null &&
+          now - beat > AUTO_ARCHIVE_MS &&
+          !session.connection.cold &&
+          !session.connection.busy &&
+          session.connection.status !== 'ended' &&
+          session.id !== activeId
+        ) {
+          this.coolDown(session.id);
+          continue;
+        }
         if (status !== 'live' && status !== 'idle') continue;
         if (!ctrl.client) continue;
-        const beat = session.connection.lastHeartbeat;
         if (beat && now - beat > OFFLINE_AFTER_MS) {
           this.store.dispatch(
             statusSet({ id: session.id, status: 'error', error: 'Connection lost — reconnect to resume.' }),

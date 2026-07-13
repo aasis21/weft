@@ -106,6 +106,11 @@ export interface ListenerDeviceState extends RegisteredDevice {
   projectsLoading: boolean;
   connected: boolean;
   error?: string;
+  /** Epoch ms of the most recent attempt to (re)connect to this laptop — stamped when a connect
+   *  attempt begins, independent of whether it succeeds. Paired with `lastSeenAt` (last SUCCESSFUL
+   *  contact) it lets the sidebar say "last seen 2h ago · tried 5s ago" so a wedged/offline laptop
+   *  reads honestly instead of a bare "Offline". Runtime-only (not persisted); resets each app run. */
+  lastAttemptAt?: number;
   /** Raw wire events exchanged over the DEVICE (listener) channel — project list request/reply,
    *  spawn request/pairing/result, forget — oldest-first (DebugPanel renders them newest-first).
    *  Excludes DEVICE_HEARTBEAT (liveness is already surfaced via `connected`/`lastSeenAt`). Not

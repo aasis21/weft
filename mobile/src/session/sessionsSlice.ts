@@ -183,11 +183,14 @@ const sessionsSlice = createSlice({
     deviceDefaultSet(state, action: PayloadAction<string>) {
       for (const device of state.devices) device.isDefault = device.channelId === action.payload;
     },
-    deviceProjectsLoadingSet(state, action: PayloadAction<{ channelId: string; loading: boolean; error?: string }>) {
+    deviceProjectsLoadingSet(state, action: PayloadAction<{ channelId: string; loading: boolean; error?: string; attempt?: boolean }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) {
         device.projectsLoading = action.payload.loading;
         device.error = action.payload.error;
+        // A fresh (re)connect attempt — record when we last TRIED, independent of success, so the
+        // sidebar can show "tried Ns ago" for a laptop that isn't answering.
+        if (action.payload.attempt) device.lastAttemptAt = Date.now();
       }
     },
     deviceProjectsReceived(

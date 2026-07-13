@@ -214,7 +214,11 @@ export function SessionDrawer({
 
   const renderDeviceRow = (device: ListenerDeviceState): JSX.Element => {
     const status = deviceStatus(device);
+    // Three clocks (now / last connected / last tried): show when we last SUCCEEDED (lastSeenAt),
+    // and — while not Online — when we last TRIED (lastAttemptAt), so a laptop that isn't answering
+    // reads "Offline · last seen 2h ago · tried 5s ago" rather than a bare, ambiguous "Offline".
     const lastSeen = formatLastSeen(device.lastSeenAt);
+    const lastTried = !device.connected ? formatLastSeen(device.lastAttemptAt) : null;
     const projectsLabel = device.projectsLoading
       ? 'Loading projects…'
       : device.projects.length > 0
@@ -246,7 +250,8 @@ export function SessionDrawer({
           </span>
           <span className="session-sub">
             {status.label}
-            {lastSeen ? ` · ${lastSeen}` : ''}
+            {lastSeen ? ` · seen ${lastSeen}` : ''}
+            {lastTried ? ` · tried ${lastTried}` : ''}
             {` · ${projectsLabel}`}
           </span>
         </span>

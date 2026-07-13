@@ -10,9 +10,9 @@ export function deviceStatus(device: ListenerDeviceState): { label: string; tone
   return { label: 'Offline', tone: 'offline' };
 }
 
-export function formatLastSeen(ts?: number): string | null {
+export function formatLastSeen(ts?: number, now: number = Date.now()): string | null {
   if (!ts) return null;
-  const diffMs = Date.now() - ts;
+  const diffMs = now - ts;
   if (diffMs < 45_000) return 'just now';
   const minutes = Math.round(diffMs / 60_000);
   if (minutes < 60) return `${minutes}m ago`;
