@@ -286,10 +286,23 @@ table.cmds td { border-top: 1px solid var(--border); padding: 13px 12px; vertica
 table.cmds td:first-child { font-family: var(--mono); color: var(--accent); white-space: nowrap; width: 1%; }
 table.cmds td:last-child { color: var(--fg-dim); }
 
-.arch { border: 1px solid var(--border); border-radius: 16px; padding: 30px; background: var(--bg-elev);
-  font-family: var(--mono); font-size: 14px; color: var(--fg-dim); line-height: 1.9; overflow-x: auto; }
-.arch b { color: var(--fg); }
-.arch .accentline { color: var(--accent); }
+.arch { border: 1px solid var(--border); border-radius: 16px; padding: 26px; background: var(--bg-elev);
+  display: flex; flex-direction: column; align-items: stretch; }
+.arch-node { border: 1px solid var(--border); border-radius: 12px; padding: 15px 18px; background: var(--bg);
+  display: flex; flex-direction: column; gap: 5px; }
+.arch-node.arch-relay { border-style: dashed; }
+.arch-role { font-family: var(--mono); font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--fg-dim); opacity: .65; }
+.arch-name { font-size: 15px; color: var(--fg-dim); }
+.arch-name b { color: var(--fg); }
+.arch-name code { font-family: var(--mono); color: var(--accent); font-size: .9em; }
+.arch-name .sep { opacity: .45; padding: 0 2px; }
+.arch-link { position: relative; height: 42px; display: flex; align-items: center; justify-content: center; }
+.arch-link::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px;
+  background: var(--border); transform: translateX(-50%); }
+.arch-link-label { position: relative; background: var(--bg-elev); padding: 3px 11px;
+  border: 1px solid var(--border); border-radius: 999px; font-family: var(--mono); font-size: 11px;
+  color: var(--accent); }
 
 .closing { text-align: center; }
 footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto; padding: 40px 32px;
@@ -311,6 +324,25 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
   .feature-grid { grid-template-columns: 1fr; } .gallery { grid-template-columns: 1fr; }
   .tcards { grid-template-columns: 1fr; }
   .states { grid-template-columns: 1fr 1fr; } .nav-links a:not(.nav-cta) { display: none; }
+}
+
+.mobile-only { display: none; }
+@media (max-width: 640px) {
+  tr.hide-mobile { display: none; }
+  .mobile-only { display: block; }
+  .cmds-more { margin-top: 14px; font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); }
+  .cmds-more code { color: var(--accent); }
+  .arch { padding: 18px; }
+  .arch-role { font-size: 10px; }
+  /* Stack each command as a block (command on top, description below) — a 2-col table is too
+     cramped at phone widths and the description column wraps into a tall sliver. */
+  table.cmds, table.cmds tbody, table.cmds tr, table.cmds td { display: block; width: auto; }
+  table.cmds tr { border-top: 1px solid var(--border); padding: 13px 0; }
+  table.cmds tr:first-child { border-top: none; }
+  table.cmds td { border-top: none; padding: 0; }
+  table.cmds td:first-child { width: auto; white-space: normal; overflow-wrap: anywhere;
+    margin-bottom: 5px; font-size: 12.5px; }
+  table.cmds tr.hide-mobile { display: none; }
 }
 </style>
 </head>
@@ -514,11 +546,20 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
       <p class="section-lede">The Copilot CLI extension and the mobile app do all the real work; the relay just forwards encrypted envelopes.</p>
     </header>
     <div class="arch reveal">
-<b>copilot CLI</b> ── /weft extension ──┐
-                                          <span class="accentline">encrypted envelopes only</span>
-                    device pairing ──►  <b>relay</b>  (Supabase realtime · dev tunnel)
-                                          <span class="accentline">encrypted envelopes only</span>
-                                        └── <b>Weft mobile</b> (web / iOS / Android)
+      <div class="arch-node">
+        <span class="arch-role">your laptop</span>
+        <span class="arch-name"><b>Copilot CLI</b> <span class="sep">·</span> <code>/weft</code> extension</span>
+      </div>
+      <div class="arch-link"><span class="arch-link-label">encrypted envelopes only</span></div>
+      <div class="arch-node arch-relay">
+        <span class="arch-role">dumb middle · sees nothing</span>
+        <span class="arch-name"><b>Relay</b> <span class="sep">·</span> Supabase realtime <span class="sep">/</span> dev tunnel</span>
+      </div>
+      <div class="arch-link"><span class="arch-link-label">encrypted envelopes only</span></div>
+      <div class="arch-node">
+        <span class="arch-role">your phone</span>
+        <span class="arch-name"><b>Weft mobile</b> <span class="sep">·</span> web / iOS / Android</span>
+      </div>
     </div>
   </section>
 
@@ -538,19 +579,20 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
         <tr><td>/weft [supabase|devtunnel]</td><td>In a Copilot session: pair your phone to the current session. Optional arg overrides the transport for this session only.</td></tr>
         <tr><td>weft start</td><td>Start the standalone Device Station and print a QR to pair from your phone.</td></tr>
         <tr><td>weft add-project &lt;name&gt; &lt;path&gt;</td><td>Register a project directory Weft can launch sessions in.</td></tr>
-        <tr><td>weft remove-project &lt;name&gt;</td><td>Forget a registered project.</td></tr>
+        <tr class="hide-mobile"><td>weft remove-project &lt;name&gt;</td><td>Forget a registered project.</td></tr>
         <tr><td>weft list-projects</td><td>List registered projects and which one is default.</td></tr>
-        <tr><td>weft set-default &lt;name&gt;</td><td>Choose the project a bare pairing launches into.</td></tr>
+        <tr class="hide-mobile"><td>weft set-default &lt;name&gt;</td><td>Choose the project a bare pairing launches into.</td></tr>
         <tr><td>weft set-transport &lt;supabase|devtunnel|clear&gt;</td><td>Choose (or clear) the pairing transport.</td></tr>
         <tr><td>weft set-pairing &lt;persistent|ephemeral&gt;</td><td>Device Station: reuse one channel/key across restarts (persistent) or mint a fresh one each start (ephemeral, the default).</td></tr>
-        <tr><td>weft rotate-pairing</td><td>Device Station: force a brand-new persistent channel/key, invalidating the old QR.</td></tr>
-        <tr><td>weft show-transport</td><td>Print the transport currently in effect and where it came from.</td></tr>
-        <tr><td>weft set-name &lt;name&gt;</td><td>Set the display name this device shows to your phone. Defaults to your OS hostname.</td></tr>
-        <tr><td>weft show-name</td><td>Print the device name currently in effect and where it came from.</td></tr>
+        <tr class="hide-mobile"><td>weft rotate-pairing</td><td>Device Station: force a brand-new persistent channel/key, invalidating the old QR.</td></tr>
+        <tr class="hide-mobile"><td>weft show-transport</td><td>Print the transport currently in effect and where it came from.</td></tr>
+        <tr class="hide-mobile"><td>weft set-name &lt;name&gt;</td><td>Set the display name this device shows to your phone. Defaults to your OS hostname.</td></tr>
+        <tr class="hide-mobile"><td>weft show-name</td><td>Print the device name currently in effect and where it came from.</td></tr>
         <tr><td>weft devtunnel &lt;start|status|stop&gt;</td><td>Bring up, check, or tear down the shared dev tunnel relay (used when the transport is <code>devtunnel</code>).</td></tr>
         <tr><td>weft help</td><td>Show usage.</td></tr>
       </tbody>
     </table>
+    <p class="cmds-more mobile-only">Project, naming &amp; introspection commands (<code>set-default</code>, <code>rotate-pairing</code>, <code>show-transport</code>, <code>set-name</code>…) are on the desktop table and in the <a href="https://github.com/aasis21/weft#commands" target="_blank" rel="noopener">README</a>.</p>
   </section>
 
   <section class="closing reveal">
