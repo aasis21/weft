@@ -124,6 +124,11 @@ const HOST_CONFIRM_MS = 30_000;
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
 const DEVICE_OFFLINE_AFTER_MS = 180_000;
+/** How long to wait between self-heal reconnect attempts for an offline device in the watchdog, so
+ *  a dead devtunnel/relay socket (which never re-opens on its own) gets re-established without an app
+ *  foreground/restart, yet a genuinely-unreachable relay isn't hammered every tick. Matches the
+ *  connect timeout (weftClient CONNECT_TIMEOUT_MS) so a failed attempt fully settles before retry. */
+const DEVICE_RECONNECT_BACKOFF_MS = 15_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
 const RESUME_DEBOUNCE_MS = 500;
 const MAX_WARM_SESSIONS = 50;
@@ -227,6 +232,9 @@ export class SessionRuntime {
   private eventSeq = 0;
   private resumeCleanups: Array<() => void> = [];
   private lastResumeAt = 0;
+  /** Per-device throttle stamps (ms) for the watchdog's self-heal reconnect, so a wedged offline
+   *  device is re-established on a backoff (DEVICE_RECONNECT_BACKOFF_MS) without hammering the relay. */
+  private readonly deviceReconnectAt = new Map<string, number>();
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
@@ -959,7 +967,14 @@ export class SessionRuntime {
     const device = this.device(channelId);
     if (!device) return;
     const ctrl = this.ensureListenerController(channelId);
-    if (ctrl.client || ctrl.reconnecting) return;
+    if (ctrl.reconnecting) return;
+    // Bail only if we already hold a HEALTHY client. A stale client whose socket silently died must
+    // be REPLACED, not treated as connected — the devtunnel/relay transport does NOT self-heal (see
+    // shared/transport-relay.mjs; unlike supabase-js it never re-opens a dropped socket), so once it
+    // drops the old `if (ctrl.client) return` guard short-circuited every watchdog/resume retry and
+    // wedged the device in "reconnecting" forever. attachListener() closes the previous client, so
+    // replacing it here is clean.
+    if (ctrl.client && device.connected) return;
     ctrl.reconnecting = true;
     this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true }));
     try {
@@ -1644,9 +1659,21 @@ export class SessionRuntime {
       // goes stale, rather than trusting the transport's own connect state alone (a hung/crashed
       // `weft` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
       for (const device of this.store.getState().sessions.devices) {
-        if (!device.connected || !device.lastSeenAt) continue;
-        if (now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {
+        if (device.connected && device.lastSeenAt && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {
           this.store.dispatch(deviceErrorSet({ channelId: device.channelId, connected: false }));
+        }
+        // Self-heal a wedged device without waiting for an app foreground (handleResume) or restart
+        // (init): the devtunnel/relay socket never re-opens on its own (unlike supabase), so once it
+        // drops nothing re-establishes it unless we drive it here. Retry on a backoff whenever the
+        // device is offline or its listener client is missing/dead.
+        const ctrl = this.listenerController(device.channelId);
+        const healthy = device.connected && !!ctrl?.client;
+        const lastTry = this.deviceReconnectAt.get(device.channelId) ?? 0;
+        if (!healthy && !ctrl?.reconnecting && now - lastTry > DEVICE_RECONNECT_BACKOFF_MS) {
+          this.deviceReconnectAt.set(device.channelId, now);
+          void this.connectDevice(device.channelId);
+        } else if (healthy && lastTry !== 0) {
+          this.deviceReconnectAt.delete(device.channelId);
         }
       }
     }, 1_000);
