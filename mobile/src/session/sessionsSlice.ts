@@ -256,19 +256,24 @@ const sessionsSlice = createSlice({
       if (device) {
         device.error = action.payload.error;
         if (action.payload.connected !== undefined) device.connected = action.payload.connected;
-        if (action.payload.connected) device.lastSeenAt = Date.now();
+        // NOTE: does NOT stamp lastSeenAt. This reducer fires for phone-side events (transport
+        // socket open, optimistic attach, request/transport errors) that are NOT proof the laptop
+        // sent anything. "Last seen" must only advance on genuine INBOUND messages from the laptop
+        // — see deviceSeen, dispatched from onListenerMessage.
         if (action.payload.error) device.projectsLoading = false;
       }
     },
     // Any inbound message on a device (listener) channel is proof the laptop is alive RIGHT NOW —
-    // so "last seen" tracks the last time the phone received ANYTHING from it, not just the
+    // so "last seen" tracks the last time the phone RECEIVED anything FROM the laptop, not just the
     // handful of subtypes (PROJECT_LIST / SESSION_OFFERS / DEVICE_HEARTBEAT) that carry their own
-    // state. Stamped at the single inbound choke point (sessionRuntime.onListenerMessage) so
-    // SPAWN_PAIRING, SPAWN_RESULT, and any future control message keep the device fresh too.
+    // state, and never phone-side send/connect actions. Stamped at the single inbound choke point
+    // (sessionRuntime.onListenerMessage) so SPAWN_PAIRING, SPAWN_RESULT, and any future control
+    // message keep the device fresh too.
     deviceSeen(state, action: PayloadAction<{ channelId: string }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) {
         device.connected = true;
+        device.error = undefined;
         device.lastSeenAt = Date.now();
       }
     },

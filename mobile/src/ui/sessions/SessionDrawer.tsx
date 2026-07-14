@@ -501,14 +501,15 @@ export function SessionDrawer({
               <span className="pill-dot" aria-hidden="true" />
               {derived.label}
             </span>
-            {` · ${turnCount(session)} msg`}
             {!isActive && (session.unreadCount ?? 0) > 0 ? (
               <span className="unread-new">{` · ${session.unreadCount} new`}</span>
-            ) : null}
+            ) : (
+              ` · ${turnCount(session)} msg`
+            )}
             {activity ? ` · ${fmtRelative(activity)}` : ''}
             {session.meta.cwd ? (
               <span className="folder-chip" title={session.meta.cwd}>
-                📁 {session.meta.cwd.split(/[\\/]/).pop()}
+                • {session.meta.cwd.split(/[\\/]/).pop()}
               </span>
             ) : null}
           </span>

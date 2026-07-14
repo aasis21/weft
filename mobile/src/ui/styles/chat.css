@@ -1274,7 +1274,7 @@
 }
 .drawer-close:hover { background: var(--bg-elev); color: var(--fg); }
 .drawer-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.drawer-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .drawer-empty { padding: 18px 8px; color: var(--fg-faint); font-size: 12.5px; text-align: center; }
 /* Docked (desktop) sidebar: themed thin scrollbar instead of the OS default, matching .debug-list. */
 .drawer-docked .drawer-list { scrollbar-width: thin; scrollbar-color: var(--bg-rule) transparent; }
@@ -1290,7 +1290,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 7px 10px;
+  padding: 5px 10px;
   border: 1px solid transparent;
   border-radius: 12px;
   cursor: pointer;
@@ -1378,17 +1378,12 @@
 /* #ui small folder-style chip for the session's project (cwd basename): a compact rounded tag,
    not a pill, so it reads as a "folder" at a glance without stealing weight from the title. */
 .folder-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: var(--bg-rule);
+  display: inline-block;
+  vertical-align: bottom;
+  margin-left: 5px;
   color: var(--fg-dim);
-  font-size: 9.5px;
-  font-weight: 600;
-  vertical-align: middle;
+  font-size: 11px;
+  font-weight: 500;
   max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1410,7 +1405,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 12px 12px 4px;
+  padding: 6px 12px 3px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -2783,7 +2778,7 @@
 
 .weft-session .session-row {
   position: relative;
-  min-height: 44px;
+  min-height: 40px;
 }
 
 .weft-session .unread-badge {

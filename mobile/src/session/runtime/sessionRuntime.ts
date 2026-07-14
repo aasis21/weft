@@ -1197,9 +1197,9 @@ export class SessionRuntime {
     // and any future control message keep the device fresh, not just the state-carrying subtypes.
     this.store.dispatch(deviceSeen({ channelId }));
     if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT) {
-      // Proactive liveness beat (independent of PROJECT_LIST request/reply): just refresh
-      // lastSeenAt/connected so an idle device doesn't go stale in the UI between polls.
-      this.store.dispatch(deviceErrorSet({ channelId, error: undefined, connected: true }));
+      // Proactive liveness beat (independent of PROJECT_LIST request/reply). deviceSeen above
+      // already refreshed lastSeenAt/connected + cleared error, so there's nothing else to do —
+      // the beat exists purely to keep an idle device from going stale between polls.
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST) {

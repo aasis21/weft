@@ -282,11 +282,13 @@ describe('SessionDrawer', () => {
 
     const bgRow = screen.getByText('Background').closest('.session-row') as HTMLElement;
     expect(within(bgRow).getByText(/12 new/)).toHaveClass('unread-new');
-    expect(bgRow.textContent).toContain('2 msg');
+    // Unread rows show "N new" INSTEAD of the total msg count — one count at a glance.
+    expect(bgRow.textContent).not.toContain('msg');
 
-    // The active session never shows a "new" count even if a stale count lingers.
+    // The active session never shows a "new" count; it shows the total instead.
     const curRow = screen.getByText('Current').closest('.session-row') as HTMLElement;
     expect(within(curRow).queryByText(/new/)).not.toBeInTheDocument();
+    expect(curRow.textContent).toContain('2 msg');
   });
 
   it('navigates to the landing page from the About Weft link', async () => {
