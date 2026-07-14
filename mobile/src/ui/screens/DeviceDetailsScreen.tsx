@@ -54,6 +54,7 @@ export function DeviceDetailsScreen({
   onSetDefault,
   onForget,
   onStartOnDevice,
+  onOpenDeviceDetails,
   onJoinOffer,
   onOpenSession,
   onSelectSession,
@@ -229,6 +230,10 @@ export function DeviceDetailsScreen({
             setDrawerOpen(false);
             onStartOnDevice(id);
           }}
+          onOpenDeviceDetails={onOpenDeviceDetails ? (id) => {
+            setDrawerOpen(false);
+            onOpenDeviceDetails(id);
+          } : undefined}
           onSelect={(id) => {
             setDrawerOpen(false);
             onSelectSession(id);
