@@ -25,51 +25,61 @@ const INSTALL: Record<OsTab, { label: string; cmd: string }> = {
 const STEPS = [
   {
     n: 1,
-    title: 'Install Weft on your laptop',
-    body: 'One line. Copilot picks it up automatically — no accounts, no setup.',
+    title: 'Install on your laptop',
+    body: 'One line in your terminal — Copilot picks it up automatically. No accounts, no setup.',
   },
   {
     n: 2,
-    title: 'Show a code',
-    body: 'One for the whole laptop, or one for a single Copilot chat you have open.',
+    title: 'Bring up a code',
+    body: 'Run weft start for the whole laptop, or /weft inside a Copilot chat for just that one. Each shows a QR.',
   },
   {
     n: 3,
-    title: 'Scan to connect',
-    body: "A laptop code lets you start fresh chats or join any that's running; a chat code drops you straight into that one. Come back later, it's right where you left it.",
+    title: 'Scan with your phone',
+    body: "Point your phone at it and you're connected — send it work, approve its moves, and pick up any chat right where you left off.",
   },
 ];
 
 const CAN_DO = [
   {
     icon: 'chat',
-    title: 'Talk to it',
-    body: 'Send prompts and follow-ups, just like at your keyboard. Replies stream in live.',
+    title: 'Drive it live',
+    body: "Send prompts and follow-ups, watch replies stream back word by word. It's the real session — not a read-only peek.",
+  },
+  {
+    icon: 'activity',
+    title: 'Watch it work',
+    body: 'See every command it runs and every file it edits unfold in real time, right in the thread.',
+  },
+  {
+    icon: 'check',
+    title: 'Approve before it acts',
+    body: 'When it wants to run something, it waits for your yes. Allow or deny with a tap, from wherever you are.',
   },
   {
     icon: 'voice',
     title: 'Go hands-free with Vox',
-    body: 'Tap the orb and just talk. Vox listens, sends, and reads replies back — eyes-free.',
-  },
-  {
-    icon: 'check',
-    title: 'Approve on the spot',
-    body: 'When Copilot needs the OK to run something, it asks your phone. Tap yes or no.',
+    body: 'Tap the orb and just talk. Vox hears you, sends it, and reads the reply back — eyes-free, hands-free.',
   },
   {
     icon: 'image',
-    title: 'Show it a screenshot',
-    body: 'Attach images from your camera or gallery so Copilot can see what you mean.',
+    title: 'Show it what you mean',
+    body: 'Snap a photo or attach a screenshot so it can see the bug, the design, the error — not just read about it.',
+  },
+  {
+    icon: 'sliders',
+    title: 'Keep it on track',
+    body: 'Flip between plan and autopilot, drop in quick commands, or tap Stop the moment it wanders.',
   },
   {
     icon: 'devices',
-    title: 'Start fresh or jump back in',
-    body: "Kick off a new chat on any laptop, or drop straight into one it's already running.",
+    title: 'Run a whole fleet',
+    body: 'Many laptops, many chats. Start a fresh one or jump into a running one, and switch between them in a tap.',
   },
   {
     icon: 'refresh',
-    title: 'Pick up where you left off',
-    body: 'Sessions stay warm and reconnect when you reopen Weft. Juggle several at once.',
+    title: 'Come back anytime',
+    body: 'Sessions stay warm and reconnect when you reopen Weft. Step away, pick up right where you left off.',
   },
 ];
 
@@ -112,6 +122,19 @@ const ICONS: Record<string, JSX.Element> = {
       <rect x="2.5" y="5" width="13" height="9.5" rx="1.6" />
       <path d="M6 18h6" />
       <rect x="16.5" y="9.5" width="5" height="10" rx="1.4" />
+    </svg>
+  ),
+  activity: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M3 12h4l2.5-6.5 5 13L17 12h4" />
+    </svg>
+  ),
+  sliders: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M5 4v6M5 14v6M12 4v3M12 11v9M19 4v9M19 17v3" />
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="9" r="2" />
+      <circle cx="19" cy="15" r="2" />
     </svg>
   ),
 };
@@ -265,7 +288,7 @@ export function LandingScreen({
       </section>
 
       <section className="landing-do" aria-label="What you can do">
-        <h2>What you can do</h2>
+        <h2>What you can do from your phone</h2>
         <div className="do-grid">
           {CAN_DO.map((item) => (
             <div key={item.title} className="do-card">
