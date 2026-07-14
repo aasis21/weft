@@ -510,7 +510,7 @@ export function SessionScreen({
             devices={devices}
             onStartOnDevice={onStartOnDevice}
             onOpenDeviceDetails={onOpenDeviceDetails}
-            onRemove={requestRemove}
+            onRemove={onRemoveSession}
             onRename={onRenameSession}
             onPin={onPinSession}
             onArchive={onArchiveSession}
@@ -812,7 +812,7 @@ export function SessionScreen({
             setDrawerOpen(false);
             onOpenDeviceDetails?.(id);
           }}
-          onRemove={requestRemove}
+          onRemove={onRemoveSession}
           onRename={onRenameSession}
           onPin={onPinSession}
           onArchive={onArchiveSession}

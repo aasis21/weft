@@ -1,8 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
 
 const composerProps = vi.hoisted(() => ({ latest: null as null | { disabled: boolean; disabledReason?: string } }));
+const drawerProps = vi.hoisted(() => ({ latest: null as null | { onRemove: (id: string) => void } }));
+const statusProps = vi.hoisted(() => ({ latest: null as null | { onRemove: () => void } }));
 
 vi.mock('@/ui/composer/Composer', () => ({
   Composer: (props: { disabled: boolean; disabledReason?: string }) => {
@@ -30,11 +32,29 @@ vi.mock('@/ui/prompts/ElicitationCard', () => ({
 }));
 
 vi.mock('@/ui/sessions/SessionDrawer', () => ({
-  SessionDrawer: () => <div data-testid="drawer" />,
+  SessionDrawer: (props: { onRemove: (id: string) => void }) => {
+    drawerProps.latest = props;
+    return (
+      <div data-testid="drawer">
+        <button type="button" data-testid="drawer-remove" onClick={() => props.onRemove('session-a')}>
+          drawer remove
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('@/ui/sessions/StatusBar', () => ({
-  StatusBar: () => <div data-testid="status" />,
+  StatusBar: (props: { onRemove: () => void }) => {
+    statusProps.latest = props;
+    return (
+      <div data-testid="status">
+        <button type="button" data-testid="status-remove" onClick={() => props.onRemove()}>
+          status remove
+        </button>
+      </div>
+    );
+  },
 }));
 
 function makeSession(status: 'live' | 'connecting' | 'idle' | 'ended' = 'live') {
@@ -233,5 +253,48 @@ describe('SessionScreen desktop keyboard shortcuts', () => {
     } finally {
       matchMediaSpy.mockRestore();
     }
+  });
+});
+
+describe('SessionScreen leave-session confirmation (#one-click-delete)', () => {
+  it('deletes directly from the drawer inline ✓ without popping a second "Leave this session?" dialog', () => {
+    // The drawer row already shows its own inline "Delete?" ✓/✕ confirm, so its ✓ must remove
+    // the session in one tap — not re-open the top-bar Leave dialog and ask again.
+    const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('min-width'), // wide viewport so the docked drawer renders
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const onRemoveSession = vi.fn();
+      renderActive(makeSession('live'), { onRemoveSession });
+
+      fireEvent.click(screen.getByTestId('drawer-remove'));
+
+      expect(onRemoveSession).toHaveBeenCalledTimes(1);
+      expect(onRemoveSession).toHaveBeenCalledWith('session-a');
+      expect(screen.queryByText('Leave this session?')).not.toBeInTheDocument();
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+
+  it('still guards the top-bar StatusBar "Leave" (no inline confirm) behind the dialog', () => {
+    const onRemoveSession = vi.fn();
+    renderActive(makeSession('live'), { onRemoveSession });
+
+    fireEvent.click(screen.getByTestId('status-remove'));
+
+    // The bar's Leave has no inline confirm, so it must open the dialog first, not delete.
+    expect(screen.getByText('Leave this session?')).toBeInTheDocument();
+    expect(onRemoveSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
+    expect(onRemoveSession).toHaveBeenCalledWith('session-a');
   });
 });
