@@ -975,17 +975,35 @@ pre {
 
 .landing-cta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 16px;
+  width: 100%;
+  max-width: 360px;
 }
 
 .landing-cta .primary-action,
 .landing-cta .secondary-action,
 .landing-cta .demo-action {
-  width: auto;
+  width: 100%;
   margin-top: 0;
   padding: 0 24px;
+}
+
+/* Desktop: let the tidy stacked group relax into a wrapping, content-width row. */
+@media (min-width: 620px) {
+  .landing-cta {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-width: none;
+  }
+
+  .landing-cta .primary-action,
+  .landing-cta .secondary-action,
+  .landing-cta .demo-action {
+    width: auto;
+  }
 }
 
 .landing-steps h2,
@@ -1180,7 +1198,7 @@ pre {
   border-radius: 999px;
   padding: 9px 16px;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--panel);
   font-weight: 600;
   font-size: 0.86rem;
   cursor: pointer;
@@ -1188,7 +1206,7 @@ pre {
 }
 
 .sessions-link:hover {
-  background: rgba(77, 141, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
   border-color: var(--accent);
   transform: translateX(-2px);
 }
