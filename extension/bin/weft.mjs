@@ -144,6 +144,12 @@ async function devtunnelStart() {
   // all down, including the cloud tunnel).
   const status = createProvisionStatusLine();
   const existing = await healthyRegistryEntry();
+  // Capture the URL a prior (possibly-preserved) run left behind BEFORE we provision, so after
+  // startup we can tell the user whether the URL survived — in persistent mode a matching URL means
+  // already-paired phones reconnect with no re-scan; a changed URL (e.g. port fallback) means they
+  // must re-scan.
+  const persistent = isPersistentPairingEnabled();
+  const priorUrl = persistent ? readRegistry(DEVTUNNEL_REGISTRY_FILE)?.baseUrl ?? null : null;
   let child = null;
   let baseUrl;
 
@@ -173,8 +179,19 @@ async function devtunnelStart() {
   }
 
   console.log(`${c.green("✓")} ${c.bold("devtunnel ready")}  ${c.dim(baseUrl)}`);
-  console.log(c.dim("This terminal owns the relay. Keep it open — every `weft start` and `/weft`"));
-  console.log(c.dim("on this machine will use this tunnel. Ctrl+C stops the relay and deletes the cloud tunnel."));
+  if (persistent) {
+    if (priorUrl && priorUrl === baseUrl) {
+      console.log(c.dim("Same URL as before — already-paired phones reconnect without re-scanning."));
+    } else if (priorUrl && priorUrl !== baseUrl) {
+      console.log(`${c.yellow("!")} URL changed since last run — phones paired to the old URL must re-scan the QR.`);
+    }
+    console.log(c.dim("This terminal owns the relay. Keep it open — every `weft start` and `/weft`"));
+    console.log(c.dim("on this machine will use this tunnel. Persistent pairing is ON: Ctrl+C stops the relay"));
+    console.log(c.dim("but keeps the cloud tunnel so the next start reuses this same URL."));
+  } else {
+    console.log(c.dim("This terminal owns the relay. Keep it open — every `weft start` and `/weft`"));
+    console.log(c.dim("on this machine will use this tunnel. Ctrl+C stops the relay and deletes the cloud tunnel."));
+  }
   await ownAndBlock(child);
 }
 
@@ -189,7 +206,8 @@ async function ownAndBlock(child) {
     shuttingDown = true;
     console.log(c.dim(`\nStopping relay (${label})…`));
     try {
-      await forceStopDevTunnel();
+      const { preserved } = await forceStopDevTunnel();
+      shuttingDown = preserved ? "preserved" : "deleted";
     } catch (err) {
       console.error(c.red(`teardown failed: ${err?.message ?? err}`));
     }
@@ -198,7 +216,8 @@ async function ownAndBlock(child) {
   process.once("SIGTERM", () => void stop("SIGTERM"));
 
   await new Promise((resolve) => child.once("exit", () => resolve()));
-  console.log(`${c.green("✓")} ${c.bold("relay stopped")} ${c.dim("· cloud tunnel released.")}`);
+  const released = shuttingDown === "preserved" ? "cloud tunnel preserved for reuse." : "cloud tunnel released.";
+  console.log(`${c.green("✓")} ${c.bold("relay stopped")} ${c.dim(`· ${released}`)}`);
 }
 
 // The watching terminal polls the owning pid every second; when it disappears (owner closed
@@ -229,6 +248,13 @@ async function devtunnelStatus() {
     return;
   }
   if (!isPidAlive(registryEntry.pid)) {
+    // A preserved persistent tunnel deliberately has no live pid (relay stopped, tunnel kept).
+    // Report it as idle-but-reusable rather than a stale entry to be reprovisioned.
+    if (registryEntry.alive === false && registryEntry.baseUrl) {
+      console.log(`${c.yellow("○")} ${c.bold("idle")} ${c.dim("· relay not running.")}`);
+      console.log(c.dim(`   tunnel preserved — ${c.bold("weft devtunnel start")} reuses ${registryEntry.baseUrl} (no re-scan).`));
+      return;
+    }
     console.log(`${c.yellow("○")} Stale entry (pid ${registryEntry.pid} no longer running). Run ${c.bold("weft devtunnel start")} to reprovision.`);
     return;
   }
@@ -244,12 +270,15 @@ async function devtunnelStatus() {
 }
 
 async function devtunnelStop() {
-  const { stopped, entry } = await forceStopDevTunnel();
+  const { stopped, entry, preserved } = await forceStopDevTunnel();
   if (!stopped) {
     console.log(c.dim("Nothing was running."));
     return;
   }
   console.log(`${c.green("✓")} Stopped the shared devtunnel relay${entry?.pid ? ` (was pid ${entry.pid})` : ""}.`);
+  if (preserved && entry?.baseUrl) {
+    console.log(c.dim(`   Persistent pairing ON — cloud tunnel ${entry.tunnelId ?? ""} preserved; next start reuses ${entry.baseUrl}.`));
+  }
 }
 
 // Live status line for `weft devtunnel start`, shown while ensureDevTunnelRelay works

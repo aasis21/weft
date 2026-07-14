@@ -33,13 +33,23 @@ const [cmd] = args;
 if (cmd === "--version") { console.log("fake 1.0"); process.exit(0); }
 if (args.join(" ") === "user show") { process.exit(process.env.FAKE_DEVTUNNEL_LOGGED_IN ? 0 : 1); }
 if (cmd === "create" && args.includes("--json")) {
+  if (process.env.FAKE_DEVTUNNEL_CREATE_LOG) {
+    appendFileSync(process.env.FAKE_DEVTUNNEL_CREATE_LOG, "1\\n");
+  }
   if (stageDelayMs) sleepSync(stageDelayMs);
   console.log(JSON.stringify({ tunnel: { tunnelId: "fake-tunnel-id" } }));
   process.exit(0);
 }
+if (cmd === "show") { process.exit(process.env.FAKE_DEVTUNNEL_SHOW_FAILS ? 1 : 0); }
 if (cmd === "port") { if (stageDelayMs) sleepSync(stageDelayMs); process.exit(0); }
 if (cmd === "access") { if (stageDelayMs) sleepSync(stageDelayMs); process.exit(0); }
-if (cmd === "delete") { console.log("Deleted: fake-tunnel-id"); process.exit(0); }
+if (cmd === "delete") {
+  if (process.env.FAKE_DEVTUNNEL_DELETE_LOG) {
+    appendFileSync(process.env.FAKE_DEVTUNNEL_DELETE_LOG, "1\\n");
+  }
+  console.log("Deleted: fake-tunnel-id");
+  process.exit(0);
+}
 if (cmd === "host") {
   if (process.env.FAKE_DEVTUNNEL_HOST_LOG) {
     appendFileSync(process.env.FAKE_DEVTUNNEL_HOST_LOG, "1\\n");
@@ -389,6 +399,109 @@ test("forceStopDevTunnel is a no-op when nothing is registered", async () => {
     const result = await forceStopDevTunnel({ baseDir: homeDir });
     assert.equal(result.stopped, false);
   } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("persistent pairing: stop preserves the cloud tunnel + durable record instead of deleting it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const deleteLog = join(dir, "delete-calls.log");
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_DELETE_LOG = deleteLog;
+    // Opt this home dir into persistent pairing — the switch the whole feature gates on.
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
+    const { ensureDevTunnelRelay, forceStopDevTunnel, healthyRegistryEntry } = await freshModule();
+
+    await ensureDevTunnelRelay({ baseDir: homeDir });
+    const registryPath = join(homeDir, "devtunnel.json");
+    await waitFor(() => existsSync(registryPath), "registry file to appear");
+    const before = JSON.parse(readFileSync(registryPath, "utf8"));
+
+    const { stopped, preserved } = await forceStopDevTunnel({ baseDir: homeDir });
+    assert.equal(stopped, true);
+    assert.equal(preserved, true, "persistent stop must report preserved:true");
+
+    // The durable record survives — same tunnelId + relayPort + baseUrl, but now marked not-alive
+    // and with the pid dropped so pairing/status see the relay as down.
+    assert.ok(existsSync(registryPath), "persistent stop must KEEP devtunnel.json");
+    const after = JSON.parse(readFileSync(registryPath, "utf8"));
+    assert.equal(after.tunnelId, before.tunnelId);
+    assert.equal(after.relayPort, before.relayPort);
+    assert.equal(after.baseUrl, before.baseUrl);
+    assert.equal(after.alive, false);
+    assert.equal(after.pid, undefined, "preserved record must not carry a stale pid");
+
+    // The cloud tunnel must NOT have been deleted.
+    assert.equal(existsSync(deleteLog), false, "persistent stop must not call devtunnel delete");
+
+    // With no live pid, health reports the relay as down (informational alive flag aside).
+    assert.equal(await healthyRegistryEntry(homeDir), null);
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_DELETE_LOG;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("persistent pairing: a restart reuses the preserved tunnel (same identity, no fresh create)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const createLog = join(dir, "create-calls.log");
+  const hostLog = join(dir, "host-calls.log");
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_CREATE_LOG = createLog;
+    process.env.FAKE_DEVTUNNEL_HOST_LOG = hostLog;
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
+    const { ensureDevTunnelRelay, forceStopDevTunnel } = await freshModule();
+
+    // First start: fresh create.
+    await ensureDevTunnelRelay({ baseDir: homeDir });
+    const registryPath = join(homeDir, "devtunnel.json");
+    await waitFor(() => existsSync(registryPath), "registry file to appear");
+    const first = JSON.parse(readFileSync(registryPath, "utf8"));
+
+    // Stop (preserves the tunnel).
+    await forceStopDevTunnel({ baseDir: homeDir });
+    await waitFor(
+      () => JSON.parse(readFileSync(registryPath, "utf8")).alive === false,
+      "registry to be marked not-alive after stop",
+    );
+
+    // Second start: must REUSE the preserved tunnel — same tunnelId + relayPort, and crucially
+    // `devtunnel create` must NOT be called again (host is, since a new relay child is spawned).
+    await ensureDevTunnelRelay({ baseDir: homeDir });
+    await waitFor(
+      () => JSON.parse(readFileSync(registryPath, "utf8")).alive === true,
+      "registry to be marked alive after restart",
+    );
+    const second = JSON.parse(readFileSync(registryPath, "utf8"));
+
+    assert.equal(second.tunnelId, first.tunnelId, "restart must reuse the same tunnelId");
+    assert.equal(second.relayPort, first.relayPort, "restart must reuse the same relay port");
+    assert.equal(second.baseUrl, first.baseUrl, "restart must reproduce the same URL");
+
+    const createCalls = existsSync(createLog) ? readFileSync(createLog, "utf8").trim().split("\n").filter(Boolean) : [];
+    const hostCalls = existsSync(hostLog) ? readFileSync(hostLog, "utf8").trim().split("\n").filter(Boolean) : [];
+    assert.equal(createCalls.length, 1, "devtunnel create must be called exactly once across both starts");
+    assert.equal(hostCalls.length, 2, "devtunnel host must be called once per start");
+
+    await forceKill(second.pid);
+    rmSync(registryPath, { force: true });
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_CREATE_LOG;
+    delete process.env.FAKE_DEVTUNNEL_HOST_LOG;
+    rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
 });

@@ -29,7 +29,8 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import WebSocket from "ws";
-import { clearRegistry, isPidAlive, readRegistry } from "./registryFile.mjs";
+import { clearRegistry, isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
+import { isPersistentPairingEnabled } from "./transportConfig.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -313,8 +314,14 @@ async function pollForHealthyEntry({ baseDir, onProgress }) {
 }
 
 /**
- * Force-tears-down the shared relay + tunnel right now: kills the relay process tree (if its
- * registered pid is alive), best-effort deletes the cloud tunnel, and clears both registry files.
+ * Force-tears-down the shared relay right now: kills the relay process tree (if its registered pid
+ * is alive), then either preserves or deletes the cloud tunnel depending on pairing mode:
+ *   - PERSISTENT (`weft set-pairing persistent`): the tunnel is KEPT so the same URL comes back on
+ *     the next `weft devtunnel start`; devtunnel.json is rewritten with just the durable identity
+ *     ({tunnelId, relayPort, baseUrl, alive:false}) instead of being cleared. Returns
+ *     `preserved: true`.
+ *   - EPHEMERAL (default): best-effort deletes the cloud tunnel and clears both registry files,
+ *     exactly as before.
  * This is both the standalone `weft devtunnel stop` CLI command AND the primary cleanup path
  * `weft devtunnel start`'s own Ctrl+C handler runs — uniform across platforms because it uses
  * taskkill/process.kill directly rather than trying to deliver a signal the child can handle
@@ -342,6 +349,16 @@ export async function forceStopDevTunnel({ baseDir } = {}) {
         // best-effort
       }
     }
+  }
+  // Persistent mode: keep the tunnel + its identity so the URL is stable across restarts.
+  if (isPersistentPairingEnabled({ baseDir }) && entry.tunnelId && entry.baseUrl) {
+    writeRegistryAtomic(
+      DEVTUNNEL_REGISTRY_FILE,
+      { relayPort: entry.relayPort, tunnelId: entry.tunnelId, baseUrl: entry.baseUrl, alive: false, stoppedAt: Date.now() },
+      { baseDir },
+    );
+    clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
+    return { stopped: true, entry, preserved: true };
   }
   if (entry.tunnelId) {
     const bin = await findDevTunnelBinary();
