@@ -13,6 +13,7 @@ import {
   stateRequest,
   spawnSession as spawnSessionMessage,
   forgetDevice as forgetDeviceMessage,
+  sessionClaimed as sessionClaimedMessage,
   voiceMode,
   invokeCommand,
   RECENT_TURNS_DEFAULT,
@@ -23,6 +24,7 @@ import type {
   ProjectListMsg,
   PromptAttachment,
   SessionMode,
+  SessionOffersMsg,
   SpawnMode,
   SpawnPairingMsg,
   SpawnResultMsg,
@@ -85,6 +87,8 @@ import {
   deviceLastProjectSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceSessionOffersReceived,
+  deviceOfferRemoved,
   deviceReconciled,
   deviceRemoved,
   devicesHydrated,
@@ -1208,6 +1212,12 @@ export class SessionRuntime {
       void this.handleSpawnPairing(message.msg as SpawnPairingMsg);
       return;
     }
+    if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS) {
+      const msg = message.msg as SessionOffersMsg;
+      const offers = (msg.offers ?? []).filter((o) => o && typeof o.channelId === 'string' && o.payload);
+      this.store.dispatch(deviceSessionOffersReceived({ channelId, offers }));
+      return;
+    }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
       const msg = message.msg as SpawnResultMsg;
       if (!msg.ok) this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
@@ -1247,6 +1257,51 @@ export class SessionRuntime {
     const session = this.session(pending.tempId);
     if (!session) return;
     this.store.dispatch(statusSet({ id: pending.tempId, status: 'error', error }));
+  }
+
+  /** Adopt an in-session `/weft` offer relayed by a Device Station (the mirror of a spawned session):
+   *  pair digitally to the offered session's own channel, open it, then tell the station we claimed it
+   *  (SESSION_CLAIMED) so it stops advertising the offer. Attributed to the offering laptop like a
+   *  spawned session. Best-effort claim: even if the notify send fails, the station drops the offer
+   *  on its owning session's own withdraw (pair) so it won't linger. Returns the joined channelId.
+   *  Throws (surfaced to the caller/UI) if pairing fails so the tapped offer can be retried. */
+  async joinOfferedSession(deviceChannelId: string, offerChannelId: string): Promise<string> {
+    const device = this.store.getState().sessions.devices.find((d) => d.channelId === deviceChannelId);
+    const offer = device?.offers?.find((o) => o.channelId === offerChannelId);
+    if (!offer || !offer.payload) throw new Error('This session offer is no longer available.');
+    // Optimistically hide the offer so a double-tap can't start two pairings; a later SESSION_OFFERS
+    // refresh (which excludes claimed ids) keeps it gone.
+    this.store.dispatch(deviceOfferRemoved({ channelId: deviceChannelId, offerChannelId }));
+    try {
+      const payload = offer.payload as PairingPayload;
+      const { client, pairing } = await pairSession(payload);
+      const joinedId = await this.openPairedSession(client, pairing, {
+        title: offer.name || null,
+        cwd: offer.cwd ?? null,
+        activate: true,
+        renamed: Boolean(offer.name),
+        spawnedFromDeviceId: device?.deviceId ?? deviceChannelId,
+        spawnedFromDeviceName: device?.name ?? undefined,
+      });
+      this.notifyOfferClaimed(deviceChannelId, offerChannelId);
+      return joinedId;
+    } catch (err) {
+      // Pairing failed — the offer is (probably) still live on the laptop, so a subsequent
+      // SESSION_OFFERS re-broadcast will bring it back for another attempt.
+      throw new Error(errMessage(err, 'Could not join the offered session.'));
+    }
+  }
+
+  /** Best-effort SESSION_CLAIMED notify to the offering station over its device channel. */
+  private notifyOfferClaimed(deviceChannelId: string, offerChannelId: string): void {
+    const ctrl = this.listenerController(deviceChannelId);
+    if (!ctrl?.client) return;
+    const message = sessionClaimedMessage(offerChannelId);
+    this.recordDeviceEvent(deviceChannelId, 'out', message);
+    void ctrl.client.send(message).catch(() => {
+      // The owning session withdraws its own offer entry on pair, so the station stops advertising
+      // it regardless; this notify is just a faster path.
+    });
   }
 
   // --- session controls ----------------------------------------------------------------------------

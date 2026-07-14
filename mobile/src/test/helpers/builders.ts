@@ -44,6 +44,8 @@ export {
   spawnResult,
   forgetDevice,
   deviceHeartbeat,
+  sessionOffers,
+  sessionClaimed,
   voiceMode,
   isValidEnvelope,
 } from '@aasis21/weft-shared';

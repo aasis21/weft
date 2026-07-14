@@ -7,6 +7,7 @@ import type {
   LogLineMsg,
   PromptAttachment,
   SessionMode,
+  SessionOffer,
   TransportDescriptor,
 } from '@aasis21/weft-shared';
 import type { RegisteredDevice } from '@/lib/devices';
@@ -106,6 +107,12 @@ export interface ListenerDeviceState extends RegisteredDevice {
   projectsLoading: boolean;
   connected: boolean;
   error?: string;
+  /** In-session `/weft` sessions this laptop is currently offering for one-tap adoption (the mirror
+   *  of the "Start session" spawn flow). Each carries the offered session's own pairing payload, so
+   *  tapping it pairs digitally — no QR scan. The station relays this list (SESSION_OFFERS) on bind
+   *  and whenever it changes; adopting one sends SESSION_CLAIMED back so it's dropped. Runtime-only
+   *  (not persisted): offers are ephemeral and re-advertised on the next reconnect. */
+  offers?: SessionOffer[];
   /** Epoch ms of the most recent attempt to (re)connect to this laptop — stamped when a connect
    *  attempt begins, independent of whether it succeeds. Paired with `lastSeenAt` (last SUCCESSFUL
    *  contact) it lets the sidebar say "last seen 2h ago · tried 5s ago" so a wedged/offline laptop

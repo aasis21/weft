@@ -21,6 +21,7 @@ interface DeviceDetailsScreenProps {
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
+  onJoinOffer(deviceChannelId: string, offerChannelId: string): void;
   onOpenSession(channelId: string): void;
   onSelectSession(channelId: string): void;
   onAddSession(): void;
@@ -52,6 +53,7 @@ export function DeviceDetailsScreen({
   onSetDefault,
   onForget,
   onStartOnDevice,
+  onJoinOffer,
   onOpenSession,
   onSelectSession,
   onAddSession,
@@ -70,6 +72,10 @@ export function DeviceDetailsScreen({
   const spawnedSessions = sessions
     .filter((s) => (s.meta.spawnedFromDeviceId ?? '') === deviceKey)
     .sort((a, b) => (b.lastEventAt ?? b.meta.addedAt) - (a.lastEventAt ?? a.meta.addedAt));
+  // Sessions this laptop opened `/weft` in and is offering for one-tap adoption. Hide any whose
+  // channel we already track (already joined) so a lingering offer can't show a duplicate row.
+  const tracked = new Set(sessions.map((s) => s.meta.channelId));
+  const offers = (device.offers ?? []).filter((o) => o && o.channelId && !tracked.has(o.channelId));
 
   return (
     <main className="weft-session join-session device-details-screen">
@@ -139,6 +145,31 @@ export function DeviceDetailsScreen({
             </button>
           </div>
         </section>
+
+        {offers.length > 0 ? (
+          <section className="session-join-fallback device-offers">
+            <h3>Offered sessions</h3>
+            <p className="device-card-sub">
+              Sessions this laptop opened with <code>/weft</code> — tap to join, no QR needed.
+            </p>
+            <ul className="devices-list device-sessions-list">
+              {offers.map((offer) => (
+                <li key={offer.channelId} className="device-card device-session-row">
+                  <button
+                    type="button"
+                    className="device-session-open"
+                    onClick={() => onJoinOffer(device.channelId, offer.channelId)}
+                  >
+                    <span className="device-card-name">{offer.name || offer.cwd || 'Copilot session'}</span>
+                    {offer.cwd && offer.name ? (
+                      <span className="device-card-sub device-session-status">{offer.cwd}</span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <section className="session-join-fallback device-sessions">
           <h3>Sessions from this device</h3>

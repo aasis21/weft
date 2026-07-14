@@ -21,6 +21,8 @@ import {
   spawnPairing,
   spawnResult,
   forgetDevice,
+  sessionOffers,
+  sessionClaimed,
   voiceMode,
   isValidEnvelope,
 } from "../messages.mjs";
@@ -93,4 +95,31 @@ test("voiceMode builds a CONTROL envelope with a boolean active flag", () => {
   assert.equal(on.msg.active, true);
   assert.equal(voiceMode(0).msg.active, false, "coerces to boolean");
   assert.ok(isValidEnvelope(on));
+});
+
+test("sessionOffers filters to well-formed offers and normalizes fields", () => {
+  const payload = { v: 1, channelId: "off-1", pub: "p", transport: { kind: "local" } };
+  const env = sessionOffers([
+    { channelId: "off-1", name: "web", cwd: "/repo/web", payload },
+    { channelId: "off-2", name: "", cwd: "", payload }, // blank name/cwd -> null
+    { channelId: "off-3" }, // no payload -> dropped
+    { name: "no-channel", payload }, // no channelId -> dropped
+    null, // junk -> dropped
+  ]);
+  assert.equal(env.eventType, EVENT_TYPE.CONTROL);
+  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.SESSION_OFFERS);
+  assert.ok(isValidEnvelope(env));
+  assert.equal(env.msg.offers.length, 2, "only offers with a channelId AND payload survive");
+  assert.deepEqual(env.msg.offers[0], { channelId: "off-1", name: "web", cwd: "/repo/web", payload });
+  assert.deepEqual(env.msg.offers[1], { channelId: "off-2", name: null, cwd: null, payload });
+  assert.deepEqual(sessionOffers(null).msg.offers, [], "tolerates a nullish list");
+});
+
+test("sessionClaimed carries the offered channelId as a string", () => {
+  const env = sessionClaimed("off-1");
+  assert.equal(env.eventType, EVENT_TYPE.CONTROL);
+  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.SESSION_CLAIMED);
+  assert.equal(env.msg.channelId, "off-1");
+  assert.ok(isValidEnvelope(env));
+  assert.equal(sessionClaimed(undefined).msg.channelId, "", "coerces a missing id to empty string");
 });

@@ -167,6 +167,7 @@ const sessionsSlice = createSlice({
         projects: incoming.projects ?? existing?.projects ?? [],
         projectsLoading: incoming.projectsLoading ?? existing?.projectsLoading ?? false,
         connected: incoming.connected ?? existing?.connected ?? false,
+        offers: incoming.offers ?? existing?.offers ?? [],
         events: incoming.events ?? existing?.events ?? [],
       };
       state.devices = [
@@ -205,6 +206,28 @@ const sessionsSlice = createSlice({
         device.error = undefined;
         device.lastSeenAt = Date.now();
         if (action.payload.deviceName) device.name = action.payload.deviceName;
+      }
+    },
+    // The laptop's current set of in-session `/weft` offers (SESSION_OFFERS). Replaces the device's
+    // whole `offers` list — the station always relays the full live set, never a delta — and doubles
+    // as a liveness signal (arrives over the same connected channel as PROJECT_LIST).
+    deviceSessionOffersReceived(
+      state,
+      action: PayloadAction<{ channelId: string; offers: NonNullable<ListenerDeviceState['offers']> }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.offers = action.payload.offers;
+        device.connected = true;
+        device.lastSeenAt = Date.now();
+      }
+    },
+    // Optimistically drop a single offer the moment the phone taps to adopt it, so it can't be
+    // tapped twice while the SESSION_CLAIMED round-trip + station re-broadcast settles.
+    deviceOfferRemoved(state, action: PayloadAction<{ channelId: string; offerChannelId: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device && device.offers) {
+        device.offers = device.offers.filter((o) => o.channelId !== action.payload.offerChannelId);
       }
     },
     // Folds a stale duplicate device (same physical laptop, an OLDER ephemeral channelId from a
@@ -445,6 +468,8 @@ export const {
   deviceDefaultSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceSessionOffersReceived,
+  deviceOfferRemoved,
   deviceReconciled,
   deviceErrorSet,
   deviceLastProjectSet,

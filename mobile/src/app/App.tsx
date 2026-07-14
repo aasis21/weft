@@ -235,6 +235,12 @@ export default function App(): JSX.Element {
             closeDeviceScreens();
           }}
           onStartOnDevice={(id) => openStart(id)}
+          onJoinOffer={(deviceId, offerChannelId) => {
+            closeDeviceScreens();
+            void sessionRuntime.joinOfferedSession(deviceId, offerChannelId).catch((err) => {
+              setError(err instanceof Error ? err.message : 'Could not join the offered session.');
+            });
+          }}
           onOpenSession={(id) => {
             closeDeviceScreens();
             sessionRuntime.setActive(id);

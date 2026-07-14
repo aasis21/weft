@@ -14,9 +14,12 @@ import {
   importKeyPair,
   sayHello,
   spawnSession,
+  projectListRequest,
+  sessionClaimed,
 } from "@aasis21/weft-shared";
 import { createListener } from "../src/listener.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
+import { registerPendingSession } from "../src/pendingSessions.mjs";
 
 let dirs = [];
 let identityFiles = [];
@@ -45,7 +48,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -65,6 +68,8 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs } = {}) {
     spawnFn,
     log,
     connectionsHome,
+    onSessionOffers,
+    onSessionClaimed,
   });
   await listener.start();
 
@@ -242,4 +247,54 @@ test("connections.json entries from processes that no longer exist are pruned on
   await listener.stop();
   const after = readRegistry("connections.json", { baseDir: connectionsHome });
   assert.equal(after?.["stale-channel"], undefined, "stale pid entry should have been pruned");
+});
+
+test("relays SESSION_OFFERS for pending `/weft` sessions and drops them on SESSION_CLAIMED", async () => {
+  const offered = [];
+  const claimed = [];
+  const { listener, phoneChannel, messages, connectionsHome } = await pairedHarness({
+    projects: [],
+    onSessionOffers: (offers) => offered.push(offers),
+    onSessionClaimed: (id) => claimed.push(id),
+  });
+
+  // A live `/weft` session in this same (test) process registers itself as pending. Since it's
+  // owned by process.pid, it reads as alive and eligible to be offered.
+  const payload = { v: 1, channelId: "offer-1", pub: "PUB", transport: { kind: "local" } };
+  registerPendingSession(
+    { channelId: "offer-1", name: "web", cwd: "/repo/web", payload },
+    { baseDir: connectionsHome },
+  );
+
+  // Deterministically pull the offers via the PROJECT_LIST_REQUEST piggyback (rather than racing
+  // the fs watcher): the listener answers with SESSION_OFFERS carrying our pending session.
+  await phoneChannel.send(projectListRequest());
+  const offersMsg = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS && m.msg.offers.length > 0),
+    "session offers",
+  );
+  assert.equal(offersMsg.msg.offers.length, 1);
+  assert.deepEqual(offersMsg.msg.offers[0], { channelId: "offer-1", name: "web", cwd: "/repo/web", payload });
+  assert.ok(offered.some((list) => list.some((o) => o.channelId === "offer-1")), "onSessionOffers hook fired");
+
+  // The phone adopts the offer → SESSION_CLAIMED removes it from the pending registry and the
+  // listener re-broadcasts an (now empty) offer set.
+  const offersSeen = messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS).length;
+  await phoneChannel.send(sessionClaimed("offer-1"));
+  await waitFor(() => claimed.includes("offer-1"), "claim handled");
+  assert.equal(
+    readRegistry("pending-sessions.json", { baseDir: connectionsHome })?.["offer-1"],
+    undefined,
+    "claimed offer is removed from the pending registry",
+  );
+  const clearMsg = await waitFor(
+    () =>
+      messages
+        .filter((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS)
+        .slice(offersSeen)
+        .find((m) => m.msg.offers.length === 0),
+    "empty offers after claim",
+  );
+  assert.equal(clearMsg.msg.offers.length, 0);
+  await listener.stop();
 });
