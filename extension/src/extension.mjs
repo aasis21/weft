@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, unlinkSync } from "node:fs";
+import { basename } from "node:path";
 import QRCode from "qrcode";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
@@ -14,6 +15,7 @@ import { createTransportFromDescriptor, resolveTransportByName, resolveTransport
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
+import { isStationRunning, registerPendingSession, removePendingSession } from "./pendingSessions.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
 // "devtunnel" path (see switchTransport below). Kept separate from transportFactory's own
@@ -34,8 +36,18 @@ const ui = {
   dim: paint("2"),
 };
 
-const handedOffIdentity = await loadIdentityFromFile(process.env.WEFT_IDENTITY_FILE);
+const identityFileEnv = process.env.WEFT_IDENTITY_FILE || "";
+const channelIdEnv = process.env.WEFT_CHANNEL_ID || "";
+const handedOffIdentity = await loadIdentityFromFile(identityFileEnv);
 const identityFileWasPresent = Boolean(handedOffIdentity);
+// A spawn-from-phone hand-off is signalled purely by the env vars spawn.mjs sets on the child
+// (WEFT_IDENTITY_FILE / WEFT_CHANNEL_ID). If EITHER is present but the identity file failed to
+// load, the hand-off broke on the way in — most commonly because the terminal launcher
+// (wt.exe / Terminal.app / gnome-terminal) routed our command through an already-running
+// terminal broker that spawns children under its OWN stale environment, dropping the vars we
+// set. When that happens the phone has been told a channel/key this session will never answer
+// on, so it looks like "session started but phone never pairs". We surface it loudly below.
+const spawnHandoffExpected = Boolean(identityFileEnv || channelIdEnv);
 // Each Copilot session always gets its own fresh channel + keypair (forward-secret, and required
 // for the relay's 1-peer-per-channel binding — see listener.mjs's boundPeerPub / bindPeer). The
 // only exception is a same-session handoff identity (e.g. after /clear), which must be reused
@@ -44,7 +56,7 @@ const identityFileWasPresent = Boolean(handedOffIdentity);
 // listener.mjs) — it never applies here, since sharing one channel across multiple live Copilot
 // sessions would mean the relay ACKs/serves the phone's hello from more than one process at once.
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
-const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
+const channelId = handedOffIdentity?.channelId ?? (channelIdEnv || randomChannelId());
 // Resolved once from the single ~/.weft/weft.config.json config file written by `weft
 // set-transport` (see transportFactory.mjs — there is no env var / .env fallback, so a
 // reinstall/rebuild of the extension can never silently override this), and stamped into the QR
@@ -115,7 +127,40 @@ const showPairing = async (context) => {
   await logPairing(session, JSON.stringify(pairingPayload), { full: true });
   appendSessionLog("pairing.shown", { transport: transportDescriptor.kind, channel: channelId?.slice(0, 8) });
   if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
+  // If a standalone Device Station is running, advertise THIS session to the phone already paired
+  // to it (the reverse of the phone-driven spawn flow) so it can be adopted with a tap instead of a
+  // QR scan. The station relays this offer over its own encrypted channel; the phone still does a
+  // full ECDH pairing to this session, so no secret leaves the process. Withdrawn once a phone pairs.
+  offerSessionToStationIfRunning();
 };
+
+// Registered only while a live station could relay it (best-effort, idempotent). Tracked so the
+// withdraw path skips a needless file write when we never offered.
+let hasOfferedToStation = false;
+
+function offerSessionToStationIfRunning() {
+  if (shuttingDown || !pairingPayload) return;
+  try {
+    if (!isStationRunning()) return;
+    const cwd = process.cwd();
+    registerPendingSession({ channelId, name: basename(cwd) || null, cwd, payload: pairingPayload });
+    hasOfferedToStation = true;
+    appendSessionLog("offer.registered", { channel: channelId?.slice(0, 8) });
+  } catch (err) {
+    appendSessionLog("offer.register_failed", { error: err?.message ?? String(err) }, { level: "warn" });
+  }
+}
+
+function withdrawSessionOffer() {
+  if (!hasOfferedToStation) return;
+  hasOfferedToStation = false;
+  try {
+    removePendingSession(channelId);
+    appendSessionLog("offer.withdrawn", { channel: channelId?.slice(0, 8) });
+  } catch {
+    // best-effort — a stale entry self-prunes via pid-liveness once this process exits.
+  }
+}
 
 // Rebuild transportDescriptor/pairingPayload for `name` and tear down any live relay so the next
 // connectRelayWithRetry() picks up the new transport. Returns false (after logging a clear error)
@@ -188,7 +233,32 @@ appendSessionLog("session.loaded", {
   transport: transportDescriptor?.kind ?? "unset",
   channel: channelId?.slice(0, 8),
   handoff: identityFileWasPresent,
+  spawnEnv: spawnHandoffExpected,
+  identityFileEnv: identityFileEnv ? "set" : "unset",
+  channelIdEnv: channelIdEnv ? "set" : "unset",
 });
+
+// Smoking gun for "phone spawned a session but it never pairs": the child was spawned from the
+// phone (env vars present) yet the identity file never loaded, so this session came up on a
+// different channel/key than the phone was told. Log it at error level and tell the user how to
+// recover (a manual QR re-pair sidesteps the broken hand-off entirely).
+if (spawnHandoffExpected && !identityFileWasPresent) {
+  appendSessionLog(
+    "spawn.handoff_lost",
+    {
+      identityFileEnv: identityFileEnv ? "set" : "unset",
+      channelIdEnv: channelIdEnv ? "set" : "unset",
+      channel: channelId?.slice(0, 8),
+    },
+    { level: "error" },
+  );
+  session.log?.(
+    "Weft: this session was spawned from your phone, but the pairing identity didn't reach it " +
+      "(the terminal launcher likely dropped the hand-off environment). The phone is waiting on a " +
+      "channel this session won't answer. Run `/weft` here to show a fresh QR and pair manually.",
+    { level: "warning", ephemeral: false },
+  );
+}
 
 if (transportSetupError) {
   appendSessionLog("transport.setup_error", { error: transportSetupError.message }, { level: "warn" });
@@ -214,6 +284,11 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
 }
 
 if (identityFileWasPresent) void connectRelayWithRetry();
+else
+  appendSessionLog("autolisten.skipped", {
+    reason: spawnHandoffExpected ? "handoff_lost" : "no_handoff",
+    channel: channelId?.slice(0, 8),
+  });
 
 // Subscribe the encrypted channel and KEEP listening for phone hellos for the whole session. A
 // transient Supabase subscribe failure (CHANNEL_ERROR) must not permanently kill pairing for a
@@ -382,6 +457,10 @@ async function attachForPeer(transport, { key, peer }) {
   });
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
+  // The phone has adopted this session — it's no longer a "pending" offer, so withdraw it from the
+  // station registry (and the station drops it from its advertised set on its own SESSION_CLAIMED
+  // handling too; both are idempotent).
+  withdrawSessionOffer();
   appendSessionLog("device.paired", { phone: peer.senderName ?? peer.deviceId ?? "unknown" });
   session.log?.(
     `${ui.lime("✓ Phone paired")} — ${peer.senderName ?? peer.deviceId ?? "your phone"} is now mirroring this session.`,
@@ -394,6 +473,7 @@ async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
   appendSessionLog("session.shutdown", { reason: reason ?? "session_end" });
+  withdrawSessionOffer();
   activeStatusStop?.();
   activeStatusStop = null;
   pairingStop?.();

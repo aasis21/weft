@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, watch, mkdirSync } from "node:fs";
 import { hostname, homedir } from "node:os";
 import { randomInt } from "node:crypto";
 import {
@@ -15,12 +15,14 @@ import {
   listenForPeers,
   projectList,
   randomChannelId,
+  sessionOffers,
   spawnPairing,
   spawnResult,
 } from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransport } from "./transportFactory.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
+import * as pendingStore from "./pendingSessions.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./pairingIdentity.mjs";
 import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
@@ -76,9 +78,12 @@ export function createListener({
   heartbeatMs = DEVICE_HEARTBEAT_MS,
   spawnFn,
   projectsApi = projectsStore,
+  // Pending in-session `/weft` offers registry (see pendingSessions.mjs) — injectable so tests can
+  // supply a stub instead of touching the real ~/.weft/pending-sessions.json.
+  pendingApi = pendingStore,
   log = console,
   // ~/.weft by default (see projects.mjs's weftHome()) — overridable so tests don't touch a real
-  // user's Weft home when exercising the connections.json registry.
+  // user's Weft home when exercising the connections.json / pending-sessions.json registries.
   connectionsHome = undefined,
   // Optional UI hooks so a host (e.g. weft) can render a live connection/heartbeat indicator
   // without this module knowing anything about terminals or rendering.
@@ -93,9 +98,13 @@ export function createListener({
   onOptimisticBind = null,
   onSpawnRequest = null,
   onSpawnResult = null,
+  // Fired whenever the station relays the current SESSION_OFFERS set to the phone (offers arg) or
+  // a phone claims one (SESSION_CLAIMED, channelId arg) — host-log hooks, best-effort.
+  onSessionOffers = null,
+  onSessionClaimed = null,
   // Fired at the top of handleControl for every decrypted control message a bound phone sends
-  // (PROJECT_LIST_REQUEST, SPAWN_SESSION, FORGET_DEVICE) — lets a host (e.g. the station log)
-  // record incoming phone traffic without this module knowing anything about logging.
+  // (PROJECT_LIST_REQUEST, SPAWN_SESSION, SESSION_CLAIMED, FORGET_DEVICE) — lets a host (e.g. the
+  // station log) record incoming phone traffic without this module knowing anything about logging.
   onControl = null,
 } = {}) {
   let listenerTransport = transport;
@@ -126,6 +135,14 @@ export function createListener({
   let stopped = false;
   let started = false;
   let heartbeatTimer = null;
+  // Pending `/weft` session offers relayed to the phone (see pendingSessions.mjs). `claimedOffers`
+  // suppresses re-advertising a session the phone already adopted (until its file entry is gone);
+  // `lastOffersJson` dedupes redundant SESSION_OFFERS sends; `pendingWatcher`/`offersDebounce` drive
+  // near-instant re-send when the on-disk pending set changes.
+  const claimedOffers = new Set();
+  let lastOffersJson = null;
+  let pendingWatcher = null;
+  let offersDebounce = null;
   // Persistent-pairing-only: true if a phone had EVER bound to this exact persisted
   // channelId/keypair as of the moment this run started (see pairingIdentity.mjs's
   // everConnected). Snapshotted before this run's own bindPeer can flip it, so a host UI (weft
@@ -185,6 +202,7 @@ export function createListener({
       onPeer: bindPeer,
     });
     pairingStop = handle.stop;
+    startPendingWatch();
     return api;
   };
 
@@ -192,6 +210,7 @@ export function createListener({
     if (stopped) return;
     stopped = true;
     stopHeartbeat();
+    stopPendingWatch();
     try {
       controlUnsub?.();
     } catch {
@@ -329,6 +348,7 @@ export function createListener({
         boundOptimistically = false;
         if (isPersistentPairingEnabled()) markPersistedIdentityConnected(listenerChannelId, peer.publicKeyB64);
         await sendProjectList();
+        await sendSessionOffers({ force: true });
         upsertConnection(
           listenerChannelId,
           {
@@ -377,6 +397,7 @@ export function createListener({
       void handleControl(envelope);
     });
     await sendProjectList();
+    await sendSessionOffers({ force: true });
     upsertConnection(
       listenerChannelId,
       {
@@ -408,6 +429,81 @@ export function createListener({
     await channel.send(projectList(projects, listenerDeviceName, listenerDeviceId));
   }
 
+  // Relay the current set of in-session `/weft` offers to the paired phone. `force` bypasses the
+  // dedupe so a fresh bind always gets the full list. Best-effort throughout: a read/send failure
+  // just skips this tick; the next bind, PROJECT_LIST_REQUEST, or file-change watch resends.
+  async function sendSessionOffers({ force = false } = {}) {
+    if (!channel || stopped) return;
+    let pending = [];
+    try {
+      pending = (await Promise.resolve(pendingApi.listPendingSessions({ baseDir: connectionsHome }))) ?? [];
+    } catch {
+      pending = [];
+    }
+    // Once a session withdraws its own file entry (on pair/exit) it's gone from `pending`, so drop
+    // it from the claimed-suppression set to keep that set bounded.
+    const presentIds = new Set(pending.map((o) => o.channelId));
+    for (const id of [...claimedOffers]) if (!presentIds.has(id)) claimedOffers.delete(id);
+    const offers = pending.filter((o) => o && typeof o.channelId === "string" && !claimedOffers.has(o.channelId));
+    const json = JSON.stringify(offers.map((o) => o.channelId));
+    if (!force && json === lastOffersJson) return;
+    lastOffersJson = json;
+    try {
+      await channel.send(sessionOffers(offers));
+    } catch {
+      lastOffersJson = null; // send didn't land — allow the next tick to resend the same set.
+      return;
+    }
+    try {
+      onSessionOffers?.(offers);
+    } catch {
+      // best-effort UI/log hook
+    }
+  }
+
+  function startPendingWatch() {
+    try {
+      const dir = projectsStore.weftHome(connectionsHome);
+      try {
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+      } catch {
+        // best-effort — a missing dir just means no offers yet; watch may still attach lazily.
+      }
+      pendingWatcher = watch(dir, (_event, filename) => {
+        // Atomic writes touch a temp file then rename to pending-sessions.json; both names include
+        // the base filename. `filename` can be null on some platforms — react to any change then.
+        if (filename && !String(filename).includes(pendingStore.PENDING_SESSIONS_FILE)) return;
+        if (offersDebounce) clearTimeout(offersDebounce);
+        offersDebounce = setTimeout(() => {
+          offersDebounce = null;
+          void sendSessionOffers();
+        }, 150);
+        offersDebounce.unref?.();
+      });
+      pendingWatcher.on?.("error", () => {
+        // Watch failures are non-fatal — PROJECT_LIST_REQUEST polling + on-bind sends still refresh.
+      });
+      // Never let the watch handle by itself hold the process open (mirrors the heartbeat/debounce
+      // unref); the station stays alive on its transport, and stop() closes this explicitly.
+      pendingWatcher.unref?.();
+    } catch {
+      pendingWatcher = null;
+    }
+  }
+
+  function stopPendingWatch() {
+    if (offersDebounce) {
+      clearTimeout(offersDebounce);
+      offersDebounce = null;
+    }
+    try {
+      pendingWatcher?.close?.();
+    } catch {
+      // best-effort
+    }
+    pendingWatcher = null;
+  }
+
   async function handleControl(envelope) {
     if (stopped || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
     try {
@@ -417,10 +513,29 @@ export function createListener({
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST_REQUEST) {
       await sendProjectList();
+      await sendSessionOffers();
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {
       await handleSpawn(envelope.msg ?? {});
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_CLAIMED) {
+      const claimedId = envelope.msg?.channelId;
+      if (typeof claimedId === "string" && claimedId) {
+        claimedOffers.add(claimedId);
+        try {
+          pendingApi.removePendingSession(claimedId, { baseDir: connectionsHome });
+        } catch {
+          // best-effort — the owning session also withdraws its own entry when the phone pairs.
+        }
+        try {
+          onSessionClaimed?.(claimedId);
+        } catch {
+          // best-effort UI/log hook
+        }
+        await sendSessionOffers({ force: true });
+      }
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.FORGET_DEVICE) {

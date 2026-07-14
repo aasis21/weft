@@ -91,6 +91,16 @@ export const SUBTYPE = Object.freeze({
     // (session.rpc.commands.invoke). The set of allowed commands lives in commands.mjs; the
     // extension re-validates against it before running. { name, input? }.
     INVOKE_COMMAND: "invoke_command",
+    // --- laptop-initiated /weft sessions offered through a running station (#offer) ---
+    // listener -> phone: the set of in-session `/weft` sessions currently waiting to be adopted by
+    // the paired phone (each carries its own SESSION pairing payload). Sent right after PROJECT_LIST
+    // on (re)connect and again whenever the on-disk pending set changes. The mirror image of
+    // SPAWN_PAIRING: there the phone asks the station to spawn a session; here a session the user
+    // started at the terminal advertises itself to the already-paired phone (see sessionOffers()).
+    SESSION_OFFERS: "session_offers",
+    // phone -> listener: the phone has adopted (paired to) an offered session, so the station can
+    // drop it from its advertised set. Idempotent; carries the offered session's channelId.
+    SESSION_CLAIMED: "session_claimed",
   }),
   PAIR: Object.freeze({ HELLO: "hello", ACK: "ack" }),
 });
@@ -344,6 +354,36 @@ export const invokeCommand = (name, input) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.INVOKE_COMMAND, {
     name: typeof name === "string" ? name : "",
     ...(typeof input === "string" && input.length > 0 ? { input } : {}),
+  });
+
+/**
+ * Listener -> phone: the in-session `/weft` sessions currently waiting to be adopted by the paired
+ * phone. Each offer is `{ channelId, name, cwd, payload }`, where `payload` is a buildPairingPayload()
+ * result for that session's own SESSION channel — so the phone pairs to it digitally (no QR), the
+ * same way it consumes spawnPairing(). `channelId` (also present inside `payload`) is the stable key
+ * the phone dedupes on and echoes back in sessionClaimed(). Non-`{channelId, payload}` entries are
+ * dropped so a malformed offer can never wedge the phone.
+ */
+export const sessionOffers = (offers) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_OFFERS, {
+    offers: (Array.isArray(offers) ? offers : [])
+      .filter((o) => o && typeof o.channelId === "string" && o.payload)
+      .map((o) => ({
+        channelId: o.channelId,
+        name: typeof o.name === "string" && o.name.length > 0 ? o.name : null,
+        cwd: typeof o.cwd === "string" && o.cwd.length > 0 ? o.cwd : null,
+        payload: o.payload,
+      })),
+  });
+
+/**
+ * Phone -> listener: the phone has adopted (paired to) an offered session, so the station drops it
+ * from its advertised set and stops re-offering it. Idempotent — a claim for an unknown/already-
+ * removed channelId is a no-op on the station. `channelId` is the offered session's channel.
+ */
+export const sessionClaimed = (channelId) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_CLAIMED, {
+    channelId: typeof channelId === "string" ? channelId : "",
   });
 
 /** Minimal structural validation of a decrypted envelope (kept dependency-free). */

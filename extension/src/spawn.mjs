@@ -28,22 +28,27 @@ export function detectTerminal(env = process.env, platform = process.platform) {
   return null;
 }
 
-export function spawnCopilotSession({ project, name, mode = "default", identity, spawnFn = childSpawn } = {}) {
+export function spawnCopilotSession({ project, name, mode = "default", identity, spawnFn = childSpawn, platform = process.platform } = {}) {
   const cwd = project?.path;
   if (!cwd) return { ok: false, error: "Project path is required" };
   const sessionName = name || "weft-session";
-  let identityFile;
+  const cleanup = [];
   try {
-    identityFile = writeIdentityFile(identity);
+    const identityFile = writeIdentityFile(identity);
+    cleanup.push(identityFile);
     const copilotArgs = ["-n", sessionName];
     if (mode === "allow-all") copilotArgs.push("--allow-all");
+    // The direct-spawn path (no visible terminal) inherits this env correctly. The visible-terminal
+    // launchers below can't rely on it — they route through a terminal broker with its own stale
+    // environment — so they re-establish these vars inside the new shell via a launcher script.
     const env = {
       ...process.env,
       WEFT_IDENTITY_FILE: identityFile,
       WEFT_CHANNEL_ID: identity.channelId,
     };
-    const terminal = detectTerminal();
-    const launch = buildLaunch({ terminal, cwd, copilotArgs });
+    const terminal = detectTerminal(process.env, platform);
+    const launch = buildLaunch({ terminal, cwd, copilotArgs, identityFile, channelId: identity.channelId, platform });
+    if (launch.launcherFile) cleanup.push(launch.launcherFile);
     const child = spawnFn(launch.command, launch.args, {
       cwd,
       env,
@@ -54,9 +59,9 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
     child?.unref?.();
     return { ok: true };
   } catch (err) {
-    if (identityFile) {
+    for (const file of cleanup) {
       try {
-        unlinkSync(identityFile);
+        unlinkSync(file);
       } catch {
         // best-effort cleanup after a failed spawn.
       }
@@ -65,32 +70,84 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
   }
 }
 
-function buildLaunch({ terminal, cwd, copilotArgs }) {
+// A cmd.exe batch value inside `set "VAR=..."` needs no escaping except a literal double-quote,
+// which cmd cannot represent inside a quoted value — strip any (our values are OS paths / random
+// channel ids that never legitimately contain one).
+function cmdSetValue(value) {
+  return String(value).replace(/"/g, "");
+}
+
+// Quote a single copilot argument for a cmd.exe batch line. Bare when safe; double-quoted (with
+// embedded quotes stripped) when it contains whitespace or cmd metacharacters.
+function cmdArg(value) {
+  const s = String(value);
+  if (s.length && !/[\s"&|<>^()]/.test(s)) return s;
+  return `"${s.replace(/"/g, "")}"`;
+}
+
+// POSIX single-quote: wrap in '...' and escape embedded single quotes as '\''.
+function shSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+// Writes a throwaway launcher script that re-establishes the WEFT_* identity env *inside the new
+// shell* and then execs copilot. This makes the hand-off immune to terminal brokers (Windows
+// Terminal, Terminal.app, gnome-terminal-server) that spawn tabs under their own captured
+// environment and would otherwise drop env vars we set on the launch process. Leaked into tmp like
+// the identity file — the spawned session consumes it at startup and the OS reaps temp later.
+function writeLauncherScript({ platform, identityFile, channelId, cwd, copilotArgs }) {
+  const isWindows = platform === "win32";
+  const file = join(tmpdir(), `weft-launch-${process.pid}-${randomUUID()}.${isWindows ? "cmd" : "sh"}`);
+  let body;
+  if (isWindows) {
+    body =
+      "@echo off\r\n" +
+      `set "WEFT_IDENTITY_FILE=${cmdSetValue(identityFile)}"\r\n` +
+      `set "WEFT_CHANNEL_ID=${cmdSetValue(channelId)}"\r\n` +
+      `cd /d "${cmdSetValue(cwd)}"\r\n` +
+      `copilot ${copilotArgs.map(cmdArg).join(" ")}\r\n`;
+  } else {
+    body =
+      "#!/bin/bash\n" +
+      `export WEFT_IDENTITY_FILE=${shSingleQuote(identityFile)}\n` +
+      `export WEFT_CHANNEL_ID=${shSingleQuote(channelId)}\n` +
+      `cd ${shSingleQuote(cwd)}\n` +
+      `exec copilot ${copilotArgs.map(shSingleQuote).join(" ")}\n`;
+  }
+  const fd = openSync(file, "wx", isWindows ? 0o600 : 0o700);
+  try {
+    writeFileSync(fd, body, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+  return file;
+}
+
+function buildLaunch({ terminal, cwd, copilotArgs, identityFile, channelId, platform = process.platform }) {
   if (terminal === "windows-terminal") {
-    // `copilot` resolves to copilot.cmd/.ps1 on Windows, not a .exe. wt.exe hands the command
-    // straight to CreateProcess (no PATHEXT resolution), so it must be routed through cmd.exe.
+    // The launcher .cmd sets WEFT_* then runs copilot (which resolves to copilot.cmd/.ps1 via cmd's
+    // PATHEXT — wt.exe alone can't, it hands the command straight to CreateProcess). Passing the
+    // launcher path as a single argv element lets Node/wt quoting handle spaces in the path.
+    const launcherFile = writeLauncherScript({ platform, identityFile, channelId, cwd, copilotArgs });
     return {
       command: "wt.exe",
-      args: ["new-tab", "--startingDirectory", cwd, "cmd.exe", "/k", "copilot", ...copilotArgs],
+      args: ["new-tab", "--startingDirectory", cwd, "cmd.exe", "/k", launcherFile],
+      launcherFile,
     };
   }
   if (terminal === "macos-terminal") {
+    const launcherFile = writeLauncherScript({ platform, identityFile, channelId, cwd, copilotArgs });
     const script = [
       "on run argv",
-      "set workDir to item 1 of argv",
-      "set cmdParts to {}",
-      "repeat with i from 2 to count of argv",
-      "set end of cmdParts to quoted form of (item i of argv)",
-      "end repeat",
-      "set AppleScript's text item delimiters to space",
-      "set cmdText to \"cd \" & quoted form of workDir & \" && \" & (cmdParts as text)",
-      "tell application \"Terminal\" to do script cmdText",
+      "set launcher to item 1 of argv",
+      "tell application \"Terminal\" to do script \"bash \" & quoted form of launcher",
       "end run",
     ].join("\n");
-    return { command: "osascript", args: ["-e", script, cwd, "copilot", ...copilotArgs] };
+    return { command: "osascript", args: ["-e", script, launcherFile], launcherFile };
   }
   if (terminal === "gnome-terminal") {
-    return { command: "gnome-terminal", args: [`--working-directory=${cwd}`, "--", "copilot", ...copilotArgs] };
+    const launcherFile = writeLauncherScript({ platform, identityFile, channelId, cwd, copilotArgs });
+    return { command: "gnome-terminal", args: [`--working-directory=${cwd}`, "--", "bash", launcherFile], launcherFile };
   }
   return { command: "copilot", args: copilotArgs };
 }

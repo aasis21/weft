@@ -69,6 +69,8 @@ export const SUBTYPE: {
     readonly DEVICE_HEARTBEAT: "device_heartbeat";
     readonly VOICE_MODE: "voice_mode";
     readonly INVOKE_COMMAND: "invoke_command";
+    readonly SESSION_OFFERS: "session_offers";
+    readonly SESSION_CLAIMED: "session_claimed";
   };
   readonly PAIR: { readonly HELLO: "hello"; readonly ACK: "ack" };
 };
@@ -316,6 +318,25 @@ export interface InvokeCommandMsg {
   /** Optional free-text argument after the command name. */
   input?: string;
 }
+/** A single in-session `/weft` session advertised to the paired phone for digital adoption. */
+export interface SessionOffer {
+  /** The offered session's own SESSION channel id (also inside `payload`); the phone's dedupe key. */
+  channelId: string;
+  /** Friendly session label (CLI title / cwd basename), or null. */
+  name: string | null;
+  /** Working directory of the offered session, or null. */
+  cwd: string | null;
+  /** buildPairingPayload() result for the offered session, consumed like SpawnPairingMsg.payload. */
+  payload: PairingPayload;
+}
+/** Listener -> phone: the set of `/weft` sessions currently waiting to be adopted by this phone. */
+export interface SessionOffersMsg {
+  offers: SessionOffer[];
+}
+/** Phone -> listener: the phone adopted an offered session; the station drops it from pending. */
+export interface SessionClaimedMsg {
+  channelId: string;
+}
 
 // ---- concrete envelope types (eventType + eventSubtype + typed msg) --------
 export type AssistantMessage = Envelope<"stream", "assistant_message", AssistantMessageMsg>;
@@ -353,6 +374,8 @@ export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>
 export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHeartbeatMsg>;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
 export type InvokeCommandMessage = Envelope<"control", "invoke_command", InvokeCommandMsg>;
+export type SessionOffersMessage = Envelope<"control", "session_offers", SessionOffersMsg>;
+export type SessionClaimedMessage = Envelope<"control", "session_claimed", SessionClaimedMsg>;
 export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
 export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
 
@@ -391,7 +414,9 @@ export type EventEnvelope =
   | ForgetDevice
   | DeviceHeartbeat
   | VoiceModeMessage
-  | InvokeCommandMessage;
+  | InvokeCommandMessage
+  | SessionOffersMessage
+  | SessionClaimedMessage;
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
 export function assistantDelta(content: string, messageId?: string): AssistantDelta;
@@ -499,3 +524,5 @@ export function forgetDevice(): ForgetDevice;
 export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
 export function voiceMode(active: boolean): VoiceModeMessage;
 export function invokeCommand(name: string, input?: string): InvokeCommandMessage;
+export function sessionOffers(offers: SessionOffer[]): SessionOffersMessage;
+export function sessionClaimed(channelId: string): SessionClaimedMessage;

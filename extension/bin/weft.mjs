@@ -377,6 +377,13 @@ async function start() {
       appendStationLog("device.optimistic_bind", {});
     },
     onControl: ({ subtype }) => appendStationLog("phone.control", { subtype: subtype ?? "unknown" }),
+    onSessionOffers: (offers) => {
+      appendStationLog("session.offers", { count: Array.isArray(offers) ? offers.length : 0 });
+    },
+    onSessionClaimed: (channelId) => {
+      status.log(`${c.cyan("→")} Session adopted by phone ${c.dim(`(${String(channelId).slice(0, 8)})`)}`);
+      appendStationLog("session.claimed", { channel: String(channelId).slice(0, 8) });
+    },
     onSpawnRequest: ({ projectName, mode, name }) => {
       status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${projectName || "default project"} ${c.dim(`[${mode}]`)}`);
       appendStationLog("spawn.request", { name: name || "(unnamed)", project: projectName || "default", mode });

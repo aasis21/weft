@@ -71,8 +71,43 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   assert.equal(JSON.parse(readFileSync(calls[0].options.env.WEFT_IDENTITY_FILE, "utf8")).channelId, "chan-spawn");
 });
 
-test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {
+test("spawnCopilotSession bakes identity into a launcher script for windows-terminal", async () => {
+  const oldWt = process.env.WT_SESSION;
+  process.env.WT_SESSION = "1"; // force windows-terminal branch regardless of host
   const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
+  cleanupDirs.push(projectDir);
+  const calls = [];
+  const result = spawnCopilotSession({
+    project: { name: "app", path: projectDir },
+    name: "brave otter", // deliberate space to exercise arg quoting
+    mode: "allow-all",
+    identity: await identity("chan-wt"),
+    platform: "win32",
+    spawnFn(command, args, options) {
+      calls.push({ command, args, options });
+      cleanupFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  process.env.WT_SESSION = oldWt;
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls[0].command, "wt.exe");
+  // Last argv element is the launcher script routed through cmd.exe /k.
+  const launcherPath = calls[0].args.at(-1);
+  cleanupFiles.push(launcherPath);
+  assert.match(launcherPath, /weft-launch-.*\.cmd$/);
+  assert.deepEqual(calls[0].args.slice(0, 5), ["new-tab", "--startingDirectory", projectDir, "cmd.exe", "/k"]);
+
+  const script = readFileSync(launcherPath, "utf8");
+  const identityFile = calls[0].options.env.WEFT_IDENTITY_FILE;
+  assert.ok(script.includes(`set "WEFT_IDENTITY_FILE=${identityFile}"`));
+  assert.ok(script.includes(`set "WEFT_CHANNEL_ID=chan-wt"`));
+  assert.ok(script.includes(`cd /d "${projectDir}"`));
+  assert.ok(script.includes(`copilot -n "brave otter" --allow-all`));
+});
+
+test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   let identityPath;
   const result = spawnCopilotSession({
