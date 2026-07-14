@@ -5,7 +5,7 @@ import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
-import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { transportIdentity } from '@aasis21/weft-shared';
@@ -222,7 +222,7 @@ export function DeviceDetailsScreen({
       ) : null}
 
       {drawerOpen ? (
-        <SessionDrawer
+        <WeftDrawer
           sessions={sessions}
           activeId={activeId}
           devices={devices}

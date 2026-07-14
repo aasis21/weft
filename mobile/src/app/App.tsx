@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import type { SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
-import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
+import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import { StartSessionScreen } from '@/ui/screens/StartSessionScreen';
 import { DevicesScreen } from '@/ui/screens/DevicesScreen';
 import { DeviceDetailsScreen } from '@/ui/screens/DeviceDetailsScreen';
@@ -140,7 +140,7 @@ export default function App(): JSX.Element {
   // Explicit "join another session" from within the app.
   if (adding) {
     return (
-      <JoinSessionScreen
+      <ConnectScreen
         hasSessions={hasSessions}
         initialManual={addManual}
         error={error}
@@ -150,6 +150,32 @@ export default function App(): JSX.Element {
           setError(null);
           setAddManual(false);
           setAdding(false);
+        }}
+        sessions={snapshot.sessions}
+        activeId={activeId}
+        devices={snapshot.devices}
+        onSelectSession={(id) => {
+          setAdding(false);
+          sessionRuntime.setActive(id);
+        }}
+        onStartOnDevice={(id) => {
+          setAdding(false);
+          openStart(id);
+        }}
+        onOpenDeviceDetails={(id) => {
+          setAdding(false);
+          openDeviceDetails(id);
+        }}
+        onOpenDevices={() => {
+          setAdding(false);
+          openDevices();
+        }}
+        onRemoveSession={(id) => void sessionRuntime.remove(id)}
+        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+        onGoHome={() => {
+          setAdding(false);
+          setError(null);
+          setShowLanding(true);
         }}
       />
     );
@@ -179,7 +205,7 @@ export default function App(): JSX.Element {
   }
 
   // Full "connected devices" manager: every registered listener, live status, and per-device
-  // actions — distinct from StartSessionScreen (launching ONE session) and JoinSessionScreen
+  // actions — distinct from StartSessionScreen (launching ONE session) and ConnectScreen
   // (mirroring an existing session by QR).
   if (devicesOpen) {
     return (
@@ -308,7 +334,7 @@ export default function App(): JSX.Element {
   // the native app skips marketing and goes straight to the scan/pair screen.
   if (!hasSessions || !active) {
     return isNativeRuntime() ? (
-      <JoinSessionScreen
+      <ConnectScreen
         firstRun
         hasSessions={false}
         error={error}

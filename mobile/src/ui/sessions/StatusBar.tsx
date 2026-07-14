@@ -224,28 +224,6 @@ export function StatusBar({
           </button>
           {menuOpen ? (
             <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
-              <button
-                type="button"
-                role="menuitem"
-                className="bar-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onStartSession?.();
-                }}
-              >
-                ▻ Start another session
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="bar-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onAddSession();
-                }}
-              >
-                ＋ Join another session
-              </button>
               {onRename ? (
                 <button
                   type="button"

@@ -96,16 +96,17 @@ describe('StatusBar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
+    // Start + Join are the header's ▻ / ＋ icons — they are NOT duplicated inside the ⋯ menu
+    // (which now holds only this-session actions), mirroring the sidebar row-action cleanup.
     await user.click(screen.getByRole('button', { name: 'Start another session' }));
     expect(onStartSession).toHaveBeenCalledTimes(1);
-
-    await user.click(screen.getByRole('button', { name: 'Session menu' }));
-    let menu = screen.getByRole('menu');
-    await user.click(within(menu).getByRole('menuitem', { name: '＋ Join another session' }));
+    await user.click(screen.getByRole('button', { name: 'New session' }));
     expect(onAddSession).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Session menu' }));
-    menu = screen.getByRole('menu');
+    let menu = screen.getByRole('menu');
+    expect(within(menu).queryByRole('menuitem', { name: /Start another session/ })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: /Join another session/ })).not.toBeInTheDocument();
     await user.click(within(menu).getByRole('menuitem', { name: '↻ Reconnect this session' }));
     expect(onReconnect).toHaveBeenCalledTimes(1);
 

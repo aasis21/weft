@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { JoinSessionScreen } from '@/ui/screens/JoinSessionScreen';
+import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 
 vi.mock('@/ui/pairing/WebQrScanner', () => ({
@@ -62,7 +62,7 @@ describe('LandingScreen', () => {
   });
 });
 
-describe('JoinSessionScreen', () => {
+describe('ConnectScreen', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     platformState.desktop = true;
@@ -72,7 +72,7 @@ describe('JoinSessionScreen', () => {
     const user = userEvent.setup();
     const onPair = vi.fn().mockResolvedValue(undefined);
     render(
-      <JoinSessionScreen
+      <ConnectScreen
         hasSessions={false}
         error={null}
         onError={vi.fn()}
@@ -90,7 +90,7 @@ describe('JoinSessionScreen', () => {
     const onPair = vi.fn().mockResolvedValue(undefined);
     const onCancel = vi.fn();
     render(
-      <JoinSessionScreen
+      <ConnectScreen
         hasSessions
         initialManual
         error="Bad code"
@@ -100,7 +100,7 @@ describe('JoinSessionScreen', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '← Back' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(screen.getByText('Bad code')).toHaveClass('error-banner');
     fireEvent.change(screen.getByRole('textbox', { name: 'Manual pairing JSON' }), {
       target: { value: '{"v":1,"channelId":"abc"}' },
@@ -109,7 +109,7 @@ describe('JoinSessionScreen', () => {
     expect(onPair).toHaveBeenCalledWith('{"v":1,"channelId":"abc"}');
     expect(screen.queryByRole('button', { name: 'Demo / Simulator' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '← Back' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -122,7 +122,7 @@ describe('JoinSessionScreen', () => {
     unmount();
 
     render(
-      <JoinSessionScreen hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn().mockResolvedValue(undefined)} />,
+      <ConnectScreen hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn().mockResolvedValue(undefined)} />,
     );
     expect(screen.queryByRole('button', { name: 'Enter code manually' })).not.toBeInTheDocument();
   });

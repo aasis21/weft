@@ -5,7 +5,7 @@ import { deriveStatus } from './sessionStatus';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 
-interface SessionDrawerProps {
+interface WeftDrawerProps {
   sessions: SessionView[];
   activeId: string | null;
   onSelect(channelId: string): void;
@@ -65,7 +65,7 @@ function isFocusable(element: HTMLElement): boolean {
   return element.tabIndex >= 0 && !element.hasAttribute('disabled') && element.getClientRects().length > 0;
 }
 
-export function SessionDrawer({
+export function WeftDrawer({
   sessions,
   activeId,
   onSelect,
@@ -83,7 +83,7 @@ export function SessionDrawer({
   onOpenSettings,
   onClose,
   docked = false,
-}: SessionDrawerProps): JSX.Element {
+}: WeftDrawerProps): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -191,7 +191,7 @@ export function SessionDrawer({
     const offlineGroup: SessionView[] = [];
     const archivedGroup: SessionView[] = [];
     for (const s of filteredSessions) {
-      const derived = deriveStatus(s);
+      const derived = deriveStatus(s, { busy: s.timeline.busy });
       if (derived.active) activeGroup.push(s);
       else if (derived.tone === 'error') offlineGroup.push(s);
       else archivedGroup.push(s);
@@ -361,7 +361,7 @@ export function SessionDrawer({
     const isActive = id === activeId;
     const pending = session.timeline.approvals.length;
     const activity = lastActivity(session);
-    const derived = deriveStatus(session);
+    const derived = deriveStatus(session, { busy: session.timeline.busy });
     const isDemo = session.meta.kind === 'demo';
     const confirming = confirmDeleteId === id;
     const swiped = swipedId === id;

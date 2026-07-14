@@ -31,8 +31,8 @@ vi.mock('@/ui/prompts/ElicitationCard', () => ({
   ElicitationCard: () => <div data-testid="elicitation" />,
 }));
 
-vi.mock('@/ui/sessions/SessionDrawer', () => ({
-  SessionDrawer: (props: { onRemove: (id: string) => void }) => {
+vi.mock('@/ui/sessions/WeftDrawer', () => ({
+  WeftDrawer: (props: { onRemove: (id: string) => void }) => {
     drawerProps.latest = props;
     return (
       <div data-testid="drawer">

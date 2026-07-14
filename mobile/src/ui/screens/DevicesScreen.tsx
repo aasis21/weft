@@ -4,7 +4,7 @@ import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
-import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 
 interface DevicesScreenProps {
@@ -249,7 +249,7 @@ export function DevicesScreen({
       </div>
 
       {drawerOpen ? (
-        <SessionDrawer
+        <WeftDrawer
           sessions={sessions}
           activeId={activeId}
           devices={devices}

@@ -5,8 +5,11 @@ import { isNativeRuntime, scanNativeQr, usePairing } from '@/ui/hooks/usePairing
 import { isDesktopInput } from '@/lib/platform';
 import { isDebugModeEnabled, setDebugModeEnabled } from '@/lib/debugSettings';
 import { runConnectivityProbe } from '@/lib/wsProbe';
+import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
+import type { SessionView } from '@/session/view';
+import type { ListenerDeviceState } from '@/session/model';
 
-interface JoinSessionScreenProps {
+interface ConnectScreenProps {
   /** Native first run: no prior sessions to go back to. */
   firstRun?: boolean;
   hasSessions: boolean;
@@ -16,9 +19,22 @@ interface JoinSessionScreenProps {
   onError(error: string | null): void;
   onPair(raw: string): Promise<void>;
   onCancel?: () => void;
+  /** In-app variant only (#186 nav consistency): the same hamburger + sessions drawer every other
+   *  screen shows, so the connect screen isn't a dead-end with a lone back button. Omitted on the
+   *  native first-run/standalone variant, which has no sessions to list. */
+  sessions?: SessionView[];
+  activeId?: string | null;
+  devices?: ListenerDeviceState[];
+  onSelectSession?(channelId: string): void;
+  onStartOnDevice?(channelId: string): void;
+  onOpenDeviceDetails?(channelId: string): void;
+  onOpenDevices?(): void;
+  onRemoveSession?(channelId: string): void;
+  onRenameSession?(channelId: string, title: string): void;
+  onGoHome?(): void;
 }
 
-export function JoinSessionScreen({
+export function ConnectScreen({
   firstRun = false,
   hasSessions,
   initialManual = false,
@@ -26,7 +42,17 @@ export function JoinSessionScreen({
   onError,
   onPair,
   onCancel,
-}: JoinSessionScreenProps): JSX.Element {
+  sessions,
+  activeId,
+  devices,
+  onSelectSession,
+  onStartOnDevice,
+  onOpenDeviceDetails,
+  onOpenDevices,
+  onRemoveSession,
+  onRenameSession,
+  onGoHome,
+}: ConnectScreenProps): JSX.Element {
   const native = isNativeRuntime();
   // Manual/paste pairing is a keyboard-and-mouse convenience (copy a JSON blob from a
   // terminal) — on a touch phone it's just a confusing dead-end box, so keep it desktop-only
@@ -40,6 +66,7 @@ export function JoinSessionScreen({
   const [probeResult, setProbeResult] = useState<string | null>(null);
   // Bumped after a failed pair so the inline web scanner remounts and resumes scanning.
   const [scanNonce, setScanNonce] = useState(0);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const autoScanned = useRef(false);
 
   useEffect(() => {
@@ -103,34 +130,52 @@ export function JoinSessionScreen({
   const kicker = 'Connect';
   const heading = 'Scan to connect';
   const tagline = 'One scan links your laptop — it pairs a new device or joins a session automatically.';
-  const steps: JSX.Element[] = [
-    <>Run <code>copilot</code> on your laptop</>,
-    <>Point your camera at the pairing QR it prints</>,
-  ];
   const secondaryCls = inApp ? 'session-secondary-action' : 'secondary-action';
   const linkCls = inApp ? 'session-link-btn' : 'link-btn';
 
   return (
     <main className={inApp ? 'weft-session join-session' : 'join-shell'}>
-      <div className={inApp ? 'session-join-inner' : undefined}>
-        <header className={inApp ? 'session-join-head' : 'join-head'}>
+      {inApp ? (
+        <header className="status-bar">
+          <button
+            className="icon-btn drawer-btn"
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open sessions"
+          >
+            <span className="hamburger" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          </button>
+          <div className="status-id">
+            <span className="status-title">Scan to connect</span>
+            <span className="status-line">
+              <span className="status-dot" aria-hidden="true" />
+              Pair a device or session
+            </span>
+          </div>
           {onCancel && !firstRun ? (
-            <button type="button" className={inApp ? 'session-pair-back' : 'pair-back'} onClick={onCancel}>
-              ← {backLabel}
+            <button className="icon-btn" type="button" onClick={onCancel} aria-label="Close">
+              ✕
             </button>
           ) : null}
-          <p className={inApp ? 'session-join-kicker' : 'eyebrow'}>{kicker}</p>
-          <h2>{heading}</h2>
-          <p className="join-tagline">{tagline}</p>
-          <ol className="join-steps">
-            {steps.map((step, i) => (
-              <li key={i}>
-                <span className="step-num" aria-hidden="true">{i + 1}</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
         </header>
+      ) : null}
+      <div className={inApp ? 'session-join-inner' : undefined}>
+        {inApp ? null : (
+          <header className="join-head">
+            {onCancel && !firstRun ? (
+              <button type="button" className="pair-back" onClick={onCancel}>
+                ← {backLabel}
+              </button>
+            ) : null}
+            <p className="eyebrow">{kicker}</p>
+            <h2>{heading}</h2>
+            <p className="join-tagline">{tagline}</p>
+          </header>
+        )}
 
       <div className={inApp ? 'session-join-scanner' : 'join-scanner'}>
         {native ? (
@@ -238,6 +283,37 @@ export function JoinSessionScreen({
         </div>
       </details>
       </div>
+      {drawerOpen && sessions ? (
+        <WeftDrawer
+          sessions={sessions}
+          activeId={activeId ?? null}
+          devices={devices}
+          onSelect={(id) => {
+            setDrawerOpen(false);
+            onSelectSession?.(id);
+          }}
+          onStartOnDevice={onStartOnDevice ? (id) => {
+            setDrawerOpen(false);
+            onStartOnDevice(id);
+          } : undefined}
+          onOpenDeviceDetails={onOpenDeviceDetails ? (id) => {
+            setDrawerOpen(false);
+            onOpenDeviceDetails(id);
+          } : undefined}
+          onAddSession={() => setDrawerOpen(false)}
+          onOpenDevices={onOpenDevices ? () => {
+            setDrawerOpen(false);
+            onOpenDevices();
+          } : undefined}
+          onRemove={(id) => onRemoveSession?.(id)}
+          onRename={onRenameSession}
+          onGoHome={() => {
+            setDrawerOpen(false);
+            onGoHome?.();
+          }}
+          onClose={() => setDrawerOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }

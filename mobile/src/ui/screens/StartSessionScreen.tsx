@@ -5,7 +5,7 @@ import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
-import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
@@ -253,7 +253,7 @@ export function StartSessionScreen({
       </div>
 
       {drawerOpen ? (
-        <SessionDrawer
+        <WeftDrawer
           sessions={sessions}
           activeId={activeId}
           devices={devices}

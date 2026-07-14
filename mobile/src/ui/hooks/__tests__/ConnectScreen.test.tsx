@@ -1,6 +1,6 @@
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { JoinSessionScreen } from '../../screens/JoinSessionScreen';
+import { ConnectScreen } from '../../screens/ConnectScreen';
 
 const scannerState = vi.hoisted(() => ({ mounts: 0 }));
 
@@ -17,7 +17,7 @@ vi.mock('@/ui/pairing/WebQrScanner', async () => {
   };
 });
 
-describe('JoinSessionScreen', () => {
+describe('ConnectScreen', () => {
   it('re-arms the inline scanner only after a failed pairing task settles', async () => {
     scannerState.mounts = 0;
     let rejectFirst: (error: Error) => void = () => undefined;
@@ -27,7 +27,7 @@ describe('JoinSessionScreen', () => {
     const onPair = vi.fn<() => Promise<void>>().mockReturnValueOnce(firstPair).mockResolvedValueOnce(undefined);
 
     render(
-      <JoinSessionScreen
+      <ConnectScreen
         hasSessions={false}
         error={null}
         onError={() => undefined}

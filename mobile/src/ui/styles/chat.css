@@ -1487,7 +1487,7 @@
 
 /* Row-level "⋮" menu: collapses pin/archive/rename behind one button so only delete ("✕")
    stays directly on the row. The dropdown is a small absolutely-positioned popover anchored
-   to the menu button; outside clicks close it (see SessionDrawer's document click listener). */
+   to the menu button; outside clicks close it (see WeftDrawer's document click listener). */
 .row-menu-wrap { position: relative; display: inline-flex; }
 .session-row .row-menu-btn { width: 30px; height: 30px; font-size: 15px; opacity: 0.55; }
 .session-row .row-menu-btn:hover,

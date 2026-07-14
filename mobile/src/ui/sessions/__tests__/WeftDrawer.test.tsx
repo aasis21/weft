@@ -1,7 +1,7 @@
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { emptyTimeline, type TimelineState } from '@/lib/timeline';
 import type { SessionView } from '@/session/view';
 
@@ -31,7 +31,7 @@ function session(
   };
 }
 
-describe('SessionDrawer', () => {
+describe('WeftDrawer', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -42,7 +42,7 @@ describe('SessionDrawer', () => {
       items: [{ kind: 'user', id: 'u1', text: 'hello', ts: 1_200 }],
     };
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[
           session('old', 'Older', 1_000, { timeline: olderTimeline }),
           session('new', 'Newest', 3_000),
@@ -82,7 +82,7 @@ describe('SessionDrawer', () => {
     };
 
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[
           session('active', 'Worker', 2_000, { timeline: activeTimeline, cwd: '', lastEventAt: 700_000 }),
           session('heartbeat', 'Heartbeat Only', 1_000, { timeline: heartbeatOnlyTimeline, cwd: '' }),
@@ -105,7 +105,7 @@ describe('SessionDrawer', () => {
     const onSelect = vi.fn();
     const onRemove = vi.fn();
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[session('a', 'Alpha', 1), session('b', 'Beta', 2)]}
         activeId="a"
         onSelect={onSelect}
@@ -135,7 +135,7 @@ describe('SessionDrawer', () => {
     const onPin = vi.fn();
     const onArchive = vi.fn();
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[
           session('live', 'Live One', 3_000, { status: 'live' }),
           session('cold', 'Cold One', 2_000, { status: 'idle', cold: true, pinned: true }),
@@ -180,7 +180,7 @@ describe('SessionDrawer', () => {
 
   it('floats pinned sessions to the top of their group regardless of scan order (#pin-float)', () => {
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[
           session('a', 'Alpha', 3_000, { status: 'idle' }),
           session('b', 'Bravo', 2_000, { status: 'idle' }),
@@ -208,7 +208,7 @@ describe('SessionDrawer', () => {
   it('auto-dismisses the delete confirm when clicking elsewhere (#delete-confirm)', async () => {
     const user = userEvent.setup();
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[
           session('a', 'Alpha', 2_000, { status: 'idle' }),
           session('b', 'Bravo', 1_000, { status: 'idle' }),
@@ -237,7 +237,7 @@ describe('SessionDrawer', () => {
     const onAddSession = vi.fn();
     const onClose = vi.fn();
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[session('a', 'Alpha', 1), session('b', 'Beta', 2)]}
         activeId={null}
         onSelect={vi.fn()}
@@ -266,7 +266,7 @@ describe('SessionDrawer', () => {
       ],
     };
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[
           session('bg', 'Background', 2_000, { timeline: withNew, unread: true, unreadCount: 12 }),
           session('cur', 'Current', 1_000, { timeline: withNew, unreadCount: 5 }),
@@ -295,7 +295,7 @@ describe('SessionDrawer', () => {
     const user = userEvent.setup();
     const onGoHome = vi.fn();
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[session('a', 'Alpha', 1)]}
         activeId={null}
         onSelect={vi.fn()}
@@ -315,7 +315,7 @@ describe('SessionDrawer', () => {
     const onRename = vi.fn();
     const onSelect = vi.fn();
     render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[session('a', 'Alpha', 1)]}
         activeId="a"
         onSelect={onSelect}
@@ -340,7 +340,7 @@ describe('SessionDrawer', () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const { rerender } = render(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[session('a', 'Alpha', 1)]}
         activeId="a"
         onSelect={vi.fn()}
@@ -368,7 +368,7 @@ describe('SessionDrawer', () => {
 
     onClose.mockClear();
     rerender(
-      <SessionDrawer
+      <WeftDrawer
         sessions={[session('a', 'Alpha', 1)]}
         activeId="a"
         onSelect={vi.fn()}

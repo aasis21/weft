@@ -7,7 +7,7 @@ import { ChatThread } from '@/ui/thread/ChatThread';
 import { Composer } from '@/ui/composer/Composer';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
-import { SessionDrawer } from '@/ui/sessions/SessionDrawer';
+import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
@@ -298,7 +298,7 @@ export function SessionScreen({
       }
 
       if ((event.ctrlKey || event.metaKey) && /^[1-9]$/.test(event.key)) {
-        // Same ordering as the docked sidebar (SessionDrawer): most recently scanned first.
+        // Same ordering as the docked sidebar (WeftDrawer): most recently scanned first.
         const ordered = [...sessions].sort(
           (a, b) => (b.meta.scannedAt ?? b.meta.addedAt ?? 0) - (a.meta.scannedAt ?? a.meta.addedAt ?? 0),
         );
@@ -499,7 +499,7 @@ export function SessionScreen({
             ⟩
           </button>
         ) : (
-          <SessionDrawer
+          <WeftDrawer
             docked
             sessions={sessions}
             activeId={activeId}
@@ -784,7 +784,7 @@ export function SessionScreen({
       </div>
 
       {!isDesktopWide && drawerOpen ? (
-        <SessionDrawer
+        <WeftDrawer
           sessions={sessions}
           activeId={activeId}
           onSelect={(id) => {
