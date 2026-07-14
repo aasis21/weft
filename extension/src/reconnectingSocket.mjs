@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import WebSocket from "ws";
 import { appendStationLog } from "./stationLog.mjs";
+import { appendSessionLog } from "./sessionLog.mjs";
+
+// Emit a transport diagnostic to whichever durable log is enabled in this process. Exactly one of
+// the two is active — station.log for `weft start`, the per-session log for an in-session `/weft`
+// run — so both calls are made and the inactive one is a silent no-op.
+function logTransport(event, detail, opts) {
+  appendStationLog(event, detail, opts);
+  appendSessionLog(event, detail, opts);
+}
 
 const WS_CONNECTING = 0;
 const WS_OPEN = 1;
@@ -78,7 +87,7 @@ export function createReconnectingSocket(url, {
     if (closedByUser || reconnectTimer) return;
     const delay = backoff;
     backoff = Math.min(backoff * 2, maxBackoffMs);
-    appendStationLog("transport.reconnect_scheduled", { kind: "devtunnel", delayMs: delay }, { level: "warn" });
+    logTransport("transport.reconnect_scheduled", { kind: "devtunnel", delayMs: delay }, { level: "warn" });
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       connect();
@@ -101,7 +110,7 @@ export function createReconnectingSocket(url, {
       if (closedByUser) return;
       backoff = minBackoffMs; // Reset backoff on a healthy connection.
       startPing();
-      appendStationLog("transport.connected", { kind: "devtunnel" });
+      logTransport("transport.connected", { kind: "devtunnel" });
       emit("open", {});
     });
     socket.addEventListener("message", (e) => {
@@ -111,7 +120,7 @@ export function createReconnectingSocket(url, {
     socket.addEventListener("close", (e) => {
       clearPing();
       if (closedByUser) return;
-      appendStationLog("transport.disconnected", { kind: "devtunnel", reason: e?.reason || "close" }, { level: "warn" });
+      logTransport("transport.disconnected", { kind: "devtunnel", reason: e?.reason || "close" }, { level: "warn" });
       emit("close", e);
       scheduleReconnect();
     });

@@ -13,6 +13,7 @@ import {
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
 // "devtunnel" path (see switchTransport below). Kept separate from transportFactory's own
@@ -112,6 +113,7 @@ const showPairing = async (context) => {
     return;
   }
   await logPairing(session, JSON.stringify(pairingPayload), { full: true });
+  appendSessionLog("pairing.shown", { transport: transportDescriptor.kind, channel: channelId?.slice(0, 8) });
   if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
 };
 
@@ -142,6 +144,7 @@ async function switchTransport(name) {
   transportSetupError = null;
   pairingPayload = buildCurrentPairingPayload();
   await teardownRelay("transport-switch");
+  appendSessionLog("transport.switched", { transport: descriptor.kind });
   session.log?.(
     `Weft: switched transport to "${descriptor.kind}" for this session only. Scan the fresh QR below.`,
     { ephemeral: false },
@@ -176,7 +179,19 @@ const session = await joinSession({
 // extension is live and how to reach it, without waiting for them to already know `/weft` exists.
 session.log?.(`${ui.brand("Weft loaded")} — run ${ui.cyan("/weft")} to pair your phone for a remote session.`);
 
+// Open this session's durable diagnostic log (~/.weft/sessions/<sessionId>.log), the per-session
+// twin of `weft start`'s station.log. Every notable lifecycle event below also lands here so a
+// finished/crashed session can be diagnosed after its terminal is gone. Best-effort — never fatal.
+enableSessionLog({ sessionId: session.sessionId });
+appendSessionLog("session.loaded", {
+  sessionId: session.sessionId || "unknown-session",
+  transport: transportDescriptor?.kind ?? "unset",
+  channel: channelId?.slice(0, 8),
+  handoff: identityFileWasPresent,
+});
+
 if (transportSetupError) {
+  appendSessionLog("transport.setup_error", { error: transportSetupError.message }, { level: "warn" });
   session.log?.(
     `Weft: transport didn't come up at startup (${transportSetupError.message}). ` +
       `Run \`/weft [${WEFT_COMMAND_TRANSPORT_NAMES.join("|")}]\` to configure/retry it.`,
@@ -232,6 +247,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
         activeStatusStop = transport.onStatus?.((status, detail) => {
           if (status === "disconnected") requestReconnect(detail);
         }) ?? null;
+        appendSessionLog(reconnect ? "pairing.reconnected" : "pairing.ready", { channel: channelId?.slice(0, 8) });
         session.log?.(
           reconnect
             ? "Weft: reconnected."
@@ -242,6 +258,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
         await closeQuietly(transport);
         if (shuttingDown) return false;
         if (attempt >= maxAttempts) {
+          appendSessionLog("pairing.subscribe_failed", { attempts: attempt, error: err?.message ?? String(err) }, { level: "error" });
           process.stderr.write(
             `Weft: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
           );
@@ -268,6 +285,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
 function requestReconnect(detail) {
   if (shuttingDown || reconnecting) return;
   reconnecting = true;
+  appendSessionLog("connection.lost", { reason: detail?.reason ?? detail ?? "unknown" }, { level: "warn" });
   session.log?.("Weft: connection lost, reconnecting…", { level: "warning", ephemeral: false });
   void reconnectRelay(detail).finally(() => {
     reconnecting = false;
@@ -313,6 +331,7 @@ async function teardownRelay(reason) {
 // a duplicate hello from the same phone is already ACKed by `listenForPeers`, so we just no-op.
 function onPeerPaired(transport, info) {
   pairChain = pairChain.then(() => attachForPeer(transport, info)).catch((err) => {
+    appendSessionLog("pairing.repair_failed", { error: err?.message ?? String(err) }, { level: "warn" });
     session.log?.(`Weft: re-pair failed: ${err?.message ?? err}`, {
       level: "warning",
       ephemeral: false,
@@ -363,6 +382,7 @@ async function attachForPeer(transport, { key, peer }) {
   });
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
+  appendSessionLog("device.paired", { phone: peer.senderName ?? peer.deviceId ?? "unknown" });
   session.log?.(
     `${ui.lime("✓ Phone paired")} — ${peer.senderName ?? peer.deviceId ?? "your phone"} is now mirroring this session.`,
   );
@@ -373,6 +393,7 @@ async function attachForPeer(transport, { key, peer }) {
 async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
+  appendSessionLog("session.shutdown", { reason: reason ?? "session_end" });
   activeStatusStop?.();
   activeStatusStop = null;
   pairingStop?.();
