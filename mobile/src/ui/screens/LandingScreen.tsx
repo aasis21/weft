@@ -204,10 +204,10 @@ export function LandingScreen({
           Your Copilot session, now in your <em className="serif">hand.</em>
         </h1>
         <p className="lede">
-          Your Copilot runs on your laptop. You don&apos;t have to be there. Scan a code and
-          you&apos;re in — a whole laptop, or one chat that&apos;s already running. Start something
-          new, jump back into what&apos;s going, approve its moves. From anywhere. Private,
-          end&nbsp;to&nbsp;end.
+          Your Copilot runs on your laptop — Weft brings it to your phone. Pick up a chat
+          that&apos;s already going, or start a new one on any laptop you&apos;ve paired. Everything
+          you&apos;d do at the terminal, you do from your phone — send it work, watch it think,
+          approve what it runs. From anywhere. Private, end&nbsp;to&nbsp;end.
         </p>
         <div className="landing-cta">
           {showSessions ? (
