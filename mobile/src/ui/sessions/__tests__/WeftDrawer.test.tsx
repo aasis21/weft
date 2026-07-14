@@ -162,14 +162,23 @@ describe('WeftDrawer', () => {
     expect(offlineHead.textContent).toContain('1');
     expect(archivedHead.textContent).toContain('1');
 
-    // Per-row pills reflect deriveStatus.
-    expect(screen.getByText('Live One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Live');
-    expect(screen.getByText('Broken One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Offline');
+    // Per-row status. Active + Offline rows convey state via the leading .status-dot only (no text
+    // pill), while the Archived group keeps its text label.
+    const liveRow = screen.getByText('Live One').closest('.session-row') as HTMLElement;
+    expect(liveRow.querySelector('.session-pill')).toBeNull();
+    expect(liveRow.querySelector('.status-dot')).toHaveClass('live');
+    expect(liveRow.querySelector('.status-dot')).toHaveAttribute('aria-label', 'Live');
+
+    const brokenRow = screen.getByText('Broken One').closest('.session-row') as HTMLElement;
+    expect(brokenRow.querySelector('.session-pill')).toBeNull();
+    expect(brokenRow.querySelector('.status-dot')).toHaveClass('error');
+    expect(brokenRow.querySelector('.status-dot')).toHaveAttribute('aria-label', 'Offline');
 
     // Archived starts collapsed (#ui) — expand it to reach the cold row.
     await user.click(archivedHead);
     const coldRow = screen.getByText('Cold One').closest('.session-row') as HTMLElement;
     expect(coldRow.querySelector('.session-pill')?.textContent).toBe('Archived');
+    expect(coldRow.querySelector('.status-dot')).toHaveClass('archived');
 
     // Pinned row shows the marker; pin/rename/archive/delete all live in the row's reveal strip.
     expect(within(coldRow).getByLabelText('Pinned')).toBeInTheDocument();

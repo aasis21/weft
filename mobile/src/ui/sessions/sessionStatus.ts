@@ -1,4 +1,18 @@
 import type { SessionView } from '@/session/view';
+import type { TimelineState } from '@/lib/timeline';
+
+/**
+ * Whether a session's agent is mid-turn ("Working…"). The authoritative `timeline.busy` (set/cleared
+ * by ACTIVITY / HEARTBEAT / STATE_SNAPSHOT) is the primary signal; a still-`running` tool item is a
+ * safe fallback so a tool-first turn whose ACTIVITY(true) edge was missed still reads as working.
+ * The fallback can't wedge: an authoritative idle settles any lingering running tool to `error`
+ * (see applyEnvelope.noteBusySignal). Shared by the main SessionScreen (Stop control) AND the
+ * sidebar/header pill so they can never disagree.
+ */
+export function isWorking(timeline: Pick<TimelineState, 'busy' | 'items'>): boolean {
+  return timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running');
+}
+
 
 /** The visual tone of a status pill — maps 1:1 to a `.status-line.<tone>` CSS class. */
 export type StatusTone =

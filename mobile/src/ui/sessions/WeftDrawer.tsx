@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
-import { deriveStatus } from './sessionStatus';
+import { deriveStatus, isWorking } from './sessionStatus';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
 
@@ -191,7 +191,7 @@ export function WeftDrawer({
     const offlineGroup: SessionView[] = [];
     const archivedGroup: SessionView[] = [];
     for (const s of filteredSessions) {
-      const derived = deriveStatus(s, { busy: s.timeline.busy });
+      const derived = deriveStatus(s, { busy: isWorking(s.timeline) });
       if (derived.active) activeGroup.push(s);
       else if (derived.tone === 'error') offlineGroup.push(s);
       else archivedGroup.push(s);
@@ -361,7 +361,11 @@ export function WeftDrawer({
     const isActive = id === activeId;
     const pending = session.timeline.approvals.length;
     const activity = lastActivity(session);
-    const derived = deriveStatus(session, { busy: session.timeline.busy });
+    const derived = deriveStatus(session, { busy: isWorking(session.timeline) });
+    // Active + Offline rows convey state purely through the leading .status-dot (colour/blink),
+    // so the sub-line drops the text pill. Archived-group rows (Archived / Ended / Initializing…)
+    // keep the text label since those are informational states, not a live pulse.
+    const showStatusText = !derived.active && derived.tone !== 'error';
     const isDemo = session.meta.kind === 'demo';
     const confirming = confirmDeleteId === id;
     const swiped = swipedId === id;
@@ -466,8 +470,9 @@ export function WeftDrawer({
         ) : null}
         <div className="row-fg" style={swiped ? { transform: `translateX(-${swipeReveal}px)` } : undefined}>
         <span
-          className={`unread-dot ${session.unread && !isActive ? 'on' : ''}`}
-          aria-label={session.unread && !isActive ? 'Unread activity' : undefined}
+          className={`status-dot ${derived.tone}`}
+          title={derived.label}
+          aria-label={derived.label}
         />
         <span className="session-info">
           <span className="session-title">
@@ -497,14 +502,16 @@ export function WeftDrawer({
             )}
           </span>
           <span className="session-sub">
-            <span className={`session-pill ${derived.tone}`}>
-              <span className="pill-dot" aria-hidden="true" />
-              {derived.label}
-            </span>
+            {showStatusText ? (
+              <span className={`session-pill ${derived.tone}`}>
+                <span className="pill-dot" aria-hidden="true" />
+                {derived.label}
+              </span>
+            ) : null}
             {!isActive && (session.unreadCount ?? 0) > 0 ? (
-              <span className="unread-new">{` · ${session.unreadCount} new`}</span>
+              <span className="unread-new">{`${showStatusText ? ' · ' : ''}${session.unreadCount} new`}</span>
             ) : (
-              ` · ${turnCount(session)} msg`
+              `${showStatusText ? ' · ' : ''}${turnCount(session)} msg`
             )}
             {activity ? ` · ${fmtRelative(activity)}` : ''}
             {session.meta.cwd ? (

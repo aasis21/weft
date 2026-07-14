@@ -1344,12 +1344,23 @@
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   background: var(--accent-soft);
 }
-.session-row .status-dot { width: 9px; height: 9px; }
-/* The list now conveys ONLY unread: a fixed-width slot keeps titles aligned; the dot lights up
-   (accent) when there's unread host activity and is invisible otherwise. Connection state lives in
-   the session header, not the list, since a per-row link status would go stale in the background. */
-.session-row .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; flex: 0 0 auto; }
-.session-row .unread-dot.on { background: var(--accent); }
+/* Leading status dot: the sidebar list conveys each row's live connection state via colour/motion
+   (mirrors the detail-header pill so they can never disagree). Working = blue blink, Connecting =
+   cyan blink (distinct hues, distinguishable at a glance), Live = solid green, Quiet = amber,
+   Offline = red slow-pulse; Archived/Ended/Initializing are faint & static. The text label is kept
+   only for the Archived group (WeftDrawer.showStatusText); unread is shown as the "N new" count. */
+.session-row .status-dot { width: 9px; height: 9px; flex: 0 0 auto; }
+.session-row .status-dot.live { background: var(--success); animation: none; box-shadow: none; }
+.session-row .status-dot.idle { background: var(--warning); animation: none; box-shadow: none; }
+.session-row .status-dot.busy { background: var(--accent); box-shadow: none; animation: weft-beat 1.2s ease-in-out infinite; }
+.session-row .status-dot.connecting { background: var(--cyan, #6fe9ff); animation: weft-beat 1.2s ease-in-out infinite; }
+.session-row .status-dot.error { background: var(--error); animation: device-status-pulse 1.8s ease-in-out infinite; }
+.session-row .status-dot.archived,
+.session-row .status-dot.ended,
+.session-row .status-dot.initializing { background: var(--fg-faint); animation: none; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .session-row .status-dot { animation: none !important; }
+}
 .session-info { display: flex; flex: 1; min-width: 0; flex-direction: column; line-height: 1.3; }
 .session-title {
   display: flex;

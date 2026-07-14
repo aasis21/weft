@@ -9,6 +9,7 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+import { isWorking } from '@/ui/sessions/sessionStatus';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
 import { getStableDeviceId } from '@/lib/weftClient';
@@ -315,9 +316,7 @@ export function SessionScreen({
   }, [sessions, onSelectSession]);  // A turn is in flight whenever the agent reports it's busy (text/reasoning/tool) —
   // which is exactly what the phone Stop aborts. Fall back to a running tool so a
   // tool-first turn still shows Stop even if the activity signal is missed.
-  const agentBusy =
-    status === 'live' &&
-    (timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
+  const agentBusy = status === 'live' && isWorking(timeline);
   // A tool actively running (vs. pure reasoning) drives the voice overlay's "Working…" state so the
   // orb distinguishes thinking from acting (#177).
   const toolActive =

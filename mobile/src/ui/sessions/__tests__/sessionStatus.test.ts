@@ -1,10 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveStatus } from '../sessionStatus';
+import { deriveStatus, isWorking } from '../sessionStatus';
 
 type View = Parameters<typeof deriveStatus>[0];
 
 const view = (over: Partial<View>): View => ({ status: 'idle', cold: false, error: undefined, ...over });
+
+const tool = (status: 'running' | 'success' | 'error') => ({ kind: 'tool' as const, id: 't', name: 'x', status });
+
+describe('isWorking (shared main-screen/sidebar busy derivation)', () => {
+  it('is true when timeline.busy is set', () => {
+    expect(isWorking({ busy: true, items: [] })).toBe(true);
+  });
+  it('falls back to a still-running tool even when busy is false (missed ACTIVITY edge)', () => {
+    expect(isWorking({ busy: false, items: [tool('running')] })).toBe(true);
+  });
+  it('is false when idle with only settled tools', () => {
+    expect(isWorking({ busy: false, items: [tool('success'), tool('error')] })).toBe(false);
+  });
+});
 
 describe('deriveStatus (#163 single source of truth)', () => {
   it('maps Ended above everything else', () => {
