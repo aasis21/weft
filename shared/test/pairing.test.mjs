@@ -101,9 +101,11 @@ test("listenForPeers re-pairs across repeated scans (single-shot waitForPeer wou
 
   // The laptop keeps listening for the WHOLE session, acking every hello and deriving a fresh key.
   const peers = [];
+  const acks = [];
   const listener = await listenForPeers({
     transport: laptopT,
     keyPair: laptop,
+    onAck: (result) => acks.push(result),
     onPeer: (info) => {
       peers.push(info);
     },
@@ -134,6 +136,8 @@ test("listenForPeers re-pairs across repeated scans (single-shot waitForPeer wou
   });
 
   assert.equal(peers.length, 2);
+  assert.equal(acks.length, 2);
+  assert.ok(acks.every((ack) => ack.ok));
   assert.equal(peers[0].peer.deviceId, "phone-a");
   assert.equal(peers[1].peer.deviceId, "phone-b");
 

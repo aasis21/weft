@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync, unlinkSync } from "node:fs";
 import QRCode from "qrcode";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
@@ -13,6 +12,7 @@ import {
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+import { readIdentityFile } from "./handoffIdentity.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
 // "devtunnel" path (see switchTransport below). Kept separate from transportFactory's own
@@ -33,7 +33,8 @@ const ui = {
   dim: paint("2"),
 };
 
-const handedOffIdentity = await loadIdentityFromFile(process.env.WEFT_IDENTITY_FILE);
+const identityFile = process.env.WEFT_IDENTITY_FILE;
+const handedOffIdentity = await loadIdentityFromFile(identityFile);
 const identityFileWasPresent = Boolean(handedOffIdentity);
 // Each Copilot session always gets its own fresh channel + keypair (forward-secret, and required
 // for the relay's 1-peer-per-channel binding — see listener.mjs's boundPeerPub / bindPeer). The
@@ -44,6 +45,9 @@ const identityFileWasPresent = Boolean(handedOffIdentity);
 // sessions would mean the relay ACKs/serves the phone's hello from more than one process at once.
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
 const channelId = handedOffIdentity?.channelId ?? (process.env.WEFT_CHANNEL_ID || randomChannelId());
+process.stderr.write(
+  `Weft: startup pid=${process.pid} identity=${handedOffIdentity ? "handoff" : "generated"} channel=${channelId.slice(0, 8)} handoffFile=${identityFile ? "set" : "unset"}\n`,
+);
 // Resolved once from the single ~/.weft/weft.config.json config file written by `weft
 // set-transport` (see transportFactory.mjs — there is no env var / .env fallback, so a
 // reinstall/rebuild of the extension can never silently override this), and stamped into the QR
@@ -220,6 +224,11 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
           keyPair: laptopKeys,
           connect: true,
           channelId,
+          onAck: ({ ok, error, peer }) => {
+            process.stderr.write(
+              `Weft: pairing ack ${ok ? "sent" : "failed"} pid=${process.pid} channel=${channelId.slice(0, 8)} peer=${peer.senderName ?? peer.deviceId ?? "unknown"}${error ? ` error=${error.message ?? error}` : ""}\n`,
+            );
+          },
           onPeer: (info) => onPeerPaired(transport, info),
         });
         if (shuttingDown) {
@@ -407,22 +416,10 @@ async function closeQuietly(transport) {
 async function loadIdentityFromFile(file) {
   if (!file) return null;
   try {
-    const raw = readFileSync(file, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed?.channelId || !parsed.privateKeyJwk) {
-      throw new Error("identity file is missing channelId or privateKeyJwk");
-    }
-    const laptopKeys = await importKeyPair({ privateKeyJwk: parsed.privateKeyJwk });
-    return { channelId: parsed.channelId, laptopKeys };
+    return await readIdentityFile(file);
   } catch (err) {
     process.stderr.write(`Weft: could not load handed-off identity; using a fresh pairing: ${err?.message ?? err}\n`);
     return null;
-  } finally {
-    try {
-      unlinkSync(file);
-    } catch {
-      // best-effort cleanup of the one-shot identity file
-    }
   }
 }
 

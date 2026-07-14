@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
 import { spawnCopilotSession, writeIdentityFile } from "../src/spawn.mjs";
+import { readIdentityFile } from "../src/handoffIdentity.mjs";
 
 const cleanupFiles = [];
 const cleanupDirs = [];
@@ -33,6 +34,21 @@ test("writeIdentityFile writes 0600 JSON that can be imported", async () => {
   const imported = await importKeyPair({ privateKeyJwk: parsed.privateKeyJwk });
   assert.equal(imported.publicKeyB64, material.publicKeyB64);
   if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
+});
+
+test("handoff identity can be read by replacement extension processes", async () => {
+  const material = await identity("chan-reload");
+  const file = writeIdentityFile(material);
+  cleanupFiles.push(file);
+
+  const first = await readIdentityFile(file);
+  const replacement = await readIdentityFile(file);
+
+  assert.equal(first.channelId, material.channelId);
+  assert.equal(first.laptopKeys.publicKeyB64, material.publicKeyB64);
+  assert.equal(replacement.channelId, material.channelId);
+  assert.equal(replacement.laptopKeys.publicKeyB64, material.publicKeyB64);
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).channelId, material.channelId);
 });
 
 test("spawnCopilotSession builds argv/env for headless spawn without shell", async () => {

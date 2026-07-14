@@ -108,13 +108,14 @@ function readHello(payload) {
  * confirms fast even if relay (re)attach is slow. `stop()` only unsubscribes — it does NOT close
  * the transport (the caller owns the transport lifecycle).
  *
- * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey }, onPeer: (info: { key: CryptoKey, peer: { publicKeyB64: string, deviceId?: string, senderName?: string } }) => void | Promise<void>, connect?: boolean, channelId?: string, senderId?: string, senderName?: string }} opts
+ * @param {{ transport: import("./transport").Transport, keyPair: { privateKey: CryptoKey }, onPeer: (info: { key: CryptoKey, peer: { publicKeyB64: string, deviceId?: string, senderName?: string } }) => void | Promise<void>, onAck?: (result: { ok: boolean, error?: unknown, peer: { publicKeyB64: string, deviceId?: string, senderName?: string } }) => void, connect?: boolean, channelId?: string, senderId?: string, senderName?: string }} opts
  * @returns {Promise<{ stop: () => void }>}
  */
 export async function listenForPeers({
   transport,
   keyPair,
   onPeer,
+  onAck,
   connect = true,
   channelId,
   senderId = "copilot",
@@ -133,20 +134,19 @@ export async function listenForPeers({
     } catch {
       return; // malformed/incompatible public key — ignore.
     }
+    const peer = { publicKeyB64: hello.pub, deviceId: hello.deviceId, senderName: hello.senderName };
     // ACK first: the phone re-broadcasts HELLO until it hears this, so answer every hello fast.
     try {
       await transport.publish(
         EVENT_TYPE.PAIR,
         pairEnvelope(SUBTYPE.PAIR.ACK, { v: PAIR_VERSION, ok: true }, { channelId, senderId, senderName }),
       );
-    } catch {
-      /* ack is best-effort */
+      onAck?.({ ok: true, peer });
+    } catch (error) {
+      onAck?.({ ok: false, error, peer });
     }
     try {
-      await onPeer({
-        key,
-        peer: { publicKeyB64: hello.pub, deviceId: hello.deviceId, senderName: hello.senderName },
-      });
+      await onPeer({ key, peer });
     } catch {
       /* the caller is responsible for surfacing its own (re)attach failures */
     }
