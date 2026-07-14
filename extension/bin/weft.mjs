@@ -44,6 +44,17 @@ function printHeader(title) {
   console.log(c.cyan(`└${bar}┘`));
 }
 
+// Print a (possibly multi-line) failure message consistently: the first line is the red headline,
+// every following line (our error messages use indented "  • do this" bullets) is dimmed so the
+// actionable steps read as guidance rather than noise. Used by the devtunnel/start paths whose
+// errors carry step-by-step recovery instructions.
+function printFailure(err) {
+  const message = err?.message ?? String(err);
+  const [headline, ...rest] = message.split("\n");
+  console.error(`${c.red("✗")} ${c.bold(headline)}`);
+  for (const line of rest) console.error(c.dim(line));
+}
+
 // Last-resort safety net: `weft start` is a long-running station process — any stray unhandled
 // rejection or synchronous throw from deep in the transport/heartbeat stack must never silently
 // kill it (that's the "crashed 100s after the heartbeat fired, no stack trace" bug). We keep the
@@ -173,7 +184,7 @@ async function devtunnelStart() {
     child = result.child;
   } catch (err) {
     status.stop();
-    console.error(`${c.red("✗")} ${err?.message ?? err}`);
+    printFailure(err);
     process.exitCode = 1;
     return;
   }
@@ -386,7 +397,20 @@ async function start() {
 
   await ensureAtLeastOneProject();
 
-  await listener.start();
+  try {
+    await listener.start();
+  } catch (err) {
+    // Most common cause: transport is set to "devtunnel" but no shared relay is running yet, so
+    // resolveDevTunnelTransport threw with step-by-step recovery (run `weft devtunnel start`, or
+    // switch to supabase). Surface that guidance instead of a bare stack, and shut the station
+    // down cleanly rather than leaving a half-started listener holding the lock.
+    status.stop();
+    printFailure(err);
+    await listener.stop().catch(() => {});
+    release();
+    process.exitCode = 1;
+    return;
+  }
   appendStationLog("station.ready", {
     channelId: listener.channelId,
     device: listener.deviceName,

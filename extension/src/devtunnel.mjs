@@ -39,6 +39,18 @@ export const DEVTUNNEL_REGISTRY_FILE = "devtunnel.json";
 // stage (see STAGE_LABELS below) BEFORE the final healthy entry lands in DEVTUNNEL_REGISTRY_FILE,
 // so a poller here can show real progress instead of silence for the whole provisioning window.
 export const DEVTUNNEL_STATUS_FILE = "devtunnel-status.json";
+
+// Reusable sign-in guidance surfaced whenever the devtunnel CLI is missing or not authenticated.
+// Dev Tunnels accepts a Microsoft (work/school or personal) account OR a GitHub account, so we
+// deliberately show BOTH — `devtunnel user login` (no flag) for the Microsoft account most Weft
+// users have, and `-g` for GitHub. Weft's own auto-login tries `-g` first (zero-friction for
+// GitHub users); when that isn't the right account, this points them at the no-`-g` command.
+export const DEVTUNNEL_LOGIN_HELP =
+  "Sign in to dev tunnels with whichever account has access, then try again:\n" +
+  "    • Microsoft (work / school or personal) account:  devtunnel user login\n" +
+  "    • GitHub account:                                 devtunnel user login -g\n" +
+  "    • On a headless box / over SSH (no browser):      add -d, e.g. devtunnel user login -d";
+
 const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mjs", import.meta.url));
 // First-ever provision on a machine has to: spawn the relay child process, have IT shell out to
 // `devtunnel host` (a real network call to Microsoft's tunnel service), and wait for that tunnel's
@@ -205,21 +217,26 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
   const bin = await findDevTunnelBinary();
   if (!bin) {
     throw new Error(
-      "Weft: the devtunnel CLI isn't installed. Run `winget install Microsoft.devtunnel`, " +
-        "then `devtunnel user login -g`, and try `weft devtunnel start` again.",
+      "the devtunnel CLI isn't installed on this machine.\n" +
+        "  1. Install it:  winget install Microsoft.devtunnel   (macOS/Linux: https://aka.ms/devtunnels/download)\n" +
+        "  2. " + DEVTUNNEL_LOGIN_HELP + "\n" +
+        "  3. Re-run `weft devtunnel start`.",
     );
   }
   try {
     await run(bin, ["user", "show"]);
   } catch {
     // Not logged in (or the token expired) — `login -g` opens the user's default browser for a
-    // GitHub device-code flow and blocks until they complete it, so just run it instead of making
-    // the user retype the command themselves.
+    // GitHub device-code flow and blocks until they complete it, so try that first for a
+    // zero-friction path. If it fails (declined, wrong account, or the user actually needs a
+    // Microsoft/work account instead), surface BOTH sign-in options rather than the user
+    // guessing.
     try {
       await run(bin, ["user", "login", "-g"]);
     } catch {
       throw new Error(
-        "Weft: automatic devtunnel login failed. Run `devtunnel user login -g` manually and try again.",
+        "couldn't sign in to dev tunnels automatically.\n  " + DEVTUNNEL_LOGIN_HELP + "\n" +
+          "  Then re-run `weft devtunnel start`.",
       );
     }
   }
@@ -242,8 +259,10 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
         await forceStopDevTunnel({ baseDir }).catch(() => {});
         try { child.kill(); } catch { /* best-effort */ }
         throw new Error(
-          "Weft: devtunnel is taking longer than usual to come up on this machine. Check your " +
-            "network + `devtunnel user login -g`, then re-run `weft devtunnel start`.",
+          "devtunnel is taking longer than usual to come up on this machine.\n" +
+            "  • Check your network connection (a corporate proxy/VPN can block the tunnel service).\n" +
+            "  • Make sure you're signed in — `devtunnel user login` (GitHub: add -g).\n" +
+            "  • Then re-run `weft devtunnel start`.",
         );
       }
       onRetry?.(attempt, maxAttempts);
@@ -268,8 +287,11 @@ export async function resolveDevTunnelTransport({ baseDir } = {}) {
   const entry = await healthyRegistryEntry(baseDir);
   if (!entry) {
     throw new Error(
-      "Weft: no devtunnel relay is running on this machine. Run `weft devtunnel start` first, " +
-        "then retry. (`weft devtunnel status` shows the current state.)",
+      "no devtunnel relay is running on this machine, so pairing over the devtunnel transport can't start.\n" +
+        "  • In another terminal on this machine, run:  weft devtunnel start\n" +
+        "    (keep it open — it owns the shared relay; first run may prompt you to sign in).\n" +
+        "  • Check state anytime with:  weft devtunnel status\n" +
+        "  • Prefer the zero-setup cloud relay instead? Switch with:  weft set-transport supabase",
     );
   }
   return { kind: "devtunnel", url: entry.baseUrl };
