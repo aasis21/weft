@@ -60,6 +60,7 @@ import {
   saveTranscript,
 } from '@/lib/transcripts';
 import { clearEventLog, loadEventLog, saveEventLog, toDebugEvent } from '@/lib/eventLog';
+import { sweepStorage } from '@/lib/storageJanitor';
 import { restoreTimeline, toPersisted } from '@/lib/timeline';
 import type { TimelineState } from '@/lib/timeline';
 import { startDemoSession } from '@/lib/demoSimulator';
@@ -438,6 +439,15 @@ export class SessionRuntime {
     }
     if (activeId) this.store.dispatch(sessionActivated(activeId));
     this.store.dispatch(readySet(true));
+
+    // Auto-clean storage now that the live set is known: drop orphaned transcripts/event-logs (from
+    // crashed/reconciled channels no longer in the list) and, if still over budget, trim the oldest
+    // cold entries. Never touches the session list, pairing, or the active/warm channels — so no
+    // session data or connection is lost. Best-effort; a failure here must not block boot.
+    void sweepStorage({
+      validChannelIds: [...stored.map((s) => s.pairing.channelId), ...devices.map((d) => d.channelId)],
+      protectChannelIds: warmIds,
+    }).catch(() => {});
 
     await Promise.all(
       stored
