@@ -87,6 +87,10 @@ export const SUBTYPE = Object.freeze({
     // phone -> ext: Voice Mode (#168) is on/off. While on, the extension prepends a directive to
     // each relayed prompt so the agent authors its reply for SPEECH (concise, no verbatim code).
     VOICE_MODE: "voice_mode",
+    // phone -> ext: invoke a whitelisted Copilot CLI slash command on the laptop session
+    // (session.rpc.commands.invoke). The set of allowed commands lives in commands.mjs; the
+    // extension re-validates against it before running. { name, input? }.
+    INVOKE_COMMAND: "invoke_command",
   }),
   PAIR: Object.freeze({ HELLO: "hello", ACK: "ack" }),
 });
@@ -330,6 +334,17 @@ export const deviceHeartbeat = (deviceId = null) =>
  */
 export const voiceMode = (active) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.VOICE_MODE, { active: Boolean(active) });
+
+/**
+ * Phone -> ext: run a whitelisted Copilot CLI slash command on the laptop session. `name` is the
+ * command (no leading slash, e.g. "rename"); `input` is the optional free-text argument. The
+ * extension re-validates `name` against the commands.mjs whitelist before invoking.
+ */
+export const invokeCommand = (name, input) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.INVOKE_COMMAND, {
+    name: typeof name === "string" ? name : "",
+    ...(typeof input === "string" && input.length > 0 ? { input } : {}),
+  });
 
 /** Minimal structural validation of a decrypted envelope (kept dependency-free). */
 export function isValidEnvelope(env) {

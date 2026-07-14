@@ -18,6 +18,7 @@ import {
   stateRequest,
   interrupt,
   voiceMode,
+  invokeCommand,
   elicitationResponse,
   approvalDecision,
 } from "@aasis21/weft-shared";
@@ -72,6 +73,7 @@ function makeFakeSession(sessionId = "unknown-session") {
   const elicitationResponses = [];
   const exitPlanResponses = [];
   const interestCalls = [];
+  const invokedCommands = [];
   return {
     sessionId,
     cwd: "/repo",
@@ -80,7 +82,14 @@ function makeFakeSession(sessionId = "unknown-session") {
     elicitationResponses,
     exitPlanResponses,
     interestCalls,
+    invokedCommands,
     rpc: {
+      commands: {
+        async invoke(params) {
+          invokedCommands.push(params);
+          return { success: true };
+        },
+      },
       async abort(params) {
         abortCalls.push(params);
         return { success: true };
@@ -516,6 +525,50 @@ test("relays a control.interrupt to the SDK turn-abort and notifies the phone", 
       (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /stopped from your phone/i.test(m.msg.message ?? "")
     );
     assert.ok(notice, "expected a stop notice to be relayed to the phone");
+  });
+});
+
+test("invokes a whitelisted phone command via session.rpc.commands.invoke and relays success", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("rename", "My Session"));
+    await flush();
+    assert.deepEqual(session.invokedCommands, [{ name: "rename", input: "My Session" }]);
+    const ok = channel.sent.find(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /Ran \/rename My Session/.test(m.msg.message ?? "")
+    );
+    assert.ok(ok, "expected a success notice relayed to the phone");
+  });
+});
+
+test("omits input when invoking a no-arg command", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("plan"));
+    await flush();
+    assert.deepEqual(session.invokedCommands, [{ name: "plan" }]);
+  });
+});
+
+test("refuses a non-whitelisted command and never touches the SDK", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("resume"));
+    await flush();
+    assert.deepEqual(session.invokedCommands, []);
+    const warn = channel.sent.find(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /isn't allowed from the phone/i.test(m.msg.message ?? "")
+    );
+    assert.ok(warn, "expected a not-allowed warning relayed to the phone");
+  });
+});
+
+test("refuses a required-arg command with no argument", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("rename"));
+    await flush();
+    assert.deepEqual(session.invokedCommands, []);
+    const warn = channel.sent.find(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /needs an argument/i.test(m.msg.message ?? "")
+    );
+    assert.ok(warn, "expected a needs-an-argument warning relayed to the phone");
   });
 });
 

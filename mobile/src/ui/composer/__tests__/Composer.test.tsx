@@ -53,6 +53,7 @@ function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
     onPrompt: vi.fn(),
     onInterrupt: vi.fn(),
     onModeChange: vi.fn(),
+    onCommand: vi.fn(),
     onOpenVoiceMode: vi.fn(),
   };
   return {
@@ -389,5 +390,91 @@ describe('Composer', () => {
 
     expect(onPrompt).not.toHaveBeenCalled();
     expect(textbox).toHaveValue('keep this draft');
+  });
+
+  describe('slash commands', () => {
+    it('routes a whitelisted command to onCommand instead of onPrompt', async () => {
+      const user = userEvent.setup();
+      const onPrompt = vi.fn();
+      const onCommand = vi.fn();
+      renderComposer({ onPrompt, onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/rename My Session');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onCommand).toHaveBeenCalledWith('rename', 'My Session');
+      expect(onPrompt).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('');
+    });
+
+    it('invokes a no-arg command with undefined input', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/plan');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onCommand).toHaveBeenCalledWith('plan', undefined);
+    });
+
+    it('waits for a required argument before invoking', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      const onPrompt = vi.fn();
+      renderComposer({ onCommand, onPrompt });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/rename');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onCommand).not.toHaveBeenCalled();
+      expect(onPrompt).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('/rename');
+    });
+
+    it('sends an unknown /command as a normal prompt (legacy behavior)', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      const onPrompt = vi.fn();
+      renderComposer({ onCommand, onPrompt });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/resume now');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onPrompt).toHaveBeenCalledWith('/resume now', undefined);
+      expect(onCommand).not.toHaveBeenCalled();
+    });
+
+    it('gates a destructive command behind a confirm sheet', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/clear');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(onCommand).not.toHaveBeenCalled();
+
+      await user.click(screen.getByRole('button', { name: 'Run /clear' }));
+      expect(onCommand).toHaveBeenCalledWith('clear', undefined);
+    });
+
+    it('cancelling the confirm sheet keeps the draft and never invokes', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/allow-all');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(onCommand).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('/allow-all');
+    });
   });
 });

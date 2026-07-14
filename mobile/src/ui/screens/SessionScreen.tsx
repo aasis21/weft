@@ -197,6 +197,8 @@ interface SessionScreenProps {
   ): void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): void;
+  /** Run a whitelisted CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
+  onCommand(name: string, input?: string): void;
   onRetry(itemId: string): void;
   onSelectSession(channelId: string): void;
   onAddSession(): void;
@@ -226,6 +228,7 @@ export function SessionScreen({
   onElicitationRespond,
   onInterrupt,
   onModeChange,
+  onCommand,
   onRetry,
   onSelectSession,
   onAddSession,
@@ -774,6 +777,7 @@ export function SessionScreen({
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}
           onModeChange={onModeChange}
+          onCommand={onCommand}
           onOpenVoiceMode={() => setVoiceOpen(true)}
         />
       </div>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/weft-shared';
 import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
+import { PHONE_COMMANDS, getPhoneCommand } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 import { isDesktopInput } from '@/lib/platform';
@@ -18,15 +19,27 @@ interface ComposerProps {
   onPrompt(text: string, attachments?: PromptAttachment[]): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
+  /** Run a whitelisted Copilot CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
+  onCommand(name: string, input?: string): void;
   onOpenVoiceMode(): void;
 }
 
 /** Max images per message — keeps the encrypted relay payload under the transport cap. */
 const MAX_ATTACHMENTS = 6;
 
-interface SlashCommand {
+/**
+ * A slash-menu entry. Two kinds are merged into one menu:
+ *  - `command`  — a real Copilot CLI slash command run ON THE LAPTOP via the whitelist
+ *                 (session.rpc.commands.invoke). Selecting inserts `/name ` and Enter runs it.
+ *  - `template` — prompt sugar with no CLI equivalent; selecting expands to an English instruction
+ *                 that is then SENT AS A PROMPT (legacy behavior).
+ */
+interface SlashItem {
   command: string;
-  template: string;
+  kind: 'command' | 'template';
+  hint: string;
+  /** Only for `template` kind: the text inserted into the composer. */
+  template?: string;
 }
 
 function appendSpeechText(committed: string, fresh: string): string {
@@ -52,32 +65,23 @@ const MODE_LABEL: Record<string, string> = {
   autopilot: 'Autopilot',
 };
 
-const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    command: '/plan',
-    template: 'Create a step-by-step plan before implementing the following, and wait for my approval: ',
-  },
-  {
-    command: '/explain',
-    template: 'Explain how the following works in detail: ',
-  },
-  {
-    command: '/test',
-    template: 'Write tests for ',
-  },
-  {
-    command: '/fix',
-    template: 'Find and fix the bug in ',
-  },
-  {
-    command: '/review',
-    template: 'Review the following code for bugs, security, and clarity: ',
-  },
-  {
-    command: '/commit',
-    template: 'Stage all changes and commit with a clear, conventional message.',
-  },
+// Real CLI commands (executed on the laptop) come first, built from the shared whitelist so the
+// palette and the extension's guard can never drift. Then prompt-template sugar that has no CLI
+// equivalent (the colliding /plan and /review are dropped in favor of the real commands).
+const COMMAND_ITEMS: SlashItem[] = PHONE_COMMANDS.map((c) => ({
+  command: c.label,
+  kind: 'command',
+  hint: c.confirm ? `${c.hint} · confirms first` : c.hint,
+}));
+
+const TEMPLATE_ITEMS: SlashItem[] = [
+  { command: '/explain', kind: 'template', hint: 'Explain how something works', template: 'Explain how the following works in detail: ' },
+  { command: '/test', kind: 'template', hint: 'Write tests', template: 'Write tests for ' },
+  { command: '/fix', kind: 'template', hint: 'Find and fix a bug', template: 'Find and fix the bug in ' },
+  { command: '/commit', kind: 'template', hint: 'Stage & commit changes', template: 'Stage all changes and commit with a clear, conventional message.' },
 ];
+
+const SLASH_ITEMS: SlashItem[] = [...COMMAND_ITEMS, ...TEMPLATE_ITEMS];
 
 const DRAFT_KEY_PREFIX = 'weft.draft.v1.';
 const ATTACHMENTS_KEY_PREFIX = 'weft.draft-attachments.v1.';
@@ -153,8 +157,20 @@ function basename(path: string | null): string | null {
 function slashQuery(value: string): string | null {
   if (!value.startsWith('/')) return null;
   const firstToken = value.split(/\s/, 1)[0] ?? '';
-  if (value !== firstToken || !/^\/[a-z]*$/i.test(firstToken)) return null;
+  if (value !== firstToken || !/^\/[a-z-]*$/i.test(firstToken)) return null;
   return firstToken.slice(1).toLowerCase();
+}
+
+/**
+ * If `value` is a whitelisted CLI command invocation ("/rename My Session"), return its parsed
+ * name + trimmed input; otherwise null (so it falls through to being sent as a normal prompt).
+ */
+function parseCommand(value: string): { name: string; input: string } | null {
+  const match = value.match(/^\/([a-z][a-z-]*)(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  const name = (match[1] ?? '').toLowerCase();
+  if (!getPhoneCommand(name)) return null;
+  return { name, input: (match[2] ?? '').trim() };
 }
 
 export function Composer({
@@ -167,6 +183,7 @@ export function Composer({
   onPrompt,
   onInterrupt,
   onModeChange,
+  onCommand,
   onOpenVoiceMode,
 }: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
@@ -174,6 +191,7 @@ export function Composer({
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [pendingCommand, setPendingCommand] = useState<{ name: string; input: string } | null>(null);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const attachWrapRef = useRef<HTMLDivElement | null>(null);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -269,18 +287,15 @@ export function Composer({
   const commandQuery = slashQuery(text);
   const slashOptions = commandQuery === null
     ? []
-    : SLASH_COMMANDS.filter((item) => item.command.slice(1).startsWith(commandQuery));
+    : SLASH_ITEMS.filter((item) => item.command.slice(1).startsWith(commandQuery));
   const slashOpen = commandQuery !== null && slashOptions.length > 0 && !slashDismissed;
 
   useEffect(() => {
     setSlashIndex(0);
   }, [commandQuery]);
 
-  const send = async (): Promise<void> => {
-    if (nowMs() < suppressSendUntilRef.current) return;
-    const trimmed = text.trim();
-    const outgoing = attachments;
-    if ((!trimmed && outgoing.length === 0) || disabled || busy || attaching) return;
+  /** Clear the composer after a message/command is dispatched. */
+  const clearDraft = (): void => {
     if (speech.listening) speech.stop();
     setText('');
     setAttachments([]);
@@ -288,6 +303,36 @@ export function Composer({
     setSlashDismissed(false);
     saveDraft(sessionId, '');
     saveAttachments(sessionId, []);
+  };
+
+  const runCommand = (name: string, input: string): void => {
+    clearDraft();
+    onCommand(name, input || undefined);
+  };
+
+  const send = async (): Promise<void> => {
+    if (nowMs() < suppressSendUntilRef.current) return;
+    const trimmed = text.trim();
+    const outgoing = attachments;
+    if ((!trimmed && outgoing.length === 0) || disabled || busy || attaching) return;
+
+    // A whitelisted CLI command (with no image attachments) runs on the laptop instead of being
+    // sent as a prompt. Unknown "/foo" falls through to onPrompt as literal text (legacy behavior).
+    if (outgoing.length === 0) {
+      const parsed = parseCommand(trimmed);
+      if (parsed) {
+        const meta = getPhoneCommand(parsed.name);
+        if (meta?.arg === 'required' && !parsed.input) return; // wait for the required argument
+        if (meta?.confirm) {
+          setPendingCommand(parsed);
+          return;
+        }
+        runCommand(parsed.name, parsed.input);
+        return;
+      }
+    }
+
+    clearDraft();
     await onPrompt(trimmed, outgoing.length ? outgoing : undefined);
   };
 
@@ -406,8 +451,18 @@ export function Composer({
     setAttachError(null);
   };
 
-  const selectSlashCommand = (item: SlashCommand): void => {
-    const next = text.replace(/^\/[a-z]*/i, item.template);
+  const selectSlashCommand = (item: SlashItem): void => {
+    if (item.kind === 'command') {
+      const meta = getPhoneCommand(item.command.slice(1));
+      // No-arg commands are ready to run (Enter sends); arg commands get a trailing space to type into.
+      const suffix = meta && meta.arg !== 'none' ? ' ' : '';
+      const next = text.replace(/^\/[a-z-]*/i, `${item.command}${suffix}`);
+      onTextChange(next);
+      setSlashDismissed(true);
+      window.requestAnimationFrame(() => areaRef.current?.focus());
+      return;
+    }
+    const next = text.replace(/^\/[a-z-]*/i, item.template ?? '');
     onTextChange(next);
     setSlashDismissed(true);
     window.requestAnimationFrame(() => areaRef.current?.focus());
@@ -545,10 +600,38 @@ export function Composer({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => selectSlashCommand(item)}
             >
-              <span className="slash-command">{item.command}</span>
-              <span className="slash-template">{item.template}</span>
+              <span className="slash-command">
+                {item.command}
+                {item.kind === 'command' ? <span className="slash-badge">runs on laptop</span> : null}
+              </span>
+              <span className="slash-template">{item.kind === 'command' ? item.hint : item.template}</span>
             </button>
           ))}
+        </div>
+      ) : null}
+
+      {pendingCommand ? (
+        <div className="slash-confirm approval-banner" role="alertdialog" aria-label="Confirm command">
+          <div className="approval-head approval-warn">
+            Run <code>/{pendingCommand.name}</code> on the laptop?
+          </div>
+          <div className="approval-hint">This command can discard context or change permissions.</div>
+          <div className="approval-actions">
+            <button type="button" className="reconnect-btn" onClick={() => setPendingCommand(null)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="bar-menu-item danger"
+              onClick={() => {
+                const cmd = pendingCommand;
+                setPendingCommand(null);
+                runCommand(cmd.name, cmd.input);
+              }}
+            >
+              Run /{pendingCommand.name}
+            </button>
+          </div>
         </div>
       ) : null}
 

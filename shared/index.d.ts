@@ -1,4 +1,5 @@
 export * from "./messages";
+export * from "./commands";
 export * from "./history";
 export * from "./crypto";
 export * from "./pairing";

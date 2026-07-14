@@ -23,6 +23,7 @@ import {
   history,
   recentTurns,
   stateSnapshot,
+  getPhoneCommand,
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
@@ -560,6 +561,10 @@ export async function attachRelay({
         );
         return;
       }
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.INVOKE_COMMAND) {
+        void applyCommand(session, msg.msg, logger, sendSafe);
+        return;
+      }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
         void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger });
       }
@@ -835,6 +840,46 @@ async function applyInterrupt(session, logger, sendSafe) {
       level: "warning",
       ephemeral: false,
     });
+  }
+}
+
+// A phone-invoked slash command maps to the SDK's session.rpc.commands.invoke RPC. We defend in
+// depth: even though the phone only offers whitelisted commands, we re-validate `name` against the
+// shared whitelist here so a rogue/old client can't drive an arbitrary command. Probed defensively
+// like applyMode/applyInterrupt (the rpc surface is @experimental) and feedback is relayed as a log
+// line so the phone sees the outcome even when the command emits no further session events.
+async function applyCommand(session, body, logger, sendSafe) {
+  const command = getPhoneCommand(body?.name);
+  const rawInput = typeof body?.input === "string" ? body.input.trim() : "";
+  if (!command) {
+    logger(`Weft: ignored non-whitelisted command "/${body?.name ?? ""}" from phone.`, {
+      level: "warning",
+      ephemeral: false,
+    });
+    await sendSafe(logLine("warning", `Command /${body?.name ?? ""} isn't allowed from the phone.`));
+    return;
+  }
+  if (command.arg === "required" && !rawInput) {
+    logger(`Weft: /${command.name} needs an argument; ignored.`, { level: "warning", ephemeral: false });
+    await sendSafe(logLine("warning", `/${command.name} needs an argument.`));
+    return;
+  }
+  if (typeof session.rpc?.commands?.invoke !== "function") {
+    logger(`Weft: /${command.name} requested but session.rpc.commands.invoke is unavailable.`, {
+      level: "warning",
+      ephemeral: false,
+    });
+    await sendSafe(logLine("warning", `This CLI build can't run /${command.name} remotely.`));
+    return;
+  }
+  const shown = rawInput ? `/${command.name} ${rawInput}` : `/${command.name}`;
+  try {
+    await session.rpc.commands.invoke(rawInput ? { name: command.name, input: rawInput } : { name: command.name });
+    logger(`Weft: ran ${shown} from phone.`, { level: "info", ephemeral: false });
+    await sendSafe(logLine("info", `▷ Ran ${shown} from your phone.`));
+  } catch (err) {
+    logger(`Weft: ${shown} failed: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
+    await sendSafe(logLine("warning", `${shown} failed: ${err?.message ?? err}`));
   }
 }
 

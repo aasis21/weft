@@ -77,6 +77,7 @@ function renderActive(active: ReturnType<typeof makeSession>, overrides: Partial
       onElicitationRespond={vi.fn()}
       onInterrupt={vi.fn()}
       onModeChange={vi.fn()}
+      onCommand={vi.fn()}
       onRetry={vi.fn()}
       onSelectSession={vi.fn()}
       onAddSession={vi.fn()}
@@ -210,6 +211,7 @@ describe('SessionScreen desktop keyboard shortcuts', () => {
           onElicitationRespond={vi.fn()}
           onInterrupt={vi.fn()}
           onModeChange={vi.fn()}
+          onCommand={vi.fn()}
           onRetry={vi.fn()}
           onSelectSession={onSelectSession}
           onAddSession={vi.fn()}

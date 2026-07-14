@@ -156,6 +156,28 @@
 .slash-command {
   color: var(--accent);
   font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.slash-badge {
+  color: var(--fg-dim);
+  background: var(--surface-2, rgba(127, 127, 127, 0.16));
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.slash-confirm {
+  margin: 0 0 0.5rem;
+}
+
+.slash-confirm code {
+  font-family: inherit;
 }
 
 .slash-template {

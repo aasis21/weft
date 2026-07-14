@@ -68,6 +68,7 @@ export const SUBTYPE: {
     readonly FORGET_DEVICE: "forget_device";
     readonly DEVICE_HEARTBEAT: "device_heartbeat";
     readonly VOICE_MODE: "voice_mode";
+    readonly INVOKE_COMMAND: "invoke_command";
   };
   readonly PAIR: { readonly HELLO: "hello"; readonly ACK: "ack" };
 };
@@ -308,6 +309,13 @@ export interface DeviceHeartbeatMsg {
 export interface VoiceModeMsg {
   active: boolean;
 }
+/** Phone -> ext: invoke a whitelisted CLI slash command on the laptop session. */
+export interface InvokeCommandMsg {
+  /** Command name, no leading slash (e.g. "rename"); re-validated against the whitelist. */
+  name: string;
+  /** Optional free-text argument after the command name. */
+  input?: string;
+}
 
 // ---- concrete envelope types (eventType + eventSubtype + typed msg) --------
 export type AssistantMessage = Envelope<"stream", "assistant_message", AssistantMessageMsg>;
@@ -344,6 +352,7 @@ export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
 export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
 export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHeartbeatMsg>;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
+export type InvokeCommandMessage = Envelope<"control", "invoke_command", InvokeCommandMsg>;
 export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
 export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
 
@@ -381,7 +390,8 @@ export type EventEnvelope =
   | SpawnResult
   | ForgetDevice
   | DeviceHeartbeat
-  | VoiceModeMessage;
+  | VoiceModeMessage
+  | InvokeCommandMessage;
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
 export function assistantDelta(content: string, messageId?: string): AssistantDelta;
@@ -488,3 +498,4 @@ export function spawnResult(
 export function forgetDevice(): ForgetDevice;
 export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
 export function voiceMode(active: boolean): VoiceModeMessage;
+export function invokeCommand(name: string, input?: string): InvokeCommandMessage;

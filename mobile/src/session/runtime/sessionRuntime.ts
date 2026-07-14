@@ -14,6 +14,7 @@ import {
   spawnSession as spawnSessionMessage,
   forgetDevice as forgetDeviceMessage,
   voiceMode,
+  invokeCommand,
   RECENT_TURNS_DEFAULT,
 } from '@aasis21/weft-shared';
 import type {
@@ -1551,6 +1552,25 @@ export class SessionRuntime {
           id: channelId,
           level: 'warning',
           text: `Couldn't switch to ${mode} — still in ${prev}.`,
+          ts: this.clock(),
+        }),
+      );
+      this.schedulePersist(channelId);
+    }
+  }
+
+  async sendCommand(channelId: string, name: string, input?: string): Promise<void> {
+    const session = this.session(channelId);
+    if (!session) return;
+    const shown = input ? `/${name} ${input}` : `/${name}`;
+    try {
+      await this.send(channelId, invokeCommand(name, input));
+    } catch {
+      this.store.dispatch(
+        noticeAppended({
+          id: channelId,
+          level: 'warning',
+          text: `Couldn't run ${shown} — tap to retry.`,
           ts: this.clock(),
         }),
       );
