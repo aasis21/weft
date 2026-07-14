@@ -100,7 +100,7 @@ describe('JoinSessionScreen', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '← Back to sessions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '← Back' })).toBeInTheDocument();
     expect(screen.getByText('Bad code')).toHaveClass('error-banner');
     fireEvent.change(screen.getByRole('textbox', { name: 'Manual pairing JSON' }), {
       target: { value: '{"v":1,"channelId":"abc"}' },
@@ -109,7 +109,7 @@ describe('JoinSessionScreen', () => {
     expect(onPair).toHaveBeenCalledWith('{"v":1,"channelId":"abc"}');
     expect(screen.queryByRole('button', { name: 'Demo / Simulator' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '← Back to sessions' }));
+    await user.click(screen.getByRole('button', { name: '← Back' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 

@@ -89,7 +89,6 @@ export function SessionDrawer({
   const onCloseRef = useRef(onClose);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   // #ui: swipe-to-reveal row actions (touch), in addition to the "⋮" menu. Only one row can be
   // swiped open at a time.
   const [swipedId, setSwipedId] = useState<string | null>(null);
@@ -116,19 +115,6 @@ export function SessionDrawer({
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
-
-  // Row actions are collapsed behind a "⋮" menu (pin/archive/rename); only delete stays as a
-  // direct "✕" icon on the row. Close that menu on any click outside a row's menu wrapper.
-  useEffect(() => {
-    if (!openMenuId) return;
-    const handleDocClick = (event: MouseEvent): void => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('.row-menu-wrap')) return;
-      setOpenMenuId(null);
-    };
-    document.addEventListener('click', handleDocClick);
-    return () => document.removeEventListener('click', handleDocClick);
-  }, [openMenuId]);
 
   const beginRename = (id: string, current: string): void => {
     setEditingId(id);
@@ -165,7 +151,6 @@ export function SessionDrawer({
     suppressClickRef.current = true;
     if (s.dx < -40) {
       setSwipedId(id);
-      setOpenMenuId(null);
       setConfirmDeleteId(null);
     } else if (s.dx > 40) {
       setSwipedId((cur) => (cur === id ? null : cur));
@@ -380,7 +365,15 @@ export function SessionDrawer({
     const isDemo = session.meta.kind === 'demo';
     const confirming = confirmDeleteId === id;
     const swiped = swipedId === id;
-    const swipeReveal = ((onArchive && derived.active ? 1 : 0) + 1) * 44;
+    // The reveal strip holds (in order) Pin, Rename, Archive (active rows only), Delete. Pin/
+    // Rename/Archive are hidden for demo rows. Slide the foreground far enough left to expose all
+    // buttons that are actually rendered.
+    const stripCount =
+      (onPin && !isDemo ? 1 : 0) +
+      (onRename && !isDemo ? 1 : 0) +
+      (onArchive && !isDemo && derived.active ? 1 : 0) +
+      1;
+    const swipeReveal = stripCount * 38 + 12;
     return (
       <div
         key={id}
@@ -411,7 +404,37 @@ export function SessionDrawer({
       >
         {swiped ? (
           <span className="row-swipe-actions" onClick={(e) => e.stopPropagation()}>
-            {onArchive && derived.active ? (
+            {onPin && !isDemo ? (
+              <button
+                className="row-swipe-btn"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSwipedId(null);
+                  onPin(id, !session.pinned);
+                }}
+                title={session.pinned ? 'Unpin' : 'Pin'}
+                aria-label={session.pinned ? 'Unpin session' : 'Pin session'}
+              >
+                📌
+              </button>
+            ) : null}
+            {onRename && !isDemo ? (
+              <button
+                className="row-swipe-btn"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSwipedId(null);
+                  beginRename(id, session.meta.title);
+                }}
+                title="Rename"
+                aria-label="Rename session"
+              >
+                ✎
+              </button>
+            ) : null}
+            {onArchive && !isDemo && derived.active ? (
               <button
                 className="row-swipe-btn archive"
                 type="button"
@@ -435,7 +458,7 @@ export function SessionDrawer({
                 setConfirmDeleteId(id);
               }}
               title="Delete"
-              aria-label={`Delete ${session.meta.title}`}
+              aria-label="Delete session"
             >
               🗑
             </button>
@@ -519,86 +542,22 @@ export function SessionDrawer({
               ✕
             </button>
           </span>
-        ) : editingId === id ? null : (
+        ) : editingId === id ? null : swiped ? null : (
           <span className="row-actions" onClick={(e) => e.stopPropagation()}>
-            {!isDemo ? (
-              <span className="row-menu-wrap">
-                <button
-                  className="icon-btn row-menu-btn"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmDeleteId(null);
-                    setOpenMenuId(openMenuId === id ? null : id);
-                  }}
-                  title="More actions"
-                  aria-label="More actions"
-                  aria-haspopup="menu"
-                  aria-expanded={openMenuId === id}
-                >
-                  ⋮
-                </button>
-                {openMenuId === id ? (
-                  <div className="row-menu-dropdown" role="menu">
-                    {onPin ? (
-                      <button
-                        className="row-menu-item"
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPin(id, !session.pinned);
-                          setOpenMenuId(null);
-                        }}
-                        aria-label={session.pinned ? 'Unpin session' : 'Pin session'}
-                      >
-                        📌 {session.pinned ? 'Unpin' : 'Pin'}
-                      </button>
-                    ) : null}
-                    {onArchive && derived.active ? (
-                      <button
-                        className="row-menu-item"
-                        type="button"
-                        role="menuitem"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onArchive(id);
-                          setOpenMenuId(null);
-                        }}
-                        aria-label="Archive session now"
-                      >
-                        ⏸ Archive now
-                      </button>
-                    ) : null}
-                    <button
-                      className="row-menu-item"
-                      type="button"
-                      role="menuitem"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenuId(null);
-                        beginRename(id, session.meta.title);
-                      }}
-                      aria-label="Rename session"
-                    >
-                      ✎ Rename
-                    </button>
-                  </div>
-                ) : null}
-              </span>
-            ) : null}
             <button
-              className="icon-btn row-x"
+              className="icon-btn row-reveal"
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setOpenMenuId(null);
-                setConfirmDeleteId(id);
+                setConfirmDeleteId(null);
+                setSwipedId((cur) => (cur === id ? null : id));
               }}
-              title="Delete session"
-              aria-label="Delete session"
+              title="More actions — swipe or tap"
+              aria-label="More actions"
+              aria-haspopup="true"
+              aria-expanded={swiped}
             >
-              ✕
+              ‹
             </button>
           </span>
         )}

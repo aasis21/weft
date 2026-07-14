@@ -20,10 +20,6 @@ export default function App(): JSX.Element {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);
   const [addManual, setAddManual] = useState(false);
-  // What the user tapped to get to the scanner — sets the JoinSessionScreen copy so "Add a
-  // device" doesn't read as "Join a session" (or vice versa). The QR payload's own `kind`
-  // still decides what actually happens; this only avoids the scanner looking mismatched (#weft-scan-ux).
-  const [joinPurpose, setJoinPurpose] = useState<'session' | 'device'>('session');
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,11 +48,10 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const openJoin = useCallback((manual = false, purpose: 'session' | 'device' = 'session'): void => {
+  const openJoin = useCallback((manual = false): void => {
     window.history.replaceState(null, '');
     setError(null);
     setAddManual(manual);
-    setJoinPurpose(purpose);
     setStarting(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
@@ -148,7 +143,6 @@ export default function App(): JSX.Element {
       <JoinSessionScreen
         hasSessions={hasSessions}
         initialManual={addManual}
-        purpose={joinPurpose}
         error={error}
         onError={setError}
         onPair={handlePair}
@@ -198,12 +192,12 @@ export default function App(): JSX.Element {
         onForget={(id) => sessionRuntime.forgetDevice(id)}
         onStartOnDevice={(id) => openStart(id)}
         onOpenDetails={(id) => openDeviceDetails(id)}
-        onScanListener={() => openJoin(false, 'device')}
+        onScanListener={() => openJoin(false)}
         onSelectSession={(id) => {
           closeDeviceScreens();
           sessionRuntime.setActive(id);
         }}
-        onAddSession={() => openJoin(false, 'session')}
+        onAddSession={() => openJoin(false)}
         onStartSession={() => openStart()}
         onOpenDevices={openDevices}
         onRemoveSession={(id) => void sessionRuntime.remove(id)}
@@ -250,7 +244,7 @@ export default function App(): JSX.Element {
             closeDeviceScreens();
             sessionRuntime.setActive(id);
           }}
-          onAddSession={() => openJoin(false, 'session')}
+          onAddSession={() => openJoin(false)}
           onStartSession={() => openStart()}
           onOpenDevices={openDevices}
           onRemoveSession={(id) => void sessionRuntime.remove(id)}
@@ -284,7 +278,7 @@ export default function App(): JSX.Element {
           setStartDeviceId(undefined);
           setShowLanding(false);
         }}
-        onScanListener={() => openJoin(false, 'device')}
+        onScanListener={() => openJoin(false)}
         onManageDevices={openDevices}
         onCancel={() => {
           setStarting(false);
@@ -351,7 +345,6 @@ export default function App(): JSX.Element {
       onSelectSession={(id) => sessionRuntime.setActive(id)}
       onAddSession={() => {
         setAddManual(false);
-        setJoinPurpose('session');
         setAdding(true);
       }}
       onStartSession={() => openStart()}

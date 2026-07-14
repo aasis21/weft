@@ -1283,6 +1283,7 @@
 /* Docked rail is narrower than the mobile overlay drawer; shrink the rename/remove tap targets
    from mobile's 30px touch size down to a more desktop-appropriate compact size. */
 .drawer-docked .session-row .row-x,
+.drawer-docked .session-row .row-reveal,
 .drawer-docked .session-row .row-menu-btn { width: 22px; height: 22px; font-size: 12px; }
 
 .session-row {
@@ -1333,6 +1334,8 @@
   border-radius: 9px;
   font-size: 15px;
   cursor: pointer;
+  background: var(--bg-rule);
+  color: var(--fg-dim);
 }
 .row-swipe-btn.archive { background: var(--bg-rule); color: var(--fg-dim); }
 .row-swipe-btn.danger { background: color-mix(in srgb, var(--error) 16%, transparent); color: var(--error); }
@@ -1479,6 +1482,13 @@
 .pin-mark { margin-right: 3px; font-size: 11px; }
 
 .row-actions { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+
+/* #ui row-reveal: the single always-visible affordance that opens the row's action strip. A left
+   chevron hints the swipe direction; tapping it opens the same strip on desktop (no touch swipe). */
+.session-row .row-reveal { width: 30px; height: 30px; font-size: 20px; line-height: 1; opacity: 0.5; flex: 0 0 auto; }
+.session-row .row-reveal:hover,
+.session-row .row-reveal:focus-visible,
+.session-row .row-reveal[aria-expanded="true"] { opacity: 1; }
 
 /* Row-level "⋮" menu: collapses pin/archive/rename behind one button so only delete ("✕")
    stays directly on the row. The dropdown is a small absolutely-positioned popover anchored

@@ -12,13 +12,6 @@ interface JoinSessionScreenProps {
   hasSessions: boolean;
   /** Open the manual paste box on mount (e.g. user tapped "Paste a pairing code"). */
   initialManual?: boolean;
-  /**
-   * What the user came here to do — changes the copy so the same scanner doesn't read as
-   * "join a session" when they actually tapped "add a device" (or vice versa). The QR itself
-   * still decides what actually happens (see sessionRuntime.addByQr); this only sets
-   * expectations up front so a scan doesn't feel like it did the "wrong" thing (#weft-scan-ux).
-   */
-  purpose?: 'session' | 'device';
   error: string | null;
   onError(error: string | null): void;
   onPair(raw: string): Promise<void>;
@@ -29,7 +22,6 @@ export function JoinSessionScreen({
   firstRun = false,
   hasSessions,
   initialManual = false,
-  purpose = 'session',
   error,
   onError,
   onPair,
@@ -106,14 +98,17 @@ export function JoinSessionScreen({
     void nativeScan();
   }, [native, nativeScan]);
 
-  const backLabel = hasSessions ? 'Back to sessions' : 'Back';
+  const backLabel = 'Back';
   const inApp = hasSessions && !firstRun;
-  const isDevice = purpose === 'device';
-  const kicker = isDevice ? 'Add a device' : (hasSessions ? 'Join another session' : 'Pair your phone');
+  const kicker = 'Connect';
   const heading = 'Scan to connect';
-  const hint = isDevice
-    ? <>Run <code>copilot</code> on the new laptop, then frame the pairing QR it prints to add it to your devices.</>
-    : <>Run <code>copilot</code> on your laptop, then frame the pairing QR it prints.</>;
+  const tagline = 'One scan links your laptop — it pairs a new device or joins a session automatically.';
+  const steps: JSX.Element[] = [
+    <>Run <code>copilot</code> on your laptop</>,
+    <>Point your camera at the pairing QR it prints</>,
+  ];
+  const secondaryCls = inApp ? 'session-secondary-action' : 'secondary-action';
+  const linkCls = inApp ? 'session-link-btn' : 'link-btn';
 
   return (
     <main className={inApp ? 'weft-session join-session' : 'join-shell'}>
@@ -126,7 +121,15 @@ export function JoinSessionScreen({
           ) : null}
           <p className={inApp ? 'session-join-kicker' : 'eyebrow'}>{kicker}</p>
           <h2>{heading}</h2>
-          <p className={inApp ? 'session-join-hint' : 'join-hint'}>{hint}</p>
+          <p className="join-tagline">{tagline}</p>
+          <ol className="join-steps">
+            {steps.map((step, i) => (
+              <li key={i}>
+                <span className="step-num" aria-hidden="true">{i + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
         </header>
 
       <div className={inApp ? 'session-join-scanner' : 'join-scanner'}>
@@ -172,11 +175,12 @@ export function JoinSessionScreen({
         </div>
       ) : null}
 
-      {debugMode ? (
-        <div className={inApp ? 'session-join-fallback' : 'join-fallback'}>
+      <details className="join-troubleshoot">
+        <summary>Trouble connecting?</summary>
+        <div className="join-troubleshoot-body">
           <button
             type="button"
-            className={inApp ? 'session-secondary-action' : 'secondary-action'}
+            className={secondaryCls}
             disabled={probeRunning}
             onClick={() => void runProbe()}
           >
@@ -188,49 +192,51 @@ export function JoinSessionScreen({
               <pre>{probeResult}</pre>
             </details>
           ) : null}
-        </div>
-      ) : null}
 
-      <div className={inApp ? 'session-join-fallback' : 'join-fallback'}>
-        <button
-          type="button"
-          className={`${inApp ? 'session-link-btn' : 'link-btn'} debug-toggle`}
-          onClick={toggleDebugMode}
-        >
-          Debug mode: {debugMode ? 'On' : 'Off'}
-        </button>
-        {desktop ? (
-          <>
+          {desktop ? (
+            <>
+              <button
+                type="button"
+                className={linkCls}
+                aria-expanded={showManual}
+                onClick={() => setShowManual((v) => !v)}
+              >
+                {showManual ? 'Hide manual entry' : 'Enter pairing code manually'}
+              </button>
+              {showManual ? (
+                <>
+                  <textarea
+                    className={inApp ? 'session-manual-input' : undefined}
+                    aria-label="Manual pairing JSON"
+                    value={manual}
+                    onChange={(event) => setManual(event.target.value)}
+                    placeholder='{"v":1,"channelId":"...","pub":"..."}'
+                  />
+                  <button
+                    type="button"
+                    className={secondaryCls}
+                    disabled={busy || !manual.trim()}
+                    onClick={() => void pair(manual)}
+                  >
+                    Pair from pasted code
+                  </button>
+                </>
+              ) : null}
+            </>
+          ) : null}
+
+          <div className="join-debug-row">
+            <span>Show technical error details</span>
             <button
               type="button"
-              className={inApp ? 'session-link-btn' : 'link-btn'}
-              aria-expanded={showManual}
-              onClick={() => setShowManual((v) => !v)}
+              className={`${linkCls} debug-toggle`}
+              onClick={toggleDebugMode}
             >
-              {showManual ? 'Hide manual entry' : 'Enter code manually'}
+              Debug mode: {debugMode ? 'On' : 'Off'}
             </button>
-            {showManual ? (
-              <>
-                <textarea
-                  className={inApp ? 'session-manual-input' : undefined}
-                  aria-label="Manual pairing JSON"
-                  value={manual}
-                  onChange={(event) => setManual(event.target.value)}
-                  placeholder='{"v":1,"channelId":"...","pub":"..."}'
-                />
-                <button
-                  type="button"
-                  className={inApp ? 'session-secondary-action' : 'secondary-action'}
-                  disabled={busy || !manual.trim()}
-                  onClick={() => void pair(manual)}
-                >
-                  Pair from pasted code
-                </button>
-              </>
-            ) : null}
-          </>
-        ) : null}
-      </div>
+          </div>
+        </div>
+      </details>
       </div>
     </main>
   );

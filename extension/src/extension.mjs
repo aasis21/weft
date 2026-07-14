@@ -579,6 +579,17 @@ async function logPairing(session, payload, { full = false } = {}) {
         payload,
         "```",
         "",
+        // Only when a standalone `weft start` Device Station is live on this machine: this session is
+        // (about to be) advertised to the already-paired phone as a one-tap offer (see
+        // offerSessionToStationIfRunning), so surface that shortcut instead of implying QR is the only way in.
+        ...(isStationRunning()
+          ? [
+              ui.dim(
+                "Phone already paired to this laptop? This session is also waiting in the Weft app under this device — just tap it to join, no scan.",
+              ),
+              "",
+            ]
+          : []),
         ui.dim(
           `Relay ${transport} · Channel ${channelShort} · End-to-end encrypted (AES-256-GCM), keys live only this session`,
         ),

@@ -1438,6 +1438,99 @@ pre {
   gap: 10px;
 }
 
+/* ---- Numbered steps (Join / Scan page) ----------------------------------- */
+.join-tagline {
+  margin: 6px 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted, #8b93a7);
+  max-width: 34ch;
+}
+.join-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.join-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-dim, #b9c2cd);
+  line-height: 1.4;
+}
+.join-steps .step-num {
+  flex: 0 0 auto;
+  width: 21px;
+  height: 21px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft, rgba(76, 141, 255, 0.16));
+  color: var(--accent, var(--cyan, #4c8dff));
+  font-size: 11px;
+  font-weight: 800;
+}
+.join-steps code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--bg-rule, var(--line, rgba(255, 255, 255, 0.12)));
+  background: var(--bg-elev, rgba(255, 255, 255, 0.05));
+  color: var(--accent, var(--cyan, #4c8dff));
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.85em;
+}
+
+/* ---- "Trouble connecting?" disclosure: keeps dev/diagnostic controls
+   available but visually subordinate to the scan flow. --------------------- */
+.join-troubleshoot {
+  margin-top: 2px;
+  border-top: 1px solid var(--bg-rule, var(--line, rgba(255, 255, 255, 0.1)));
+  padding-top: 6px;
+}
+.join-troubleshoot > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 0;
+  color: var(--fg-faint, #8b95a1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.join-troubleshoot > summary::-webkit-details-marker { display: none; }
+.join-troubleshoot > summary::before {
+  content: '▸ ';
+  font-size: 10px;
+}
+.join-troubleshoot[open] > summary::before { content: '▾ '; }
+.join-troubleshoot[open] > summary { color: var(--fg-dim, #b9c2cd); }
+.join-troubleshoot-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+}
+.join-debug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+  color: var(--fg-faint, #8b95a1);
+  font-size: 12.5px;
+}
+.join-debug-row .link-btn,
+.join-debug-row .session-link-btn {
+  align-self: auto;
+  min-height: auto;
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
 .join-fallback .secondary-action,
 .join-fallback .demo-action {
   margin-top: 0;
@@ -1498,8 +1591,20 @@ pre {
 }
 
 .scanner-inline .scanner-reticle {
-  width: min(64%, 240px);
-  box-shadow: none;
+  width: min(66%, 250px);
+  /* Dim everything outside the scan window so the QR target is unmistakable (the huge spread
+     shadow is clipped by .scanner-inline's overflow:hidden, leaving a clean lit rectangle). */
+  box-shadow: 0 0 0 100vmax rgba(4, 10, 16, 0.5);
+}
+
+/* Caption pinned to the bottom of the viewport so it never overlaps the scan window. */
+.scanner-inline .scanner-status {
+  position: absolute;
+  bottom: 14px;
+  z-index: 2;
+  max-width: calc(100% - 28px);
+  background: rgba(0, 0, 0, 0.66);
+  backdrop-filter: blur(3px);
 }
 
 /* ---- Post-scan "connecting" state: replaces the frozen camera preview so the

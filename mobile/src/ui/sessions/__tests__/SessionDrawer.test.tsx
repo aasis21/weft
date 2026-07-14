@@ -121,6 +121,7 @@ describe('SessionDrawer', () => {
     await user.click(betaRow!);
     expect(onSelect).toHaveBeenCalledWith('b');
 
+    await user.click(within(betaRow as HTMLElement).getByRole('button', { name: 'More actions' }));
     await user.click(within(betaRow as HTMLElement).getByRole('button', { name: 'Delete session' }));
     await user.click(
       within(betaRow as HTMLElement).getByRole('button', { name: 'Confirm delete session' }),
@@ -170,10 +171,10 @@ describe('SessionDrawer', () => {
     const coldRow = screen.getByText('Cold One').closest('.session-row') as HTMLElement;
     expect(coldRow.querySelector('.session-pill')?.textContent).toBe('Archived');
 
-    // Pinned row shows the marker; pin/archive/rename live behind the row's "⋮" menu.
+    // Pinned row shows the marker; pin/rename/archive/delete all live in the row's reveal strip.
     expect(within(coldRow).getByLabelText('Pinned')).toBeInTheDocument();
     await user.click(within(coldRow).getByRole('button', { name: 'More actions' }));
-    await user.click(within(coldRow).getByRole('menuitem', { name: 'Unpin session' }));
+    await user.click(within(coldRow).getByRole('button', { name: 'Unpin session' }));
     expect(onPin).toHaveBeenCalledWith('cold', false);
   });
 
@@ -221,6 +222,7 @@ describe('SessionDrawer', () => {
       />,
     );
     const alphaRow = screen.getByText('Alpha').closest('.session-row') as HTMLElement;
+    await user.click(within(alphaRow).getByRole('button', { name: 'More actions' }));
     await user.click(within(alphaRow).getByRole('button', { name: /delete session/i }));
     expect(within(alphaRow).getByText('Delete?')).toBeInTheDocument();
     // Clicking another row dismisses the primed confirm instead of leaving it armed.
@@ -324,7 +326,7 @@ describe('SessionDrawer', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'More actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Rename session' }));
+    await user.click(screen.getByRole('button', { name: 'Rename session' }));
     const input = screen.getByRole('textbox', { name: 'Rename session' });
     await user.clear(input);
     await user.type(input, 'Deploy Box{Enter}');
