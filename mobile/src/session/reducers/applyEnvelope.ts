@@ -164,15 +164,15 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
     case EVENT_TYPE.STREAM:
       switch (message.eventSubtype) {
         case SUBTYPE.STREAM.ASSISTANT_MESSAGE:
-          noteStreamActivity(session, message.ts);
+          markStreamBusy(session, message.ts);
           upsertAssistant(session, message);
           return;
         case SUBTYPE.STREAM.ASSISTANT_DELTA:
-          noteStreamActivity(session, message.ts);
+          markStreamBusy(session, message.ts);
           appendDelta(session, message);
           return;
         case SUBTYPE.STREAM.TOOL_START:
-          noteStreamActivity(session, message.ts);
+          markStreamBusy(session, message.ts);
           startTool(session, message);
           return;
         case SUBTYPE.STREAM.TOOL_COMPLETE:
@@ -581,6 +581,27 @@ function noteStreamActivity(session: Session, ts: number): void {
   const state = monitorFor(session);
   state.lastStreamAt = ts;
   state.idleBeats = 0;
+}
+
+/**
+ * Live stream output (an assistant message/delta or a tool start) is itself proof that a turn is in
+ * flight — so flip the session to busy ("Working…") even when the authoritative ACTIVITY(true) edge
+ * was never seen: the phone subscribed mid-turn, or the turn began before this session was warm, or
+ * the host exposes no activity RPC so heartbeats only ever carry busy:null. Complements the
+ * authoritative sources (ACTIVITY / HEARTBEAT / STATE_SNAPSHOT) rather than replacing them.
+ *
+ * Only ever transitions false→true and never touches busyFrom while already busy, so it can't
+ * RESURRECT busy after an authoritative idle: a trailing/late delta whose ts predates the last
+ * busy/idle transition (busyFrom) is stale and ignored. Authoritative idle signals
+ * (ACTIVITY(false), HEARTBEAT(busy:false), STATE_SNAPSHOT(busy:false)) still clear it as before.
+ */
+function markStreamBusy(session: Session, ts: number): void {
+  noteStreamActivity(session, ts);
+  if (session.connection.busy) return;
+  if (isStaleBusyHeartbeat(session, ts)) return;
+  session.connection.busy = true;
+  session.connection.busyFrom = ts;
+  noteBusySignal(session, true, ts);
 }
 
 function shouldClearStuckBusy(session: Session, ts: number): boolean {

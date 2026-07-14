@@ -130,11 +130,37 @@ const HOST_CONFIRM_MS = 30_000;
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
 const DEVICE_OFFLINE_AFTER_MS = 180_000;
-/** How long to wait between self-heal reconnect attempts for an offline device in the watchdog, so
- *  a dead devtunnel/relay socket (which never re-opens on its own) gets re-established without an app
- *  foreground/restart, yet a genuinely-unreachable relay isn't hammered every tick. Matches the
- *  connect timeout (weftClient CONNECT_TIMEOUT_MS) so a failed attempt fully settles before retry. */
-const DEVICE_RECONNECT_BACKOFF_MS = 15_000;
+/** Base self-heal reconnect interval for an offline device in the watchdog, so a dead devtunnel/relay
+ *  socket (which never re-opens on its own) gets re-established without an app foreground/restart, yet
+ *  a genuinely-unreachable relay isn't hammered every tick. Matches the connect timeout (weftClient
+ *  CONNECT_TIMEOUT_MS) so a failed attempt fully settles before retry. This is the FLOOR of the
+ *  backoff — see deviceReconnectBackoffMs, which grows it with attempts + staleness. */
+const DEVICE_RECONNECT_BASE_MS = 15_000;
+/** Ceiling for the self-heal reconnect backoff — a device dark for a long time is almost certainly
+ *  a laptop that's off, so probe it at most this often (still instantly retried on app foreground /
+ *  boot, which resets the ramp — see handleResume()/init()). */
+const DEVICE_RECONNECT_MAX_MS = 15 * 60_000;
+
+/**
+ * Self-heal reconnect backoff for an offline device, growing with BOTH the number of consecutive
+ * failed attempts (exponential) and how long since the device was last seen. Rationale: a laptop
+ * that just blipped (seen seconds ago, few attempts) should recover fast, but one dark for an hour
+ * shouldn't have a socket thrown at it every 15s. The attempt counter is reset to 0 (instant retry)
+ * on app foreground / boot, so a returning user always gets an immediate reconnect regardless of how
+ * relaxed the background ramp had become. Capped at DEVICE_RECONNECT_MAX_MS.
+ */
+function deviceReconnectBackoffMs(attempts: number, sinceLastSeenMs: number): number {
+  const exponential = DEVICE_RECONNECT_BASE_MS * 2 ** Math.min(attempts, 6);
+  const stalenessFloor =
+    sinceLastSeenMs > 2 * 60 * 60_000
+      ? 15 * 60_000
+      : sinceLastSeenMs > 30 * 60_000
+        ? 5 * 60_000
+        : sinceLastSeenMs > 5 * 60_000
+          ? 60_000
+          : DEVICE_RECONNECT_BASE_MS;
+  return Math.min(Math.max(exponential, stalenessFloor), DEVICE_RECONNECT_MAX_MS);
+}
 /** Fail-safe window after a `project_list_request` is sent: while a request is outstanding, extra
  *  refreshProjects triggers (boot auto-reconnect + watchdog self-heal + attachListener's trailing
  *  refresh + a manual pull all firing within seconds of a reconnect) are collapsed into the one
@@ -245,8 +271,12 @@ export class SessionRuntime {
   private resumeCleanups: Array<() => void> = [];
   private lastResumeAt = 0;
   /** Per-device throttle stamps (ms) for the watchdog's self-heal reconnect, so a wedged offline
-   *  device is re-established on a backoff (DEVICE_RECONNECT_BACKOFF_MS) without hammering the relay. */
+   *  device is re-established on a backoff (deviceReconnectBackoffMs) without hammering the relay. */
   private readonly deviceReconnectAt = new Map<string, number>();
+  /** Per-device count of consecutive self-heal reconnect attempts since the device was last healthy.
+   *  Feeds the exponential half of deviceReconnectBackoffMs; reset to 0 on health, on app foreground,
+   *  and on boot so a returning user always gets an immediate (attempt-0) reconnect. */
+  private readonly deviceReconnectFails = new Map<string, number>();
   /** Per-device fail-safe timers for an outstanding `project_list_request` (see
    *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
   private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1838,11 +1868,16 @@ export class SessionRuntime {
         const ctrl = this.listenerController(device.channelId);
         const healthy = device.connected && !!ctrl?.client;
         const lastTry = this.deviceReconnectAt.get(device.channelId) ?? 0;
-        if (!healthy && !ctrl?.reconnecting && now - lastTry > DEVICE_RECONNECT_BACKOFF_MS) {
+        const fails = this.deviceReconnectFails.get(device.channelId) ?? 0;
+        const sinceSeen = device.lastSeenAt != null ? now - device.lastSeenAt : Number.POSITIVE_INFINITY;
+        const backoff = deviceReconnectBackoffMs(fails, sinceSeen);
+        if (!healthy && !ctrl?.reconnecting && now - lastTry > backoff) {
           this.deviceReconnectAt.set(device.channelId, now);
+          this.deviceReconnectFails.set(device.channelId, fails + 1);
           void this.connectDevice(device.channelId);
-        } else if (healthy && lastTry !== 0) {
+        } else if (healthy && (lastTry !== 0 || fails !== 0)) {
           this.deviceReconnectAt.delete(device.channelId);
+          this.deviceReconnectFails.delete(device.channelId);
         }
       }
     }, 1_000);
@@ -1881,6 +1916,11 @@ export class SessionRuntime {
       const ctrl = this.listenerController(device.channelId);
       const stale = device.lastSeenAt != null && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS;
       if (!ctrl?.client || !device.connected || stale) {
+        // Foregrounding resets the backoff ramp: clear the attempt counter + throttle stamp so the
+        // returning user gets an immediate attempt-0 reconnect, however relaxed the background ramp
+        // had become, then the watchdog re-ramps from scratch if this attempt also fails.
+        this.deviceReconnectFails.delete(device.channelId);
+        this.deviceReconnectAt.delete(device.channelId);
         void this.connectDevice(device.channelId);
       }
     }

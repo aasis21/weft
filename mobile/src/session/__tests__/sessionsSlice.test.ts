@@ -165,10 +165,11 @@ describe('sessionsSlice', () => {
     expect(snap.activeId).toBe('ch-one');
     expect(snap.sessions.map((s) => s.meta.channelId)).toEqual(['ch-one', 'ch-two']);
     const active = snap.sessions.find((s) => s.meta.channelId === snap.activeId);
+    // A live assistant delta (no explicit ACTIVITY(true) needed) marks the session busy/"Working…".
     expect(active).toMatchObject({
       meta: { channelId: 'ch-one', title: 'One', cwd: 'C:\\one', kind: 'live' },
       status: 'live',
-      timeline: { busy: false, items: [{ kind: 'assistant', id: 'm1', text: 'hi', ts: 50 }], approvals: [], history: [] },
+      timeline: { busy: true, items: [{ kind: 'assistant', id: 'm1', text: 'hi', ts: 50 }], approvals: [], history: [] },
       events: [],
     });
   });

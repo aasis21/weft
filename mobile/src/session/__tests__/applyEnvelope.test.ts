@@ -73,6 +73,35 @@ describe('session applyEnvelope', () => {
     expect(session.connection.busy).toBe(true);
   });
 
+  it('flips busy from live stream output even when the ACTIVITY(true) edge was missed', () => {
+    // Phone subscribed mid-turn: no ACTIVITY(true), host heartbeats only carry busy:null (no
+    // activity RPC). A streaming delta / tool start must still read as "Working…".
+    const session = makeSession();
+
+    reduceAll(session, [
+      at(B.assistantDelta('Hel', 'm1'), 11),
+      at(B.heartbeat(1, null), 12),
+    ]);
+    expect(session.connection.busy).toBe(true);
+    expect(session.connection.busyFrom).toBe(11);
+
+    // An authoritative idle still clears it.
+    applyEnvelope(session, at(B.activity(false), 20));
+    expect(session.connection.busy).toBe(false);
+  });
+
+  it('does not resurrect busy from a trailing delta that predates an authoritative idle', () => {
+    const session = makeSession();
+
+    reduceAll(session, [
+      at(B.activity(true), 10),
+      at(B.activity(false), 20), // turn ended at ts=20
+      at(B.assistantDelta('late', 'm1'), 15), // stale straggler (ts < busyFrom=20)
+    ]);
+
+    expect(session.connection.busy).toBe(false);
+  });
+
   it('stamps heartbeat liveness from the phone-domain receivedAt, not the laptop ts (cross-clock)', () => {
     const session = makeSession();
     const phoneNow = 1_000_000;
