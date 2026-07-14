@@ -35,7 +35,7 @@ const STEPS = [
   },
   {
     n: 3,
-    title: "Scan it, you're in",
+    title: 'Scan to connect',
     body: "A laptop code lets you start fresh chats or join any that's running; a chat code drops you straight into that one. Come back later, it's right where you left it.",
   },
 ];
