@@ -2,6 +2,8 @@ import { Preferences } from '@capacitor/preferences';
 import type { StoredPairing } from './storage';
 import { loadStoredPairing } from './storage';
 import { freeSpaceUntilFitsSync } from './storageJanitor';
+import { clearTranscript } from './transcripts';
+import { clearEventLog } from './eventLog';
 
 const SESSIONS_KEY = 'weft.sessions.v1';
 
@@ -69,15 +71,37 @@ function normalizeStore(parsed: unknown): SessionsStore {
   };
 }
 
-async function readStore(): Promise<SessionsStore> {
+/** Extract every `pairing.channelId` present in the raw stored blob — INCLUDING entries that
+ *  `isStoredSession` will reject (e.g. legacy sessions with no transport descriptor). Lets the load
+ *  path reclaim transcript/event-log keys for entries it silently drops. */
+function collectRawChannelIds(parsed: unknown): string[] {
+  const arr: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { sessions?: unknown }).sessions)
+      ? ((parsed as { sessions: unknown[] }).sessions)
+      : [];
+  const ids: string[] = [];
+  for (const entry of arr) {
+    const ch = (entry as Partial<StoredSession> | undefined)?.pairing?.channelId;
+    if (typeof ch === 'string' && ch) ids.push(ch);
+  }
+  return ids;
+}
+
+async function readStoreRaw(): Promise<{ store: SessionsStore; rawChannelIds: string[] }> {
   try {
     const { value } = await Preferences.get({ key: SESSIONS_KEY });
     const raw = value ?? globalThis.localStorage?.getItem(SESSIONS_KEY);
-    if (!raw) return { sessions: [], lastActiveId: null };
-    return normalizeStore(JSON.parse(raw));
+    if (!raw) return { store: { sessions: [], lastActiveId: null }, rawChannelIds: [] };
+    const parsed: unknown = JSON.parse(raw);
+    return { store: normalizeStore(parsed), rawChannelIds: collectRawChannelIds(parsed) };
   } catch {
-    return { sessions: [], lastActiveId: null };
+    return { store: { sessions: [], lastActiveId: null }, rawChannelIds: [] };
   }
+}
+
+async function readStore(): Promise<SessionsStore> {
+  return (await readStoreRaw()).store;
 }
 
 async function read(): Promise<StoredSession[]> {
@@ -181,7 +205,20 @@ function dedupeBySessionId(list: StoredSession[]): StoredSession[] {
  * `weft.pairing.v1` entry into the multi-session list on first run.
  */
 export async function loadSessions(): Promise<StoredSession[]> {
-  const list = dedupeBySessionId(await read());
+  const { store, rawChannelIds } = await readStoreRaw();
+  const list = dedupeBySessionId(store.sessions);
+
+  // Reclaim storage at the source for entries dropped on load — legacy sessions rejected by
+  // isStoredSession (no transport descriptor) and cards collapsed by dedupeBySessionId — whose
+  // transcript/event-log keys would otherwise linger as orphans until the boot sweep. Best-effort;
+  // the data is regenerable from the laptop, so a failure here is harmless.
+  const kept = new Set(list.map((s) => s.pairing.channelId));
+  for (const id of rawChannelIds) {
+    if (kept.has(id)) continue;
+    void clearTranscript(id).catch(() => {});
+    void clearEventLog(id).catch(() => {});
+  }
+
   if (list.length > 0) return list;
   const legacy = await loadStoredPairing();
   if (legacy?.channelId && legacy.publicKeyB64) {

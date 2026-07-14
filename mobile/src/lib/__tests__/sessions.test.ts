@@ -8,6 +8,7 @@ import {
   type StoredSession,
 } from '@/lib/sessions';
 import { saveStoredPairing, type StoredPairing } from '@/lib/storage';
+import { Preferences } from '@capacitor/preferences';
 
 function pairing(channelId: string, savedAt = 1): StoredPairing {
   return {
@@ -192,5 +193,57 @@ describe('sessions storage', () => {
       sessions: loaded,
       lastActiveId: null,
     });
+  });
+});
+
+describe('loadSessions source cleanup', () => {
+  const TRANSCRIPT = (ch: string) => `weft.transcript.v1.${ch}`;
+  const EVENTLOG = (ch: string) => `weft.eventlog.v1.${ch}`;
+
+  function seedTranscript(ch: string): void {
+    localStorage.setItem(TRANSCRIPT(ch), JSON.stringify({ v: 1, savedAt: 1, data: {} }));
+    localStorage.setItem(EVENTLOG(ch), JSON.stringify({ v: 1, savedAt: 1, events: [] }));
+  }
+  async function seedRawStore(sessions: unknown[]): Promise<void> {
+    await Preferences.set({
+      key: 'weft.sessions.v1',
+      value: JSON.stringify({ sessions, lastActiveId: null }),
+    });
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it('clears transcript + event-log for a legacy session dropped by isStoredSession', async () => {
+    // A pre-transport-refactor entry (no pairing.transport) is silently rejected on load.
+    const legacy = { ...session('legacy'), pairing: { ...pairing('legacy'), transport: undefined } };
+    await seedRawStore([legacy, session('good')]);
+    seedTranscript('legacy');
+    seedTranscript('good');
+
+    const loaded = await loadSessions();
+    await flush();
+
+    expect(loaded.map((s) => s.pairing.channelId)).toEqual(['good']);
+    expect(localStorage.getItem(TRANSCRIPT('legacy'))).toBeNull();
+    expect(localStorage.getItem(EVENTLOG('legacy'))).toBeNull();
+    expect(localStorage.getItem(TRANSCRIPT('good'))).toBeTruthy();
+    expect(localStorage.getItem(EVENTLOG('good'))).toBeTruthy();
+  });
+
+  it('clears transcript + event-log for the loser of a dedupeBySessionId collapse', async () => {
+    // Two cards share sessionId 's1'; the higher pairing.savedAt (chNew) wins, chOld is dropped.
+    const chOld = { ...session('chOld', { sessionId: 's1' }), pairing: pairing('chOld', 10) };
+    const chNew = { ...session('chNew', { sessionId: 's1' }), pairing: pairing('chNew', 20) };
+    await seedRawStore([chOld, chNew]);
+    seedTranscript('chOld');
+    seedTranscript('chNew');
+
+    const loaded = await loadSessions();
+    await flush();
+
+    expect(loaded.map((s) => s.pairing.channelId)).toEqual(['chNew']);
+    expect(localStorage.getItem(TRANSCRIPT('chOld'))).toBeNull();
+    expect(localStorage.getItem(EVENTLOG('chOld'))).toBeNull();
+    expect(localStorage.getItem(TRANSCRIPT('chNew'))).toBeTruthy();
+    expect(localStorage.getItem(EVENTLOG('chNew'))).toBeTruthy();
   });
 });
