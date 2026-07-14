@@ -1293,7 +1293,49 @@
   border: 1px solid transparent;
   border-radius: 12px;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
+
+/* #ui swipe-to-reveal: foreground content slides left over an action strip pinned to the right
+   edge. Only mounted while a row is swiped open (touch), so it never collides with the "⋮"/"✕"
+   row actions or duplicates their accessible names in tests. */
+.row-fg {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+  transition: transform 0.18s ease;
+  will-change: transform;
+}
+.session-row.row-swipe-open .row-fg { background: var(--bg); }
+.row-swipe-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+.row-swipe-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.row-swipe-btn.archive { background: var(--bg-rule); color: var(--fg-dim); }
+.row-swipe-btn.danger { background: color-mix(in srgb, var(--error) 16%, transparent); color: var(--error); }
 .session-row:hover { background: var(--bg); }
 .session-row.current {
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
@@ -1330,6 +1372,25 @@
   color: var(--accent, #4c8dff);
   font-weight: 600;
 }
+/* #ui small folder-style chip for the session's project (cwd basename): a compact rounded tag,
+   not a pill, so it reads as a "folder" at a glance without stealing weight from the title. */
+.folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--bg-rule);
+  color: var(--fg-dim);
+  font-size: 9.5px;
+  font-weight: 600;
+  vertical-align: middle;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .session-row .row-x { width: 30px; height: 30px; font-size: 13px; }
 
 /* Compact "Devices" group at the top of the drawer (#186 nav simplification): a single-line
@@ -1355,6 +1416,20 @@
 }
 .drawer-group-head-offline {
   color: var(--danger, #e5534b);
+}
+/* #ui collapsible group headers (Offline / Archived): the whole header is a toggle button; a
+   chevron on the right shows expand/collapse state. Archived starts collapsed. */
+.drawer-group-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+}
+.drawer-group-chevron {
+  margin-left: auto;
+  font-size: 9px;
+  opacity: 0.6;
 }
 .drawer-group-count {
   min-width: 16px;
@@ -1549,6 +1624,29 @@
   font-weight: 600;
 }
 .drawer-home:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+
+/* Compact footer (5 stacked rows -> 2): two primaries share one row, the nav items
+   collapse into a single icon strip, reclaiming vertical space for the session list. */
+.drawer-actions { display: flex; gap: 6px; }
+.drawer-add-split { flex: 1; text-align: center; }
+.drawer-nav { display: flex; gap: 6px; margin-top: 6px; }
+.drawer-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border: 1px solid var(--border, color-mix(in srgb, var(--fg) 14%, transparent));
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fg-muted, var(--fg));
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+.drawer-nav-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.drawer-nav-icon { font-size: 16px; line-height: 1; }
 
 /* ---- In-app join screen --------------------------------------------------- */
 .weft-session.join-session {
@@ -2392,6 +2490,7 @@
   min-width: 44px;
   min-height: 38px;
 }
+.weft-session .drawer-nav-item { min-height: 44px; }
 
 .weft-session .pill,
 .weft-session .mode-pill {

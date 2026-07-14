@@ -90,6 +90,15 @@ export function SessionDrawer({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // #ui: swipe-to-reveal row actions (touch), in addition to the "⋮" menu. Only one row can be
+  // swiped open at a time.
+  const [swipedId, setSwipedId] = useState<string | null>(null);
+  const touchRef = useRef<{ id: string; startX: number; startY: number; dx: number; swiping: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
+  // #ui: Offline/Archived are collapsible; Archived starts collapsed (calm cooldown bucket) so the
+  // list opens focused on Active + anything that broke.
+  const [collapsedOffline, setCollapsedOffline] = useState(false);
+  const [collapsedArchived, setCollapsedArchived] = useState(true);
   // Bumped on a timer / focus so relative "N ago" labels re-render even for idle rows that
   // receive no new events (fmtRelative reads Date.now() only at render time).
   const [, forceTick] = useState(0);
@@ -130,6 +139,50 @@ export function SessionDrawer({
     setEditingId(null);
   };
   const cancelRename = (): void => setEditingId(null);
+
+  // #ui: touch swipe detection for session rows. A mostly-horizontal drag past the threshold opens
+  // (swipe left) or closes (swipe right) the row's action strip; a tap still selects the row.
+  const onRowTouchStart = (id: string) => (e: React.TouchEvent): void => {
+    const t = e.touches[0];
+    if (!t) return;
+    touchRef.current = { id, startX: t.clientX, startY: t.clientY, dx: 0, swiping: false };
+  };
+  const onRowTouchMove = (e: React.TouchEvent): void => {
+    const s = touchRef.current;
+    const t = e.touches[0];
+    if (!s || !t) return;
+    const dx = t.clientX - s.startX;
+    const dy = t.clientY - s.startY;
+    if (!s.swiping && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) s.swiping = true;
+    s.dx = dx;
+  };
+  const onRowTouchEnd = (id: string) => (): void => {
+    const s = touchRef.current;
+    touchRef.current = null;
+    if (!s || !s.swiping) return;
+    // A real swipe fires a synthetic click afterwards on most browsers — swallow it so the row
+    // doesn't also get selected.
+    suppressClickRef.current = true;
+    if (s.dx < -40) {
+      setSwipedId(id);
+      setOpenMenuId(null);
+      setConfirmDeleteId(null);
+    } else if (s.dx > 40) {
+      setSwipedId((cur) => (cur === id ? null : cur));
+    }
+  };
+
+  // Close a swiped-open row on any click outside its own controls (mirrors the row-menu behaviour).
+  useEffect(() => {
+    if (!swipedId) return;
+    const handleDocClick = (event: MouseEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.row-swipe-open')) return;
+      setSwipedId(null);
+    };
+    document.addEventListener('click', handleDocClick);
+    return () => document.removeEventListener('click', handleDocClick);
+  }, [swipedId]);
 
   const filteredSessions = useMemo(() => {
     // Filter search box removed for now (#see chat request) — sidebar just shows all sessions.
@@ -326,13 +379,25 @@ export function SessionDrawer({
     const derived = deriveStatus(session);
     const isDemo = session.meta.kind === 'demo';
     const confirming = confirmDeleteId === id;
+    const swiped = swipedId === id;
+    const swipeReveal = ((onArchive && derived.active ? 1 : 0) + 1) * 44;
     return (
       <div
         key={id}
-        className={`session-row ${isActive ? 'current' : ''} ${session.unread && !isActive ? 'unread' : ''}`}
+        className={`session-row ${isActive ? 'current' : ''} ${session.unread && !isActive ? 'unread' : ''} ${swiped ? 'row-swipe-open' : ''}`}
         role="button"
         tabIndex={0}
-        onClick={() => onSelect(id)}
+        onClick={() => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            return;
+          }
+          if (swiped) {
+            setSwipedId(null);
+            return;
+          }
+          onSelect(id);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onSelect(id);
           if (e.key === ' ' || e.key === 'Spacebar') {
@@ -340,7 +405,43 @@ export function SessionDrawer({
             onSelect(id);
           }
         }}
+        onTouchStart={onRowTouchStart(id)}
+        onTouchMove={onRowTouchMove}
+        onTouchEnd={onRowTouchEnd(id)}
       >
+        {swiped ? (
+          <span className="row-swipe-actions" onClick={(e) => e.stopPropagation()}>
+            {onArchive && derived.active ? (
+              <button
+                className="row-swipe-btn archive"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSwipedId(null);
+                  onArchive(id);
+                }}
+                title="Archive now"
+                aria-label={`Archive ${session.meta.title}`}
+              >
+                ⏸
+              </button>
+            ) : null}
+            <button
+              className="row-swipe-btn danger"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSwipedId(null);
+                setConfirmDeleteId(id);
+              }}
+              title="Delete"
+              aria-label={`Delete ${session.meta.title}`}
+            >
+              🗑
+            </button>
+          </span>
+        ) : null}
+        <div className="row-fg" style={swiped ? { transform: `translateX(-${swipeReveal}px)` } : undefined}>
         <span
           className={`unread-dot ${session.unread && !isActive ? 'on' : ''}`}
           aria-label={session.unread && !isActive ? 'Unread activity' : undefined}
@@ -382,7 +483,11 @@ export function SessionDrawer({
               <span className="unread-new">{` · ${session.unreadCount} new`}</span>
             ) : null}
             {activity ? ` · ${fmtRelative(activity)}` : ''}
-            {session.meta.cwd ? ` · ${session.meta.cwd.split(/[\\/]/).pop()}` : ''}
+            {session.meta.cwd ? (
+              <span className="folder-chip" title={session.meta.cwd}>
+                📁 {session.meta.cwd.split(/[\\/]/).pop()}
+              </span>
+            ) : null}
           </span>
         </span>
         {confirming ? (
@@ -497,6 +602,7 @@ export function SessionDrawer({
             </button>
           </span>
         )}
+        </div>
       </div>
     );
   };
@@ -507,12 +613,12 @@ export function SessionDrawer({
         ref={drawerRef}
         className={docked ? 'drawer drawer-docked' : 'drawer'}
         {...(docked ? {} : { role: 'dialog', 'aria-modal': true })}
-        aria-label="Sessions"
+        aria-label="Weft"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="drawer-head">
-          <span className="drawer-title">SESSIONS</span>
+          <span className="drawer-title">WEFT</span>
         </div>
         <button
           className="drawer-close"
@@ -543,44 +649,62 @@ export function SessionDrawer({
               ) : null}
               {activeGroup.map(renderRow)}
               {offlineGroup.length > 0 ? (
-                <div className="drawer-group-head drawer-group-head-offline">
+                <button
+                  type="button"
+                  className="drawer-group-head drawer-group-head-offline drawer-group-toggle"
+                  aria-expanded={!collapsedOffline}
+                  onClick={() => setCollapsedOffline((v) => !v)}
+                >
                   Offline <span className="drawer-group-count">{offlineGroup.length}</span>
-                </div>
+                  <span className="drawer-group-chevron" aria-hidden="true">{collapsedOffline ? '▸' : '▾'}</span>
+                </button>
               ) : null}
-              {offlineGroup.map(renderRow)}
+              {!collapsedOffline ? offlineGroup.map(renderRow) : null}
               {archivedGroup.length > 0 ? (
-                <div className="drawer-group-head">
+                <button
+                  type="button"
+                  className="drawer-group-head drawer-group-toggle"
+                  aria-expanded={!collapsedArchived}
+                  onClick={() => setCollapsedArchived((v) => !v)}
+                >
                   Archived <span className="drawer-group-count">{archivedGroup.length}</span>
-                </div>
+                  <span className="drawer-group-chevron" aria-hidden="true">{collapsedArchived ? '▸' : '▾'}</span>
+                </button>
               ) : null}
-              {archivedGroup.map(renderRow)}
+              {!collapsedArchived ? archivedGroup.map(renderRow) : null}
             </>
           )}
         </div>
 
-        <button className="drawer-add" type="button" onClick={onAddSession}>
-          ＋ Join another Copilot session
-        </button>
-
-        <button className="drawer-add" type="button" onClick={onStartSession}>
-          ▻ Start another Copilot session
-        </button>
-
-        {onOpenDevices ? (
-          <button className="drawer-home" type="button" onClick={onOpenDevices}>
-            🖥 Manage devices
+        <div className="drawer-actions">
+          <button className="drawer-add drawer-add-split" type="button" onClick={onAddSession}>
+            ＋ Join
           </button>
-        ) : null}
-
-        {onOpenSettings ? (
-          <button className="drawer-home" type="button" onClick={onOpenSettings}>
-            ⚙ Settings
+          <button className="drawer-add drawer-add-split" type="button" onClick={onStartSession}>
+            ▻ Start
           </button>
-        ) : null}
+        </div>
 
-        <button className="drawer-home" type="button" onClick={onGoHome}>
-          ⌂ About Weft
-        </button>
+        <div className="drawer-nav">
+          {onOpenDevices ? (
+            <button className="drawer-nav-item" type="button" onClick={onOpenDevices} aria-label="Manage devices">
+              <span className="drawer-nav-icon" aria-hidden="true">🖥</span>
+              Devices
+            </button>
+          ) : null}
+
+          {onOpenSettings ? (
+            <button className="drawer-nav-item" type="button" onClick={onOpenSettings} aria-label="Settings">
+              <span className="drawer-nav-icon" aria-hidden="true">⚙</span>
+              Settings
+            </button>
+          ) : null}
+
+          <button className="drawer-nav-item" type="button" onClick={onGoHome} aria-label="About Weft">
+            <span className="drawer-nav-icon" aria-hidden="true">⌂</span>
+            About
+          </button>
+        </div>
       </aside>
       {docked ? null : <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />}
     </>

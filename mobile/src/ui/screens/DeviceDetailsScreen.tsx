@@ -21,6 +21,7 @@ interface DeviceDetailsScreenProps {
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
+  onOpenDeviceDetails?(channelId: string): void;
   onJoinOffer(deviceChannelId: string, offerChannelId: string): void;
   onOpenSession(channelId: string): void;
   onSelectSession(channelId: string): void;

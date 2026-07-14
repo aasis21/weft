@@ -46,7 +46,7 @@ describe('DevicesScreen', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /scan a device qr/i }));
+    fireEvent.click(screen.getByRole('button', { name: /scan to connect/i }));
     expect(onScanListener).toHaveBeenCalledTimes(1);
   });
 

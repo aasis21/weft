@@ -163,9 +163,12 @@ describe('SessionDrawer', () => {
 
     // Per-row pills reflect deriveStatus.
     expect(screen.getByText('Live One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Live');
+    expect(screen.getByText('Broken One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Offline');
+
+    // Archived starts collapsed (#ui) — expand it to reach the cold row.
+    await user.click(archivedHead);
     const coldRow = screen.getByText('Cold One').closest('.session-row') as HTMLElement;
     expect(coldRow.querySelector('.session-pill')?.textContent).toBe('Archived');
-    expect(screen.getByText('Broken One').closest('.session-row')?.querySelector('.session-pill')?.textContent).toBe('Offline');
 
     // Pinned row shows the marker; pin/archive/rename live behind the row's "⋮" menu.
     expect(within(coldRow).getByLabelText('Pinned')).toBeInTheDocument();
@@ -246,7 +249,7 @@ describe('SessionDrawer', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
 
-    await user.click(screen.getByText('＋ Join another Copilot session'));
+    await user.click(screen.getByText('＋ Join'));
     expect(onAddSession).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTitle('Close'));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -299,7 +302,7 @@ describe('SessionDrawer', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: '⌂ About Weft' }));
+    await user.click(screen.getByRole('button', { name: 'About Weft' }));
     expect(onGoHome).toHaveBeenCalledTimes(1);
   });
 

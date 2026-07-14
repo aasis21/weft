@@ -227,7 +227,7 @@ export function DevicesScreen({
           <section className="session-join-scanner start-empty">
             <p>No devices saved yet.</p>
             <button type="button" className="session-primary-action" onClick={onScanListener}>
-              Scan a device QR
+              Scan to connect
             </button>
           </section>
         ) : (
@@ -256,6 +256,10 @@ export function DevicesScreen({
           onStartOnDevice={(id) => {
             setDrawerOpen(false);
             onStartOnDevice(id);
+          }}
+          onOpenDeviceDetails={(id) => {
+            setDrawerOpen(false);
+            onOpenDetails(id);
           }}
           onSelect={(id) => {
             setDrawerOpen(false);

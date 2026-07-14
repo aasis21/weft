@@ -127,7 +127,7 @@ export function StartSessionScreen({
             </p>
             <p>No devices saved yet.</p>
             <button type="button" className="session-primary-action" onClick={onScanListener}>
-              Scan a device QR
+              Scan to connect
             </button>
           </section>
         ) : (

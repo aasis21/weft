@@ -110,7 +110,7 @@ export function JoinSessionScreen({
   const inApp = hasSessions && !firstRun;
   const isDevice = purpose === 'device';
   const kicker = isDevice ? 'Add a device' : (hasSessions ? 'Join another session' : 'Pair your phone');
-  const heading = isDevice ? "Point your camera at the device's pairing QR" : 'Point your camera at the laptop QR';
+  const heading = 'Scan to connect';
   const hint = isDevice
     ? <>Run <code>copilot</code> on the new laptop, then frame the pairing QR it prints to add it to your devices.</>
     : <>Run <code>copilot</code> on your laptop, then frame the pairing QR it prints.</>;

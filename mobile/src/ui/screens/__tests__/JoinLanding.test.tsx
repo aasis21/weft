@@ -80,7 +80,7 @@ describe('JoinSessionScreen', () => {
       />,
     );
 
-    expect(screen.getByText('Point your camera at the laptop QR')).toBeInTheDocument();
+    expect(screen.getByText('Scan to connect')).toBeInTheDocument();
     await user.click(screen.getByTestId('mock-scanner'));
     expect(onPair).toHaveBeenCalledWith('scanner-payload');
   });
