@@ -260,6 +260,18 @@ const sessionsSlice = createSlice({
         if (action.payload.error) device.projectsLoading = false;
       }
     },
+    // Any inbound message on a device (listener) channel is proof the laptop is alive RIGHT NOW —
+    // so "last seen" tracks the last time the phone received ANYTHING from it, not just the
+    // handful of subtypes (PROJECT_LIST / SESSION_OFFERS / DEVICE_HEARTBEAT) that carry their own
+    // state. Stamped at the single inbound choke point (sessionRuntime.onListenerMessage) so
+    // SPAWN_PAIRING, SPAWN_RESULT, and any future control message keep the device fresh too.
+    deviceSeen(state, action: PayloadAction<{ channelId: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.connected = true;
+        device.lastSeenAt = Date.now();
+      }
+    },
     deviceLastProjectSet(state, action: PayloadAction<{ channelId: string; projectName: string }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) device.lastProjectName = action.payload.projectName;
@@ -472,6 +484,7 @@ export const {
   deviceOfferRemoved,
   deviceReconciled,
   deviceErrorSet,
+  deviceSeen,
   deviceLastProjectSet,
   deviceEventAppended,
   sessionAdded,

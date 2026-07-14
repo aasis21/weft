@@ -83,6 +83,7 @@ import {
   debugAppended,
   deviceDefaultSet,
   deviceErrorSet,
+  deviceSeen,
   deviceEventAppended,
   deviceLastProjectSet,
   deviceProjectsLoadingSet,
@@ -1191,6 +1192,10 @@ export class SessionRuntime {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
     this.recordDeviceEvent(channelId, 'in', message);
+    // Single inbound choke point: ANY control message is proof the laptop is alive right now, so
+    // refresh "last seen" here — before the per-subtype branches — so SPAWN_PAIRING, SPAWN_RESULT
+    // and any future control message keep the device fresh, not just the state-carrying subtypes.
+    this.store.dispatch(deviceSeen({ channelId }));
     if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT) {
       // Proactive liveness beat (independent of PROJECT_LIST request/reply): just refresh
       // lastSeenAt/connected so an idle device doesn't go stale in the UI between polls.
