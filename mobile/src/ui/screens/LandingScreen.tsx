@@ -30,13 +30,13 @@ const STEPS = [
   },
   {
     n: 2,
-    title: 'Start a Copilot session',
-    body: 'Run copilot in any project. A pairing QR appears right on your screen.',
+    title: 'Show a code',
+    body: 'One for the whole laptop, or one for a single Copilot chat you have open.',
   },
   {
     n: 3,
-    title: 'Scan it with your phone',
-    body: "You're in. Chat with it, send it new tasks, and approve its actions — from anywhere.",
+    title: "Scan it, you're in",
+    body: "A laptop code lets you start fresh chats or join any that's running; a chat code drops you straight into that one. Come back later, it's right where you left it.",
   },
 ];
 
@@ -63,8 +63,8 @@ const CAN_DO = [
   },
   {
     icon: 'devices',
-    title: 'Every laptop, every project',
-    body: 'Pair more than one machine, pick a project, and start a fresh session — all from your phone.',
+    title: 'Start fresh or jump back in',
+    body: "Kick off a new chat on any laptop, or drop straight into one it's already running.",
   },
   {
     icon: 'refresh',
@@ -204,9 +204,10 @@ export function LandingScreen({
           Your Copilot session, now in your <em className="serif">hand.</em>
         </h1>
         <p className="lede">
-          Weft connects to your live GitHub Copilot session and puts you in control from your
-          phone — see what it&apos;s doing, tell it what to do next, and approve its moves.
-          Wherever you are. Private, end&nbsp;to&nbsp;end.
+          Your Copilot runs on your laptop. You don&apos;t have to be there. Scan a code and
+          you&apos;re in — a whole laptop, or one chat that&apos;s already running. Start something
+          new, jump back into what&apos;s going, approve its moves. From anywhere. Private,
+          end&nbsp;to&nbsp;end.
         </p>
         <div className="landing-cta">
           {showSessions ? (
@@ -240,8 +241,8 @@ export function LandingScreen({
 
       <section className="landing-pitch">
         <p>
-          Start a task at your desk — keep it going from the couch, the kitchen, or the train.
-          Copilot keeps working; you stay in charge.
+          Start a chat at your desk, keep it going from the couch. Pair more than one laptop, run as
+          many chats as you like — Weft keeps them all in one place, warm and ready.
         </p>
       </section>
 
