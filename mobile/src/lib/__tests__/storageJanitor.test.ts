@@ -16,6 +16,21 @@ function putTranscript(ch: string, savedAt: number, size = 200): void {
   const data = { pad: 'x'.repeat(Math.max(0, size)) };
   localStorage.setItem(TRANSCRIPT(ch), JSON.stringify({ v: 1, savedAt, data }));
 }
+/** Write a realistically-shaped transcript with `items` + `history` arrays so compaction has
+ *  something to trim. */
+function putRealTranscript(ch: string, savedAt: number, itemCount: number, histCount: number): void {
+  const data = {
+    items: Array.from({ length: itemCount }, (_, i) => ({ id: `i${i}`, kind: 'assistant', text: 'z'.repeat(100) })),
+    history: Array.from({ length: histCount }, (_, i) => ({ turnIndex: i, role: 'user', text: 'h'.repeat(100) })),
+    historyCursor: null,
+    historyHasMore: false,
+    mode: 'interactive',
+    title: 't',
+    cwd: null,
+    latestTurnIndex: null,
+  };
+  localStorage.setItem(TRANSCRIPT(ch), JSON.stringify({ v: 1, savedAt, data }));
+}
 function putEventLog(ch: string, savedAt: number, size = 200): void {
   const events = [{ pad: 'y'.repeat(Math.max(0, size)) }];
   localStorage.setItem(EVENTLOG(ch), JSON.stringify({ v: 1, savedAt, events }));
@@ -78,6 +93,27 @@ describe('storageJanitor.sweepStorage', () => {
     expect(localStorage.getItem(TRANSCRIPT('active'))).toBeTruthy(); // protected
     expect(localStorage.getItem(TRANSCRIPT('cold-old'))).toBeNull(); // oldest evicted first
     expect(estimateUsageChars()).toBeLessThanOrEqual(9000);
+  });
+
+  it('compacts a cold transcript to its recent tail instead of dropping the whole chat', async () => {
+    putRealTranscript('archived', 100, 100, 100); // 100 items + 100 history
+
+    const res = await sweepStorage({
+      validChannelIds: ['archived'],
+      protectChannelIds: [], // cold/archived (not warm) → eligible for compaction
+      budgetChars: 8000,
+    });
+
+    const raw = localStorage.getItem(TRANSCRIPT('archived'));
+    expect(raw).toBeTruthy(); // chat preserved, NOT evicted
+    expect(res.compacted).toBe(1);
+    expect(res.evicted).toBe(0);
+
+    const data = JSON.parse(raw as string).data;
+    expect(data.items).toHaveLength(40); // trimmed to the last 40 items
+    expect(data.items[0].id).toBe('i60'); // kept the most recent tail (i60..i99)
+    expect(data.history).toHaveLength(0); // history dropped (re-pulls from laptop)
+    expect(data.historyHasMore).toBe(true); // UI can offer to load older turns again
   });
 
   it('reports usage via usageSnapshot', () => {

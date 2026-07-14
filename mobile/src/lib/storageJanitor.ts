@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences';
+import { compactTranscript } from './transcripts';
 
 // Storage auto-clean ("janitor").
 //
@@ -32,6 +33,11 @@ const EVENTLOG_PREFIX = 'weft.eventlog.v1.';
  *  Chrome's ~5 MB per-origin limit is ~2.6M code units; we trim to well under half that so a burst of
  *  transcript writes has ample headroom before it can ever hit the cap. */
 const SOFT_BUDGET_CHARS = 1_500_000;
+
+/** When compacting a cold/archived transcript to free space, keep at most this many recent items and
+ *  drop the paginated history entirely — enough to show the chat's latest context, re-pulling older
+ *  turns from the laptop on demand. */
+const COMPACT_MAX_ITEMS = 40;
 
 type PrunableKind = 'eventlog' | 'transcript';
 
@@ -197,9 +203,9 @@ export async function sweepStorage(opts: {
   validChannelIds: Iterable<string>;
   protectChannelIds?: Iterable<string>;
   budgetChars?: number;
-}): Promise<{ evicted: number; freedChars: number }> {
+}): Promise<{ evicted: number; compacted: number; freedChars: number }> {
   const store = ls();
-  if (!store) return { evicted: 0, freedChars: 0 };
+  if (!store) return { evicted: 0, compacted: 0, freedChars: 0 };
   const valid = new Set(opts.validChannelIds);
   const protectedCh = new Set(opts.protectChannelIds ?? []);
   const budget = opts.budgetChars ?? SOFT_BUDGET_CHARS;
@@ -209,6 +215,7 @@ export async function sweepStorage(opts: {
 
   let total = estimateUsageChars();
   let evicted = 0;
+  let compacted = 0;
   let freedChars = 0;
 
   const evict = (entry: PrunableEntry): void => {
@@ -218,20 +225,49 @@ export async function sweepStorage(opts: {
     evicted += 1;
   };
 
+  // A cold entry = still in the live set but NOT active/warm (i.e. archived). These are the safe
+  // targets once orphans are gone.
+  const isCold = (e: PrunableEntry): boolean => valid.has(e.channelId) && !protectedCh.has(e.channelId);
+
   // Pass 1: always remove orphans (worthless leftovers), regardless of budget.
   for (const entry of ordered) {
     if (!valid.has(entry.channelId)) evict(entry);
   }
 
-  // Pass 2: if still over budget, trim oldest cold entries toward the budget.
+  // Pass 2: still over budget → evict cold debug event-logs (debug-only, lowest value), oldest first.
   if (total > budget) {
     for (const entry of ordered) {
       if (total <= budget) break;
-      if (!valid.has(entry.channelId)) continue; // already handled in pass 1
-      if (protectedCh.has(entry.channelId)) continue; // never sacrifice active/warm proactively
-      evict(entry);
+      if (entry.kind === 'eventlog' && isCold(entry)) evict(entry);
     }
   }
 
-  return { evicted, freedChars };
+  // Pass 3: still over budget → COMPACT cold transcripts to their recent tail rather than dropping
+  // them. Keeps the archived chat and its latest context; the older history re-pulls from the laptop
+  // on demand. Archived chats are hit first (they're the cold, non-warm ones), oldest first.
+  if (total > budget) {
+    for (const entry of ordered) {
+      if (total <= budget) break;
+      if (entry.kind !== 'transcript' || !isCold(entry)) continue;
+      const freed = await compactTranscript(entry.channelId, {
+        maxItems: COMPACT_MAX_ITEMS,
+        maxHistory: 0,
+      });
+      if (freed > 0) {
+        total -= freed;
+        freedChars += freed;
+        compacted += 1;
+      }
+    }
+  }
+
+  // Pass 4: last resort — still over budget after compaction, fully evict oldest cold transcripts.
+  if (total > budget) {
+    for (const entry of ordered) {
+      if (total <= budget) break;
+      if (entry.kind === 'transcript' && isCold(entry)) evict(entry);
+    }
+  }
+
+  return { evicted, compacted, freedChars };
 }
