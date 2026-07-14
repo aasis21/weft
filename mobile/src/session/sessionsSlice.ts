@@ -1,6 +1,7 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { EVENT_TYPE, SUBTYPE } from '@aasis21/weft-shared';
 import type { EventEnvelope, HistoryMsg } from '@aasis21/weft-shared';
+import { EVENT_LOG_CAP } from '@/lib/eventLog';
 import type {
   ApprovalRequestMsg,
   DebugEvent,
@@ -26,7 +27,6 @@ import {
   setUserFailed,
 } from './reducers/applyEnvelope';
 
-const EVENT_LOG_CAP = 200;
 const DEVICE_EVENT_LOG_CAP = 100;
 
 function isHeartbeatEvent(event: DebugEvent): boolean {

@@ -9,7 +9,7 @@ const PREFIX = 'weft.eventlog.v1.';
 const VERSION = 1 as const;
 
 /** Keep at most this many events per session (a ring buffer; oldest fall off the front). */
-export const EVENT_LOG_CAP = 200;
+export const EVENT_LOG_CAP = 75;
 
 /** One captured wire event, flattened for display. */
 export interface DebugEvent {
