@@ -1,23 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn as childSpawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { closeSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeIdentityFile } from "./handoffIdentity.mjs";
 
-export function writeIdentityFile({ channelId, publicKeyB64, privateKeyJwk }) {
-  if (!channelId || !publicKeyB64 || !privateKeyJwk) {
-    throw new Error("Weft spawn: channelId, publicKeyB64, and privateKeyJwk are required");
-  }
-  const file = join(tmpdir(), `weft-identity-${process.pid}-${randomUUID()}.json`);
-  const fd = openSync(file, "wx", 0o600);
-  try {
-    writeFileSync(fd, JSON.stringify({ channelId, publicKeyB64, privateKeyJwk }), "utf8");
-  } finally {
-    closeSync(fd);
-  }
-  return file;
-}
+export { writeIdentityFile } from "./handoffIdentity.mjs";
 
 export function detectTerminal(env = process.env, platform = process.platform) {
   if (platform === "win32" && env.WT_SESSION) return "windows-terminal";
