@@ -183,7 +183,7 @@ const PERSIST_THROTTLE_MS = 800;
 const LIVENESS_PERSIST_THROTTLE_MS = 30_000;
 // #163 session lifecycle: after AUTO_ARCHIVE_MS of witnessed silence (subscribed but no heartbeat)
 // a session is cooled down (Archived); after AUTO_DELETE_MS of witnessed silence it is purged.
-const AUTO_ARCHIVE_MS = 2 * 60 * 60 * 1_000; // 2 hours
+const AUTO_ARCHIVE_MS = 6 * 60 * 60 * 1_000; // 6 hours
 const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
 const SPAWN_TIMEOUT_MS = 30_000;
@@ -414,7 +414,7 @@ export class SessionRuntime {
       if (activeId) warmIds.add(activeId);
     }
 
-    // #163 boot auto-archive: sessions whose *witnessed* silence already crossed the 2h archive
+    // #163 boot auto-archive: sessions whose *witnessed* silence already crossed the 6h archive
     // window (but not the 2-day delete window handled above) start in the calm Archived state —
     // cold, no live socket, out of the warm pool — rather than burning a reconnect on a laptop
     // we last heard from hours ago. The user taps to reconnect. Active/pinned are spared.
@@ -1472,7 +1472,7 @@ export class SessionRuntime {
   }
 
   /** True when a stored session should start (or be moved) in the calm **Archived** state (#163):
-   *  its *witnessed* silence exceeds AUTO_ARCHIVE_MS (2h) but not yet AUTO_DELETE_MS (2d, at which
+   *  its *witnessed* silence exceeds AUTO_ARCHIVE_MS (6h) but not yet AUTO_DELETE_MS (2d, at which
    *  point {@link isDeleteEligible} purges it instead). Pinned and the spared (active/last-active)
    *  session are never auto-archived. Sessions never witnessed with a pulse are ineligible. */
   private isArchiveEligible(s: StoredSession, spareId: string | null): boolean {

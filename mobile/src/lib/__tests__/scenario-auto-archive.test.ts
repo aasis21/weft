@@ -10,9 +10,9 @@ import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
 
 const HOUR = 60 * 60 * 1_000;
-const AUTO_ARCHIVE_MS = 2 * HOUR;
+const AUTO_ARCHIVE_MS = 6 * HOUR;
 
-describe('scenario: #163 auto-archive (2h witnessed silence → cold/Archived)', () => {
+describe('scenario: #163 auto-archive (6h witnessed silence → cold/Archived)', () => {
   let h: ReturnType<typeof makeManager> | undefined;
 
   beforeEach(() => {
@@ -27,7 +27,7 @@ describe('scenario: #163 auto-archive (2h witnessed silence → cold/Archived)',
     vi.useRealTimers();
   });
 
-  it('watchdog cools a non-active session to Archived after 2h of silence, sparing the active one', async () => {
+  it('watchdog cools a non-active session to Archived after 6h of silence, sparing the active one', async () => {
     h = makeManager();
     await h.init();
     const { client: c1 } = await h.pair('c1');
@@ -40,7 +40,7 @@ describe('scenario: #163 auto-archive (2h witnessed silence → cold/Archived)',
     await h.flush();
     expect(h.byChannel('c1')).toMatchObject({ status: 'live' });
 
-    // Cross the 2h archive window. The background session cools to Archived; the active session the
+    // Cross the 6h archive window. The background session cools to Archived; the active session the
     // user is looking at is never archived out from under them (it merely goes Offline).
     await vi.advanceTimersByTimeAsync(AUTO_ARCHIVE_MS + 5_000);
 
@@ -49,15 +49,15 @@ describe('scenario: #163 auto-archive (2h witnessed silence → cold/Archived)',
     expect(h.byChannel('c2')?.cold).toBeFalsy();
   });
 
-  it('boots a witnessed-silence >2h (but <2d) session straight into Archived, without deleting it', async () => {
+  it('boots a witnessed-silence >6h (but <2d) session straight into Archived, without deleting it', async () => {
     const now = Date.now();
     const base = { title: 't', cwd: '/repo', addedAt: 1, lastSeenAt: 1 };
 
-    // 3h of witnessed silence → archive (not delete). Not the active card, so not spared.
+    // 8h of witnessed silence → archive (not delete). Not the active card, so not spared.
     await upsertSession({
       ...base,
       pairing: fakePairing('stale'),
-      lastHeartbeatAt: now - 3 * HOUR,
+      lastHeartbeatAt: now - 8 * HOUR,
       lastSubscribedAt: now,
     });
     // 5m of witnessed silence → stays a normal warm session.
@@ -82,7 +82,7 @@ describe('scenario: #163 auto-archive (2h witnessed silence → cold/Archived)',
     expect(stored).toEqual(['fresh', 'stale']);
   });
 
-  it('spares a pinned session from auto-archive even past the 2h window', async () => {
+  it('spares a pinned session from auto-archive even past the 6h window', async () => {
     const now = Date.now();
     await upsertSession({
       pairing: fakePairing('pinned'),
@@ -91,7 +91,7 @@ describe('scenario: #163 auto-archive (2h witnessed silence → cold/Archived)',
       addedAt: 1,
       lastSeenAt: 1,
       pinned: true,
-      lastHeartbeatAt: now - 3 * HOUR,
+      lastHeartbeatAt: now - 8 * HOUR,
       lastSubscribedAt: now,
     });
     await setLastActiveSessionId('other-active');
