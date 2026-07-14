@@ -9,7 +9,8 @@
 [![Built with](https://img.shields.io/badge/built%20with-Copilot%20CLI-24292e?logo=github)](https://github.com/github/copilot-cli)
 
 Weft mirrors your live GitHub Copilot terminal session to your phone over an end-to-end
-encrypted relay — watch it work, approve its moves, talk back, from anywhere.
+encrypted relay — watch it work, approve its moves, steer it by text or voice, and pick any
+chat back up, from anywhere.
 
 **[✨ Live site → aasis21.github.io/weft](https://aasis21.github.io/weft/)** · **[Try the web app → useweft.netlify.app](https://useweft.netlify.app)**
 
@@ -23,6 +24,28 @@ encrypted relay — watch it work, approve its moves, talk back, from anywhere.
 
 > **Try it now (no install):** **<https://useweft.netlify.app>** — open on your phone,
 > scan the pairing QR your terminal prints (or paste it), and you're bound to the session.
+
+## What you can do
+
+Everything you'd do at the terminal — now from your phone:
+
+- **Drive it live** — send prompts and follow-ups; replies stream back token by token. It's the
+  real session, not a read-only mirror.
+- **Watch it work** — every command it runs and file it edits, unfolding live in the thread.
+- **Approve before it acts** — the *native* Copilot permission prompt is relayed to your phone;
+  allow or deny with a tap. A configurable timeout → deny keeps a missing phone from hanging the agent.
+- **Go hands-free with Vox** — tap the orb and just talk; Vox transcribes, sends, and reads the
+  reply back — eyes-free, hands-free.
+- **Show it a screenshot** — attach up to six images from your camera, library, paste, or drag so
+  it can *see* the bug, the design, the error.
+- **Keep it on track** — switch **interactive / plan / autopilot**, fire whitelisted slash commands
+  (`/model`, `/compact`, `/clear`, `/autopilot`, …) that run on the laptop, or **Stop** a turn mid-run.
+- **Run a fleet** — one Device Station drives many projects and sessions; start a fresh chat or tap
+  into a running one, across multiple laptops with a default device.
+- **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,
+  and juggle several at once.
+
+All of it flows over the same end-to-end-encrypted channel — the relay only ever sees ciphertext.
 
 ### Install the extension on your laptop
 
