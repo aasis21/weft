@@ -1840,6 +1840,38 @@
   letter-spacing: normal;
 }
 
+.weft-session .start-add-device {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent, var(--fg-dim));
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.weft-session .start-add-device:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.weft-session .start-empty-explainer {
+  margin: 0;
+}
+.weft-session .start-empty-explainer code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  font-size: 0.92em;
+}
+
 .weft-session .start-device-list {
   display: flex;
   flex-direction: column;

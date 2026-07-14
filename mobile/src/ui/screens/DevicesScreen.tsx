@@ -218,8 +218,9 @@ export function DevicesScreen({
 
       <div className="session-join-inner">
         <p className="session-join-hint">
-          Each is a laptop running <code>weft start</code>. Tap a card to view its details,
-          projects, and event log.
+          A <strong>device</strong> is a laptop running <code>weft start</code>. Pair one here,
+          then start <strong>sessions</strong> (live Copilot runs) on it from your phone.
+          {sortedDevices.length > 0 ? ' Tap a card to view its details, projects, and event log.' : ''}
         </p>
 
         {sortedDevices.length === 0 ? (

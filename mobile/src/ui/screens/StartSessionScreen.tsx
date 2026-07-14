@@ -121,6 +121,10 @@ export function StartSessionScreen({
       <div className="session-join-inner">
         {sortedDevices.length === 0 ? (
           <section className="session-join-scanner start-empty">
+            <p className="session-join-hint start-empty-explainer">
+              A <strong>device</strong> is a laptop running <code>weft start</code>. Pair one here,
+              then start <strong>sessions</strong> (live Copilot runs) on it from your phone.
+            </p>
             <p>No devices saved yet.</p>
             <button type="button" className="session-primary-action" onClick={onScanListener}>
               Scan a device QR
@@ -132,6 +136,14 @@ export function StartSessionScreen({
               <h3 className="start-section-title">
                 1. Device
                 {sortedDevices.length > 1 ? <span className="start-section-count">{sortedDevices.length}</span> : null}
+                <button
+                  type="button"
+                  className="start-add-device"
+                  onClick={onScanListener}
+                  aria-label="Add a new device"
+                >
+                  ＋ Add device
+                </button>
               </h3>
               <div className="start-device-list" role="radiogroup" aria-label="Device">
                 {sortedDevices.map((device) => {
