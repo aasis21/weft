@@ -8,6 +8,7 @@ import type {
   PromptAttachment,
   SessionMode,
   SessionOffer,
+  StoredSession,
   TransportDescriptor,
 } from '@aasis21/weft-shared';
 import type { RegisteredDevice } from '@/lib/devices';
@@ -117,6 +118,14 @@ export interface ListenerDeviceState extends RegisteredDevice {
    *  and whenever it changes; adopting one sends SESSION_CLAIMED back so it's dropped. Runtime-only
    *  (not persisted): offers are ephemeral and re-advertised on the next reconnect. */
   offers?: SessionOffer[];
+  /** Past CLI sessions from this laptop's session store, pulled on-demand (SESSION_LIST_REQUEST →
+   *  SESSION_LIST) when the Device details "Resume a session" section mounts or is refreshed. Newest
+   *  first, capped at SESSION_LIST_MAX, already filtered to sessions whose cwd still exists. Tapping
+   *  one spawns `copilot --resume=<id>` and pairs like the "Start session" flow. Runtime-only (not
+   *  persisted) — the store is high-churn, so it's always re-pulled rather than cached across runs. */
+  sessions?: StoredSession[];
+  /** True while a SESSION_LIST_REQUEST is in flight, so the section can show a spinner. Runtime-only. */
+  sessionsLoading?: boolean;
   /** Epoch ms of the most recent attempt to (re)connect to this laptop — stamped when a connect
    *  attempt begins, independent of whether it succeeds. Paired with `lastSeenAt` (last SUCCESSFUL
    *  contact) it lets the sidebar say "last seen 2h ago · tried 5s ago" so a wedged/offline laptop

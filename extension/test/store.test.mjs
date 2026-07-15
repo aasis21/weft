@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readHistory, readLatestTurnIndex, readSummary } from "../src/store.mjs";
+import { listSessions, readHistory, readLatestTurnIndex, readSessionCwd, readSummary } from "../src/store.mjs";
 
 const SESSION = "sess-1";
 let dir;
@@ -177,4 +177,74 @@ test("readHistory returns an empty page for unknown session or missing db", asyn
   });
   const missing = await readHistory(SESSION, {}, join(dir, "nope.db"));
   assert.deepEqual(missing, { items: [], nextCursor: null, hasMore: false });
+});
+
+// ---- listSessions / readSessionCwd (the "Resume a session" list) -----------
+// These need the fuller `sessions` schema (repository/branch/updated_at) plus real on-disk cwds,
+// so they build a dedicated DB rather than reusing the minimal one above.
+let sdir;
+let sdbPath;
+let liveCwdA;
+let liveCwdB;
+
+before(async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  sdir = mkdtempSync(join(tmpdir(), "weft-store-sessions-"));
+  sdbPath = join(sdir, "session-store.db");
+  liveCwdA = mkdtempSync(join(tmpdir(), "weft-live-cwd-a-"));
+  liveCwdB = mkdtempSync(join(tmpdir(), "weft-live-cwd-b-"));
+  const deletedCwd = join(sdir, "gone"); // never created -> should be filtered out
+  const db = new DatabaseSync(sdbPath);
+  db.exec(
+    "CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT, repository TEXT, branch TEXT, " +
+      "summary TEXT, created_at TEXT, updated_at TEXT);",
+  );
+  const ins = db.prepare(
+    "INSERT INTO sessions (id, cwd, repository, branch, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  // Newest updated_at first once sorted: B (t=3) then A (t=1). "gone" (t=2) is filtered by cwd.
+  ins.run("sid-a", liveCwdA, "repo-a", "main", "Fix the bug", iso(0), iso(1));
+  ins.run("sid-gone", deletedCwd, "repo-x", "feat", "Deleted worktree", iso(0), iso(2));
+  ins.run("sid-b", liveCwdB, null, null, "", iso(0), iso(3));
+  // A row with NULL cwd must be skipped (WHERE cwd IS NOT NULL + defensive filter).
+  ins.run("sid-null", null, "repo-y", "x", "No cwd", iso(0), iso(4));
+  db.close();
+});
+
+after(() => {
+  for (const d of [sdir, liveCwdA, liveCwdB]) if (d) rmSync(d, { recursive: true, force: true });
+});
+
+test("listSessions returns live-cwd sessions newest-first, filtering deleted/NULL cwds", async () => {
+  const sessions = await listSessions({}, sdbPath);
+  assert.deepEqual(sessions.map((s) => s.sessionId), ["sid-b", "sid-a"]);
+  // sid-b: empty summary -> title falls back to the cwd basename; null repo/branch preserved.
+  assert.equal(sessions[0].sessionId, "sid-b");
+  assert.equal(sessions[0].title, join(liveCwdB).split(/[\\/]/).pop());
+  assert.equal(sessions[0].repository, null);
+  assert.equal(sessions[0].branch, null);
+  assert.equal(sessions[0].updatedAt, Date.parse(iso(3)));
+  // sid-a: full metadata.
+  assert.deepEqual(sessions[1], {
+    sessionId: "sid-a",
+    title: "Fix the bug",
+    cwd: liveCwdA,
+    repository: "repo-a",
+    branch: "main",
+    updatedAt: Date.parse(iso(1)),
+  });
+});
+
+test("listSessions clamps the limit and degrades to [] on a missing db", async () => {
+  const capped = await listSessions({ limit: 1 }, sdbPath);
+  assert.equal(capped.length, 1);
+  assert.equal(capped[0].sessionId, "sid-b", "newest survives the cap");
+  assert.deepEqual(await listSessions({}, join(sdir, "nope.db")), []);
+});
+
+test("readSessionCwd returns the stored cwd, null for unknown/missing", async () => {
+  assert.equal(await readSessionCwd("sid-a", sdbPath), liveCwdA);
+  assert.equal(await readSessionCwd("nope", sdbPath), null);
+  assert.equal(await readSessionCwd("", sdbPath), null);
+  assert.equal(await readSessionCwd("sid-a", join(sdir, "nope.db")), null);
 });

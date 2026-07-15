@@ -15,6 +15,13 @@ export const HISTORY_TEXT_CLIP = 4000;
  *  asks for). One "turn" ≈ a user message plus the assistant reply that follows it. */
 export const RECENT_TURNS_DEFAULT = 50;
 
+/** How many recent CLI sessions the phone's "Resume a session" list asks for (and the listener
+ *  serves), ordered newest-first by the store's `updated_at`. */
+export const SESSION_LIST_DEFAULT = 50;
+/** Hard cap the listener enforces on the resumable-session list regardless of what the phone
+ *  requests, so each encrypted SESSION_LIST broadcast stays well under the payload limit. */
+export const SESSION_LIST_MAX = 50;
+
 /** Stable id for a history item: a turn yields at most one user + one assistant item. */
 export function historyItemId(item) {
   return `${item.turnIndex}:${item.role}`;

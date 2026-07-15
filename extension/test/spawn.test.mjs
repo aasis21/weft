@@ -123,6 +123,38 @@ test("spawnCopilotSession bakes identity into a launcher script for windows-term
   assert.ok(script.includes(`copilot -n "brave otter" --allow-all`));
 });
 
+test("spawnCopilotSession resumes an existing session by id in its cwd (no -n name)", async () => {
+  const oldWt = process.env.WT_SESSION;
+  const oldTerm = process.env.TERM_PROGRAM;
+  const oldGnome = process.env.GNOME_TERMINAL_SCREEN;
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
+  cleanupDirs.push(sessionCwd);
+  const calls = [];
+  const result = spawnCopilotSession({
+    project: { name: "resume", path: sessionCwd },
+    mode: "allow-all",
+    identity: await identity("chan-resume"),
+    resumeSessionId: "sid-123",
+    spawnFn(command, args, options) {
+      calls.push({ command, args, options });
+      cleanupFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  process.env.WT_SESSION = oldWt;
+  process.env.TERM_PROGRAM = oldTerm;
+  process.env.GNOME_TERMINAL_SCREEN = oldGnome;
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls[0].command, "copilot");
+  assert.deepEqual(calls[0].args, ["--resume=sid-123", "--allow-all"]);
+  assert.equal(calls[0].options.cwd, sessionCwd);
+  assert.equal(calls[0].options.env.WEFT_CHANNEL_ID, "chan-resume");
+});
+
 test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   let identityPath;

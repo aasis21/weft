@@ -74,6 +74,19 @@ export const SUBTYPE = Object.freeze({
     PROJECT_LIST: "project_list",
     // phone -> listener: spawn a new Copilot session for a project with a permission mode.
     SPAWN_SESSION: "spawn_session",
+    // --- phone-driven resume of an existing CLI session (#resume) -----------
+    // phone -> listener: give me the machine's recent resumable Copilot sessions (from the CLI
+    // session store), so the phone can offer a "Resume a session" list. On-demand only (viewed
+    // occasionally, and the store is large + high-churn) — never pushed on bind like PROJECT_LIST.
+    SESSION_LIST_REQUEST: "session_list_request",
+    // listener -> phone: the machine's recent resumable sessions (newest-first, capped), each
+    // `{ sessionId, title, cwd, repository, branch, updatedAt }`. Sessions whose cwd no longer
+    // exists are filtered out (a resume needs a valid working directory).
+    SESSION_LIST: "session_list",
+    // phone -> listener: resume an existing CLI session by id (spawns `copilot --resume=<id>` in
+    // that session's own cwd). Replies over the SAME SPAWN_PAIRING / SPAWN_RESULT path a fresh
+    // spawn uses, so the phone pairs to the resumed session digitally (no QR).
+    RESUME_SESSION: "resume_session",
     // listener -> phone: the pre-minted pairing payload for a freshly spawned session.
     SPAWN_PAIRING: "spawn_pairing",
     // listener -> phone: terminal result of a spawn request (ok / failure reason).
@@ -315,6 +328,44 @@ export const projectList = (projects, deviceName, deviceId) =>
  */
 export const spawnSession = (requestId, projectName, mode = "default", name = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_SESSION, { requestId, projectName, mode, name });
+/** Phone -> listener: request the machine's recent resumable CLI sessions (on-demand; not pushed on
+ *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. */
+export const sessionListRequest = (limit = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST_REQUEST, {
+    ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}),
+  });
+/**
+ * Listener -> phone: the machine's recent resumable sessions, newest-first. Each entry is
+ * `{ sessionId, title, cwd, repository, branch, updatedAt }` — `sessionId` is the CLI session UUID
+ * the phone passes back to resumeSession() (and dedupes live cards on); `title` is the CLI-derived
+ * chat summary (falling back to the cwd basename); `repository`/`branch` are null when unknown;
+ * `updatedAt` is epoch ms of the session's last activity (for "2h ago" sorting/labels). Malformed
+ * entries (missing sessionId/cwd) are dropped so a corrupt row can never wedge the phone list.
+ */
+export const sessionList = (sessions) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST, {
+    sessions: (Array.isArray(sessions) ? sessions : [])
+      .filter((s) => s && typeof s.sessionId === "string" && s.sessionId && typeof s.cwd === "string" && s.cwd)
+      .map((s) => ({
+        sessionId: s.sessionId,
+        title: typeof s.title === "string" && s.title.length > 0 ? s.title : null,
+        cwd: s.cwd,
+        repository: typeof s.repository === "string" && s.repository.length > 0 ? s.repository : null,
+        branch: typeof s.branch === "string" && s.branch.length > 0 ? s.branch : null,
+        updatedAt: Number.isFinite(s.updatedAt) ? s.updatedAt : null,
+      })),
+  });
+/**
+ * Phone -> listener: resume an existing CLI session. `requestId` correlates the reply (reusing the
+ * SPAWN_PAIRING / SPAWN_RESULT path); `sessionId` is the CLI session UUID from sessionList(); `mode`
+ * is "default" | "allow-all" (the resumed session's permission mode).
+ */
+export const resumeSession = (requestId, sessionId, mode = "default") =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RESUME_SESSION, {
+    requestId,
+    sessionId: typeof sessionId === "string" ? sessionId : "",
+    mode,
+  });
 /**
  * Listener -> phone: the pre-minted pairing payload of a freshly spawned session, so the phone
  * pairs to it digitally (no QR). `payload` is a buildPairingPayload() result; `name`/`projectName`

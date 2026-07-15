@@ -15,6 +15,7 @@ import {
   listenForPeers,
   projectList,
   randomChannelId,
+  sessionList,
   sessionOffers,
   spawnPairing,
   spawnResult,
@@ -23,6 +24,7 @@ import { createTransportFromDescriptor, resolveTransport } from "./transportFact
 import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import * as pendingStore from "./pendingSessions.mjs";
+import * as sessionStore from "./store.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./pairingIdentity.mjs";
 import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
@@ -82,6 +84,9 @@ export function createListener({
   // Pending in-session `/weft` offers registry (see pendingSessions.mjs) — injectable so tests can
   // supply a stub instead of touching the real ~/.weft/pending-sessions.json.
   pendingApi = pendingStore,
+  // Read-only CLI session store access (see store.mjs) — injectable so tests can stub the
+  // resumable-session list instead of reading the real ~/.copilot/session-store.db.
+  sessionsApi = sessionStore,
   log = console,
   // ~/.weft by default (see projects.mjs's weftHome()) — overridable so tests don't touch a real
   // user's Weft home when exercising the connections.json / pending-sessions.json registries.
@@ -463,6 +468,26 @@ export function createListener({
     }
   }
 
+  // Serve the phone's on-demand "Resume a session" list from the CLI session store. Unlike
+  // sendProjectList()/sendSessionOffers(), this is NEVER pushed on bind or on a watch — the store is
+  // large and rewritten on every turn of every session, so we read it only when the phone explicitly
+  // asks (SESSION_LIST_REQUEST). Best-effort: any read/send failure just sends (or skips) an empty
+  // list; the phone can pull again.
+  async function sendSessionList(limit) {
+    if (!channel || stopped) return;
+    let sessions = [];
+    try {
+      sessions = (await Promise.resolve(sessionsApi.listSessions({ limit }))) ?? [];
+    } catch {
+      sessions = [];
+    }
+    try {
+      await channel.send(sessionList(sessions));
+    } catch {
+      // send didn't land — the phone will re-request on its next refresh.
+    }
+  }
+
   function startPendingWatch() {
     try {
       const dir = projectsStore.weftHome(connectionsHome);
@@ -520,6 +545,14 @@ export function createListener({
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {
       await handleSpawn(envelope.msg ?? {});
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST_REQUEST) {
+      await sendSessionList(envelope.msg?.limit);
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {
+      await handleResume(envelope.msg ?? {});
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_CLAIMED) {
@@ -603,6 +636,80 @@ export function createListener({
       } catch {
         // best-effort UI hook
       }
+    }
+  }
+
+  // Resume an existing CLI session by id. Mirrors handleSpawn (mint identity → spawn → reply over
+  // SPAWN_PAIRING/SPAWN_RESULT so the phone pairs digitally), but spawns `copilot --resume=<id>` in
+  // the session's OWN cwd (read from the store) instead of a registered project. The cwd is
+  // re-validated here even though listSessions() already filtered dead ones, in case the folder
+  // vanished between listing and resuming.
+  async function handleResume({ requestId, sessionId, mode = "default" }) {
+    const id = requestId || `request-${Date.now()}`;
+    const cleanSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
+    try {
+      onSpawnRequest?.({ requestId: id, sessionId: cleanSessionId, mode, resume: true });
+    } catch {
+      // best-effort UI hook
+    }
+    const failResume = async (error) => {
+      await channel?.send(spawnResult(id, false, error));
+      try {
+        onSpawnResult?.({ requestId: id, ok: false, error, sessionId: cleanSessionId, resume: true });
+      } catch {
+        // best-effort UI hook
+      }
+    };
+    try {
+      if (!cleanSessionId) {
+        await failResume("No session id to resume.");
+        return;
+      }
+      const cwd = await Promise.resolve(sessionsApi.readSessionCwd(cleanSessionId));
+      if (!cwd) {
+        await failResume("That session is no longer in the CLI session store.");
+        return;
+      }
+      if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
+        await failResume(`The session's folder no longer exists: ${cwd}`);
+        return;
+      }
+      const newChannelId = randomChannelId();
+      const newKeyPair = await generateKeyPair();
+      const { publicKeyB64, privateKeyJwk } = await exportKeyPair(newKeyPair);
+      const result = spawnCopilotSession({
+        project: { name: "resume", path: cwd },
+        mode,
+        identity: { channelId: newChannelId, publicKeyB64, privateKeyJwk },
+        resumeSessionId: cleanSessionId,
+        spawnFn,
+      });
+      if (!result.ok) {
+        await failResume(result.error || "Could not resume Copilot");
+        return;
+      }
+      await channel?.send(
+        spawnPairing(
+          id,
+          buildPairingPayload({
+            channelId: newChannelId,
+            publicKeyB64,
+            transport: listenerTransportDescriptor ?? (await resolveTransport()),
+            kind: PAIR_KIND.SESSION,
+            appVersion: resolveVersion(),
+          }),
+          null,
+          null,
+        ),
+      );
+      await channel?.send(spawnResult(id, true));
+      try {
+        onSpawnResult?.({ requestId: id, ok: true, sessionId: cleanSessionId, resume: true });
+      } catch {
+        // best-effort UI hook
+      }
+    } catch (err) {
+      await failResume(err?.message ?? String(err));
     }
   }
 

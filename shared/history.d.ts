@@ -12,6 +12,8 @@ export const HISTORY_PAGE_DEFAULT: number;
 export const HISTORY_PAGE_MAX: number;
 export const HISTORY_TEXT_CLIP: number;
 export const RECENT_TURNS_DEFAULT: number;
+export const SESSION_LIST_DEFAULT: number;
+export const SESSION_LIST_MAX: number;
 
 export function historyItemId(item: HistoryItem): string;
 export function clipText(text: string, max?: number): string;

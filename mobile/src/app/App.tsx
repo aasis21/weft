@@ -249,6 +249,13 @@ export default function App(): JSX.Element {
           sessions={snapshot.sessions}
           devices={snapshot.devices}
           onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
+          onRefreshSessions={(id) => void sessionRuntime.refreshSessions(id)}
+          onResumeSession={(deviceId, sessionId, mode, title, cwd) => {
+            closeDeviceScreens();
+            void sessionRuntime.resumeSession(deviceId, { sessionId, mode, title, cwd }).catch((err) => {
+              setError(err instanceof Error ? err.message : 'Could not resume the session.');
+            });
+          }}
           onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
           onForget={async (id) => {
             await sessionRuntime.forgetDevice(id);

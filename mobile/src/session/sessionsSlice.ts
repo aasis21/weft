@@ -1,6 +1,6 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { EVENT_TYPE, SUBTYPE } from '@aasis21/weft-shared';
-import type { EventEnvelope, HistoryMsg } from '@aasis21/weft-shared';
+import type { EventEnvelope, HistoryMsg, StoredSession } from '@aasis21/weft-shared';
 import { EVENT_LOG_CAP } from '@/lib/eventLog';
 import type {
   ApprovalRequestMsg,
@@ -229,6 +229,25 @@ const sessionsSlice = createSlice({
       if (device && device.offers) {
         device.offers = device.offers.filter((o) => o.channelId !== action.payload.offerChannelId);
       }
+    },
+    // On-demand pull of the laptop's past CLI sessions (SESSION_LIST reply). Replaces the whole
+    // `sessions` list — the station always sends the full capped, newest-first, cwd-filtered set —
+    // and, like the other DEVICE-channel replies, doubles as a liveness signal.
+    deviceSessionsReceived(
+      state,
+      action: PayloadAction<{ channelId: string; sessions: StoredSession[] }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.sessions = action.payload.sessions;
+        device.sessionsLoading = false;
+        device.connected = true;
+        device.lastSeenAt = Date.now();
+      }
+    },
+    deviceSessionsLoadingSet(state, action: PayloadAction<{ channelId: string; loading: boolean }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.sessionsLoading = action.payload.loading;
     },
     // Folds a stale duplicate device (same physical laptop, an OLDER ephemeral channelId from a
     // prior `weft start` run) into the surviving `channelId` entry. See devices.ts
@@ -486,6 +505,8 @@ export const {
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
   deviceSessionOffersReceived,
+  deviceSessionsReceived,
+  deviceSessionsLoadingSet,
   deviceOfferRemoved,
   deviceReconciled,
   deviceErrorSet,

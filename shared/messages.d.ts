@@ -63,6 +63,9 @@ export const SUBTYPE: {
     readonly PROJECT_LIST_REQUEST: "project_list_request";
     readonly PROJECT_LIST: "project_list";
     readonly SPAWN_SESSION: "spawn_session";
+    readonly SESSION_LIST_REQUEST: "session_list_request";
+    readonly SESSION_LIST: "session_list";
+    readonly RESUME_SESSION: "resume_session";
     readonly SPAWN_PAIRING: "spawn_pairing";
     readonly SPAWN_RESULT: "spawn_result";
     readonly FORGET_DEVICE: "forget_device";
@@ -292,6 +295,34 @@ export interface SpawnSessionMsg {
   mode: SpawnMode;
   name: string | null;
 }
+/** One recent resumable CLI session the phone can offer in its "Resume a session" list. */
+export interface StoredSession {
+  /** CLI session UUID — passed back to resumeSession() and used to dedupe already-live cards. */
+  sessionId: string;
+  /** CLI-derived chat summary, or null (the phone falls back to the cwd basename). */
+  title: string | null;
+  /** Absolute working directory the resumed session is spawned in (guaranteed to exist at list time). */
+  cwd: string;
+  /** Repository this session's cwd belongs to, or null when unknown. */
+  repository: string | null;
+  /** Branch checked out at the session's cwd, or null when unknown. */
+  branch: string | null;
+  /** Epoch ms of the session's last activity (store `updated_at`), or null when unparseable. */
+  updatedAt: number | null;
+}
+export interface SessionListRequestMsg {
+  /** Optional page size; clamped by the listener to SESSION_LIST_MAX. */
+  limit?: number;
+}
+export interface SessionListMsg {
+  sessions: StoredSession[];
+}
+export interface ResumeSessionMsg {
+  requestId: string;
+  /** CLI session UUID from StoredSession.sessionId. */
+  sessionId: string;
+  mode: SpawnMode;
+}
 export interface SpawnPairingMsg {
   requestId: string;
   payload: PairingPayload;
@@ -368,6 +399,9 @@ export type StateSnapshot = Envelope<"control", "state_snapshot", StateSnapshotM
 export type ProjectListRequest = Envelope<"control", "project_list_request", ProjectListRequestMsg>;
 export type ProjectListMessage = Envelope<"control", "project_list", ProjectListMsg>;
 export type SpawnSessionMessage = Envelope<"control", "spawn_session", SpawnSessionMsg>;
+export type SessionListRequest = Envelope<"control", "session_list_request", SessionListRequestMsg>;
+export type SessionListMessage = Envelope<"control", "session_list", SessionListMsg>;
+export type ResumeSessionMessage = Envelope<"control", "resume_session", ResumeSessionMsg>;
 export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
 export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
 export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
@@ -509,6 +543,13 @@ export function spawnSession(
   mode?: SpawnMode,
   name?: string | null
 ): SpawnSessionMessage;
+export function sessionListRequest(limit?: number | null): SessionListRequest;
+export function sessionList(sessions: StoredSession[]): SessionListMessage;
+export function resumeSession(
+  requestId: string,
+  sessionId: string,
+  mode?: SpawnMode
+): ResumeSessionMessage;
 export function spawnPairing(
   requestId: string,
   payload: PairingPayload,

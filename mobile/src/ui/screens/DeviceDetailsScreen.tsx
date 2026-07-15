@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { JSX } from 'react';
+import type { SpawnMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
@@ -18,6 +19,10 @@ interface DeviceDetailsScreenProps {
   /** Every registered listener device, so the sidebar's "Devices" group stays visible here too. */
   devices: ListenerDeviceState[];
   onRefreshProjects(channelId: string): void;
+  /** On-demand pull of this device's recent resumable CLI sessions (the "Resume a session" list). */
+  onRefreshSessions(channelId: string): void;
+  /** Resume a past CLI session: spawn `copilot --resume=<id>` in its cwd and pair to it. */
+  onResumeSession(deviceChannelId: string, sessionId: string, mode: SpawnMode, title: string, cwd: string): void;
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
@@ -51,6 +56,8 @@ export function DeviceDetailsScreen({
   sessions,
   devices,
   onRefreshProjects,
+  onRefreshSessions,
+  onResumeSession,
   onSetDefault,
   onForget,
   onStartOnDevice,
@@ -68,6 +75,7 @@ export function DeviceDetailsScreen({
   const [logOpen, setLogOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resumeMode, setResumeMode] = useState<SpawnMode>('allow-all');
   const status = deviceStatus(device);
   const lastSeen = formatLastSeen(device.lastSeenAt);
   const deviceKey = device.deviceId ?? device.channelId;
@@ -78,6 +86,25 @@ export function DeviceDetailsScreen({
   // channel we already track (already joined) so a lingering offer can't show a duplicate row.
   const tracked = new Set(sessions.map((s) => s.meta.channelId));
   const offers = (device.offers ?? []).filter((o) => o && o.channelId && !tracked.has(o.channelId));
+
+  // Dedupe the resumable-session list against sessions we're already driving: a store row whose CLI
+  // sessionId matches a live/spawning card on the phone is "Open" (route to it), not "Resume" (which
+  // would launch a second `copilot --resume` on an already-attached session). Keyed on meta.sessionId
+  // — the CLI session UUID, populated from session_meta on live sessions.
+  const liveBySessionId = new Map<string, SessionView>();
+  for (const s of sessions) {
+    if (s.meta.sessionId) liveBySessionId.set(s.meta.sessionId, s);
+  }
+  const storeSessions = device.sessions ?? [];
+
+  // Lazy pull the resumable-session list when this screen mounts on an online device, and whenever
+  // the device (re)connects. On-demand only — the session store is large and rewritten every turn,
+  // so it's never pushed on bind.
+  const channelId = device.channelId;
+  const connected = device.connected;
+  useEffect(() => {
+    if (connected) onRefreshSessions(channelId);
+  }, [channelId, connected, onRefreshSessions]);
 
   return (
     <main className="weft-session join-session device-details-screen">
@@ -172,6 +199,77 @@ export function DeviceDetailsScreen({
             </ul>
           </section>
         ) : null}
+
+        <section className="session-join-fallback device-sessions device-resume">
+          <div className="device-resume-head">
+            <h3>Resume a session</h3>
+            <button
+              type="button"
+              className="session-link-btn"
+              onClick={() => onRefreshSessions(device.channelId)}
+              disabled={device.sessionsLoading}
+            >
+              {device.sessionsLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          <p className="device-card-sub">
+            Recent Copilot CLI sessions on this laptop — tap to reopen one on your phone.
+          </p>
+          <div className="start-mode-toggle" role="radiogroup" aria-label="Permission mode for resumed session">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={resumeMode === 'default'}
+              className={resumeMode === 'default' ? 'selected' : ''}
+              onClick={() => setResumeMode('default')}
+            >
+              Default
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={resumeMode === 'allow-all'}
+              className={resumeMode === 'allow-all' ? 'selected' : ''}
+              onClick={() => setResumeMode('allow-all')}
+            >
+              Allow all
+            </button>
+          </div>
+          {storeSessions.length === 0 ? (
+            <p className="device-card-sub">
+              {device.sessionsLoading ? 'Loading sessions…' : 'No resumable sessions found.'}
+            </p>
+          ) : (
+            <ul className="devices-list device-sessions-list">
+              {storeSessions.map((s) => {
+                const live = liveBySessionId.get(s.sessionId);
+                const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
+                const when = formatLastSeen(s.updatedAt ?? undefined);
+                const label = s.title || s.cwd;
+                return (
+                  <li key={s.sessionId} className="device-card device-session-row">
+                    <button
+                      type="button"
+                      className="device-session-open"
+                      onClick={() =>
+                        live
+                          ? onOpenSession(live.meta.channelId)
+                          : onResumeSession(device.channelId, s.sessionId, resumeMode, label, s.cwd)
+                      }
+                    >
+                      <span className="device-card-name">{label}</span>
+                      <span className="device-card-sub device-session-status">
+                        {live ? 'live · Open' : 'Resume'}
+                        {subtitle ? ` · ${subtitle}` : ''}
+                        {when ? ` · ${when}` : ''}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
         <section className="session-join-fallback device-sessions">
           <h3>Sessions from this device</h3>

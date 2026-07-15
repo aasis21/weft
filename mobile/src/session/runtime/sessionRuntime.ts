@@ -12,6 +12,8 @@ import {
   projectListRequest,
   stateRequest,
   spawnSession as spawnSessionMessage,
+  sessionListRequest,
+  resumeSession as resumeSessionMessage,
   forgetDevice as forgetDeviceMessage,
   sessionClaimed as sessionClaimedMessage,
   voiceMode,
@@ -23,6 +25,7 @@ import type {
   PairingPayload,
   ProjectListMsg,
   PromptAttachment,
+  SessionListMsg,
   SessionMode,
   SessionOffersMsg,
   SpawnMode,
@@ -90,6 +93,8 @@ import {
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
   deviceSessionOffersReceived,
+  deviceSessionsReceived,
+  deviceSessionsLoadingSet,
   deviceOfferRemoved,
   deviceReconciled,
   deviceRemoved,
@@ -194,6 +199,15 @@ interface SpawnRequestOptions {
   projectName: string;
   mode: SpawnMode;
   name?: string;
+}
+
+interface ResumeRequestOptions {
+  sessionId: string;
+  mode: SpawnMode;
+  /** The tapped store session's title/cwd, used purely to label the Initializing card until the
+   *  resumed CLI session re-reports its own title/cwd via session_meta once paired. */
+  title?: string | null;
+  cwd?: string | null;
 }
 
 interface PendingSpawn {
@@ -1174,6 +1188,93 @@ export class SessionRuntime {
     return tempId;
   }
 
+  /** On-demand pull of the laptop's recent resumable CLI sessions (SESSION_LIST_REQUEST). Lazy — the
+   *  Device details "Resume a session" section calls this on mount and on manual refresh, never on
+   *  bind, because the session store is large and rewritten every turn. The reply lands in
+   *  onListenerMessage → deviceSessionsReceived. Best-effort: a connect/send failure just clears the
+   *  loading flag (the section shows whatever was last pulled) without wedging the device. */
+  async refreshSessions(channelId: string): Promise<void> {
+    this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: true }));
+    try {
+      await this.connectDevice(channelId);
+      const ctrl = this.listenerController(channelId);
+      if (!ctrl?.client) {
+        this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
+        return;
+      }
+      const message = sessionListRequest();
+      this.recordDeviceEvent(channelId, 'out', message);
+      await ctrl.client.send(message);
+    } catch (err) {
+      this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
+      this.store.dispatch(
+        deviceErrorSet({ channelId, error: errMessage(err, 'Could not request sessions.'), connected: false }),
+      );
+    }
+  }
+
+  /** Resume an existing CLI session from the laptop's store: spawn `copilot --resume=<id>` in that
+   *  session's own cwd and pair to it — reusing the entire spawn machinery (pendingSpawns →
+   *  SPAWN_PAIRING → openPairedSession), so the only difference from `spawnSession` is the wire
+   *  message (RESUME_SESSION vs SPAWN_SESSION) and that there's no project. The placeholder card is
+   *  titled from the tapped session; `renamed` stays false so the resumed session's own CLI title
+   *  (re-reported via session_meta once paired) wins. Returns the temp id of the Initializing card. */
+  async resumeSession(channelId: string, opts: ResumeRequestOptions): Promise<string> {
+    const device = this.device(channelId);
+    if (!device) throw new Error('Choose a registered listener device first.');
+    const requestId = `resume-${this.clock()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tempId = `initializing-${requestId}`;
+    const displayName = opts.title?.trim() || basename(opts.cwd) || 'Resuming session';
+    const meta: SessionMeta = {
+      channelId: tempId,
+      sessionId: opts.sessionId,
+      title: displayName,
+      cwd: opts.cwd ?? null,
+      kind: 'spawning',
+      addedAt: this.clock(),
+      spawnedFromDeviceId: device.deviceId ?? channelId,
+      spawnedFromDeviceName: device.name,
+    };
+    const session = emptySession(tempId, meta);
+    session.connection.status = 'initializing';
+    session.connection.spawning = {
+      requestId,
+      deviceId: channelId,
+      deviceName: device.name,
+      projectName: displayName,
+    };
+    this.store.dispatch(sessionAdded(session));
+    this.store.dispatch(sessionActivated(tempId));
+
+    const pending: PendingSpawn = {
+      requestId,
+      tempId,
+      deviceId: channelId,
+      spawnedFromDeviceId: device.deviceId ?? channelId,
+      spawnedFromDeviceName: device.name,
+      // Used only as the Initializing placeholder title fallback; `name` is left undefined so
+      // handleSpawnPairing keeps renamed=false and the resumed session's own CLI title wins.
+      projectName: displayName,
+      timer: setTimeout(() => {
+        this.failSpawn(requestId, 'Timed out waiting for the laptop to resume the session.');
+      }, SPAWN_TIMEOUT_MS),
+    };
+    this.pendingSpawns.set(requestId, pending);
+
+    try {
+      await this.connectDevice(channelId);
+      const ctrl = this.listenerController(channelId);
+      if (!ctrl?.client) throw new Error('Listener device is not connected.');
+      const message = resumeSessionMessage(requestId, opts.sessionId, opts.mode);
+      this.recordDeviceEvent(channelId, 'out', message);
+      await ctrl.client.send(message);
+    } catch (err) {
+      this.failSpawn(requestId, errMessage(err, 'Could not resume the session.'));
+    }
+
+    return tempId;
+  }
+
   async forgetDevice(channelId: string): Promise<void> {
     const ctrl = this.listenerController(channelId);
     if (ctrl?.client) {
@@ -1264,6 +1365,14 @@ export class SessionRuntime {
       const msg = message.msg as SessionOffersMsg;
       const offers = (msg.offers ?? []).filter((o) => o && typeof o.channelId === 'string' && o.payload);
       this.store.dispatch(deviceSessionOffersReceived({ channelId, offers }));
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST) {
+      const msg = message.msg as SessionListMsg;
+      const sessions = (msg.sessions ?? []).filter(
+        (s) => s && typeof s.sessionId === 'string' && s.sessionId && typeof s.cwd === 'string' && s.cwd,
+      );
+      this.store.dispatch(deviceSessionsReceived({ channelId, sessions }));
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {

@@ -5,10 +5,13 @@
 // depending on the experimental session-metadata RPC. node:sqlite ships built-in on
 // Node 24 (no flag).
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import {
   HISTORY_PAGE_DEFAULT,
   HISTORY_PAGE_MAX,
+  SESSION_LIST_DEFAULT,
+  SESSION_LIST_MAX,
   clipText,
 } from "@aasis21/weft-shared";
 
@@ -136,6 +139,87 @@ export async function readLatestTurnIndex(sessionId, dbPath = DB_PATH) {
 function clampLimit(limit) {
   const n = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : HISTORY_PAGE_DEFAULT;
   return Math.min(n, HISTORY_PAGE_MAX);
+}
+
+function clampSessionLimit(limit) {
+  const n = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : SESSION_LIST_DEFAULT;
+  return Math.min(n, SESSION_LIST_MAX);
+}
+
+/** True if `dir` is a currently-existing directory. A resumable session whose cwd was deleted
+ *  (e.g. a removed worktree) can't be resumed — `copilot --resume` needs a valid cwd — so such
+ *  rows are filtered out of listSessions(). Best-effort: any stat error counts as "gone". */
+function dirExists(dir) {
+  try {
+    return typeof dir === "string" && dir.length > 0 && existsSync(dir) && statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The machine's most-recently-active resumable CLI sessions, newest-first, for the phone's
+ * "Resume a session" list. Reads the CLI's `sessions` table directly (same store the terminal
+ * session picker uses) so the phone stays in sync without any CLI RPC. Each row maps to
+ * `{ sessionId, title, cwd, repository, branch, updatedAt }`:
+ *  - `title` is the CLI-derived chat summary, falling back to the cwd basename when empty.
+ *  - `updatedAt` is epoch ms of the session's last activity (store `updated_at`), for "2h ago".
+ * Sessions whose `cwd` no longer exists on disk are filtered out (a resume needs a valid working
+ * directory). `limit` is clamped to SESSION_LIST_MAX. Returns [] on any read failure (older Node
+ * without node:sqlite, missing/locked DB, …) so the caller degrades to an empty list.
+ */
+export async function listSessions({ limit } = {}, dbPath = DB_PATH) {
+  const pageSize = clampSessionLimit(limit);
+  try {
+    const db = await openDb(dbPath);
+    try {
+      const rows = db
+        .prepare(
+          "SELECT id, cwd, repository, branch, summary, updated_at FROM sessions " +
+            "WHERE cwd IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
+        )
+        .all(pageSize);
+      const sessions = [];
+      for (const r of rows) {
+        if (!r || !r.id || !r.cwd || !dirExists(r.cwd)) continue;
+        const title = (r.summary || "").trim() || basename(r.cwd) || r.cwd;
+        sessions.push({
+          sessionId: r.id,
+          title,
+          cwd: r.cwd,
+          repository: (r.repository || "").trim() || null,
+          branch: (r.branch || "").trim() || null,
+          updatedAt: parseTs(r.updated_at),
+        });
+      }
+      return sessions;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The working directory recorded for a single CLI session id, or null when the session is unknown
+ * or the store can't be read. Used by the listener to spawn `copilot --resume=<id>` in the session's
+ * own cwd (and to re-validate that cwd still exists at resume time, guarding against a worktree
+ * deleted between listing and resuming).
+ */
+export async function readSessionCwd(sessionId, dbPath = DB_PATH) {
+  if (!sessionId) return null;
+  try {
+    const db = await openDb(dbPath);
+    try {
+      const row = db.prepare("SELECT cwd FROM sessions WHERE id = ?").get(sessionId);
+      return (row && row.cwd) || null;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
 }
 
 /** CLI stores `timestamp` as ISO-8601 text; normalize to epoch ms (0 if unparseable). */

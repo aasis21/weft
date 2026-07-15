@@ -17,7 +17,7 @@ export function detectTerminal(env = process.env, platform = process.platform) {
   return null;
 }
 
-export function spawnCopilotSession({ project, name, mode = "default", identity, spawnFn = childSpawn, platform = process.platform } = {}) {
+export function spawnCopilotSession({ project, name, mode = "default", identity, resumeSessionId = null, spawnFn = childSpawn, platform = process.platform } = {}) {
   const cwd = project?.path;
   if (!cwd) return { ok: false, error: "Project path is required" };
   const sessionName = name || "weft-session";
@@ -25,7 +25,10 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
   try {
     const identityFile = writeIdentityFile(identity);
     cleanup.push(identityFile);
-    const copilotArgs = ["-n", sessionName];
+    // Resume an existing session by id (keeps its stored name/history) vs. name a fresh one.
+    // `--resume=<id>` uses the attached-value form so the CLI never treats the id as a positional
+    // (its `-r, --resume[=value]` takes an OPTIONAL value).
+    const copilotArgs = resumeSessionId ? [`--resume=${resumeSessionId}`] : ["-n", sessionName];
     if (mode === "allow-all") copilotArgs.push("--allow-all");
     // The direct-spawn path (no visible terminal) inherits this env correctly. The visible-terminal
     // launchers below can't rely on it — they route through a terminal broker with its own stale

@@ -18,6 +18,9 @@ import {
   projectListRequest,
   projectList,
   spawnSession,
+  sessionListRequest,
+  sessionList,
+  resumeSession,
   spawnPairing,
   spawnResult,
   forgetDevice,
@@ -122,4 +125,48 @@ test("sessionClaimed carries the offered channelId as a string", () => {
   assert.equal(env.msg.channelId, "off-1");
   assert.ok(isValidEnvelope(env));
   assert.equal(sessionClaimed(undefined).msg.channelId, "", "coerces a missing id to empty string");
+});
+
+test("sessionListRequest carries an optional clamped limit", () => {
+  const bare = sessionListRequest();
+  assert.equal(bare.eventType, EVENT_TYPE.CONTROL);
+  assert.equal(bare.eventSubtype, SUBTYPE.CONTROL.SESSION_LIST_REQUEST);
+  assert.ok(isValidEnvelope(bare));
+  assert.equal("limit" in bare.msg, false, "omits limit when not given");
+  assert.equal(sessionListRequest(20).msg.limit, 20);
+  assert.equal("limit" in sessionListRequest(0).msg, false, "drops a non-positive limit");
+  assert.equal("limit" in sessionListRequest(-5).msg, false);
+});
+
+test("sessionList filters malformed rows and normalizes fields", () => {
+  const env = sessionList([
+    { sessionId: "s1", title: "Fix bug", cwd: "/repo/web", repository: "web", branch: "main", updatedAt: 1000 },
+    { sessionId: "s2", title: "", cwd: "/repo/api", repository: "", branch: "", updatedAt: undefined }, // blanks -> null
+    { sessionId: "s3" }, // no cwd -> dropped
+    { cwd: "/repo/no-id" }, // no sessionId -> dropped
+    null, // junk -> dropped
+  ]);
+  assert.equal(env.eventType, EVENT_TYPE.CONTROL);
+  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.SESSION_LIST);
+  assert.ok(isValidEnvelope(env));
+  assert.equal(env.msg.sessions.length, 2, "only rows with sessionId AND cwd survive");
+  assert.deepEqual(env.msg.sessions[0], {
+    sessionId: "s1", title: "Fix bug", cwd: "/repo/web", repository: "web", branch: "main", updatedAt: 1000,
+  });
+  assert.deepEqual(env.msg.sessions[1], {
+    sessionId: "s2", title: null, cwd: "/repo/api", repository: null, branch: null, updatedAt: null,
+  });
+  assert.deepEqual(sessionList(null).msg.sessions, [], "tolerates a nullish list");
+});
+
+test("resumeSession carries requestId, sessionId, and a defaulted mode", () => {
+  const env = resumeSession("r9", "s1", "allow-all");
+  assert.equal(env.eventType, EVENT_TYPE.CONTROL);
+  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.RESUME_SESSION);
+  assert.ok(isValidEnvelope(env));
+  assert.equal(env.msg.requestId, "r9");
+  assert.equal(env.msg.sessionId, "s1");
+  assert.equal(env.msg.mode, "allow-all");
+  assert.equal(resumeSession("r10", "s2").msg.mode, "default", "mode defaults to 'default'");
+  assert.equal(resumeSession("r11", undefined).msg.sessionId, "", "coerces a missing id to empty string");
 });

@@ -14,6 +14,8 @@ import {
   importKeyPair,
   sayHello,
   spawnSession,
+  sessionListRequest,
+  resumeSession,
   projectListRequest,
   sessionClaimed,
 } from "@aasis21/weft-shared";
@@ -48,7 +50,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -65,6 +67,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     deviceId: "test-device",
     heartbeatMs,
     projectsApi,
+    ...(sessionsApi ? { sessionsApi } : {}),
     spawnFn,
     log,
     connectionsHome,
@@ -185,6 +188,97 @@ test("unknown project emits SPAWN_RESULT ok:false", async () => {
   );
   assert.equal(result.msg.ok, false);
   assert.match(result.msg.error, /Unknown project/);
+  await listener.stop();
+});
+
+test("SESSION_LIST_REQUEST replies with the store's resumable sessions (on-demand, not on bind)", async () => {
+  const cwdA = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
+  dirs.push(cwdA);
+  const sessionsApi = {
+    listSessions: ({ limit } = {}) => {
+      sessionsApi.lastLimit = limit;
+      return [{ sessionId: "sid-1", title: "Fix bug", cwd: cwdA, repository: "web", branch: "main", updatedAt: 5 }];
+    },
+    readSessionCwd: () => cwdA,
+  };
+  const { listener, phoneChannel, messages } = await pairedHarness({ projects: [], sessionsApi });
+
+  // Not pushed on bind: the phone must ask. Nothing should have arrived before the request.
+  assert.equal(messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST), undefined);
+
+  await phoneChannel.send(sessionListRequest(50));
+  const list = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
+    "session list",
+  );
+  assert.equal(sessionsApi.lastLimit, 50, "the requested limit is passed through to the store");
+  assert.equal(list.msg.sessions.length, 1);
+  assert.deepEqual(list.msg.sessions[0], {
+    sessionId: "sid-1", title: "Fix bug", cwd: cwdA, repository: "web", branch: "main", updatedAt: 5,
+  });
+  await listener.stop();
+});
+
+test("RESUME_SESSION spawns `copilot --resume=<id>` in the session's cwd and pairs", async () => {
+  const oldWt = process.env.WT_SESSION;
+  const oldTerm = process.env.TERM_PROGRAM;
+  const oldGnome = process.env.GNOME_TERMINAL_SCREEN;
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
+  dirs.push(sessionCwd);
+  const spawnCalls = [];
+  const sessionsApi = {
+    listSessions: () => [],
+    readSessionCwd: (id) => (id === "sid-42" ? sessionCwd : null),
+  };
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    sessionsApi,
+    spawnFn(command, args, options) {
+      spawnCalls.push({ command, args, options });
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+
+  await phoneChannel.send(resumeSession("req-r1", "sid-42", "allow-all"));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-r1"),
+    "resume result",
+  );
+
+  process.env.WT_SESSION = oldWt;
+  process.env.TERM_PROGRAM = oldTerm;
+  process.env.GNOME_TERMINAL_SCREEN = oldGnome;
+
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0].command, "copilot");
+  assert.deepEqual(spawnCalls[0].args, ["--resume=sid-42", "--allow-all"]);
+  assert.equal(spawnCalls[0].options.cwd, sessionCwd);
+  const pairing = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING && m.msg.requestId === "req-r1");
+  assert.ok(pairing, "a SPAWN_PAIRING is sent for the resumed session");
+  assert.equal(pairing.msg.payload.channelId, spawnCalls[0].options.env.WEFT_CHANNEL_ID);
+  assert.equal(result.msg.ok, true);
+  await listener.stop();
+});
+
+test("RESUME_SESSION for an unknown / vanished session emits SPAWN_RESULT ok:false", async () => {
+  const sessionsApi = { listSessions: () => [], readSessionCwd: () => null };
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    sessionsApi,
+    spawnFn() { throw new Error("should not spawn"); },
+  });
+  await phoneChannel.send(resumeSession("req-gone", "sid-gone", "default"));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-gone"),
+    "failed resume result",
+  );
+  assert.equal(result.msg.ok, false);
+  assert.match(result.msg.error, /no longer in the CLI session store/);
   await listener.stop();
 });
 
