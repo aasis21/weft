@@ -173,6 +173,10 @@ function deviceReconnectBackoffMs(attempts: number, sinceLastSeenMs: number): nu
  *  in-flight request instead of each sending a duplicate. If the reply is dropped, the marker
  *  auto-clears after this window so refreshes can't wedge forever. */
 const PROJECT_LIST_INFLIGHT_MS = 8_000;
+/** Fail-safe window after a `session_list_request` is sent: if the async SESSION_LIST reply never
+ *  arrives (wedged laptop), the "Resume a session" loading flag auto-clears after this window so the
+ *  Load/Refresh button re-enables instead of spinning forever. */
+const SESSION_LIST_INFLIGHT_MS = 8_000;
 const INITIAL_HISTORY_GRACE_MS = 700;
 const RESUME_DEBOUNCE_MS = 500;
 const MAX_WARM_SESSIONS = 50;
@@ -1195,10 +1199,20 @@ export class SessionRuntime {
    *  loading flag (the section shows whatever was last pulled) without wedging the device. */
   async refreshSessions(channelId: string): Promise<void> {
     this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: true }));
+    // Comms are async: the SESSION_LIST reply arrives later via onListenerMessage (or never, if the
+    // laptop is wedged). Arm a failsafe so the button can't stay stuck on "Loading…" — clearing the
+    // flag is idempotent, so if the reply lands first (deviceSessionsReceived also clears it) this is
+    // a harmless no-op.
+    const failSafe = setTimeout(
+      () => this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false })),
+      SESSION_LIST_INFLIGHT_MS,
+    );
+    (failSafe as { unref?: () => void }).unref?.();
     try {
       await this.connectDevice(channelId);
       const ctrl = this.listenerController(channelId);
       if (!ctrl?.client) {
+        clearTimeout(failSafe);
         this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
         return;
       }
@@ -1206,6 +1220,7 @@ export class SessionRuntime {
       this.recordDeviceEvent(channelId, 'out', message);
       await ctrl.client.send(message);
     } catch (err) {
+      clearTimeout(failSafe);
       this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not request sessions.'), connected: false }),

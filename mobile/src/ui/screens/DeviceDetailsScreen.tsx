@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { JSX } from 'react';
 import type { SpawnMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
@@ -96,15 +96,12 @@ export function DeviceDetailsScreen({
     if (s.meta.sessionId) liveBySessionId.set(s.meta.sessionId, s);
   }
   const storeSessions = device.sessions ?? [];
-
-  // Lazy pull the resumable-session list when this screen mounts on an online device, and whenever
-  // the device (re)connects. On-demand only — the session store is large and rewritten every turn,
-  // so it's never pushed on bind.
-  const channelId = device.channelId;
-  const connected = device.connected;
-  useEffect(() => {
-    if (connected) onRefreshSessions(channelId);
-  }, [channelId, connected, onRefreshSessions]);
+  // Whether the resumable-session list has ever been pulled this run (undefined = never asked; the
+  // reply always sets it to an array, even if empty). Drives the "Load sessions" vs "none found"
+  // empty state. The pull is strictly manual (a button) — never auto-run on mount — because the
+  // session store is large and rewritten every turn, and the comms are async (the reply arrives
+  // later via SESSION_LIST), so a blocking auto-load would just make the screen look stuck.
+  const sessionsPulled = device.sessions !== undefined;
 
   return (
     <main className="weft-session join-session device-details-screen">
@@ -209,11 +206,11 @@ export function DeviceDetailsScreen({
               onClick={() => onRefreshSessions(device.channelId)}
               disabled={device.sessionsLoading}
             >
-              {device.sessionsLoading ? 'Refreshing…' : 'Refresh'}
+              {device.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}
             </button>
           </div>
           <p className="device-card-sub">
-            Recent Copilot CLI sessions on this laptop — tap to reopen one on your phone.
+            Recent Copilot CLI sessions on this laptop — tap Load, then pick one to reopen on your phone.
           </p>
           <div className="start-mode-toggle" role="radiogroup" aria-label="Permission mode for resumed session">
             <button
@@ -237,7 +234,11 @@ export function DeviceDetailsScreen({
           </div>
           {storeSessions.length === 0 ? (
             <p className="device-card-sub">
-              {device.sessionsLoading ? 'Loading sessions…' : 'No resumable sessions found.'}
+              {device.sessionsLoading
+                ? 'Loading sessions…'
+                : sessionsPulled
+                  ? 'No resumable sessions found.'
+                  : 'Tap Load to fetch this laptop’s recent sessions.'}
             </p>
           ) : (
             <ul className="devices-list device-sessions-list">
