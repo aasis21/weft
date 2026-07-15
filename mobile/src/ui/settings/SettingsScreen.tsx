@@ -11,6 +11,9 @@ import {
 
 interface SettingsScreenProps {
   onClose(): void;
+  /** Version of the paired laptop's Weft extension, when the Settings screen is opened from a
+   *  session or device context that knows it. Omitted from the Devices list (no single laptop). */
+  laptopVersion?: string;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -26,7 +29,8 @@ const THEME_OPTIONS: Array<{ value: ThemeSetting; label: string }> = [
   { value: 'dark', label: 'Dark' },
 ];
 
-export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
+export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps): JSX.Element {
+  const appVersion = import.meta.env.VITE_APP_VERSION ?? 'dev';
   const [settings, setSettingsState] = useState<WeftSettings>({
     voiceAutoRelisten: false,
     voiceSpeakStreaming: false,
@@ -193,6 +197,25 @@ export function SettingsScreen({ onClose }: SettingsScreenProps): JSX.Element {
                 <span aria-hidden="true" />
               </label>
             </div>
+          </section>
+
+          <section className="settings-group" aria-labelledby="settings-about-title">
+            <div className="settings-row-head">
+              <div>
+                <h2 id="settings-about-title">About</h2>
+                <p>Which Weft build this phone and the paired laptop are running.</p>
+              </div>
+            </div>
+            <dl className="settings-about">
+              <div className="settings-about-row">
+                <dt>App version</dt>
+                <dd>{appVersion}</dd>
+              </div>
+              <div className="settings-about-row">
+                <dt>Laptop version</dt>
+                <dd>{laptopVersion ?? 'Unknown'}</dd>
+              </div>
+            </dl>
           </section>
         </div>
       </section>

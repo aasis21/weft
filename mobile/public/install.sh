@@ -31,7 +31,10 @@
 # Force re-applying the transport (or device name) even if one is already configured: WEFT_FORCE=1
 set -euo pipefail
 
-BASE="https://useweft.netlify.app"
+# The release origin for the prebuilt bundles. Defaults to the hosted Weft site; override via
+# WEFT_INSTALL_BASE to point at a staging/local mirror when testing.
+BASE="${WEFT_INSTALL_BASE:-https://useweft.netlify.app}"
+BASE="${BASE%/}"
 INSTALL_DIR="${WEFT_INSTALL_DIR:-$HOME/.copilot/extensions/weft}"
 BIN_DIR="${WEFT_BIN_DIR:-$HOME/.local/bin}"
 WEFT_HOME="$HOME/.weft"
@@ -111,24 +114,21 @@ if [ "$TRANSPORT" = "devtunnel" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Step 2: fetch the code. Download JUST weft.mjs (the bootstrap), then hand off to its own
+# `weft install` command - the single cross-platform implementation of code placement (the three
+# bundles + the how-to-use skill, into ~/.copilot/extensions/weft and
+# ~/.copilot/skills/weft-how-to-use). That same command backs the dev setup.sh and `weft update`,
+# so the destination dirs / file list live in exactly ONE place instead of being duplicated here.
+# WEFT_INSTALL_BASE + WEFT_INSTALL_DIR point it at the same release + target dir this script uses.
+# (The POSIX `weft` shim in ~/.local/bin is still written below in Step 5 - that path is
+# PATH-coupled and OS-specific, so it stays in this installer.)
+# ---------------------------------------------------------------------------
 step 2 "Downloading Weft bundles"
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$BASE/extension.mjs" -o "$INSTALL_DIR/extension.mjs"
-ok "extension.mjs -> $INSTALL_DIR  (the Copilot CLI extension itself)"
-# relayServerProcess.mjs is spawned as an ATTACHED sibling process by devtunnel.mjs (resolved next
-# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can be brought up and torn
-# down by an ordinary `weft devtunnel start` terminal — must always be installed alongside
-# extension.mjs, not just on first install.
-curl -fsSL "$BASE/relayServerProcess.mjs" -o "$INSTALL_DIR/relayServerProcess.mjs"
-ok "relayServerProcess.mjs -> $INSTALL_DIR  (shared devtunnel relay, only spawned if you use devtunnel)"
 curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"
-ok "weft.mjs -> $INSTALL_DIR  (standalone Device Station CLI)"
-# The "how to use Weft" skill goes to ~/.copilot/skills/weft-how-to-use/SKILL.md - same convention as the
-# extension going to ~/.copilot/extensions/weft - so the agent can answer "how do I pair my
-# phone" / "how do I switch transport" etc. without the user having to ask us directly.
+WEFT_INSTALL_BASE="$BASE" WEFT_INSTALL_DIR="$INSTALL_DIR" node "$INSTALL_DIR/weft.mjs" install >/dev/null
 SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
-mkdir -p "$SKILL_DIR"
-curl -fsSL "$BASE/weft-skill.md" -o "$SKILL_DIR/SKILL.md"
+ok "extension.mjs, relayServerProcess.mjs, weft.mjs -> $INSTALL_DIR"
 ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"
 
 # ---------------------------------------------------------------------------

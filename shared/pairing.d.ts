@@ -17,6 +17,9 @@ export interface PairingPayload {
   transport: TransportDescriptor;
   /** Absent for normal sessions; "listener" marks a `weft` spawn-capable device. */
   kind?: PairKind;
+  /** The laptop's Weft version at pairing time, surfaced on the phone's Settings page. Optional —
+   *  older laptops (or QRs minted before this field) omit it. */
+  appVersion?: string;
 }
 
 /** Info about a paired peer, as seen by the laptop after a hello. */
@@ -31,11 +34,12 @@ export declare function buildPairingPayload(opts: {
   publicKeyB64: string;
   transport: TransportDescriptor;
   kind?: PairKind;
+  appVersion?: string;
 }): PairingPayload;
 
 export declare function parsePairingPayload(
   input: string | PairingPayload,
-): { channelId: string; publicKeyB64: string; kind: PairKind; transport: TransportDescriptor };
+): { channelId: string; publicKeyB64: string; kind: PairKind; transport: TransportDescriptor; appVersion?: string };
 
 export declare function listenForPeers(opts: {
   transport: Transport;

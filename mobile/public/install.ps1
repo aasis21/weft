@@ -62,11 +62,14 @@ param(
     [string]$SupabaseUrl = 'https://jqzohxjouzxzawqqlifv.supabase.co',
     [string]$SupabaseKey = 'sb_publishable_Rf_bymYhJk9fF2Op4xKT0w_eaWLiyCY',
     [string]$DeviceName = '',
-    [switch]$Force
+    [switch]$Force,
+    # The release origin to pull the prebuilt bundles from. Defaults to the hosted Weft site;
+    # override (or set $env:WEFT_INSTALL_BASE) to point at a staging/local mirror when testing.
+    [string]$Base = 'https://useweft.netlify.app'
 )
 
 $ErrorActionPreference = 'Stop'
-$base = 'https://useweft.netlify.app'
+$base = ($(if ($env:WEFT_INSTALL_BASE) { $env:WEFT_INSTALL_BASE } else { $Base })).TrimEnd('/')
 
 $supportsColor = $Host.UI.SupportsVirtualTerminal -or $env:WT_SESSION
 function Paint($text, $code) { if ($supportsColor) { "`e[${code}m$text`e[0m" } else { $text } }
@@ -148,29 +151,24 @@ if ($Transport -eq 'devtunnel') {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Step 2: download the three standalone bundles.
+# Step 2: fetch the code. Download JUST weft.mjs (the bootstrap), then hand off to its own
+# `weft install` command — the single cross-platform implementation of code placement (the three
+# bundles + the how-to-use skill + the weft.cmd shim, into ~/.copilot/extensions/weft and
+# ~/.copilot/skills/weft-how-to-use). That same command backs the dev setup.ps1 and `weft update`,
+# so the destination dirs / file list / shim logic live in exactly ONE place instead of being
+# duplicated here. WEFT_INSTALL_BASE + WEFT_INSTALL_DIR point it at the same release + target dir
+# this script uses (so a -Base mirror flows through to the bundle downloads too).
 # ---------------------------------------------------------------------------------------------
 StepHeader 2 $TOTAL_STEPS 'Downloading Weft bundles'
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-Invoke-WebRequest -Uri "$base/extension.mjs" -OutFile (Join-Path $InstallDir 'extension.mjs') -UseBasicParsing
-Ok "extension.mjs -> $InstallDir  $(Dim '(the Copilot CLI extension itself)')"
-# relayServerProcess.mjs is spawned as an ATTACHED sibling process by devtunnel.mjs (resolved next
-# to extension.mjs at runtime) so the shared devtunnel relay/tunnel can be brought up and torn
-# down by an ordinary `weft devtunnel start` terminal — must always be installed alongside
-# extension.mjs, not just on first install.
-Invoke-WebRequest -Uri "$base/relayServerProcess.mjs" -OutFile (Join-Path $InstallDir 'relayServerProcess.mjs') -UseBasicParsing
-Ok "relayServerProcess.mjs -> $InstallDir  $(Dim '(shared devtunnel relay, only spawned if you use devtunnel)')"
-# weft.mjs is a fully standalone bundle (no dependency on the rest of this repo/extension) —
-# it's the "Device Station" you can run on ANY machine (with or without the Copilot CLI/extension
-# installed) to let your phone spawn Copilot sessions there.
 Invoke-WebRequest -Uri "$base/weft.mjs" -OutFile (Join-Path $InstallDir 'weft.mjs') -UseBasicParsing
-Ok "weft.mjs -> $InstallDir  $(Dim '(standalone Device Station CLI)')"
-# The "how to use Weft" skill goes to ~/.copilot/skills/weft-how-to-use/SKILL.md — same convention as the
-# extension going to ~/.copilot/extensions/weft — so the agent can answer "how do I pair my
-# phone" / "how do I switch transport" etc. without the user having to ask us directly.
+$env:WEFT_INSTALL_BASE = $base
+$env:WEFT_INSTALL_DIR = $InstallDir
+& node (Join-Path $InstallDir 'weft.mjs') install | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "weft install failed (exit code $LASTEXITCODE)" }
+# $skillDir is referenced again in the Step 6 uninstall hint; keep it defined here.
 $skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
-New-Item -ItemType Directory -Force -Path $skillDir | Out-Null
-Invoke-WebRequest -Uri "$base/weft-skill.md" -OutFile (Join-Path $skillDir 'SKILL.md') -UseBasicParsing
+Ok "extension.mjs, relayServerProcess.mjs, weft.mjs -> $InstallDir"
 Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"
 
 # ---------------------------------------------------------------------------------------------
@@ -266,15 +264,13 @@ if ($existingDeviceName -and -not $deviceNameExplicit -and -not $Force) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Step 5: register a `weft` command on PATH (a tiny .cmd shim next to the standalone bundle).
+# Step 5: put the `weft` command on PATH. The weft.cmd shim next to the bundle was already
+# written by `weft install` in Step 2 (shim placement is centralized there); here we only ensure
+# its folder is on your User PATH so `weft` resolves in new terminals.
 # ---------------------------------------------------------------------------------------------
 StepHeader 5 $TOTAL_STEPS 'Registering the `weft` command'
 $shimPath = Join-Path $InstallDir 'weft.cmd'
-@"
-@echo off
-node "%~dp0weft.mjs" %*
-"@ | Set-Content -Path $shimPath -Encoding ascii
-Ok "weft.cmd -> $InstallDir"
+if (Test-Path $shimPath) { Ok "weft.cmd -> $InstallDir" }
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $pathEntries = @()

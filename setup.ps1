@@ -8,23 +8,16 @@ try {
   Write-Host "Building Weft extension..." -ForegroundColor Cyan
   npm run build -w @aasis21/weft-extension | Out-Null
 
-  $bundle = Join-Path $root "extension\dist\extension.mjs"
-  if (-not (Test-Path $bundle)) { throw "Build did not produce $bundle" }
-
-  $dest = Join-Path $env:USERPROFILE ".copilot\extensions\weft"
-  New-Item -ItemType Directory -Force -Path $dest | Out-Null
-  Copy-Item $bundle (Join-Path $dest "extension.mjs") -Force
-  Write-Host "Installed extension.mjs -> $dest" -ForegroundColor Green
-
-  # Bundle the "how to use Weft" skill into ~/.copilot/skills/weft-how-to-use/ too, same as the extension
-  # goes into ~/.copilot/extensions/weft/ — lets the agent answer "how do I pair my phone" etc.
-  $skillSource = Join-Path $root "skill\weft-how-to-use\SKILL.md"
-  if (Test-Path $skillSource) {
-    $skillDest = Join-Path $env:USERPROFILE ".copilot\skills\weft-how-to-use"
-    New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
-    Copy-Item $skillSource (Join-Path $skillDest "SKILL.md") -Force
-    Write-Host "Installed SKILL.md -> $skillDest" -ForegroundColor Green
-  }
+  # Place the freshly-built code bundles + how-to-use skill via the CLI's own `weft install` — the
+  # single cross-platform implementation of code placement (dest dirs, the three-bundle list, the
+  # weft.cmd shim), shared with the cloud installer (mobile/public/install.ps1) so none of that is
+  # hand-duplicated here. `--from` points it at our local build output instead of the cloud
+  # release. It deliberately does NOT touch ~/.weft or PATH — those are handled below / by the
+  # cloud installer. The extension folder is CODE-only; ~/.weft (config/identity/pairings) is safe.
+  node (Join-Path $root "extension\dist\weft.mjs") install `
+    --from (Join-Path $root "extension\dist") `
+    --skill (Join-Path $root "skill\weft-how-to-use\SKILL.md")
+  if ($LASTEXITCODE -ne 0) { throw "weft install failed (exit $LASTEXITCODE)" }
 
   # Transport is configured once, in a single file: ~/.weft/weft.config.json (via `weft
   # set-transport`) — never via .env / env vars, so re-running this script never overwrites it.

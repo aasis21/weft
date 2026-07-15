@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { hostname, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { stdin as input, stdout as output } from "node:process";
 import readline from "node:readline/promises";
 import QRCode from "qrcode";
@@ -21,8 +22,26 @@ import {
 import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
 import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
+import { resolveVersion } from "../src/version.mjs";
 
 const [, , command, ...args] = process.argv;
+
+// Where the end-user installer drops Weft's code bundles (CODE only — all user data lives in
+// ~/.weft). `weft update` refreshes these in place from the cloud; `weft clean-install` wipes both
+// this dir and ~/.weft, then re-runs the bootstrap installer. Both honor env overrides so they can
+// be exercised against a local mirror without touching a real install or the network.
+const INSTALL_BASE = (process.env.WEFT_INSTALL_BASE || "https://useweft.netlify.app").replace(/\/+$/, "");
+// The three standalone code bundles esbuild emits and every install ships: the Copilot CLI
+// extension, the devtunnel relay child (spawned relative to the bundle), and the weft CLI itself.
+// Declared up here (not next to its helpers) so it's initialized before the top-level command
+// dispatch can reach placeBundles — a later `const` would be in the temporal dead zone.
+const BUNDLE_NAMES = ["extension.mjs", "relayServerProcess.mjs", "weft.mjs"];
+function extensionInstallDir() {
+  return process.env.WEFT_INSTALL_DIR || join(homedir(), ".copilot", "extensions", "weft");
+}
+function skillInstallDir() {
+  return process.env.WEFT_SKILL_DIR || join(homedir(), ".copilot", "skills", "weft-how-to-use");
+}
 
 const supportsColor = Boolean(process.stdout.isTTY) && process.env.NO_COLOR === undefined;
 const wrap = (open, close) => (text) => (supportsColor ? `\x1b[${open}m${text}\x1b[${close}m` : String(text));
@@ -72,6 +91,8 @@ process.on("uncaughtException", (err) => {
 try {
   if (!command || command === "help" || command === "--help" || command === "-h") {
     usage();
+  } else if (command === "version" || command === "--version" || command === "-v") {
+    printVersion();
   } else if (command === "start") {
     await start();
   } else if (command === "add-project") {
@@ -105,6 +126,12 @@ try {
     await rotatePairing();
   } else if (command === "devtunnel") {
     await devtunnelCommand(args);
+  } else if (command === "update") {
+    await update();
+  } else if (command === "install") {
+    await install(args);
+  } else if (command === "clean-install") {
+    await cleanInstall(args);
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -781,6 +808,168 @@ function showName() {
   }
 }
 
+// Print the running Weft version and persist it to ~/.weft/version.json. The persisted record is
+// the laptop's own note of "which build am I on" — handy for support/diagnostics and mirrors the
+// version the phone sees over the pairing handshake. Best-effort: a failed write never fails the
+// command (printing the version is the contract; saving is a convenience).
+function printVersion() {
+  const version = resolveVersion();
+  const file = join(weftHome(), "version.json");
+  try {
+    mkdirSync(weftHome(), { recursive: true });
+    writeFileSync(file, `${JSON.stringify({ version, savedAt: new Date().toISOString() }, null, 2)}\n`);
+    console.log(`weft ${version} ${c.dim(`(saved to ${file})`)}`);
+  } catch {
+    console.log(`weft ${version}`);
+  }
+}
+
+// Download one file from the cloud release into `dest`, atomically (tmp + rename) so a partial
+// or interrupted download can never leave a half-written bundle that Node would then try to run.
+async function downloadTo(url, dest) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed (HTTP ${res.status}) for ${url}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const tmp = `${dest}.${process.pid}.download.tmp`;
+  writeFileSync(tmp, buf);
+  renameSync(tmp, dest);
+}
+
+// On Windows, (re)create the `weft.cmd` PATH shim if it's missing so `weft` resolves to the just
+// -refreshed weft.mjs. No-op on POSIX (that shim lives in ~/.local/bin and is owned by the
+// bootstrap installer). Best-effort — never fails the caller.
+function ensureWindowsShim(dir) {
+  if (process.platform !== "win32") return;
+  const shim = join(dir, "weft.cmd");
+  if (existsSync(shim)) return;
+  try {
+    writeFileSync(shim, "@echo off\r\nnode \"%~dp0weft.mjs\" %*\r\n");
+    console.log(`${c.green("✓")} weft.cmd`);
+  } catch {
+    // ignore — an existing PATH shim elsewhere still works
+  }
+}
+
+// Single source of truth for placing Weft's code bundles into the extension install dir — either
+// by DOWNLOADING them from the cloud release (default) or COPYING them from a local build dir
+// (`fromDir`, used by the dev setup scripts against extension/dist). Overwrites in place; safe even
+// for the live weft.mjs (Node doesn't lock its own running file). Shared by `install` and `update`
+// so the dest dir + file list live in exactly one place instead of being duplicated across the
+// PowerShell and bash installers.
+async function placeBundles({ fromDir } = {}) {
+  const dir = extensionInstallDir();
+  mkdirSync(dir, { recursive: true });
+  for (const name of BUNDLE_NAMES) {
+    const dest = join(dir, name);
+    if (fromDir) {
+      const src = join(fromDir, name);
+      if (!existsSync(src)) throw new Error(`Missing bundle: ${src} (did you run \`npm run build\`?)`);
+      copyFileSync(src, dest);
+    } else {
+      await downloadTo(`${INSTALL_BASE}/${name}`, dest);
+    }
+    console.log(`${c.green("✓")} ${name}`);
+  }
+  return dir;
+}
+
+// Install the how-to-use skill next to the extension, from a local file (`fromFile`, dev scripts)
+// or the cloud release (default). Companion to placeBundles so the skill's dest + source URL are
+// defined once.
+async function installSkill({ fromFile } = {}) {
+  const dir = skillInstallDir();
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, "SKILL.md");
+  if (fromFile) {
+    if (!existsSync(fromFile)) throw new Error(`Missing skill file: ${fromFile}`);
+    copyFileSync(fromFile, dest);
+  } else {
+    await downloadTo(`${INSTALL_BASE}/weft-skill.md`, dest);
+  }
+  console.log(`${c.green("✓")} SKILL.md`);
+}
+
+// `weft install`: the single, cross-platform implementation of Weft's CODE placement (bundles +
+// skill + Windows shim), shared by the dev `setup.*` scripts (via `--from <dist dir>`) and the
+// cloud `install.*` bootstrappers (default = download from the cloud release). It deliberately
+// does NOT touch ~/.weft config or register PATH — the thin shell installers own those OS-specific
+// / interactive steps (PATH env, POSIX ~/.local/bin shim, transport + device-name prompts). This
+// is what lets four scripts stop hand-duplicating the dest dir, file names, and download/copy
+// logic. Idempotent.
+async function install(cmdArgs) {
+  const fromIdx = cmdArgs.indexOf("--from");
+  const fromDir = fromIdx !== -1 ? cmdArgs[fromIdx + 1] : undefined;
+  const skillIdx = cmdArgs.indexOf("--skill");
+  const skillFile = skillIdx !== -1 ? cmdArgs[skillIdx + 1] : undefined;
+  printHeader("WEFT INSTALL");
+  console.log(c.dim(fromDir ? `Source: ${resolve(fromDir)} ${c.dim("(local build)")}` : `Source: ${INSTALL_BASE}`));
+  console.log(c.dim(`Target: ${extensionInstallDir()}\n`));
+  await placeBundles({ fromDir });
+  await installSkill({ fromFile: skillFile });
+  ensureWindowsShim(extensionInstallDir());
+  console.log(`\n${c.green("Installed code.")} ${c.dim("(PATH + transport config are handled by the installer script.)")}`);
+}
+
+// `weft update`: refresh ONLY the code bundles and the how-to-use skill from the cloud, overwriting
+// them in place. It never touches ~/.weft, so your transport/device-name/identity/pairings all
+// survive. Thin wrapper over the shared placement core with the cloud source.
+async function update() {
+  printHeader("WEFT UPDATE");
+  console.log(c.dim(`Source: ${INSTALL_BASE}`));
+  console.log(c.dim(`Target: ${extensionInstallDir()}\n`));
+  await placeBundles();
+  await installSkill();
+  ensureWindowsShim(extensionInstallDir());
+  console.log(`\n${c.green("Updated.")} ${c.dim("Your ~/.weft config was left untouched.")}`);
+}
+
+// `weft clean-install`: nuke BOTH the code dir (~/.copilot/extensions/weft) and ALL user data
+// (~/.weft — config, identity, pairings, logs), then re-run the bootstrap installer from scratch
+// for a from-basics setup. Destructive and irreversible for your config, so it confirms first
+// unless --yes/-y is passed. Deleting the running weft.mjs is fine — Node has it in memory and the
+// installer recreates it.
+async function cleanInstall(cmdArgs) {
+  const assumeYes = cmdArgs.includes("--yes") || cmdArgs.includes("-y");
+  const dir = extensionInstallDir();
+  const home = weftHome();
+  printHeader("WEFT CLEAN INSTALL");
+  console.log("This will permanently DELETE:");
+  console.log(`  ${c.red("•")} ${home}  ${c.dim("(config, identity, pairings, logs)")}`);
+  console.log(`  ${c.red("•")} ${dir}  ${c.dim("(extension + weft CLI code)")}`);
+  console.log(`then run a fresh install from ${INSTALL_BASE}.\n`);
+  if (!assumeYes) {
+    const rl = readline.createInterface({ input, output });
+    const answer = (await rl.question(`Type ${c.bold("yes")} to proceed (anything else aborts): `)).trim().toLowerCase();
+    rl.close();
+    if (answer !== "yes" && answer !== "y") {
+      console.log("Aborted — nothing was deleted.");
+      return;
+    }
+  }
+  rmSync(home, { recursive: true, force: true });
+  console.log(`${c.green("✓")} removed ${home}`);
+  rmSync(dir, { recursive: true, force: true });
+  console.log(`${c.green("✓")} removed ${dir}`);
+  console.log(`\n${c.cyan("Running the fresh installer…")}\n`);
+  runBootstrapInstaller();
+}
+
+// Fetch-and-run the platform bootstrap installer, inheriting stdio so its interactive prompts
+// (transport / device name) work. This is exactly the documented one-liner users run for a first
+// install (`irm .../install.ps1 | iex` on Windows, `curl -fsSL .../install.sh | bash` on POSIX).
+// NB: install.sh is a bash script (it uses bash arrays), so it MUST be piped to `bash`, not `sh`
+// — on Debian/Ubuntu `/bin/sh` is dash and would choke on the array syntax.
+function runBootstrapInstaller() {
+  const isWin = process.platform === "win32";
+  const bin = isWin ? "powershell" : "sh";
+  const cmdArgs = isWin
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${INSTALL_BASE}/install.ps1 | iex`]
+    : ["-c", `curl -fsSL ${INSTALL_BASE}/install.sh | bash`];
+  const res = spawnSync(bin, cmdArgs, { stdio: "inherit" });
+  if (res.error) throw res.error;
+  if (res.status !== 0) throw new Error(`Installer exited with code ${res.status}`);
+}
+
 function usage() {
   console.log(`Usage:
   weft start
@@ -795,6 +984,10 @@ function usage() {
   weft set-pairing <persistent|ephemeral>
   weft rotate-pairing
   weft devtunnel <start|status|stop>
+  weft version
+  weft update
+  weft install [--from <dir>] [--skill <file>]
+  weft clean-install [--yes]
   weft help
 
 Your transport CHOICE lives in ~/.weft/weft.config.json (written by \`weft set-transport\`).
@@ -816,6 +1009,12 @@ reverts to a new identity every run.
 \`weft devtunnel start\` provisions (or attaches to) the shared devtunnel relay in the
 foreground with a live status line — useful for first-time setup or watching a slow
 provision independently of any \`/weft\` session. \`weft devtunnel status\` reports whether
-it's currently running; \`weft devtunnel stop\` force-tears it down for troubleshooting.`);
+it's currently running; \`weft devtunnel stop\` force-tears it down for troubleshooting.
+
+\`weft update\` refreshes just the code bundles (extension + relay + this CLI) and the
+how-to-use skill from the cloud, in place — it never touches ~/.weft, so all your config
+survives. \`weft clean-install\` is the nuclear option: it DELETES both ~/.weft and the
+extension code dir, then re-runs the bootstrap installer for a fresh from-basics setup
+(pass --yes to skip the confirmation).`);
 }
 

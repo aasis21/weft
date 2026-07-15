@@ -60,7 +60,7 @@ function pairEnvelope(eventSubtype, msg, { channelId, senderId, senderName } = {
  * session ("session", default) or a `weft` listener ("listener") the phone should register as
  * a spawn-capable device rather than open as a session.
  */
-export function buildPairingPayload({ channelId, publicKeyB64, transport, kind = PAIR_KIND.SESSION }) {
+export function buildPairingPayload({ channelId, publicKeyB64, transport, kind = PAIR_KIND.SESSION, appVersion }) {
   if (!channelId || !publicKeyB64) {
     throw new Error("weft/pairing: channelId and publicKeyB64 are required");
   }
@@ -72,6 +72,9 @@ export function buildPairingPayload({ channelId, publicKeyB64, transport, kind =
   const payload = { v: PAIR_VERSION, channelId, pub: publicKeyB64, transport };
   // Only stamp non-default kinds so existing session QRs stay byte-identical (back-compat).
   if (kind && kind !== PAIR_KIND.SESSION) payload.kind = kind;
+  // The laptop's Weft version, so the phone can show which extension build it's paired with.
+  // Optional + only stamped when known — older laptops omit it and the phone just shows "unknown".
+  if (typeof appVersion === "string" && appVersion) payload.appVersion = appVersion;
   return payload;
 }
 
@@ -88,7 +91,8 @@ export function parsePairingPayload(input) {
     throw new Error("weft/pairing: invalid pairing payload");
   }
   const kind = o.kind === PAIR_KIND.LISTENER ? PAIR_KIND.LISTENER : PAIR_KIND.SESSION;
-  return { channelId: o.channelId, publicKeyB64: o.pub, kind, transport: o.transport };
+  const appVersion = typeof o.appVersion === "string" && o.appVersion ? o.appVersion : undefined;
+  return { channelId: o.channelId, publicKeyB64: o.pub, kind, transport: o.transport, appVersion };
 }
 
 /** Read a hello envelope's public key + sender, tolerating a missing/foreign message. */

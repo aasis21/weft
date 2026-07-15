@@ -503,6 +503,7 @@ export class SessionRuntime {
       spawnedFromDeviceId: stored.spawnedFromDeviceId,
       spawnedFromDeviceName: stored.spawnedFromDeviceName,
       transport: stored.pairing.transport?.kind,
+      laptopVersion: stored.pairing.appVersion,
     };
     const session = emptySession(channelId, meta);
     session.unread = stored.unread ?? false;
@@ -944,6 +945,7 @@ export class SessionRuntime {
       spawnedFromDeviceId: opts.spawnedFromDeviceId,
       spawnedFromDeviceName: opts.spawnedFromDeviceName,
       transport: pairing.transport?.kind,
+      laptopVersion: pairing.appVersion,
     };
     const session = emptySession(channelId, meta);
     session.connection.status = 'connecting';
@@ -1022,6 +1024,7 @@ export class SessionRuntime {
       savedAt: now,
       isDefault: prior?.isDefault ?? this.store.getState().sessions.devices.length === 0,
       lastProjectName: prior?.lastProjectName,
+      appVersion: pairing.appVersion ?? prior?.appVersion,
     };
     await upsertDevice(stored);
     this.store.dispatch(

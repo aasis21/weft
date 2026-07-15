@@ -12,6 +12,9 @@ export interface StoredPairing {
   savedAt: number;
   /** Which transport + endpoint this session was paired with — reused verbatim on reconnect. */
   transport: TransportDescriptor;
+  /** The paired laptop's Weft version at pairing time (from the QR/pairing payload). Optional —
+   *  older laptops omit it. Persisted with the session so Settings can show it after a reload. */
+  appVersion?: string;
 }
 
 export async function loadStoredPairing(): Promise<StoredPairing | null> {

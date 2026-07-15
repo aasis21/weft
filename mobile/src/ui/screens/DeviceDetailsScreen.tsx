@@ -266,7 +266,7 @@ export function DeviceDetailsScreen({
         />
       ) : null}
 
-      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} laptopVersion={device.appVersion} /> : null}
     </main>
   );
 }

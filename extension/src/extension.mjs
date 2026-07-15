@@ -15,6 +15,7 @@ import { createTransportFromDescriptor, resolveTransportByName, resolveTransport
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
 import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
+import { resolveVersion } from "./version.mjs";
 import { isStationRunning, registerPendingSession, removePendingSession } from "./pendingSessions.mjs";
 import { readIdentityFile } from "./handoffIdentity.mjs";
 
@@ -95,6 +96,7 @@ function buildCurrentPairingPayload() {
     channelId,
     publicKeyB64: laptopKeys.publicKeyB64,
     transport: transportDescriptor,
+    appVersion: resolveVersion(),
   });
 }
 

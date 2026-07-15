@@ -27,6 +27,7 @@ import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./pairingIdentity.mjs";
 import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
+import { resolveVersion } from "./version.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
@@ -184,6 +185,7 @@ export function createListener({
       publicKeyB64: listenerKeyPair.publicKeyB64,
       transport: listenerTransportDescriptor,
       kind: PAIR_KIND.LISTENER,
+      appVersion: resolveVersion(),
     });
     // Persistent mode + a known-returning phone: derive the shared key from the REMEMBERED peer
     // public key and open the encrypted channel + start heartbeating right away, instead of
@@ -581,6 +583,7 @@ export function createListener({
             publicKeyB64,
             transport: listenerTransportDescriptor ?? (await resolveTransport()),
             kind: PAIR_KIND.SESSION,
+            appVersion: resolveVersion(),
           }),
           sessionName,
           project.name,

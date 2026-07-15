@@ -8,23 +8,14 @@ cd "$root"
 echo "Building Weft extension..."
 npm run build -w @aasis21/weft-extension >/dev/null
 
-bundle="$root/extension/dist/extension.mjs"
-[ -f "$bundle" ] || { echo "Build did not produce $bundle" >&2; exit 1; }
-
-dest="$HOME/.copilot/extensions/weft"
-mkdir -p "$dest"
-cp "$bundle" "$dest/extension.mjs"
-echo "Installed extension.mjs -> $dest"
-
-# Bundle the "how to use Weft" skill into ~/.copilot/skills/weft-how-to-use/ too, same as the extension
-# goes into ~/.copilot/extensions/weft/ — lets the agent answer "how do I pair my phone" etc.
-skill_source="$root/skill/weft-how-to-use/SKILL.md"
-if [ -f "$skill_source" ]; then
-  skill_dest="$HOME/.copilot/skills/weft-how-to-use"
-  mkdir -p "$skill_dest"
-  cp "$skill_source" "$skill_dest/SKILL.md"
-  echo "Installed SKILL.md -> $skill_dest"
-fi
+# Place the freshly-built code bundles + how-to-use skill via the CLI's own `weft install` — the
+# single cross-platform implementation of code placement (dest dirs, the three-bundle list, the
+# shim), shared with the cloud installer (mobile/public/install.sh) so none of that is
+# hand-duplicated here. --from points it at our local build output instead of the cloud release.
+# It deliberately does NOT touch ~/.weft or PATH — those are handled below / by the cloud installer.
+node "$root/extension/dist/weft.mjs" install \
+  --from "$root/extension/dist" \
+  --skill "$root/skill/weft-how-to-use/SKILL.md"
 
 # Transport is configured once, in a single file: ~/.weft/weft.config.json (via `weft
 # set-transport`) — never via .env / env vars, so re-running this script never overwrites it.

@@ -65,11 +65,12 @@ export async function pairSession(
   raw: string | PairingPayload,
   opts?: { transport?: Transport },
 ): Promise<{ client: WeftClient; pairing: StoredPairing }> {
-  const { channelId, publicKeyB64, transport: transportDescriptor } = parsePairingPayload(raw);
+  const { channelId, publicKeyB64, transport: transportDescriptor, appVersion } = parsePairingPayload(raw);
   return pairWithPublicKey({
     channelId,
     publicKeyB64,
     transportDescriptor,
+    appVersion,
     transport: opts?.transport,
   });
 }
@@ -79,9 +80,11 @@ export async function pairWithPublicKey(opts: {
   publicKeyB64: string;
   /** Which transport + endpoint to connect with — laptop-resolved, carried in the QR/pairing payload. */
   transportDescriptor: TransportDescriptor;
+  /** The laptop's Weft version from the pairing payload, persisted on StoredPairing for display. */
+  appVersion?: string;
   transport?: Transport;
 }): Promise<{ client: WeftClient; pairing: StoredPairing }> {
-  const { channelId, publicKeyB64, transportDescriptor } = opts;
+  const { channelId, publicKeyB64, transportDescriptor, appVersion } = opts;
   const phoneKeys = await generateKeyPair();
   const deviceId = getStableDeviceId();
   const transport = opts.transport ?? createTransportFromDescriptor(transportDescriptor, channelId);
@@ -104,6 +107,7 @@ export async function pairWithPublicKey(opts: {
     deviceId,
     savedAt: Date.now(),
     transport: transportDescriptor,
+    ...(appVersion ? { appVersion } : {}),
   };
   let client: WeftClient;
   try {

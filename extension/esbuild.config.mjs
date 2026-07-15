@@ -1,8 +1,15 @@
 import { build } from "esbuild";
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 
 const outfile = "dist/extension.mjs";
+
+// Bake the repo-root VERSION into every bundle so the installed extension/CLI report the right
+// version with zero runtime file reads (see src/version.mjs). `define` replaces the bare
+// `__WEFT_VERSION__` identifier token with this string literal at build time.
+const version = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim();
+const define = { __WEFT_VERSION__: JSON.stringify(version) };
 
 await build({
   entryPoints: ["src/extension.mjs"],
@@ -12,6 +19,7 @@ await build({
   target: "node18",
   format: "esm",
   sourcemap: true,
+  define,
   external: ["@github/copilot-sdk", "@github/copilot-sdk/extension"],
   // Bundled CommonJS deps (qrcode, supabase transitive deps) call require("fs").
   // In ESM output esbuild's shim throws "Dynamic require of ... is not supported"
@@ -39,6 +47,7 @@ await build({
   target: "node18",
   format: "esm",
   sourcemap: true,
+  define,
   banner: {
     js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },
@@ -59,6 +68,7 @@ await build({
   target: "node18",
   format: "esm",
   sourcemap: true,
+  define,
   banner: {
     js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },

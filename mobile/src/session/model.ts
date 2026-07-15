@@ -100,6 +100,10 @@ export interface SessionMeta {
    *  so a `/weft <transport>` switch (or a devtunnel pairing) is visible from the phone side too.
    *  Optional: sessions restored before this field existed simply omit it until their next re-pair. */
   transport?: TransportDescriptor['kind'];
+  /** The paired laptop's Weft version at pairing time (from the QR/pairing payload). Optional —
+   *  older laptops omit it, and sessions paired before this field existed omit it until re-paired.
+   *  Surfaced on the phone's Settings page so you can see which extension build you're driving. */
+  laptopVersion?: string;
 }
 
 export interface ListenerDeviceState extends RegisteredDevice {

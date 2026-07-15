@@ -33,6 +33,9 @@ export interface RegisteredDevice {
   deviceId?: string;
   /** Last time this device was seen live (connected or sent a project list), epoch ms. */
   lastSeenAt?: number;
+  /** The laptop's Weft version reported in its listener QR at pairing time. Optional — older
+   *  laptops omit it. Surfaced on the phone's Settings page (Device details context). */
+  appVersion?: string;
 }
 
 function isRegisteredDevice(value: unknown): value is RegisteredDevice {

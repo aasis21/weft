@@ -17,6 +17,22 @@ test("buildPairingPayload / parsePairingPayload round-trip", () => {
   assert.throws(() => parsePairingPayload({ v: 999, channelId: "x", pub: "y", transport: { kind: "local" } }), /invalid pairing/);
 });
 
+test("buildPairingPayload carries an optional appVersion; parse tolerates its absence", () => {
+  const withVersion = buildPairingPayload({
+    channelId: "abc",
+    publicKeyB64: "PUB",
+    transport: { kind: "local" },
+    appVersion: "0.1.0",
+  });
+  assert.equal(withVersion.appVersion, "0.1.0");
+  assert.equal(parsePairingPayload(JSON.stringify(withVersion)).appVersion, "0.1.0");
+
+  // Omitted → the field is never stamped (keeps legacy QRs byte-identical) and parse returns undefined.
+  const without = buildPairingPayload({ channelId: "abc", publicKeyB64: "PUB", transport: { kind: "local" } });
+  assert.equal("appVersion" in without, false);
+  assert.equal(parsePairingPayload(JSON.stringify(without)).appVersion, undefined);
+});
+
 test("buildPairingPayload accepts a devtunnel transport descriptor", () => {
   const payload = buildPairingPayload({
     channelId: "abc",
