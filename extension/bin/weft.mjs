@@ -959,14 +959,29 @@ async function cleanInstall(cmdArgs) {
 // install (`irm .../install.ps1 | iex` on Windows, `curl -fsSL .../install.sh | bash` on POSIX).
 // NB: install.sh is a bash script (it uses bash arrays), so it MUST be piped to `bash`, not `sh`
 // — on Debian/Ubuntu `/bin/sh` is dash and would choke on the array syntax.
+//
+// cwd MUST be an explicitly-existing directory: `weft clean-install` calls this right after
+// deleting the extension dir, which is often the caller's own working directory (the weft.cmd shim
+// lives there). Spawning a child inherits the parent's cwd, and on Windows spawning with a cwd that
+// no longer exists fails hard with EPERM / "The system cannot find the path specified" — so we pin
+// cwd to the home directory, which is never the dir we just removed.
 function runBootstrapInstaller() {
   const isWin = process.platform === "win32";
-  const bin = isWin ? "powershell" : "sh";
+  const bin = isWin ? "powershell.exe" : "bash";
   const cmdArgs = isWin
     ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `irm ${INSTALL_BASE}/install.ps1 | iex`]
     : ["-c", `curl -fsSL ${INSTALL_BASE}/install.sh | bash`];
-  const res = spawnSync(bin, cmdArgs, { stdio: "inherit" });
-  if (res.error) throw res.error;
+  const res = spawnSync(bin, cmdArgs, { stdio: "inherit", cwd: homedir() });
+  if (res.error) {
+    const oneLiner = isWin
+      ? `irm ${INSTALL_BASE}/install.ps1 | iex`
+      : `curl -fsSL ${INSTALL_BASE}/install.sh | bash`;
+    console.error(
+      `\n${c.red("✗")} Could not launch the installer automatically (${res.error.code || res.error.message}).\n` +
+        `  Run this one-liner to finish the fresh install:\n\n    ${c.bold(oneLiner)}\n`,
+    );
+    throw res.error;
+  }
   if (res.status !== 0) throw new Error(`Installer exited with code ${res.status}`);
 }
 
