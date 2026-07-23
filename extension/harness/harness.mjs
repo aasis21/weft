@@ -155,7 +155,6 @@ async function main() {
     session,
     channel: extChannel,
     channelId,
-    approvalTimeoutMs: 5_000,
     heartbeatMs: 1_000,
   });
 

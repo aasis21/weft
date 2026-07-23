@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
-import type { SessionMode } from '@aasis21/weft-shared';
+import type { PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import { StartSessionScreen } from '@/ui/screens/StartSessionScreen';
@@ -366,7 +366,9 @@ export default function App(): JSX.Element {
       active={active}
       sessions={snapshot.sessions}
       activeId={active.meta.channelId}
-      onPrompt={(text, attachments) => void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments)}
+      onPrompt={(text, attachments, delivery?: PromptDelivery) =>
+        void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments, delivery)
+      }
       onApprove={(requestId, optionId) => void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)}
       onElicitationRespond={(requestId, action, content) =>
         void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)

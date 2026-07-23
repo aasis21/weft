@@ -430,6 +430,7 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
               <div className="user-meta">
                 <span className="ts user-ts">{formatTime(item.ts)}</span>
                 <DeviceChip origin={item.origin} />
+                {item.delivery === 'enqueue' ? <span className="user-queued">Queued</span> : null}
                 {item.failed ? (
                   <span className="user-failed" role="alert">Not delivered</span>
                 ) : null}

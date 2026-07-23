@@ -162,11 +162,13 @@ export const userMessage = (text, origin = "terminal", id) =>
 /**
  * A phone-typed prompt relayed to the laptop session. `attachments` (optional) carries inline
  * images the user picked: each is `{ data (base64, no `data:` prefix), mimeType, name }`.
+ * `delivery` is omitted for the existing immediate/steering behavior and stamped only for enqueue.
  */
-export const prompt = (text, attachments = null) =>
+export const prompt = (text, attachments = null, delivery = "immediate") =>
   envelope(EVENT_TYPE.PROMPT, SUBTYPE.PROMPT.PROMPT, {
     text,
     ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+    ...(delivery === "enqueue" ? { delivery } : {}),
   });
 
 // ---- factories (approval / decision) ---------------------------------------
@@ -190,8 +192,8 @@ export const approvalRequest = (requestId, toolName, toolArgs, options, deadline
 export const approvalDecision = (requestId, optionId, raw) =>
   envelope(EVENT_TYPE.DECISION, SUBTYPE.DECISION.APPROVAL_DECISION, { requestId, optionId, raw });
 /**
- * Ext -> phone notice that an approval was resolved elsewhere (timed out, decided on another device,
- * or the relay stopped); dismiss any open banner for it. The approval analogue of elicitationComplete
+ * Ext -> phone notice that an approval was resolved elsewhere (decided on another device or the
+ * relay stopped); dismiss any open banner for it. The approval analogue of elicitationComplete
  * — permissions have no native completion event, so the relay synthesizes this on resolve. `decision`
  * is informational (the chosen optionId, "timeout", ...); the phone only needs the requestId.
  */

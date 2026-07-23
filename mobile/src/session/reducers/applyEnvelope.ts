@@ -10,6 +10,7 @@ import type {
   LogLine,
   LogLineMsg,
   PromptAttachment,
+  PromptDelivery,
   RecentTurnsMsg,
   StateSnapshotMsg,
   ToolComplete,
@@ -81,6 +82,7 @@ export function makeUserItem(
   text: string,
   ts: number,
   attachments?: PromptAttachment[],
+  delivery?: PromptDelivery,
 ): UserItem {
   return {
     kind: 'user',
@@ -88,6 +90,7 @@ export function makeUserItem(
     text,
     ts,
     origin: 'phone',
+    ...(delivery === 'enqueue' ? { delivery } : {}),
     ...(attachments && attachments.length ? { attachments } : {}),
   };
 }

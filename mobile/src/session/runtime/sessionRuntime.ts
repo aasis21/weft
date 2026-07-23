@@ -25,6 +25,7 @@ import type {
   PairingPayload,
   ProjectListMsg,
   PromptAttachment,
+  PromptDelivery,
   SessionListMsg,
   SessionMode,
   SessionOffersMsg,
@@ -1639,23 +1640,42 @@ export class SessionRuntime {
   }
 
   // --- user actions --------------------------------------------------------------------------------
-  async sendPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
+  async sendPrompt(
+    channelId: string,
+    text: string,
+    attachments?: PromptAttachment[],
+    delivery: PromptDelivery = 'immediate',
+  ): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
+    const wasBusy = session.connection.busy;
     const ts = this.clock();
-    const item = makeUserItem(`user-${ts}-${Math.random().toString(36).slice(2, 7)}`, text, ts, attachments);
+    const item = makeUserItem(
+      `user-${ts}-${Math.random().toString(36).slice(2, 7)}`,
+      text,
+      ts,
+      attachments,
+      delivery,
+    );
     this.store.dispatch(userPromptAppended({ id: channelId, item }));
-    // Flip the composer to its "Copilot working" / Stop state immediately instead of waiting for the
-    // host's ACTIVITY(true) echo, so a sent prompt gives instant feedback (#85). The host's own
-    // ACTIVITY(false) at end-of-turn (or the send-failure branch below) clears it.
-    this.store.dispatch(busySet({ id: channelId, busy: true, ts }));
+    // Immediate prompts start or steer the active turn, so reflect working state right away.
+    // Enqueued prompts leave the current turn's state untouched.
+    if (delivery === 'immediate') {
+      this.store.dispatch(busySet({ id: channelId, busy: true, ts }));
+    }
     this.schedulePersist(channelId);
     this.markActivity(channelId);
     try {
-      await this.deliverPrompt(channelId, text, attachments);
+      await this.deliverPrompt(channelId, text, attachments, delivery);
     } catch {
-      if (!this.session(channelId)) return;
-      this.store.dispatch(busySet({ id: channelId, busy: false, ts: this.clock() }));
+      const current = this.session(channelId);
+      if (!current) return;
+      // A failed first prompt returns to idle; a failed steering message must not make the active
+      // turn look idle while Copilot is still working. If the host reported idle while this send
+      // was in flight, preserve that newer authoritative state instead of resurrecting busy.
+      if (delivery === 'immediate' && current.connection.busy) {
+        this.store.dispatch(busySet({ id: channelId, busy: wasBusy, ts: this.clock() }));
+      }
       this.store.dispatch(promptFailed({ id: channelId, itemId: item.id, failed: true }));
       this.schedulePersist(channelId);
     }
@@ -1669,7 +1689,7 @@ export class SessionRuntime {
     this.store.dispatch(promptFailed({ id: channelId, itemId, failed: false }));
     this.schedulePersist(channelId);
     try {
-      await this.deliverPrompt(channelId, item.text, item.attachments);
+      await this.deliverPrompt(channelId, item.text, item.attachments, item.delivery);
     } catch {
       if (!this.session(channelId)) return;
       this.store.dispatch(promptFailed({ id: channelId, itemId, failed: true }));
@@ -1677,8 +1697,13 @@ export class SessionRuntime {
     }
   }
 
-  private async deliverPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
-    await this.send(channelId, prompt(text, attachments));
+  private async deliverPrompt(
+    channelId: string,
+    text: string,
+    attachments?: PromptAttachment[],
+    delivery: PromptDelivery = 'immediate',
+  ): Promise<void> {
+    await this.send(channelId, prompt(text, attachments, delivery));
   }
 
   async sendApproval(channelId: string, requestId: string, optionId: string): Promise<void> {
