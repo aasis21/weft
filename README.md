@@ -33,13 +33,14 @@ Everything you'd do at the terminal — now from your phone:
   real session, not a read-only mirror.
 - **Watch it work** — every command it runs and file it edits, unfolding live in the thread.
 - **Approve before it acts** — the *native* Copilot permission prompt is relayed to your phone;
-  allow or deny with a tap. A configurable timeout → deny keeps a missing phone from hanging the agent.
+  allow or deny with a tap. The prompt stays open until you answer or the session ends.
 - **Go hands-free with Vox** — tap the orb and just talk; Vox transcribes, sends, and reads the
   reply back — eyes-free, hands-free.
 - **Show it a screenshot** — attach up to six images from your camera, library, paste, or drag so
   it can *see* the bug, the design, the error.
-- **Keep it on track** — switch **interactive / plan / autopilot**, fire whitelisted slash commands
-  (`/model`, `/compact`, `/clear`, `/autopilot`, …) that run on the laptop, or **Stop** a turn mid-run.
+- **Keep it on track** — steer an active turn, switch **interactive / plan / autopilot**, fire
+  whitelisted slash commands (`/model`, `/compact`, `/clear`, `/autopilot`, …) that run on the
+  laptop, or **Stop** a turn mid-run.
 - **Run a fleet** — one Device Station drives many projects and sessions; start a fresh chat or tap
   into a running one, across multiple laptops with a default device.
 - **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,
@@ -175,8 +176,8 @@ Three layers, one monorepo:
 ### Design principles
 - **Approval = pure relay of native Copilot behavior.** The extension forwards the *native*
   permission prompt to the phone via `onPermissionRequest` and resolves with the user's tap. No
-  custom policy. Only safety net: a configurable **timeout → deny** so a missing phone can't hang
-  the agent.
+  custom policy or automatic decision timeout; the prompt stays pending until answered or the
+  session ends.
 - **Ephemeral relay.** Supabase Realtime Broadcast is in-memory; zero DB persistence in v1.
 - **End-to-end encrypted.** ECDH key agreement (public key in the QR, no secret) → AES-256-GCM.
   Supabase only ever sees ciphertext.

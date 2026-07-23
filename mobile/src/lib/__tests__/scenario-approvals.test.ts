@@ -64,8 +64,8 @@ describe('scenario: approvals', () => {
     await h!.flush();
     expect(h!.active()!.timeline.approvals.map((a) => a.requestId)).toEqual(['r1']);
 
-    // The CLI resolved r1 without this phone (timed out / decided on another device); the relay echoes it.
-    client.emit(B.approvalComplete('r1', 'timeout'));
+    // The CLI resolved r1 without this phone (for example, another device decided); the relay echoes it.
+    client.emit(B.approvalComplete('r1', 'approve-once'));
     await h!.flush();
     expect(h!.active()!.timeline.approvals).toHaveLength(0);
   });

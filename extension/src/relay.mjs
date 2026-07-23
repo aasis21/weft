@@ -28,10 +28,6 @@ import {
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
 
-const DEFAULT_APPROVAL_TIMEOUT_MS = 120_000;
-// ask_user forms take longer to fill in than a one-tap approval, so allow more slack before
-// the fail-safe cancel fires (a cancel is a no-op if the terminal already answered).
-const DEFAULT_ELICITATION_TIMEOUT_MS = 300_000;
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
 // How long a phone-relayed prompt stays "claimable" so the echoed user.message session
@@ -86,7 +82,6 @@ export function createPromptOriginTracker({
 
 export function createPermissionRelay({
   channel,
-  approvalTimeoutMs = approvalTimeoutFromEnv(),
   logger = () => {},
 } = {}) {
   if (!channel) throw new Error("weft relay: channel is required");
@@ -99,7 +94,6 @@ export function createPermissionRelay({
     const entry = pending.get(decision.requestId);
     if (!entry) return;
     pending.delete(decision.requestId);
-    clearTimeout(entry.timer);
     entry.resolve(permissionResultFromDecision(decision));
     // Echo a completion so any OTHER device still showing this banner dismisses it too.
     void channel.send(approvalComplete(decision.requestId, decision.optionId)).catch(() => {});
@@ -117,32 +111,14 @@ export function createPermissionRelay({
     }
     const toolArgs = inferToolArgs(request, invocation);
     const options = inferOptions(request);
-    const expiresAt = Date.now() + approvalTimeoutMs;
     // Keep the exact payload we sent so a late-joining phone can have it replayed verbatim
     // in a state snapshot (same requestId → its decision still resolves this pending entry).
-    const payload = approvalRequest(requestId, toolName, toolArgs, options, {
-      timeoutMs: approvalTimeoutMs,
-      expiresAt,
-    });
+    const payload = approvalRequest(requestId, toolName, toolArgs, options);
 
     await channel.send(payload);
 
     return await new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        pending.delete(requestId);
-        logger(
-          `Weft: approval request timed out after ${approvalTimeoutMs}ms; denying ${toolName}.`,
-          { level: "warning", ephemeral: false },
-        );
-        // Tell the phone the request is gone so its banner doesn't linger as a zombie (#78).
-        void channel.send(approvalComplete(requestId, "timeout")).catch(() => {});
-        resolve({
-          kind: "reject",
-          feedback: "Weft approval timed out",
-        });
-      }, approvalTimeoutMs);
-
-      pending.set(requestId, { resolve, timer, request, invocation, payload });
+      pending.set(requestId, { resolve, request, invocation, payload });
     });
   }
 
@@ -155,7 +131,6 @@ export function createPermissionRelay({
   function close() {
     unsubscribe?.();
     for (const [requestId, entry] of pending) {
-      clearTimeout(entry.timer);
       entry.resolve({
         kind: "reject",
         feedback: "Weft relay stopped before approval decision",
@@ -181,13 +156,12 @@ export function createPermissionRelay({
  *  - `complete(data)`  — call on an `elicitation.completed` event: dismiss the phone's form.
  *  - internally listens for the phone's ELICITATION_RESPONSE and calls respondToElicitation.
  *
- * A per-request timeout fails safe with `{ action: "cancel" }` so a walked-away phone can never
- * hang the agent (the cancel is a no-op when the terminal already answered).
+ * Requests stay pending until the phone or terminal answers, the runtime completes them, or the
+ * relay closes.
  */
 export function createElicitationRelay({
   session,
   channel,
-  elicitationTimeoutMs = elicitationTimeoutFromEnv(),
   logger = () => {},
 } = {}) {
   if (!channel) throw new Error("weft relay: channel is required");
@@ -204,7 +178,7 @@ export function createElicitationRelay({
     if (msg?.eventSubtype !== SUBTYPE.ELICITATION_RESPONSE.RESPONSE) return;
     const answer = msg.msg;
     const entry = pending.get(answer.requestId);
-    if (!entry) return; // already resolved at the terminal, or timed out
+    if (!entry) return; // already resolved at the terminal or completed by the runtime
     clearPending(answer.requestId);
     if (!respond) {
       logger(
@@ -238,18 +212,7 @@ export function createElicitationRelay({
       data.url,
     );
     await channel.send(payload);
-    const timer = setTimeout(() => {
-      pending.delete(requestId);
-      // Fail safe so a walked-away phone can't hang the agent; no-op if already answered.
-      respond?.(requestId, { action: "cancel" });
-      void channel.send(elicitationComplete(requestId, "cancel")).catch(() => {});
-      logger(`Weft: ask_user prompt unanswered after ${elicitationTimeoutMs}ms; cancelled.`, {
-        level: "warning",
-        ephemeral: false,
-      });
-    }, elicitationTimeoutMs);
-    timer.unref?.();
-    pending.set(requestId, { timer, payload });
+    pending.set(requestId, { payload });
   }
 
   /** The still-open ask_user prompts, as flat elicitationRequest PAYLOADS (msg), so a phone
@@ -267,9 +230,6 @@ export function createElicitationRelay({
   }
 
   function clearPending(requestId) {
-    const entry = pending.get(requestId);
-    if (!entry) return;
-    clearTimeout(entry.timer);
     pending.delete(requestId);
   }
 
@@ -293,7 +253,6 @@ export function createElicitationRelay({
 export function createExitPlanModeRelay({
   session,
   channel,
-  approvalTimeoutMs = approvalTimeoutFromEnv(),
   logger = () => {},
 } = {}) {
   if (!channel) throw new Error("weft relay: channel is required");
@@ -334,7 +293,6 @@ export function createExitPlanModeRelay({
     const requestId = data.requestId;
     if (!requestId) return;
     const options = exitPlanOptions(data);
-    const expiresAt = Date.now() + approvalTimeoutMs;
     const payload = approvalRequest(
       requestId,
       "Exit Plan Mode",
@@ -343,20 +301,9 @@ export function createExitPlanModeRelay({
         ...(typeof data.planContent === "string" && data.planContent ? { planContent: data.planContent } : {}),
       },
       options,
-      { timeoutMs: approvalTimeoutMs, expiresAt },
     );
     await channel.send(payload);
-    const timer = setTimeout(() => {
-      clearPending(requestId);
-      respond?.(requestId, { approved: false, feedback: "Weft plan-exit approval timed out" });
-      void channel.send(approvalComplete(requestId, "timeout")).catch(() => {});
-      logger(`Weft: plan-exit request unanswered after ${approvalTimeoutMs}ms; declined.`, {
-        level: "warning",
-        ephemeral: false,
-      });
-    }, approvalTimeoutMs);
-    timer.unref?.();
-    pending.set(requestId, { timer, payload });
+    pending.set(requestId, { payload });
   }
 
   async function complete(data = {}) {
@@ -371,9 +318,6 @@ export function createExitPlanModeRelay({
   }
 
   function clearPending(requestId) {
-    const entry = pending.get(requestId);
-    if (!entry) return;
-    clearTimeout(entry.timer);
     pending.delete(requestId);
   }
 
@@ -394,7 +338,6 @@ export async function attachRelay({
   session,
   channel,
   channelId,
-  approvalTimeoutMs,
   heartbeatMs = DEFAULT_HEARTBEAT_MS,
   permissionRelay,
   onConnectionLost,
@@ -412,9 +355,9 @@ export async function attachRelay({
   const logger = (message, options = {}) => logToSession(session, message, options);
   const approvals =
     permissionRelay ??
-    createPermissionRelay({ channel, approvalTimeoutMs, logger });
+    createPermissionRelay({ channel, logger });
   const elicitations = createElicitationRelay({ session, channel, logger });
-  const exitPlans = createExitPlanModeRelay({ session, channel, approvalTimeoutMs, logger });
+  const exitPlans = createExitPlanModeRelay({ session, channel, logger });
   // In-memory recent-turns buffer: captures FULL assistant text live (the CLI store drops it for
   // long/multi-tool turns), so a connecting phone can backfill recent turns at full fidelity. Seeded
   // best-effort from the store so turns from before this extension started still show.
@@ -1043,16 +986,6 @@ function safeJson(value) {
   } catch {
     return "[unserializable]";
   }
-}
-
-function approvalTimeoutFromEnv() {
-  const raw = Number.parseInt(process.env.WEFT_APPROVAL_TIMEOUT_MS ?? "", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_APPROVAL_TIMEOUT_MS;
-}
-
-function elicitationTimeoutFromEnv() {
-  const raw = Number.parseInt(process.env.WEFT_ELICITATION_TIMEOUT_MS ?? "", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_ELICITATION_TIMEOUT_MS;
 }
 
 /** Shape the phone's response into the SDK's ElicitResult ({ action, content? }). */

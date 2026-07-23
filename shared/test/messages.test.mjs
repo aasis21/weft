@@ -146,10 +146,10 @@ test("approvalDecision echoes the chosen option", () => {
 });
 
 test("approvalComplete carries the requestId and terminating decision", () => {
-  const m = approvalComplete("req-1", "timeout");
+  const m = approvalComplete("req-1", "stopped");
   assertEnvelope(m, EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.COMPLETE);
   assert.equal(m.msg.requestId, "req-1");
-  assert.equal(m.msg.decision, "timeout");
+  assert.equal(m.msg.decision, "stopped");
 });
 
 // ---- control ---------------------------------------------------------------

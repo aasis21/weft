@@ -64,8 +64,57 @@ describe('scenario: send prompt', () => {
     await h!.manager.sendPrompt('c1', 'do a thing');
     expect(h!.active()!.timeline.busy).toBe(true);
 
+    client.emit(B.activity(false));
+    await h!.flush();
+    expect(h!.active()!.timeline.busy).toBe(false);
+
     client.send = vi.fn().mockRejectedValue(new Error('offline'));
     await h!.manager.sendPrompt('c1', 'will fail');
+    expect(h!.active()!.timeline.busy).toBe(false);
+  });
+
+  it('sends steering prompts while already busy and preserves busy state when steering delivery fails', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    client.emit(B.activity(true));
+    await h!.flush();
+    client.clearSent();
+
+    await h!.manager.sendPrompt('c1', 'focus on the failing test');
+    expect(client.sentOfKind('prompt.prompt')).toHaveLength(1);
+    expect(client.sentOfKind('prompt.prompt')[0]).toMatchObject({ text: 'focus on the failing test' });
+    expect(h!.active()!.timeline.busy).toBe(true);
+
+    client.send = vi.fn().mockRejectedValue(new Error('offline'));
+    await h!.manager.sendPrompt('c1', 'try a smaller change');
+    expect(h!.active()!.timeline.items.at(-1)).toMatchObject({
+      kind: 'user',
+      text: 'try a smaller change',
+      failed: true,
+    });
+    expect(h!.active()!.timeline.busy).toBe(true);
+  });
+
+  it('does not restore busy when the host reports idle during a failed steering send', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    client.emit(B.activity(true));
+    await h!.flush();
+
+    let rejectSend!: (error: Error) => void;
+    client.send = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    const steering = h!.manager.sendPrompt('c1', 'focus on the failing test');
+
+    client.emit(B.activity(false));
+    await h!.flush();
+    rejectSend(new Error('offline'));
+    await steering;
+
     expect(h!.active()!.timeline.busy).toBe(false);
   });
 });

@@ -1642,6 +1642,7 @@ export class SessionRuntime {
   async sendPrompt(channelId: string, text: string, attachments?: PromptAttachment[]): Promise<void> {
     const session = this.session(channelId);
     if (!session) return;
+    const wasBusy = session.connection.busy;
     const ts = this.clock();
     const item = makeUserItem(`user-${ts}-${Math.random().toString(36).slice(2, 7)}`, text, ts, attachments);
     this.store.dispatch(userPromptAppended({ id: channelId, item }));
@@ -1654,8 +1655,14 @@ export class SessionRuntime {
     try {
       await this.deliverPrompt(channelId, text, attachments);
     } catch {
-      if (!this.session(channelId)) return;
-      this.store.dispatch(busySet({ id: channelId, busy: false, ts: this.clock() }));
+      const current = this.session(channelId);
+      if (!current) return;
+      // A failed first prompt returns to idle; a failed steering message must not make the active
+      // turn look idle while Copilot is still working. If the host reported idle while this send
+      // was in flight, preserve that newer authoritative state instead of resurrecting busy.
+      if (current.connection.busy) {
+        this.store.dispatch(busySet({ id: channelId, busy: wasBusy, ts: this.clock() }));
+      }
       this.store.dispatch(promptFailed({ id: channelId, itemId: item.id, failed: true }));
       this.schedulePersist(channelId);
     }

@@ -168,7 +168,7 @@ export interface ApprovalDecisionMsg {
 }
 export interface ApprovalCompleteMsg {
   requestId: string;
-  /** How it resolved elsewhere: the chosen optionId, "timeout", or "stopped". Informational only. */
+  /** How it resolved elsewhere: the chosen optionId or "stopped". Informational only. */
   decision?: string;
 }
 /** JSON Schema for a form-mode elicitation: an object whose properties are the fields. */
