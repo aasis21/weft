@@ -162,11 +162,13 @@ export const userMessage = (text, origin = "terminal", id) =>
 /**
  * A phone-typed prompt relayed to the laptop session. `attachments` (optional) carries inline
  * images the user picked: each is `{ data (base64, no `data:` prefix), mimeType, name }`.
+ * `delivery` is omitted for the existing immediate/steering behavior and stamped only for enqueue.
  */
-export const prompt = (text, attachments = null) =>
+export const prompt = (text, attachments = null, delivery = "immediate") =>
   envelope(EVENT_TYPE.PROMPT, SUBTYPE.PROMPT.PROMPT, {
     text,
     ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
+    ...(delivery === "enqueue" ? { delivery } : {}),
   });
 
 // ---- factories (approval / decision) ---------------------------------------

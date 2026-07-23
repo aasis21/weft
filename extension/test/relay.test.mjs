@@ -233,6 +233,15 @@ test("createPromptOriginTracker: matches expire after the window", () => {
   assert.equal(t.size, 0);
 });
 
+test("createPromptOriginTracker: queued matches persist until consumed", () => {
+  let nowMs = 1000;
+  const t = createPromptOriginTracker({ windowMs: 5000, now: () => nowMs });
+  t.record("after this", { persistent: true });
+  nowMs = 1000 + 5001;
+  assert.equal(t.classify("after this"), "phone");
+  assert.equal(t.size, 0);
+});
+
 test("createPromptOriginTracker: ignores non-string input", () => {
   const t = createPromptOriginTracker();
   t.record(undefined);
@@ -268,6 +277,14 @@ test("does NOT re-broadcast a phone-relayed prompt's echoed user.message", async
       (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "from my phone"
     );
     assert.equal(echoes.length, 0);
+  });
+});
+
+test("relays a queued phone prompt with enqueue delivery", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.PROMPT, prompt("after this", null, "enqueue"));
+    await flush();
+    assert.deepEqual(session.prompts.at(-1), { prompt: "after this", mode: "enqueue" });
   });
 });
 

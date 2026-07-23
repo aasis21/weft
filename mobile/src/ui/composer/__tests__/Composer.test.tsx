@@ -179,7 +179,7 @@ describe('Composer', () => {
     expect(dictation.querySelector('svg')?.innerHTML).not.toBe(voiceMode.querySelector('svg')?.innerHTML);
   });
 
-  it('shows Stop and sends steering prompts while busy', async () => {
+  it('shows Stop, Queue, and Steer while busy', async () => {
     const user = userEvent.setup();
     const onPrompt = vi.fn();
     const onInterrupt = vi.fn();
@@ -188,6 +188,13 @@ describe('Composer', () => {
     const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
     expect(textbox).toHaveAttribute('placeholder', 'Steer the current turn…');
     expect(screen.queryByRole('button', { name: 'Steer current turn' })).not.toBeInTheDocument();
+
+    await user.type(textbox, 'run the integration tests next');
+    await user.click(screen.getByRole('button', { name: 'Queue after current turn' }));
+
+    expect(onPrompt).toHaveBeenCalledWith('run the integration tests next', undefined, 'enqueue');
+    expect(onInterrupt).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('');
 
     await user.type(textbox, 'focus on the failing test');
     await user.click(screen.getByRole('button', { name: 'Steer current turn' }));
@@ -405,6 +412,21 @@ describe('Composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Vox' }));
 
     expect(onOpenVoiceMode).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a draft when a stop tap finishes after busy clears', async () => {
+    const user = userEvent.setup();
+    const onPrompt = vi.fn();
+    const rendered = renderComposer({ busy: true, onPrompt });
+    const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+    await user.type(textbox, 'keep this draft');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Stop generating' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue after current turn' }));
+
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('keep this draft');
+    rendered.unmount();
   });
 
   describe('slash commands', () => {

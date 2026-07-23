@@ -111,12 +111,16 @@ test("prompt carries text and only includes attachments when present", () => {
   assertEnvelope(bare, EVENT_TYPE.PROMPT, SUBTYPE.PROMPT.PROMPT);
   assert.equal(bare.msg.text, "do the thing");
   assert.equal(bare.msg.attachments, undefined);
+  assert.equal(bare.msg.delivery, undefined);
 
   const atts = [{ data: "AAAA", mimeType: "image/png", name: "a.png" }];
   const withImg = prompt("look", atts);
   assert.deepEqual(withImg.msg.attachments, atts);
   // Empty array is treated as no attachments.
   assert.equal(prompt("x", []).msg.attachments, undefined);
+
+  const queued = prompt("after this", null, "enqueue");
+  assert.equal(queued.msg.delivery, "enqueue");
 });
 
 // ---- approval / decision ---------------------------------------------------

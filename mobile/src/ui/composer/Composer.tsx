@@ -3,7 +3,7 @@ import '@/ui/styles/composer.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/weft-shared';
-import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
+import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { PHONE_COMMANDS, getPhoneCommand } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
@@ -16,7 +16,7 @@ interface ComposerProps {
   busy: boolean;
   mode: SessionMode;
   cwd: string | null;
-  onPrompt(text: string, attachments?: PromptAttachment[]): Promise<void> | void;
+  onPrompt(text: string, attachments?: PromptAttachment[], delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
   /** Run a whitelisted Copilot CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
@@ -309,7 +309,7 @@ export function Composer({
     onCommand(name, input || undefined);
   };
 
-  const send = async (): Promise<void> => {
+  const send = async (delivery: PromptDelivery = 'immediate'): Promise<void> => {
     if (nowMs() < suppressSendUntilRef.current) return;
     const trimmed = text.trim();
     const outgoing = attachments;
@@ -333,7 +333,12 @@ export function Composer({
     }
 
     clearDraft();
-    await onPrompt(trimmed, outgoing.length ? outgoing : undefined);
+    const outgoingAttachments = outgoing.length ? outgoing : undefined;
+    if (delivery === 'enqueue') {
+      await onPrompt(trimmed, outgoingAttachments, delivery);
+    } else {
+      await onPrompt(trimmed, outgoingAttachments);
+    }
   };
 
   const openFilePicker = (): void => {
@@ -788,6 +793,27 @@ export function Composer({
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
+                </svg>
+              </button>
+            ) : null}
+            {busy && !emptyPrompt ? (
+              <button
+                className="queue-btn"
+                type="button"
+                onClick={() => void send('enqueue')}
+                disabled={disabled || attaching}
+                aria-label="Queue after current turn"
+                title="Queue after current turn"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M5 7h8M5 12h8M17 5v12m-3-3 3 3 3-3"
+                  />
                 </svg>
               </button>
             ) : null}

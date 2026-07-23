@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
+import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { ChatThread } from '@/ui/thread/ChatThread';
@@ -189,7 +189,7 @@ interface SessionScreenProps {
   active: SessionView;
   sessions: SessionView[];
   activeId: string;
-  onPrompt(text: string, attachments?: PromptAttachment[]): void;
+  onPrompt(text: string, attachments?: PromptAttachment[], delivery?: PromptDelivery): void;
   onApprove(requestId: string, optionId: string): void;
   onElicitationRespond(
     requestId: string,

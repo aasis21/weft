@@ -38,9 +38,9 @@ Everything you'd do at the terminal — now from your phone:
   reply back — eyes-free, hands-free.
 - **Show it a screenshot** — attach up to six images from your camera, library, paste, or drag so
   it can *see* the bug, the design, the error.
-- **Keep it on track** — steer an active turn, switch **interactive / plan / autopilot**, fire
-  whitelisted slash commands (`/model`, `/compact`, `/clear`, `/autopilot`, …) that run on the
-  laptop, or **Stop** a turn mid-run.
+- **Keep it on track** — steer an active turn, queue the next instruction, switch
+  **interactive / plan / autopilot**, fire whitelisted slash commands (`/model`, `/compact`,
+  `/clear`, `/autopilot`, …) that run on the laptop, or **Stop** a turn mid-run.
 - **Run a fleet** — one Device Station drives many projects and sessions; start a fresh chat or tap
   into a running one, across multiple laptops with a default device.
 - **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,

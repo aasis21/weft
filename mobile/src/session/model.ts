@@ -6,6 +6,7 @@ import type {
   ListenerProject,
   LogLineMsg,
   PromptAttachment,
+  PromptDelivery,
   SessionMode,
   SessionOffer,
   StoredSession,
@@ -23,6 +24,7 @@ export interface UserItem {
   text: string;
   ts: number;
   failed?: boolean;
+  delivery?: PromptDelivery;
   origin?: 'phone' | 'terminal';
   attachments?: PromptAttachment[];
 }

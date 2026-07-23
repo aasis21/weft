@@ -117,4 +117,49 @@ describe('scenario: send prompt', () => {
 
     expect(h!.active()!.timeline.busy).toBe(false);
   });
+
+  it('queues a follow-up without changing the active turn busy state', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    client.emit(B.activity(true));
+    await h!.flush();
+    client.clearSent();
+
+    await h!.manager.sendPrompt('c1', 'run the integration tests next', undefined, 'enqueue');
+
+    expect(client.sentOfKind('prompt.prompt')).toHaveLength(1);
+    expect(client.sentOfKind('prompt.prompt')[0]).toMatchObject({
+      text: 'run the integration tests next',
+      delivery: 'enqueue',
+    });
+    expect(h!.active()!.timeline.items.at(-1)).toMatchObject({
+      kind: 'user',
+      text: 'run the integration tests next',
+      delivery: 'enqueue',
+    });
+    expect(h!.active()!.timeline.busy).toBe(true);
+  });
+
+  it('retries a failed queued follow-up as queued', async () => {
+    const { client } = await h!.pair('c1');
+    client.emit(B.channelUp('c1', 'sess-1', '/repo', 'Title'));
+    client.emit(B.activity(true));
+    await h!.flush();
+
+    const originalSend = client.send;
+    client.send = vi.fn().mockRejectedValue(new Error('offline'));
+    await h!.manager.sendPrompt('c1', 'run the integration tests next', undefined, 'enqueue');
+    const failed = h!.active()!.timeline.items.at(-1);
+    expect(failed).toMatchObject({ kind: 'user', delivery: 'enqueue', failed: true });
+
+    client.send = originalSend;
+    client.clearSent();
+    await h!.manager.retryPrompt('c1', failed!.id);
+
+    expect(client.sentOfKind('prompt.prompt')).toHaveLength(1);
+    expect(client.sentOfKind('prompt.prompt')[0]).toMatchObject({
+      text: 'run the integration tests next',
+      delivery: 'enqueue',
+    });
+  });
 });

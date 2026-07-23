@@ -59,13 +59,13 @@ export function createPromptOriginTracker({
   let pending = [];
   const prune = () => {
     const cutoff = now() - windowMs;
-    pending = pending.filter((p) => p.ts >= cutoff);
+    pending = pending.filter((p) => p.persistent || p.ts >= cutoff);
   };
   return {
-    record(text) {
+    record(text, { persistent = false } = {}) {
       if (typeof text !== "string") return;
       prune();
-      pending.push({ text, ts: now() });
+      pending.push({ text, ts: now(), persistent });
     },
     classify(text) {
       prune();
@@ -450,8 +450,10 @@ export async function attachRelay({
       const promptText = voiceModeActive ? VOICE_MODE_PROMPT_PREFIX + body.text : body.text;
       // Remember this phone-typed prompt so its echoed user.message session event is
       // attributed to the phone (which already shows it optimistically) and not
-      // re-broadcast as a terminal message.
-      promptOrigin.record(promptText);
+      // re-broadcast as a terminal message. Queued prompts can execute much later than
+      // immediate steering prompts, so keep their correlation until consumed or relay shutdown.
+      const delivery = body.delivery === "enqueue" ? "enqueue" : "immediate";
+      promptOrigin.record(promptText, { persistent: delivery === "enqueue" });
       // Map phone-relayed image attachments (base64) to Copilot SDK blob attachments.
       // Defensive: drop anything missing base64 `data` or a `mimeType`. The SDK resizes
       // images itself; the phone already downscales to keep the relay payload small.
@@ -466,8 +468,8 @@ export async function attachRelay({
             }))
         : [];
       const sendOptions = attachments.length
-        ? { prompt: promptText, attachments, mode: "immediate" }
-        : { prompt: promptText, mode: "immediate" };
+        ? { prompt: promptText, attachments, mode: delivery }
+        : { prompt: promptText, mode: delivery };
       void session
         .send?.(sendOptions)
         ?.catch?.((err) =>
