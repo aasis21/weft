@@ -15,6 +15,7 @@ export type EventType =
   | "pair";
 
 export type SessionMode = "interactive" | "plan" | "autopilot";
+export type PromptDelivery = "immediate" | "enqueue";
 
 export type ElicitationMode = "form" | "url";
 export type ElicitationAction = "accept" | "decline" | "cancel";
@@ -154,6 +155,7 @@ export interface PromptAttachment {
 export interface PromptMsg {
   text: string;
   attachments?: PromptAttachment[];
+  delivery?: PromptDelivery;
 }
 export interface ApprovalRequestMsg {
   requestId: string;
@@ -168,7 +170,7 @@ export interface ApprovalDecisionMsg {
 }
 export interface ApprovalCompleteMsg {
   requestId: string;
-  /** How it resolved elsewhere: the chosen optionId, "timeout", or "stopped". Informational only. */
+  /** How it resolved elsewhere: the chosen optionId or "stopped". Informational only. */
   decision?: string;
 }
 /** JSON Schema for a form-mode elicitation: an object whose properties are the fields. */
@@ -468,7 +470,11 @@ export function userMessage(
   origin?: "phone" | "terminal",
   id?: string
 ): UserMessageEcho;
-export function prompt(text: string, attachments?: PromptAttachment[] | null): PromptMessage;
+export function prompt(
+  text: string,
+  attachments?: PromptAttachment[] | null,
+  delivery?: PromptDelivery
+): PromptMessage;
 export function approvalRequest(
   requestId: string,
   toolName: string,

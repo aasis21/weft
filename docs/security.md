@@ -49,7 +49,7 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 | Message tampering / replay garbage | GCM auth tag rejects modified ciphertext | replay of *valid* old envelopes not yet sequence-checked → **see below** |
 | **QR shoulder-surf / screenshot** | QR shown briefly; contains only a public key + channelId | **anyone who reads the QR can pair** — accepted in v1 |
 | **Pairing race / impersonation** | `waitForPeer` resolves on the first `pair.hello` | an attacker who saw the QR could pair first — accepted in v1 |
-| Approval prompt hangs the agent | `onPermissionRequest` has a **timeout → deny** safety net (`WEFT_APPROVAL_TIMEOUT_MS`, default 120s) | a slow phone denies a tool it might have approved |
+| Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
 | Lost/stolen phone | session key is ephemeral and dies with the session | a live, unlocked paired phone can drive the session |
 
 ### The QR is a bearer credential

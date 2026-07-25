@@ -90,6 +90,16 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   npm run build -w @aasis21/weft-mobile >/dev/null
   [ -f "$dist_dir/index.html" ] || { echo "mobile build did not produce $dist_dir" >&2; exit 1; }
   ok "mobile/dist"
+
+  # Keep the downloadable Android package in parity with ship.ps1. The checked-in debug APK is
+  # optional; when present, stitch it into the web deploy so /app can serve /weft-debug.apk.
+  apk_source="$root/mobile/release/weft-debug.apk"
+  if [ -f "$apk_source" ]; then
+    cp "$apk_source" "$dist_dir/weft-debug.apk"
+    ok "mobile/dist/weft-debug.apk  (served as /weft-debug.apk for the /app download page)"
+  else
+    info "no mobile/release/weft-debug.apk - /app download page will not include an APK"
+  fi
 else
   info "skip-build: reusing existing extension/dist and mobile/dist"
   [ -f "$ext_bundle" ] || { echo "no $ext_bundle - run once without --skip-build first" >&2; exit 1; }
@@ -172,4 +182,6 @@ if [ "$SKIP_DEPLOY" -eq 0 ] && [ "$DRAFT" -eq 0 ]; then
   printf '\033[32m  Site:      https://useweft.netlify.app\033[0m\n'
   printf '\033[32m  Installer: curl -fsSL https://useweft.netlify.app/install.sh | bash\033[0m\n'
 fi
-[ "$INSTALL" -eq 1 ] && printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'
+if [ "$INSTALL" -eq 1 ]; then
+  printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'
+fi

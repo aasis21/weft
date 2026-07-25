@@ -145,7 +145,7 @@ async function withRelay(run) {
 test("relays exit_plan_mode.requested as a three-option approval and answers via the UI RPC", async () => {
   const channel = makeFakeChannel();
   const session = makeFakeSession();
-  const relay = createExitPlanModeRelay({ session, channel, approvalTimeoutMs: 10_000_000 });
+  const relay = createExitPlanModeRelay({ session, channel });
   try {
     await relay.offer({
       requestId: "plan-1",
@@ -158,6 +158,8 @@ test("relays exit_plan_mode.requested as a three-option approval and answers via
     );
     assert.ok(req, "expected a plan-exit approval request to be sent to the phone");
     assert.equal(req.msg.toolName, "Exit Plan Mode");
+    assert.equal(req.msg.timeoutMs, undefined);
+    assert.equal(req.msg.expiresAt, undefined);
     assert.deepEqual(
       req.msg.options.map((o) => ({ id: o.id, label: o.label, recommended: o.recommended })),
       [
@@ -165,6 +167,14 @@ test("relays exit_plan_mode.requested as a three-option approval and answers via
         { id: "autopilot", label: "Accept plan and build", recommended: true },
         { id: "suggest_changes", label: "Suggest changes", recommended: false },
       ],
+    );
+
+    await new Promise((r) => setTimeout(r, 45));
+    assert.deepEqual(session.exitPlanResponses, []);
+    assert.equal(
+      channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.COMPLETE),
+      undefined,
+      "the plan-exit request must not be dismissed automatically",
     );
 
     channel.emit(EVENT_TYPE.DECISION, approvalDecision("plan-1", "autopilot"));
@@ -223,6 +233,15 @@ test("createPromptOriginTracker: matches expire after the window", () => {
   assert.equal(t.size, 0);
 });
 
+test("createPromptOriginTracker: queued matches persist until consumed", () => {
+  let nowMs = 1000;
+  const t = createPromptOriginTracker({ windowMs: 5000, now: () => nowMs });
+  t.record("after this", { persistent: true });
+  nowMs = 1000 + 5001;
+  assert.equal(t.classify("after this"), "phone");
+  assert.equal(t.size, 0);
+});
+
 test("createPromptOriginTracker: ignores non-string input", () => {
   const t = createPromptOriginTracker();
   t.record(undefined);
@@ -258,6 +277,14 @@ test("does NOT re-broadcast a phone-relayed prompt's echoed user.message", async
       (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "from my phone"
     );
     assert.equal(echoes.length, 0);
+  });
+});
+
+test("relays a queued phone prompt with enqueue delivery", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.PROMPT, prompt("after this", null, "enqueue"));
+    await flush();
+    assert.deepEqual(session.prompts.at(-1), { prompt: "after this", mode: "enqueue" });
   });
 });
 
@@ -495,7 +522,7 @@ test("sendSafe stays quiet for five failures, triggers reconnect once on the six
 test("createElicitationRelay.snapshotPending replays open ask_user payloads, cleared on complete", async () => {
   const channel = makeFakeChannel();
   const session = makeFakeSession();
-  const relay = createElicitationRelay({ session, channel, elicitationTimeoutMs: 10_000_000 });
+  const relay = createElicitationRelay({ session, channel });
   try {
     await relay.offer({
       requestId: "req-open",
@@ -666,23 +693,28 @@ test("dismisses the phone form when any side completes the elicitation", async (
   });
 });
 
-test("cancels a stale elicitation on timeout so a walked-away phone can't hang the turn", async () => {
+test("keeps an unanswered elicitation pending until it is explicitly completed", async () => {
   const channel = makeFakeChannel();
   const session = makeFakeSession();
-  const relay = createElicitationRelay({ session, channel, elicitationTimeoutMs: 15 });
+  const relay = createElicitationRelay({ session, channel });
   try {
-    relay.offer({
+    await relay.offer({
       requestId: "req-4",
       message: "still there?",
       mode: "form",
       requestedSchema: { type: "object", properties: {} },
     });
     await new Promise((r) => setTimeout(r, 45));
-    assert.deepEqual(session.elicitationResponses, [
-      { requestId: "req-4", result: { action: "cancel" } },
-    ]);
-    const dismiss = channel.sent.find((m) => m.eventSubtype === SUBTYPE.ELICITATION.COMPLETE);
-    assert.ok(dismiss && dismiss.msg.action === "cancel", "expected a cancel dismiss after timeout");
+    assert.deepEqual(session.elicitationResponses, []);
+    assert.equal(
+      channel.sent.find((m) => m.eventSubtype === SUBTYPE.ELICITATION.COMPLETE),
+      undefined,
+      "the phone form must not be dismissed automatically",
+    );
+    assert.equal(relay.snapshotPending()[0]?.requestId, "req-4");
+
+    await relay.complete({ requestId: "req-4", action: "cancel" });
+    assert.deepEqual(relay.snapshotPending(), []);
   } finally {
     relay.close();
   }
@@ -729,35 +761,27 @@ test("an exact native decision in raw is passed through, unknown raw kinds are n
   assert.equal(result.kind, "reject");
 });
 
-test("a permission timeout fails closed with the native reject kind", async () => {
+test("keeps a permission request pending until the phone decides", async () => {
   const channel = makeFakeChannel();
-  const relay = createPermissionRelay({ channel, approvalTimeoutMs: 5 });
+  const relay = createPermissionRelay({ channel });
   try {
-    const result = await relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
-    assert.equal(result.kind, "reject");
-    // #78: the phone must be told the request is gone so its banner doesn't linger as a zombie.
-    const done = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.COMPLETE);
-    assert.ok(done, "expected an approval_complete after the timeout");
-    assert.equal(done.msg.decision, "timeout");
-  } finally {
-    relay.close();
-  }
-});
-
-test("approval requests carry the relay's real auto-deny deadline", async () => {
-  const channel = makeFakeChannel();
-  const approvalTimeoutMs = 12_345;
-  const relay = createPermissionRelay({ channel, approvalTimeoutMs });
-  try {
-    const before = Date.now();
-    void relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
-    await flush();
-    const after = Date.now();
+    const resultPromise = relay.onPermissionRequest({ kind: "shell", toolName: "powershell" });
+    await new Promise((r) => setTimeout(r, 45));
     const req = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
     assert.ok(req, "expected an approval request to be sent to the phone");
-    assert.equal(req.msg.timeoutMs, approvalTimeoutMs);
-    assert.ok(req.msg.expiresAt >= before + approvalTimeoutMs);
-    assert.ok(req.msg.expiresAt <= after + approvalTimeoutMs);
+    assert.equal(req.msg.timeoutMs, undefined);
+    assert.equal(req.msg.expiresAt, undefined);
+    assert.equal(
+      channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.COMPLETE),
+      undefined,
+      "the approval must not be dismissed automatically",
+    );
+
+    channel.emit(EVENT_TYPE.DECISION, approvalDecision(req.msg.requestId, "denied-interactively-by-user"));
+    const result = await resultPromise;
+    assert.equal(result.kind, "reject");
+    const done = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.COMPLETE);
+    assert.equal(done?.msg.decision, "denied-interactively-by-user");
   } finally {
     relay.close();
   }

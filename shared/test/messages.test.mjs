@@ -111,12 +111,16 @@ test("prompt carries text and only includes attachments when present", () => {
   assertEnvelope(bare, EVENT_TYPE.PROMPT, SUBTYPE.PROMPT.PROMPT);
   assert.equal(bare.msg.text, "do the thing");
   assert.equal(bare.msg.attachments, undefined);
+  assert.equal(bare.msg.delivery, undefined);
 
   const atts = [{ data: "AAAA", mimeType: "image/png", name: "a.png" }];
   const withImg = prompt("look", atts);
   assert.deepEqual(withImg.msg.attachments, atts);
   // Empty array is treated as no attachments.
   assert.equal(prompt("x", []).msg.attachments, undefined);
+
+  const queued = prompt("after this", null, "enqueue");
+  assert.equal(queued.msg.delivery, "enqueue");
 });
 
 // ---- approval / decision ---------------------------------------------------
@@ -146,10 +150,10 @@ test("approvalDecision echoes the chosen option", () => {
 });
 
 test("approvalComplete carries the requestId and terminating decision", () => {
-  const m = approvalComplete("req-1", "timeout");
+  const m = approvalComplete("req-1", "stopped");
   assertEnvelope(m, EVENT_TYPE.APPROVAL, SUBTYPE.APPROVAL.COMPLETE);
   assert.equal(m.msg.requestId, "req-1");
-  assert.equal(m.msg.decision, "timeout");
+  assert.equal(m.msg.decision, "stopped");
 });
 
 // ---- control ---------------------------------------------------------------

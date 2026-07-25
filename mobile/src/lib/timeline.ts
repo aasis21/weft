@@ -10,6 +10,7 @@ import type {
   LogLine,
   LogLineMsg,
   PromptAttachment,
+  PromptDelivery,
   RecentTurnsMsg,
   SessionMode,
   StateSnapshotMsg,
@@ -31,6 +32,8 @@ export interface UserItem {
   text: string;
   ts: number;
   failed?: boolean;
+  /** How this phone prompt was delivered to the active Copilot session. */
+  delivery?: PromptDelivery;
   /** Which device typed this prompt: 'phone' (this device) or 'terminal' (the laptop).
    *  Undefined for backfilled history (turns carry no device). */
   origin?: 'phone' | 'terminal';

@@ -179,18 +179,29 @@ describe('Composer', () => {
     expect(dictation.querySelector('svg')?.innerHTML).not.toBe(voiceMode.querySelector('svg')?.innerHTML);
   });
 
-  it('shows Stop while busy and does not queue prompts while busy', async () => {
+  it('shows Stop, Queue, and Steer while busy', async () => {
     const user = userEvent.setup();
     const onPrompt = vi.fn();
     const onInterrupt = vi.fn();
     renderComposer({ busy: true, onPrompt, onInterrupt });
 
     const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
-    await user.type(textbox, 'do not send yet');
-    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    expect(textbox).toHaveAttribute('placeholder', 'Steer the current turn…');
+    expect(screen.queryByRole('button', { name: 'Steer current turn' })).not.toBeInTheDocument();
 
-    fireEvent.keyDown(textbox, { key: 'Enter', ctrlKey: true });
-    expect(onPrompt).not.toHaveBeenCalled();
+    await user.type(textbox, 'run the integration tests next');
+    await user.click(screen.getByRole('button', { name: 'Queue after current turn' }));
+
+    expect(onPrompt).toHaveBeenCalledWith('run the integration tests next', undefined, 'enqueue');
+    expect(onInterrupt).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('');
+
+    await user.type(textbox, 'focus on the failing test');
+    await user.click(screen.getByRole('button', { name: 'Steer current turn' }));
+
+    expect(onPrompt).toHaveBeenCalledWith('focus on the failing test', undefined);
+    expect(onInterrupt).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('');
 
     await user.click(screen.getByRole('button', { name: 'Stop generating' }));
     expect(onInterrupt).toHaveBeenCalledTimes(1);
@@ -392,7 +403,48 @@ describe('Composer', () => {
     expect(textbox).toHaveValue('keep this draft');
   });
 
+  it('does not open Vox when a stop tap finishes after busy clears', () => {
+    const onOpenVoiceMode = vi.fn();
+    const rendered = renderComposer({ busy: true, onOpenVoiceMode });
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Stop generating' }));
+    rendered.rerender(<Composer {...rendered.props} busy={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Vox' }));
+
+    expect(onOpenVoiceMode).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a draft when a stop tap finishes after busy clears', async () => {
+    const user = userEvent.setup();
+    const onPrompt = vi.fn();
+    const rendered = renderComposer({ busy: true, onPrompt });
+    const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+    await user.type(textbox, 'keep this draft');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Stop generating' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue after current turn' }));
+
+    expect(onPrompt).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('keep this draft');
+    rendered.unmount();
+  });
+
   describe('slash commands', () => {
+    it('treats slash-prefixed text as steering while busy', async () => {
+      const user = userEvent.setup();
+      const onPrompt = vi.fn();
+      const onCommand = vi.fn();
+      renderComposer({ busy: true, onPrompt, onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/plan focus only on the API');
+      expect(screen.queryByRole('option')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Steer current turn' }));
+
+      expect(onPrompt).toHaveBeenCalledWith('/plan focus only on the API', undefined);
+      expect(onCommand).not.toHaveBeenCalled();
+    });
+
     it('routes a whitelisted command to onCommand instead of onPrompt', async () => {
       const user = userEvent.setup();
       const onPrompt = vi.fn();

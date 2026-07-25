@@ -25,6 +25,25 @@ describe('ChatThread', () => {
     expect(container.querySelector('.avatar.copilot')).toBeInTheDocument();
   });
 
+  it('labels queued phone prompts', () => {
+    render(
+      <ChatThread
+        items={[
+          {
+            kind: 'user',
+            id: 'u-queued',
+            text: 'run the integration tests next',
+            ts: now,
+            origin: 'phone',
+            delivery: 'enqueue',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Queued')).toHaveClass('user-queued');
+  });
+
   it('ignores deprecated paginated history props', () => {
     const { container } = render(
       <ChatThread

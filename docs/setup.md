@@ -188,8 +188,6 @@ small number of *unrelated*, legitimate tuning env vars:
 
 | Env var | Used by | Meaning |
 |---|---|---|
-| `WEFT_APPROVAL_TIMEOUT_MS` | extension | approval wait before auto-deny (default 120000) |
-| `WEFT_ELICITATION_TIMEOUT_MS` | extension | elicitation wait before auto-deny |
 | `WEFT_CHANNEL_ID` | extension | force a channel id (tests); otherwise random 128-bit |
 
 ## Docs index

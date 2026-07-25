@@ -3,7 +3,7 @@ import '@/ui/styles/composer.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/weft-shared';
-import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
+import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { PHONE_COMMANDS, getPhoneCommand } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
@@ -16,7 +16,7 @@ interface ComposerProps {
   busy: boolean;
   mode: SessionMode;
   cwd: string | null;
-  onPrompt(text: string, attachments?: PromptAttachment[]): Promise<void> | void;
+  onPrompt(text: string, attachments?: PromptAttachment[], delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
   /** Run a whitelisted Copilot CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
@@ -202,7 +202,6 @@ export function Composer({
   const speechCommittedRef = useRef('');
   const sessionIdRef = useRef(sessionId);
   const attachmentGenerationRef = useRef(0);
-  const actionPointerStartedBusyRef = useRef(false);
   const disabledPlaceholder =
     disabledReason === 'offline'
       ? 'Reconnecting… — hold on'
@@ -284,7 +283,7 @@ export function Composer({
     };
   }, [attachMenuOpen]);
 
-  const commandQuery = slashQuery(text);
+  const commandQuery = busy ? null : slashQuery(text);
   const slashOptions = commandQuery === null
     ? []
     : SLASH_ITEMS.filter((item) => item.command.slice(1).startsWith(commandQuery));
@@ -310,15 +309,16 @@ export function Composer({
     onCommand(name, input || undefined);
   };
 
-  const send = async (): Promise<void> => {
+  const send = async (delivery: PromptDelivery = 'immediate'): Promise<void> => {
     if (nowMs() < suppressSendUntilRef.current) return;
     const trimmed = text.trim();
     const outgoing = attachments;
-    if ((!trimmed && outgoing.length === 0) || disabled || busy || attaching) return;
+    if ((!trimmed && outgoing.length === 0) || disabled || attaching) return;
 
     // A whitelisted CLI command (with no image attachments) runs on the laptop instead of being
     // sent as a prompt. Unknown "/foo" falls through to onPrompt as literal text (legacy behavior).
-    if (outgoing.length === 0) {
+    // While Copilot is busy, every submission is steering text for the active turn.
+    if (!busy && outgoing.length === 0) {
       const parsed = parseCommand(trimmed);
       if (parsed) {
         const meta = getPhoneCommand(parsed.name);
@@ -333,7 +333,12 @@ export function Composer({
     }
 
     clearDraft();
-    await onPrompt(trimmed, outgoing.length ? outgoing : undefined);
+    const outgoingAttachments = outgoing.length ? outgoing : undefined;
+    if (delivery === 'enqueue') {
+      await onPrompt(trimmed, outgoingAttachments, delivery);
+    } else {
+      await onPrompt(trimmed, outgoingAttachments);
+    }
   };
 
   const openFilePicker = (): void => {
@@ -532,22 +537,8 @@ export function Composer({
     suppressSendUntilRef.current = Math.max(suppressSendUntilRef.current, nowMs() + SEND_AFTER_STOP_SUPPRESS_MS);
   };
 
-  const onActionPointerDown = (): void => {
-    actionPointerStartedBusyRef.current = busy;
-    if (busy) suppressSendAfterStopTap();
-  };
-
   const onActionClick = (): void => {
-    if (actionPointerStartedBusyRef.current) {
-      actionPointerStartedBusyRef.current = false;
-      if (busy) onInterrupt();
-      return;
-    }
-    if (busy) {
-      suppressSendAfterStopTap();
-      onInterrupt();
-      return;
-    }
+    if (nowMs() < suppressSendUntilRef.current) return;
     if (emptyPrompt && !disabled && !attaching) {
       onOpenVoiceMode();
       return;
@@ -703,7 +694,9 @@ export function Composer({
           onKeyDown={onKeyDown}
           onChange={(event) => onTextChange(event.target.value)}
           onPaste={onPaste}
-          placeholder={disabled ? disabledPlaceholder : 'Message your Copilot session…'}
+          placeholder={
+            disabled ? disabledPlaceholder : busy ? 'Steer the current turn…' : 'Message your Copilot session…'
+          }
         />
 
         <div className="composer-controls">
@@ -789,30 +782,64 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            <button
-              className={busy ? 'stop-btn' : `send-btn${emptyPrompt ? ' voice-action' : ''}`}
-              type="button"
-              onPointerDown={onActionPointerDown}
-              onClick={onActionClick}
-              disabled={!busy && (disabled || attaching)}
-              aria-label={busy ? 'Stop generating' : emptyPrompt ? 'Open Vox' : 'Send'}
-              title={busy ? 'Stop generating' : emptyPrompt ? 'Open Vox' : undefined}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                {busy ? (
+            {busy ? (
+              <button
+                className="stop-btn"
+                type="button"
+                onPointerDown={suppressSendAfterStopTap}
+                onClick={onInterrupt}
+                aria-label="Stop generating"
+                title="Stop generating"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
-                ) : emptyPrompt ? (
-                  <>
-                    <rect x="5" y="10" width="2.4" height="4" rx="1.2" fill="currentColor" />
-                    <rect x="9" y="6.5" width="2.4" height="11" rx="1.2" fill="currentColor" />
-                    <rect x="13" y="4" width="2.4" height="16" rx="1.2" fill="currentColor" />
-                    <rect x="17" y="8" width="2.4" height="8" rx="1.2" fill="currentColor" />
-                  </>
-                ) : (
-                  <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
-                )}
-              </svg>
-            </button>
+                </svg>
+              </button>
+            ) : null}
+            {busy && !emptyPrompt ? (
+              <button
+                className="queue-btn"
+                type="button"
+                onClick={() => void send('enqueue')}
+                disabled={disabled || attaching}
+                aria-label="Queue after current turn"
+                title="Queue after current turn"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M5 7h8M5 12h8M17 5v12m-3-3 3 3 3-3"
+                  />
+                </svg>
+              </button>
+            ) : null}
+            {!busy || !emptyPrompt ? (
+              <button
+                className={`send-btn${!busy && emptyPrompt ? ' voice-action' : ''}`}
+                type="button"
+                onClick={onActionClick}
+                disabled={disabled || attaching}
+                aria-label={busy ? 'Steer current turn' : emptyPrompt ? 'Open Vox' : 'Send'}
+                title={busy ? 'Steer current turn' : emptyPrompt ? 'Open Vox' : undefined}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  {!busy && emptyPrompt ? (
+                    <>
+                      <rect x="5" y="10" width="2.4" height="4" rx="1.2" fill="currentColor" />
+                      <rect x="9" y="6.5" width="2.4" height="11" rx="1.2" fill="currentColor" />
+                      <rect x="13" y="4" width="2.4" height="16" rx="1.2" fill="currentColor" />
+                      <rect x="17" y="8" width="2.4" height="8" rx="1.2" fill="currentColor" />
+                    </>
+                  ) : (
+                    <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
+                  )}
+                </svg>
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
