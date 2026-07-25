@@ -97,6 +97,28 @@ configured yet.
 > Redeploy after a change with `npm run build -w @aasis21/weft-mobile` then a Netlify deploy
 > of `mobile/dist` (or connect the repo — `netlify.toml` already has the build config).
 
+### Shipping it: environments
+
+`ship.sh` / `ship.ps1` deploy to Netlify from a laptop. The same scripts also run in CI, via two
+manually-dispatched GitHub Actions workflows that differ only in which GitHub Environment (and so
+which `NETLIFY_SITE_ID`) they use:
+
+| Workflow | Environment | Netlify site | URL |
+| --- | --- | --- | --- |
+| `Deploy Netlify Production` | `production` | `useweft` | <https://useweft.netlify.app> |
+| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> |
+
+Both are `workflow_dispatch`-only — nothing deploys on a push to `main`:
+
+```sh
+gh workflow run "Deploy Netlify Test" --repo aasis21/weft
+```
+
+Each environment holds `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`. The installers are checked in
+with the production origin as their default, so at deploy time the ship scripts resolve the target
+site's real URL and rewrite the `mobile/dist` copies of `install.sh` / `install.ps1` (never the
+sources) — a test deploy therefore serves an installer that pulls *its own* bundles.
+
 **3. Pair and drive it.** Start `copilot` in any repo; Weft prints a pairing QR via
 `session.log()` (run `/weft` to re-show it). Scan/paste it, then trigger a Copilot
 action (e.g. a file write) and watch the stream — approve/deny and switch modes from the

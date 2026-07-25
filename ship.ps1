@@ -68,6 +68,22 @@ function Ok($m)   { Write-Host "  OK  $m" -ForegroundColor Green }
 function Info($m) { Write-Host "  ..  $m" -ForegroundColor DarkGray }
 function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
 
+$ProdUrl = 'https://useweft.netlify.app'
+
+# Ask Netlify for the public URL of $Site so every downstream string (the installers we deploy and
+# the closing banner) points at the site we actually shipped to, not a hardcoded production URL.
+function Resolve-SiteUrl([string]$SiteId) {
+    try {
+        $raw = & netlify api getSite --data "{`"site_id`":`"$SiteId`"}" 2>$null | Out-String
+        $start = $raw.IndexOf('{')
+        if ($start -lt 0) { return '' }
+        $site = $raw.Substring($start) | ConvertFrom-Json
+        if ($site.ssl_url) { return $site.ssl_url }
+        if ($site.url) { return $site.url }
+        return ''
+    } catch { return '' }
+}
+
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
     $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
@@ -134,6 +150,28 @@ try {
 
     if (-not $SkipDeploy) {
         $kind = if ($Draft) { 'preview (draft)' } else { 'production' }
+
+        $siteUrl = Resolve-SiteUrl $Site
+        if (-not $siteUrl) {
+            $siteUrl = $ProdUrl
+            Warn "could not resolve the public URL for site $Site - assuming $ProdUrl"
+        }
+
+        # The installers are checked in with the production origin baked in as their default. Rewrite
+        # the deploy-time copies (never the sources) so a non-production site serves an installer that
+        # pulls ITS OWN bundles - otherwise useweft-test would hand out production bits.
+        if ($siteUrl -ne $ProdUrl) {
+            Step "Retargeting deployed installers to $siteUrl"
+            foreach ($name in @('install.sh', 'install.ps1')) {
+                $f = Join-Path $distDir $name
+                if (-not (Test-Path $f)) { continue }
+                $text = Get-Content $f -Raw
+                # install.sh must keep LF endings - it is executed by bash from a curl pipe.
+                [System.IO.File]::WriteAllText($f, $text.Replace($ProdUrl, $siteUrl))
+                Ok "$name  (origin -> $siteUrl)"
+            }
+        }
+
         Step "Deploying mobile/dist to Netlify [$Site] - $kind"
         # --no-build: we already built mobile/dist above; just upload it. --filter resolves the
         # npm-workspace monorepo so the CLI does not prompt. Site is referenced by id (the name
@@ -211,8 +249,8 @@ node "%~dp0weft.mjs" %*
 
     Step 'Done'
     if (-not $SkipDeploy -and -not $Draft) {
-        Write-Host '  Site:      https://useweft.netlify.app' -ForegroundColor Green
-        Write-Host '  Installer: irm https://useweft.netlify.app/install.ps1 | iex' -ForegroundColor Green
+        Write-Host "  Site:      $siteUrl" -ForegroundColor Green
+        Write-Host "  Installer: irm $siteUrl/install.ps1 | iex" -ForegroundColor Green
     }
     if ($Install) {
         # ship.ps1 can only refresh the files in ~/.copilot/extensions/weft; the running Copilot

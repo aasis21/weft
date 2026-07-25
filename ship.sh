@@ -49,6 +49,21 @@ ok(){   printf '\033[32m  OK  %s\033[0m\n' "$1"; }
 info(){ printf '\033[90m  ..  %s\033[0m\n' "$1"; }
 warn(){ printf '\033[33m  !!  %s\033[0m\n' "$1"; }
 
+PROD_URL="https://useweft.netlify.app"
+
+# Ask Netlify for the public URL of $SITE so every downstream string (the installers we deploy and
+# the closing banner) points at the site we actually shipped to, not a hardcoded production URL.
+resolve_site_url(){
+  netlify api getSite --data "{\"site_id\":\"$1\"}" 2>/dev/null | node -e '
+    let s = "";
+    process.stdin.on("data", d => s += d).on("end", () => {
+      const i = s.indexOf("{");
+      try { const j = JSON.parse(s.slice(i)); process.stdout.write(j.ssl_url || j.url || ""); }
+      catch { process.stdout.write(""); }
+    });
+  '
+}
+
 ext_bundle="$root/extension/dist/extension.mjs"
 relay_bundle="$root/extension/dist/relayServerProcess.mjs"
 weft_cli_bundle="$root/extension/dist/weft.mjs"
@@ -110,6 +125,26 @@ fi
 
 if [ "$SKIP_DEPLOY" -eq 0 ]; then
   kind=$([ "$DRAFT" -eq 1 ] && echo "preview (draft)" || echo "production")
+
+  site_url="$(resolve_site_url "$SITE")"
+  if [ -z "$site_url" ]; then
+    site_url="$PROD_URL"
+    warn "could not resolve the public URL for site $SITE - assuming $PROD_URL"
+  fi
+
+  # The installers are checked in with the production origin baked in as their default. Rewrite the
+  # deploy-time copies (never the sources) so a non-production site serves an installer that pulls
+  # ITS OWN bundles - otherwise useweft-test would hand out production bits.
+  if [ "$site_url" != "$PROD_URL" ]; then
+    cyan "Retargeting deployed installers to $site_url"
+    for f in "$dist_dir/install.sh" "$dist_dir/install.ps1"; do
+      [ -f "$f" ] || continue
+      sed -i.bak "s#$PROD_URL#$site_url#g" "$f"
+      rm -f "$f.bak"
+      ok "$(basename "$f")  (origin -> $site_url)"
+    done
+  fi
+
   cyan "Deploying mobile/dist to Netlify [$SITE] - $kind"
   # --no-build: mobile/dist is already built above; just upload it. --filter resolves the
   # npm-workspace monorepo so the CLI does not prompt. Site referenced by id.
@@ -179,8 +214,8 @@ fi
 
 cyan "Done"
 if [ "$SKIP_DEPLOY" -eq 0 ] && [ "$DRAFT" -eq 0 ]; then
-  printf '\033[32m  Site:      https://useweft.netlify.app\033[0m\n'
-  printf '\033[32m  Installer: curl -fsSL https://useweft.netlify.app/install.sh | bash\033[0m\n'
+  printf '\033[32m  Site:      %s\033[0m\n' "$site_url"
+  printf '\033[32m  Installer: curl -fsSL %s/install.sh | bash\033[0m\n' "$site_url"
 fi
 if [ "$INSTALL" -eq 1 ]; then
   printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'
