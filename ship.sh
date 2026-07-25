@@ -182,4 +182,6 @@ if [ "$SKIP_DEPLOY" -eq 0 ] && [ "$DRAFT" -eq 0 ]; then
   printf '\033[32m  Site:      https://useweft.netlify.app\033[0m\n'
   printf '\033[32m  Installer: curl -fsSL https://useweft.netlify.app/install.sh | bash\033[0m\n'
 fi
-[ "$INSTALL" -eq 1 ] && printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'
+if [ "$INSTALL" -eq 1 ]; then
+  printf '\033[32m  Local CLI: restart copilot to load the new extension; run /weft to show the QR.\033[0m\n'
+fi
