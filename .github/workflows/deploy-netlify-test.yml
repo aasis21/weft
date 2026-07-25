@@ -1,10 +1,24 @@
 name: Deploy Netlify Test
 
+# Dispatchable from ANY branch: pick the branch in the Actions UI, or
+#   gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=preview
+# The `test` environment has no deployment-branch policy, so feature branches are allowed.
+
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview = unique throwaway URL (safe from any branch); live = overwrite useweft-test.netlify.app"
+        type: choice
+        options:
+          - preview
+          - live
+        default: preview
 
 concurrency:
-  group: netlify-test
+  # Live deploys share one site, so they must serialise. Previews get their own URL, so key
+  # them per branch - two feature branches must never cancel each other.
+  group: netlify-test-${{ github.event.inputs.mode == 'live' && 'live-shared' || format('preview-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -32,4 +46,25 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: bash ./ship.sh --site "$NETLIFY_SITE_ID"
+          MODE: ${{ github.event.inputs.mode }}
+        run: |
+          set -o pipefail
+          args=(--site "$NETLIFY_SITE_ID")
+          if [ "$MODE" = "preview" ]; then args+=(--draft); fi
+          bash ./ship.sh "${args[@]}" 2>&1 | tee ship.log
+
+      - name: Summarise deploy
+        if: always()
+        run: |
+          url=$(grep -oE 'https://[a-z0-9-]+--[a-z0-9-]+\.netlify\.app' ship.log | tail -1 || true)
+          {
+            echo "### Netlify test deploy"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
+            echo "| Mode | \`${MODE}\` |"
+            echo "| URL | ${url:-_see job log_} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          MODE: ${{ github.event.inputs.mode }}
