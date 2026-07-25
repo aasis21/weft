@@ -103,15 +103,16 @@ configured yet.
 manually-dispatched GitHub Actions workflows that differ only in which GitHub Environment (and so
 which `NETLIFY_SITE_ID`) they use:
 
-| Workflow | Environment | Netlify site | URL |
-| --- | --- | --- | --- |
-| `Deploy Netlify Production` | `production` | `useweft` | <https://useweft.netlify.app> |
-| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> |
+| Workflow | Environment | Netlify site | URL | Triggers |
+| --- | --- | --- | --- | --- |
+| `Deploy Netlify Production` | `production` | `useweft` | <https://useweft.netlify.app> | manual only |
+| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> | push to `main` + manual |
 
-Both are `workflow_dispatch`-only — nothing deploys on a push to `main`:
+The test site auto-deploys on every push to `main`, so it always mirrors the tip of the default
+branch. Production never deploys automatically — it is always an explicit dispatch:
 
 ```sh
-gh workflow run "Deploy Netlify Test" --repo aasis21/weft
+gh workflow run "Deploy Netlify Production" --repo aasis21/weft
 ```
 
 **Deploying a feature branch.** The `test` environment has no deployment-branch policy, so the test
@@ -121,10 +122,10 @@ workflow can be dispatched from any ref — pick the branch in the Actions UI, o
 gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=preview
 ```
 
-`mode=preview` (the default) is a Netlify *draft* deploy: it publishes to a unique throwaway URL and
-leaves `useweft-test.netlify.app` alone, so several branches can be in flight at once. `mode=live`
-overwrites the shared test site. The resulting URL is printed in the run's job summary. Production
-has no such input — it always publishes.
+`mode=preview` (the default for a manual run) is a Netlify *draft* deploy: it publishes to a unique
+throwaway URL and leaves `useweft-test.netlify.app` alone, so several branches can be in flight at
+once. `mode=live` overwrites the shared test site — which is also what a push to `main` does, since
+push events carry no inputs. The resulting URL is printed in the run's job summary.
 
 Each environment holds `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`. The installers are checked in
 with the production origin as their default, so at deploy time the ship scripts resolve the target

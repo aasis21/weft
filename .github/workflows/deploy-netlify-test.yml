@@ -1,10 +1,14 @@
 name: Deploy Netlify Test
 
-# Dispatchable from ANY branch: pick the branch in the Actions UI, or
+# Runs automatically on every push to `main` (a live deploy, so useweft-test always mirrors main),
+# and can be dispatched from ANY branch: pick the branch in the Actions UI, or
 #   gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=preview
 # The `test` environment has no deployment-branch policy, so feature branches are allowed.
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       mode:
@@ -17,8 +21,9 @@ on:
 
 concurrency:
   # Live deploys share one site, so they must serialise. Previews get their own URL, so key
-  # them per branch - two feature branches must never cancel each other.
-  group: netlify-test-${{ github.event.inputs.mode == 'live' && 'live-shared' || format('preview-{0}', github.ref) }}
+  # them per branch - two feature branches must never cancel each other. Push events carry no
+  # inputs, hence the `|| 'live'` default that is repeated wherever the mode is read.
+  group: netlify-test-${{ (github.event.inputs.mode || 'live') == 'live' && 'live-shared' || format('preview-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -46,7 +51,7 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-          MODE: ${{ github.event.inputs.mode }}
+          MODE: ${{ github.event.inputs.mode || 'live' }}
         run: |
           set -o pipefail
           args=(--site "$NETLIFY_SITE_ID")
@@ -67,4 +72,4 @@ jobs:
             echo "| URL | ${url:-_see job log_} |"
           } >> "$GITHUB_STEP_SUMMARY"
         env:
-          MODE: ${{ github.event.inputs.mode }}
+          MODE: ${{ github.event.inputs.mode || 'live' }}
