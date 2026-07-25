@@ -30,9 +30,10 @@ import { createRecentTurns } from "./recentTurns.mjs";
 
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
-// How long a phone-relayed prompt stays "claimable" so the echoed user.message session
-// event it produces is attributed to the phone (and not re-broadcast as a terminal msg).
-const PROMPT_CORRELATION_WINDOW_MS = 30_000;
+// Upper bound on un-consumed phone-prompt correlations kept in memory. Entries are normally
+// removed when their echoed user.message arrives (or when the relay send fails); this cap is
+// only a safety valve so a pathological stream of never-echoed prompts can't grow unbounded.
+const MAX_PENDING_PROMPT_CORRELATIONS = 100;
 // Voice Mode (#176): prefixed to a relayed phone prompt while voice mode is on, so the agent
 // authors its reply for LISTENING (spoken aloud) rather than dense on-screen reading.
 const VOICE_MODE_PROMPT_PREFIX =
@@ -43,36 +44,44 @@ const VOICE_MODE_PROMPT_PREFIX =
   "your spoken phrasing.]\n\n";
 
 /**
- * Tracks recent phone-originated prompts so that when the matching `user.message`
- * session event fires we can tell it apart from a prompt typed at the laptop terminal.
- * The SDK event carries no source device, so we correlate by exact content within a
- * short time window. Pure + injectable clock → unit-testable.
+ * Tracks phone-originated prompts so that when the matching `user.message` session event
+ * fires we can tell it apart from a prompt typed at the laptop terminal. The SDK event
+ * carries no source device, so we correlate by exact content. Pure → unit-testable.
+ *
+ * Correlations are held until CONSUMED rather than expiring on a timer: the CLI can defer a
+ * prompt for arbitrarily long (a steering prompt waits for the current turn to reach a safe
+ * boundary; a queued prompt waits for the whole turn), and any prompt whose echo outlived a
+ * time window got mis-classified as terminal and re-broadcast — showing twice on the phone.
+ * A failed relay send is undone with `forget`, and `MAX_PENDING_PROMPT_CORRELATIONS` bounds
+ * the list (oldest dropped first) so nothing can grow without limit.
  *
  * - `record(text)` — call right before relaying a phone prompt into the session.
+ * - `forget(text)` — call if that relay send failed, so no `user.message` will ever arrive.
  * - `classify(text)` — call on each `user.message`; returns 'phone' (consuming the
  *   match so a later identical terminal prompt isn't mis-attributed) or 'terminal'.
  */
 export function createPromptOriginTracker({
-  windowMs = PROMPT_CORRELATION_WINDOW_MS,
-  now = () => Date.now(),
+  maxPending = MAX_PENDING_PROMPT_CORRELATIONS,
 } = {}) {
   let pending = [];
-  const prune = () => {
-    const cutoff = now() - windowMs;
-    pending = pending.filter((p) => p.persistent || p.ts >= cutoff);
+  const drop = (text) => {
+    const idx = pending.findIndex((p) => p.text === text);
+    if (idx === -1) return false;
+    pending.splice(idx, 1);
+    return true;
   };
   return {
-    record(text, { persistent = false } = {}) {
+    record(text) {
       if (typeof text !== "string") return;
-      prune();
-      pending.push({ text, ts: now(), persistent });
+      pending.push({ text });
+      if (pending.length > maxPending) pending = pending.slice(pending.length - maxPending);
+    },
+    forget(text) {
+      if (typeof text !== "string") return;
+      drop(text);
     },
     classify(text) {
-      prune();
-      const idx = pending.findIndex((p) => p.text === text);
-      if (idx === -1) return "terminal";
-      pending.splice(idx, 1);
-      return "phone";
+      return drop(text) ? "phone" : "terminal";
     },
     get size() {
       return pending.length;
@@ -450,10 +459,10 @@ export async function attachRelay({
       const promptText = voiceModeActive ? VOICE_MODE_PROMPT_PREFIX + body.text : body.text;
       // Remember this phone-typed prompt so its echoed user.message session event is
       // attributed to the phone (which already shows it optimistically) and not
-      // re-broadcast as a terminal message. Queued prompts can execute much later than
-      // immediate steering prompts, so keep their correlation until consumed or relay shutdown.
+      // re-broadcast as a terminal message. The correlation is held until consumed:
+      // steering AND queued prompts can both surface long after they were relayed.
       const delivery = body.delivery === "enqueue" ? "enqueue" : "immediate";
-      promptOrigin.record(promptText, { persistent: delivery === "enqueue" });
+      promptOrigin.record(promptText);
       // Map phone-relayed image attachments (base64) to Copilot SDK blob attachments.
       // Defensive: drop anything missing base64 `data` or a `mimeType`. The SDK resizes
       // images itself; the phone already downscales to keep the relay payload small.
@@ -472,11 +481,15 @@ export async function attachRelay({
         : { prompt: promptText, mode: delivery };
       void session
         .send?.(sendOptions)
-        ?.catch?.((err) =>
+        ?.catch?.((err) => {
+          // The prompt never reached the session, so no user.message echo will ever arrive to
+          // consume the correlation — release it so an identical terminal-typed prompt later
+          // isn't silently swallowed as a phone echo.
+          promptOrigin.forget(promptText);
           logger(`Weft prompt relay failed: ${err?.message ?? err}`, {
             level: "warning",
-          }),
-        );
+          });
+        });
     }),
   );
 

@@ -214,7 +214,7 @@ test("attachRelay forwards exit_plan_mode events into the approval timeline", as
 // ---- pure tracker ----------------------------------------------------------
 
 test("createPromptOriginTracker: unseen text is terminal, recorded text is phone (once)", () => {
-  const t = createPromptOriginTracker({ now: () => 1000 });
+  const t = createPromptOriginTracker();
   assert.equal(t.classify("never typed here"), "terminal");
   t.record("run the tests");
   assert.equal(t.size, 1);
@@ -224,28 +224,39 @@ test("createPromptOriginTracker: unseen text is terminal, recorded text is phone
   assert.equal(t.size, 0);
 });
 
-test("createPromptOriginTracker: matches expire after the window", () => {
-  let nowMs = 1000;
-  const t = createPromptOriginTracker({ windowMs: 5000, now: () => nowMs });
+test("createPromptOriginTracker: matches never expire on time (steering + queued alike)", () => {
+  const t = createPromptOriginTracker();
   t.record("deploy please");
-  nowMs = 1000 + 5001; // advance past the window
-  assert.equal(t.classify("deploy please"), "terminal");
+  // A steering prompt can sit until the current turn reaches a safe boundary, a queued one
+  // until the whole turn ends — however long that takes, its echo is still the phone's.
+  assert.equal(t.classify("deploy please"), "phone");
   assert.equal(t.size, 0);
 });
 
-test("createPromptOriginTracker: queued matches persist until consumed", () => {
-  let nowMs = 1000;
-  const t = createPromptOriginTracker({ windowMs: 5000, now: () => nowMs });
-  t.record("after this", { persistent: true });
-  nowMs = 1000 + 5001;
-  assert.equal(t.classify("after this"), "phone");
+test("createPromptOriginTracker: forget releases a prompt whose relay send failed", () => {
+  const t = createPromptOriginTracker();
+  t.record("never delivered");
+  t.forget("never delivered");
   assert.equal(t.size, 0);
+  assert.equal(t.classify("never delivered"), "terminal");
+});
+
+test("createPromptOriginTracker: pending correlations are capped, oldest dropped first", () => {
+  const t = createPromptOriginTracker({ maxPending: 2 });
+  t.record("one");
+  t.record("two");
+  t.record("three");
+  assert.equal(t.size, 2);
+  assert.equal(t.classify("one"), "terminal");
+  assert.equal(t.classify("two"), "phone");
+  assert.equal(t.classify("three"), "phone");
 });
 
 test("createPromptOriginTracker: ignores non-string input", () => {
   const t = createPromptOriginTracker();
   t.record(undefined);
   t.record(42);
+  t.forget(undefined);
   assert.equal(t.size, 0);
 });
 
@@ -277,6 +288,49 @@ test("does NOT re-broadcast a phone-relayed prompt's echoed user.message", async
       (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "from my phone"
     );
     assert.equal(echoes.length, 0);
+  });
+});
+
+test("does NOT re-broadcast a phone STEERING prompt echoed long after it was relayed", async () => {
+  // Regression: a steering prompt sent while the agent is busy is held by the CLI until the
+  // current turn reaches a safe boundary. When correlations expired on a timer, a slow turn
+  // meant the echo arrived unclaimed, was classed 'terminal', and re-broadcast — so the phone
+  // showed the message twice (once optimistically, once as a 'Laptop' bubble).
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.PROMPT, prompt("steer me"));
+    await flush();
+
+    // A whole turn's worth of unrelated activity happens before the prompt is admitted.
+    session.emitEvent({ type: "user.message", id: "e-other", data: { content: "typed at laptop" } });
+    session.emitEvent({ type: "assistant.message", id: "a1", data: { content: "working" } });
+    session.emitEvent({ type: "tool.execution_start", id: "t1", data: { toolCallId: "t1", toolName: "bash" } });
+    await flush();
+
+    session.emitEvent({ type: "user.message", id: "e3", data: { content: "steer me" } });
+    await flush();
+    const echoes = channel.sent.filter(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "steer me"
+    );
+    assert.equal(echoes.length, 0);
+  });
+});
+
+test("re-broadcasts a phone prompt whose relay send failed, if it is later typed at the laptop", async () => {
+  await withRelay(async ({ channel, session }) => {
+    session.send = async () => {
+      throw new Error("session gone");
+    };
+    channel.emit(EVENT_TYPE.PROMPT, prompt("never delivered"));
+    await flush();
+
+    // The prompt never reached the session, so this user.message really is terminal-typed.
+    session.emitEvent({ type: "user.message", id: "e4", data: { content: "never delivered" } });
+    await flush();
+    const echo = channel.sent.find(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.USER_MESSAGE && m.msg.text === "never delivered"
+    );
+    assert.ok(echo, "expected the undelivered prompt's correlation to have been released");
+    assert.equal(echo.msg.origin, "terminal");
   });
 });
 
