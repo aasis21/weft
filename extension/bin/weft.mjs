@@ -19,6 +19,7 @@ import {
   forceStopDevTunnel,
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
+import { loadTransportConfig } from "../src/transportConfig.mjs";
 import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
 import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
@@ -431,6 +432,19 @@ async function start() {
 
   await ensureAtLeastOneProject();
 
+  // Auto-provision the shared devtunnel relay when that's the configured transport, so `weft
+  // start` is genuinely one command: previously it would fail here with "no devtunnel relay is
+  // running" and make the user go run `weft devtunnel start` in a second terminal first. If a
+  // healthy relay is already up (its own terminal, or another station), we attach to it and
+  // leave it alone; if we brought it up, this station owns it and tears it down on shutdown.
+  const ownedRelay = await ensureRelayForTransport();
+  if (ownedRelay.failed) {
+    await listener.stop().catch(() => {});
+    release();
+    process.exitCode = 1;
+    return;
+  }
+
   try {
     await listener.start();
   } catch (err) {
@@ -502,10 +516,16 @@ async function start() {
   status.setIdleLabel(idleLabel);
   status.start();
 
+  // Keep an eye on the relay we own for the rest of the station's life (no-op for supabase, and
+  // for a relay some other terminal owns — that terminal is responsible for it).
+  const relayWatchdog = startRelayHealthWatchdog(ownedRelay, (line) => status.log(line));
+
   const shutdown = async (signal) => {
     appendStationLog("station.stop", { signal: signal ?? "exit" });
     status.stop();
+    relayWatchdog.stop();
     await listener.stop();
+    await releaseOwnedRelay(ownedRelay);
     release();
     if (signal) process.exit(0);
   };
@@ -513,6 +533,132 @@ async function start() {
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
   process.once("exit", release);
   await new Promise(() => {});
+}
+
+/**
+ * Brings up whatever "server" the configured transport needs BEFORE the station starts listening,
+ * so `weft start` is genuinely one command. Only the devtunnel transport has one: previously the
+ * station just failed with "no devtunnel relay is running" and sent the user off to run `weft
+ * devtunnel start` in a second terminal first.
+ *
+ * Returns `{ owned, child, baseUrl, failed }`. `owned` is true only when THIS process spawned the
+ * relay — in that case the station's shutdown tears it down (same contract as `weft devtunnel
+ * start`'s owning terminal). A relay that was already healthy (its own terminal, or another
+ * station) is reused untouched, so the 10-tunnels-per-account quota still sees one shared relay.
+ */
+async function ensureRelayForTransport() {
+  let configured = null;
+  try {
+    configured = loadTransportConfig();
+  } catch {
+    // Unset/unreadable config is the listener's error to raise (with its own set-transport
+    // guidance) — don't pre-empt it with a worse message from here.
+  }
+  if (configured?.kind !== "devtunnel") return { owned: false, child: null, baseUrl: null, failed: false };
+
+  const healthy = await healthyRegistryEntry();
+  if (healthy) {
+    console.log(
+      `${c.green("✓")} ${c.bold("devtunnel relay ready")}  ${c.dim(healthy.baseUrl)}\n` +
+        c.dim(`   Reusing the shared relay (pid ${healthy.pid}) — it stays up when this station exits.`),
+    );
+    appendStationLog("devtunnel.reused", { baseUrl: healthy.baseUrl, pid: healthy.pid });
+    return { owned: false, child: null, baseUrl: healthy.baseUrl, failed: false };
+  }
+
+  console.log(c.dim("\nNo devtunnel relay running yet — starting one for this station…"));
+  const provision = createProvisionStatusLine();
+  provision.start();
+  try {
+    const { baseUrl, child } = await ensureDevTunnelRelay({
+      onProgress: (stage) => provision.setStage(stage),
+      onRetry: (attempt, maxAttempts) => provision.setRetry(attempt, maxAttempts),
+    });
+    provision.stop();
+    // child === null means the relay came up under someone else's ownership between our probe
+    // and now (a racing terminal) — reuse it, but don't claim its lifetime.
+    if (!child) {
+      console.log(`${c.green("✓")} ${c.bold("devtunnel relay ready")}  ${c.dim(baseUrl)}`);
+      appendStationLog("devtunnel.reused", { baseUrl });
+      return { owned: false, child: null, baseUrl, failed: false };
+    }
+    console.log(`${c.green("✓")} ${c.bold("devtunnel relay started")}  ${c.dim(baseUrl)}`);
+    console.log(
+      c.dim(
+        isPersistentPairingEnabled()
+          ? "   This station owns it — closing this window stops the relay but keeps the tunnel for reuse."
+          : "   This station owns it — closing this window stops the relay and deletes the cloud tunnel.",
+      ),
+    );
+    appendStationLog("devtunnel.provisioned", { baseUrl, owned: true });
+    return { owned: true, child, baseUrl, failed: false };
+  } catch (err) {
+    provision.stop();
+    printFailure(err);
+    appendStationLog("devtunnel.provision_failed", { error: err?.message ?? String(err) }, { level: "error" });
+    return { owned: false, child: null, baseUrl: null, failed: true };
+  }
+}
+
+// Periodic liveness check for a relay this station owns. A wedged relay (process alive but no
+// longer accepting connections) or one that died outright would otherwise leave the station
+// silently unreachable from the phone — with the spinner still cheerfully saying "waiting for
+// phone to connect". We re-provision once; if the tunnel comes back on the SAME URL (persistent
+// pairing reuses the tunnel identity) the paired phone reconnects on its own, otherwise the
+// station has to be restarted for the new URL to reach the QR, so say so plainly.
+const RELAY_HEALTH_INTERVAL_MS = 30_000;
+
+function startRelayHealthWatchdog(relay, log) {
+  if (!relay?.owned) return { stop() {} };
+  let checking = false;
+  const timer = setInterval(async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      if (await healthyRegistryEntry()) return;
+      log(`${c.yellow("!")} devtunnel relay stopped responding — restarting it…`);
+      appendStationLog("devtunnel.unhealthy", { previousUrl: relay.baseUrl }, { level: "warn" });
+      const { baseUrl, child } = await ensureDevTunnelRelay();
+      const sameUrl = baseUrl === relay.baseUrl;
+      relay.baseUrl = baseUrl;
+      relay.child = child ?? relay.child;
+      relay.owned = relay.owned || Boolean(child);
+      log(
+        sameUrl
+          ? `${c.green("✓")} devtunnel relay restarted on the same URL — your phone reconnects on its own.`
+          : `${c.yellow("!")} devtunnel relay restarted on a NEW URL (${baseUrl}) — restart \`weft start\` and re-scan the QR.`,
+      );
+      appendStationLog("devtunnel.recovered", { baseUrl, sameUrl }, { level: sameUrl ? "info" : "warn" });
+    } catch (err) {
+      log(`${c.red("✗")} devtunnel relay is down and could not be restarted: ${err?.message?.split("\n")[0] ?? err}`);
+      appendStationLog("devtunnel.recovery_failed", { error: err?.message ?? String(err) }, { level: "error" });
+    } finally {
+      checking = false;
+    }
+  }, RELAY_HEALTH_INTERVAL_MS);
+  timer.unref?.();
+  return {
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
+// Mirror of `weft devtunnel start`'s Ctrl+C teardown, for the relay a station brought up itself:
+// kill the process tree, and delete or preserve the cloud tunnel according to the pairing mode.
+// A relay we merely attached to is left running — its owning terminal decides when it goes.
+async function releaseOwnedRelay(relay) {
+  if (!relay?.owned) return;
+  try {
+    const { preserved } = await forceStopDevTunnel();
+    console.log(
+      `${c.green("✓")} ${c.bold("devtunnel relay stopped")} ${c.dim(
+        preserved ? "· cloud tunnel preserved for reuse." : "· cloud tunnel released.",
+      )}`,
+    );
+  } catch (err) {
+    console.error(c.red(`devtunnel teardown failed: ${err?.message ?? err}`));
+  }
 }
 
 function acquireLock() {
@@ -1021,10 +1167,16 @@ channel + key across every run instead — an already-paired phone then reconnec
 rescan. \`weft rotate-pairing\` forces a fresh one on demand; \`weft set-pairing ephemeral\`
 reverts to a new identity every run.
 
+\`weft start\` brings up whatever the configured transport needs on its own: on the devtunnel
+transport it auto-provisions the shared relay (signing in to dev tunnels for you if needed),
+watches its health while the station runs, and stops it again on exit — unless another terminal
+already owns a healthy relay, in which case it just reuses that one and leaves it running.
+
 \`weft devtunnel start\` provisions (or attaches to) the shared devtunnel relay in the
-foreground with a live status line — useful for first-time setup or watching a slow
-provision independently of any \`/weft\` session. \`weft devtunnel status\` reports whether
-it's currently running; \`weft devtunnel stop\` force-tears it down for troubleshooting.
+foreground with a live status line — useful for first-time setup, for keeping the relay up
+across station restarts, or for watching a slow provision independently of any \`/weft\`
+session. \`weft devtunnel status\` reports whether it's currently running; \`weft devtunnel
+stop\` force-tears it down for troubleshooting.
 
 \`weft update\` refreshes just the code bundles (extension + relay + this CLI) and the
 how-to-use skill from the cloud, in place — it never touches ~/.weft, so all your config

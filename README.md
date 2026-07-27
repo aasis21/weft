@@ -95,7 +95,7 @@ so flipping back to `supabase` never needs a URL or key.
 | Transport | What it is | Set it up |
 |---|---|---|
 | **Supabase** (default) | A Supabase Realtime channel. The installer seeds Weft's **hosted relay** — zero-config, no account, no keys to supply. | `weft set-transport supabase` |
-| **Dev tunnel** (bring your own) | A [Visual Studio Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) you run yourself — a private relay under your own account, **no third party in the path**. You bring it up; pairing attaches to it. | `weft set-transport devtunnel`, then `weft devtunnel start` before pairing |
+| **Dev tunnel** (bring your own) | A [Visual Studio Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) you run yourself — a private relay under your own account, **no third party in the path**. `weft start` brings it up for you; `/weft` attaches to a relay you started. | `weft set-transport devtunnel` (then `weft devtunnel start` if you want it to outlive the station, or for `/weft`) |
 
 See [`docs/hosting.md`](docs/hosting.md) for self-hosting, RLS, and operating a relay.
 
@@ -113,6 +113,8 @@ this session only: `/weft supabase` or `/weft devtunnel`.
 **`weft start` — a standalone Device Station.** Run it in its own terminal, before any Copilot
 session exists. Your phone pairs to the station and *spawns* new Copilot sessions in the projects
 you've registered (`weft add-project`) — one station, many sessions, driven from your pocket.
+On the `devtunnel` transport the station is self-contained: it starts (and signs into) the relay
+itself when one isn't already running, watches its health, and releases it when you Ctrl+C.
 
 **Pairing modes** apply to the standalone station only (`/weft` is always per-session — a fresh
 channel and key that die with the session):
@@ -131,7 +133,7 @@ Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidate
 | Command | What it does |
 |---|---|
 | `/weft [supabase\|devtunnel]` | *(inside a Copilot session)* Pair your phone to the current session; optional arg overrides the transport for this session only. |
-| `weft start` | Start the standalone Device Station and print a QR to pair from your phone. |
+| `weft start` | Start the standalone Device Station and print a QR to pair from your phone. On the `devtunnel` transport it also brings the relay up (signing in with `devtunnel user login -g` if needed), health-watches it, and releases it on exit unless another terminal owns it. |
 | `weft add-project <name> <path> [--default]` | Register a project directory Weft can launch sessions in. |
 | `weft remove-project <name>` | Forget a registered project. |
 | `weft list-projects` | List registered projects and which one is default. |
@@ -142,7 +144,7 @@ Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidate
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
 | `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |
 | `weft show-name` | Print the device name currently in effect and where it came from. |
-| `weft devtunnel start` | Bring up the shared devtunnel relay (prerequisite before pairing when the transport is `devtunnel`). Provisions on first run or reuses an already-running one; blocks with a live status line. |
+| `weft devtunnel start` | Bring up the shared devtunnel relay and keep it up across station restarts (required before `/weft` when the transport is `devtunnel`). Provisions on first run or reuses an already-running one; blocks with a live status line. |
 | `weft devtunnel status` | Check whether the shared devtunnel relay is running, without starting it. |
 | `weft devtunnel stop` | Tear down the shared devtunnel relay. |
 | `weft help` | Show usage. |

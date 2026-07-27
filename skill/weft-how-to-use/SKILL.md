@@ -43,7 +43,8 @@ weft help
 
 - **`weft start`** — runs a standalone "Device Station": pairs a phone the same way
   `/weft` does, but without needing an active Copilot CLI session (useful for headless
-  boxes or testing transport setup independently).
+  boxes or testing transport setup independently). On the `devtunnel` transport it is
+  self-contained — see "Self-provisioning" below.
 - **`weft add-project` / `remove-project` / `list-projects` / `set-default`** — manage
   named project shortcuts the mobile app can launch a session into.
 - **`weft set-transport` / `show-transport`** — the ONLY way transport is configured.
@@ -73,9 +74,10 @@ weft help
   the relay's lifetime**: keep it open for as long as you want the tunnel up; Ctrl+C (or
   closing the terminal) stops the relay and deletes the cloud tunnel. If a healthy relay
   is already running (from another terminal), this one attaches as a watcher and exits
-  its watcher on Ctrl+C without disturbing the relay. **Run this before `/weft` /
-  `weft start` when the transport is `devtunnel`** — pairing itself never spawns the
-  relay (see Picking a transport below).
+  its watcher on Ctrl+C without disturbing the relay. Run this when you want the relay to
+  **outlive** individual stations, and always before `/weft` when the transport is
+  `devtunnel` — an in-session `/weft` never spawns the relay. (`weft start` does; see
+  Self-provisioning below.)
 - **`weft devtunnel status`** — one-shot check: prints whether the shared relay is
   running, its pid, and its public URL, or "not running". **Always check status before
   assuming you need to start** — devtunnel provisioning is shared across sessions on a
@@ -89,12 +91,32 @@ weft help
 | Transport | Setup | Best for |
 |---|---|---|
 | `supabase` | Installer seeds `~/.weft/supabase.json` with the hosted defaults. Point at your own project with `weft set-transport supabase --url <url> --anon-key <key>`, or just `weft set-transport supabase` (no flags) if the creds file is already there. | No local process to manage; works from anywhere |
-| `devtunnel` | `weft set-transport devtunnel` (no flags), **then** `weft devtunnel start` in a separate terminal before pairing. That terminal owns the relay — keep it open; every `/weft` / `weft start` elsewhere on the machine reuses it until you Ctrl+C or close it. | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft account |
+| `devtunnel` | `weft set-transport devtunnel` (no flags). `weft start` then brings the relay up on its own. For `/weft`, or to keep the relay up across station restarts, run `weft devtunnel start` in a separate terminal first — that terminal owns the relay; everything else on the machine reuses it until you Ctrl+C or close it. | Self-hosted / no third-party account needed, but requires the `devtunnel` CLI installed and a Microsoft or GitHub account |
 
-Pairing (`/weft`, `weft start`) is symmetric across both transports: it just *uses* the
-"server" — Supabase for `supabase`, the local relay + tunnel for `devtunnel` — and never
-tries to spin it up for you. If the devtunnel relay isn't running when you pair, you get
-an actionable error pointing at `weft devtunnel start` (see Troubleshooting).
+Pairing is *mostly* symmetric across both transports: it just *uses* the "server" —
+Supabase for `supabase`, the local relay + tunnel for `devtunnel`. `/weft` never tries to
+spin the relay up for you; if it isn't running you get an actionable error pointing at
+`weft devtunnel start` (see Troubleshooting).
+
+### Self-provisioning (`weft start` on the `devtunnel` transport)
+
+`weft start` is single-terminal — before pairing it will:
+
+1. **reuse** an already-healthy relay from `~/.weft/devtunnel.json` (and then leave its
+   lifetime alone — the owning terminal still owns it), otherwise
+2. **check the `devtunnel` CLI and sign in** — including the sneaky case where
+   `devtunnel user show` exits 0 but prints "Login token expired." It runs
+   `devtunnel user login -g` (GitHub device-code flow) and re-verifies before continuing,
+3. **clear a stale registry entry** (a record pointing at a relay that's gone) and
+   provision a fresh relay — if a remembered tunnel can't be hosted by the current
+   identity, it falls back to creating a brand-new one (URL changes → re-scan the QR),
+4. **health-check the relay every 30s** while the station runs, re-provisioning once if it
+   disappears, and
+5. **release it on exit** — only if this station started it. A relay from
+   `weft devtunnel start` is never torn down by a station shutting down.
+
+With persistent pairing on, teardown keeps the cloud tunnel, so the next start comes back
+on the same URL and already-paired phones reconnect without re-scanning.
 
 Microsoft Dev Tunnels caps accounts at 10 tunnels, which is why Weft provisions **one
 shared relay** (not one per session) and reuses it — that's also why `devtunnel
@@ -109,10 +131,16 @@ status`/`stop` exist as independent commands, separate from any single Copilot s
   supabase but the creds file isn't there. Run `weft set-transport supabase --url <url>
   --anon-key <key>` to write it, or re-run the installer to seed the hosted defaults.
 - **"Weft: no devtunnel relay is running on this machine"** (with transport =
-  `devtunnel`) → pairing never spawns the relay itself. Run `weft devtunnel start` in
+  `devtunnel`) → `/weft` never spawns the relay itself. Run `weft devtunnel start` in
   another terminal (blocks until healthy), then retry `/weft` (in-session, run `/weft
-  devtunnel` to force a re-resolve) or `weft start`. Use `weft devtunnel status` first to
-  confirm whether one is already up (a single relay is shared across all sessions).
+  devtunnel` to force a re-resolve). Use `weft devtunnel status` first to confirm whether
+  one is already up (a single relay is shared across all sessions). `weft start` doesn't
+  hit this — it provisions the relay itself.
+- **"the devtunnel relay failed to start"** on `weft start` → the relay child exited
+  early. Check the message beneath it; common causes are the `devtunnel` CLI not being
+  installed, or a sign-in that didn't take. Run `devtunnel user show` — if it says
+  "Login token expired." (even though it exits 0), run `devtunnel user login -g`, then
+  retry.
 - **devtunnel seems stuck / taking a long time on `weft devtunnel start`** → run `weft
   devtunnel status` in another terminal; if it reports "not running" after a couple
   minutes, `weft devtunnel stop` then retry.

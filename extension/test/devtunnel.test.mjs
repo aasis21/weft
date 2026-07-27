@@ -22,16 +22,35 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const FAKE_CLI_SCRIPT = `
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 function sleepSync(ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {}
 }
 const stageDelayMs = Number(process.env.FAKE_DEVTUNNEL_STAGE_DELAY_MS) || 0;
+const loginState = process.env.FAKE_DEVTUNNEL_LOGIN_STATE;
+const loggedIn = () =>
+  Boolean(process.env.FAKE_DEVTUNNEL_LOGGED_IN) || Boolean(loginState && existsSync(loginState));
 const args = process.argv.slice(2);
 const [cmd] = args;
 if (cmd === "--version") { console.log("fake 1.0"); process.exit(0); }
-if (args.join(" ") === "user show") { process.exit(process.env.FAKE_DEVTUNNEL_LOGGED_IN ? 0 : 1); }
+if (args.join(" ") === "user show") {
+  if (loggedIn()) { console.log("Logged in as fake@example.com using GitHub."); process.exit(0); }
+  // The REAL devtunnel CLI exits 0 here while printing that the session is unusable — detecting
+  // that (rather than trusting the exit code) is exactly what the auth check has to get right.
+  if (process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO) { console.log("Login token expired."); process.exit(0); }
+  process.exit(1);
+}
+if (args[0] === "user" && args[1] === "login") {
+  if (process.env.FAKE_DEVTUNNEL_LOGIN_LOG) {
+    appendFileSync(process.env.FAKE_DEVTUNNEL_LOGIN_LOG, args.join(" ") + "\\n");
+  }
+  if (loginState && process.env.FAKE_DEVTUNNEL_LOGIN_SUCCEEDS) { writeFileSync(loginState, "ok"); process.exit(0); }
+  // "Succeeded" without actually authenticating — declined prompt / wrong account / no-op token
+  // refresh. Exits 0, so only a re-check of \`user show\` can tell this apart from a real login.
+  if (process.env.FAKE_DEVTUNNEL_LOGIN_NOOP) { process.exit(0); }
+  process.exit(1);
+}
 if (cmd === "create" && args.includes("--json")) {
   if (process.env.FAKE_DEVTUNNEL_CREATE_LOG) {
     appendFileSync(process.env.FAKE_DEVTUNNEL_CREATE_LOG, "1\\n");
@@ -52,7 +71,14 @@ if (cmd === "delete") {
 }
 if (cmd === "host") {
   if (process.env.FAKE_DEVTUNNEL_HOST_LOG) {
-    appendFileSync(process.env.FAKE_DEVTUNNEL_HOST_LOG, "1\\n");
+    appendFileSync(process.env.FAKE_DEVTUNNEL_HOST_LOG, args.join(" ") + "\\n");
+  }
+  // Mirrors the real service's behaviour when the signed-in identity may SEE a tunnel (connect
+  // scope, so \`devtunnel show\` succeeds) but may not HOST it — e.g. it was created under a
+  // different account. Fatal and unretryable: the CLI exits instead of printing a URL.
+  if (process.env.FAKE_DEVTUNNEL_HOST_DENY_ID && args[1] === process.env.FAKE_DEVTUNNEL_HOST_DENY_ID) {
+    console.error("Tunnel service error: Request not permitted. Unauthorized tunnel access: expected one or more of [host].");
+    process.exit(1);
   }
   if (stageDelayMs) sleepSync(stageDelayMs);
   console.log("Connect via browser: https://fake-abc123-9999.usw2.devtunnels.ms");
@@ -140,6 +166,72 @@ test("ensureDevTunnelRelay throws an actionable error when not logged in", async
     delete process.env.WEFT_DEVTUNNEL_BIN;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("isDevTunnelLoggedIn: exit code 0 is not enough — an expired token reads as signed out", async () => {
+  // The real CLI prints "Login token expired." and STILL exits 0; trusting the exit code is why
+  // auto-login used to never fire on an expired session.
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO = "1";
+    const { isDevTunnelLoggedIn } = await freshModule();
+    assert.equal(await isDevTunnelLoggedIn(bin), false);
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    assert.equal(await isDevTunnelLoggedIn(bin), true);
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ensureDevTunnelLogin auto-signs in with -g when the token expired, then re-verifies", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  try {
+    const bin = makeFakeCli(dir);
+    const loginLog = join(dir, "login.log");
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO = "1";
+    process.env.FAKE_DEVTUNNEL_LOGIN_STATE = join(dir, "login.state");
+    process.env.FAKE_DEVTUNNEL_LOGIN_SUCCEEDS = "1";
+    process.env.FAKE_DEVTUNNEL_LOGIN_LOG = loginLog;
+    const { ensureDevTunnelLogin } = await freshModule();
+    const stages = [];
+    const result = await ensureDevTunnelLogin(bin, { onProgress: (s) => stages.push(s) });
+    assert.deepEqual(result, { loggedIn: true, signedIn: true });
+    assert.match(readFileSync(loginLog, "utf8"), /user login -g/);
+    assert.deepEqual(stages, ["signing-in"]);
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO;
+    delete process.env.FAKE_DEVTUNNEL_LOGIN_STATE;
+    delete process.env.FAKE_DEVTUNNEL_LOGIN_SUCCEEDS;
+    delete process.env.FAKE_DEVTUNNEL_LOGIN_LOG;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ensureDevTunnelLogin rejects a login that exits 0 without actually authenticating", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO = "1";
+    process.env.FAKE_DEVTUNNEL_LOGIN_NOOP = "1";
+    const { ensureDevTunnelLogin } = await freshModule();
+    await assert.rejects(ensureDevTunnelLogin(bin), /devtunnel user login/);
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_EXPIRED_EXIT_ZERO;
+    delete process.env.FAKE_DEVTUNNEL_LOGIN_NOOP;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -265,9 +357,21 @@ test("ensureDevTunnelRelay reports stage progress via onProgress as the relay co
 
     assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
     assert.ok(stages.length > 0, "expected at least one stage progress callback");
-    // Stages must appear in the order relayServerProcess.mjs publishes them (a subset is fine —
-    // the exact ones observed depend on scheduling, but relative order must never regress).
-    const order = ["starting-relay", "creating-tunnel", "creating-port", "creating-access", "hosting", "waiting-for-url"];
+    // Stages must appear in the order they're published — the pre-flight ones ensureDevTunnelRelay
+    // itself reports (CLI check / sign-in / stale-relay cleanup) first, then the ones
+    // relayServerProcess.mjs publishes. A subset is fine (the exact ones observed depend on
+    // scheduling), but relative order must never regress.
+    const order = [
+      "checking-cli",
+      "signing-in",
+      "clearing-stale-relay",
+      "starting-relay",
+      "creating-tunnel",
+      "creating-port",
+      "creating-access",
+      "hosting",
+      "waiting-for-url",
+    ];
     let lastIndex = -1;
     for (const stage of stages) {
       const idx = order.indexOf(stage);
@@ -354,7 +458,7 @@ test("ensureDevTunnelRelay gives an actionable error after exhausting the max-wa
 
     await assert.rejects(
       ensureDevTunnelRelay({ baseDir: homeDir }),
-      /re-run `weft devtunnel start`/,
+      /re-run `weft start` \(or `weft devtunnel start`\)/,
     );
   } finally {
     delete process.env.WEFT_DEVTUNNEL_BIN;
@@ -362,6 +466,54 @@ test("ensureDevTunnelRelay gives an actionable error after exhausting the max-wa
     delete process.env.FAKE_DEVTUNNEL_STAGE_DELAY_MS;
     delete process.env.WEFT_DEVTUNNEL_TIMEOUT_MS;
     delete process.env.WEFT_DEVTUNNEL_MAX_WAIT_MS;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("persistent pairing: a remembered tunnel this identity can't host falls back to a fresh one", async () => {
+  // `devtunnel show` only needs connect scope while `host` needs host scope, so a tunnel created
+  // under a different sign-in stays visible but refuses to host — forever. The relay must notice
+  // and provision a brand-new tunnel instead of hanging until the caller's ceiling expires.
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const hostLog = join(dir, "host-calls.log");
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_HOST_LOG = hostLog;
+    process.env.FAKE_DEVTUNNEL_HOST_DENY_ID = "foreign-tunnel-id";
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
+    const registryPath = join(homeDir, "devtunnel.json");
+    writeFileSync(
+      registryPath,
+      JSON.stringify({ tunnelId: "foreign-tunnel-id", relayPort: 51234, baseUrl: "wss://gone.usw2.devtunnels.ms", alive: false }),
+    );
+    const { ensureDevTunnelRelay } = await freshModule();
+
+    const { baseUrl } = await ensureDevTunnelRelay({ baseDir: homeDir });
+    assert.equal(baseUrl, "wss://fake-abc123-9999.usw2.devtunnels.ms");
+
+    await waitFor(
+      () => JSON.parse(readFileSync(registryPath, "utf8")).alive === true,
+      "registry to be marked alive after the fallback provision",
+    );
+    const entry = JSON.parse(readFileSync(registryPath, "utf8"));
+    assert.equal(entry.tunnelId, "fake-tunnel-id", "must have provisioned a brand-new tunnel");
+
+    const hostCalls = readFileSync(hostLog, "utf8").trim().split("\n").filter(Boolean);
+    assert.equal(hostCalls.length, 2, "host is attempted on the remembered tunnel, then the fresh one");
+    assert.match(hostCalls[0], /foreign-tunnel-id/);
+    assert.match(hostCalls[1], /fake-tunnel-id/);
+
+    await forceKill(entry.pid);
+    rmSync(registryPath, { force: true });
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_HOST_LOG;
+    delete process.env.FAKE_DEVTUNNEL_HOST_DENY_ID;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }

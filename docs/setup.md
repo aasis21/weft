@@ -182,11 +182,15 @@ planned follow-up.)
 
 ## Pairing with the `devtunnel` transport
 
-The devtunnel transport is **operator-run** — the shared local relay + Microsoft Dev
-Tunnel is your responsibility to bring up, in exactly the same sense that the Supabase
-transport expects you to have already spun up a Supabase project. Pairing (`/weft`,
-`weft start`) never spawns the tunnel for you; it just reads the shared registry
-(`~/.weft/devtunnel.json`) and uses whatever's running.
+The devtunnel transport is **operator-run** for `/weft` — the shared local relay +
+Microsoft Dev Tunnel is your responsibility to bring up inside a Copilot session, in
+exactly the same sense that the Supabase transport expects you to have already spun up a
+Supabase project. `/weft` never spawns the tunnel for you; it just reads the shared
+registry (`~/.weft/devtunnel.json`) and uses whatever's running.
+
+**`weft start` is the exception**: the standalone Device Station will provision the relay
+itself when one isn't already healthy (see
+[Self-provisioning with `weft start`](#self-provisioning-with-weft-start) below).
 
 **Two-terminal flow** (after `weft set-transport devtunnel`):
 
@@ -209,10 +213,32 @@ exits the watcher, it doesn't touch the running relay. Use `weft devtunnel statu
 check whether one's already up before opening a new owning terminal, and
 `weft devtunnel stop` from anywhere to force it down.
 
-If you run `/weft` (or `weft start`) with `transport = devtunnel` and no relay is
-running, pairing fails fast with an actionable error pointing you at `weft devtunnel
-start`. This is deliberate — it mirrors how the Supabase transport won't try to spin
-up Supabase for you either.
+If you run `/weft` with `transport = devtunnel` and no relay is running, pairing fails
+fast with an actionable error pointing you at `weft devtunnel start`. This is deliberate
+— it mirrors how the Supabase transport won't try to spin up Supabase for you either.
+
+### Self-provisioning with `weft start`
+
+`weft start` on the `devtunnel` transport is single-terminal: before it starts pairing it
+
+1. **reuses** an already-healthy relay from `~/.weft/devtunnel.json` if there is one (and
+   then never touches its lifetime — the owning terminal still owns it), otherwise
+2. **checks the `devtunnel` CLI**, and if the account is signed out (including the case
+   where `devtunnel user show` exits 0 but prints `Login token expired.`) runs
+   `devtunnel user login -g` and re-verifies before continuing,
+3. **clears a stale registry entry** (a record claiming a relay that is no longer
+   running) and provisions a fresh relay, then
+4. **watches its health every 30s** for as long as the station runs, re-provisioning once
+   if it goes away — if the new relay comes back on a different URL you'll be told to
+   re-scan the QR, and
+5. **releases it on exit** — but only if this station is the process that started it. A
+   relay you brought up with `weft devtunnel start` is never torn down by a station
+   shutting down.
+
+With persistent pairing on, teardown keeps the cloud tunnel so the next start comes back
+on the same URL and already-paired phones reconnect without re-scanning. Use
+`weft devtunnel start` when you want the relay to outlive individual stations (e.g. so
+`/weft` in Copilot sessions has something to attach to).
 
 ## Configuration reference
 

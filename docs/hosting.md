@@ -61,11 +61,15 @@ reinstalling/rebuilding the extension can never silently reset or shadow your ch
 transport — only `weft set-transport` (or the installer, on first run / when you explicitly
 pass `-Transport` / `-SupabaseUrl` / `-SupabaseKey`) ever writes them.
 
-> **Devtunnel transport is operator-run** — pairing (`/weft`, `weft start`) never spawns
-> the relay itself, exactly the way it never spins up a Supabase project for you. Bring the
-> shared relay up first with `weft devtunnel start` (which owns the `devtunnel` CLI, login,
-> and lifecycle), then run `/weft`. If it isn't running, pairing fails fast with an error
-> pointing at that command. See [`setup.md`](./setup.md#pairing-with-the-devtunnel-transport).
+> **Devtunnel transport is operator-run, with one exception** — `weft start` (the standalone
+> Device Station) will bring the shared relay up itself if it isn't already healthy: it checks
+> the `devtunnel` CLI, runs `devtunnel user login -g` when signed out, provisions the relay,
+> watches its health while the station runs, and tears it down again on exit (only if that
+> station was the one that started it). `/weft` inside a Copilot session still never spawns
+> the relay — bring it up first with `weft devtunnel start`, which owns the relay for as long
+> as that terminal stays open and survives station restarts. If no relay is running, `/weft`
+> fails fast with an error pointing at that command.
+> See [`setup.md`](./setup.md#pairing-with-the-devtunnel-transport).
 
 ## Operating a public instance
 

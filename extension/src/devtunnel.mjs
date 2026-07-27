@@ -11,19 +11,22 @@
 //
 // SHARED ACROSS SESSIONS + TERMINAL-OWNED LIFECYCLE: Dev Tunnels are capped at 10 per account (a
 // hard Microsoft quota), so Weft provisions ONE shared relay + tunnel per machine, living in a
-// child process (relayServerProcess.mjs) whose lifetime is tied to the terminal that ran
-// `weft devtunnel start`. Every other consumer (`weft start`, `/weft` in a Copilot session)
-// discovers it via a small registry file at ~/.weft/devtunnel.json (see registryFile.mjs).
+// child process (relayServerProcess.mjs) whose lifetime is tied to the terminal that brought it
+// up (`weft devtunnel start`, or `weft start`). Every other consumer (a second `weft start`,
+// `/weft` in a Copilot session) discovers it via a small registry file at ~/.weft/devtunnel.json
+// (see registryFile.mjs).
 // Close that terminal (or Ctrl+C, or `weft devtunnel stop` from anywhere) → relay dies, cloud
 // tunnel is deleted, registry cleared. No idle self-teardown: the terminal is the visible,
 // explicit owner, exactly like `ngrok` / `cloudflared tunnel` — nothing lingers in the
 // background silently.
 //
-// The pairing path (`/weft`, `weft start` → resolveDevTunnelTransport) is symmetric with the
-// Supabase transport: it just *uses* the relay, exactly like the Supabase client just uses a
-// cloud project. It never spawns, never logs in, never waits. The USER brings the relay up
-// explicitly via `weft devtunnel start` (which is the only caller of ensureDevTunnelRelay below);
-// if it isn't running, pairing throws an actionable error pointing at that command.
+// The pairing path (`/weft` in a Copilot session → resolveDevTunnelTransport) is symmetric with
+// the Supabase transport: it just *uses* the relay, exactly like the Supabase client just uses a
+// cloud project. It never spawns, never logs in, never waits. The relay is brought up by a
+// terminal-owning command instead — `weft devtunnel start`, or `weft start` (the Device Station
+// auto-provisions it so pairing a phone is one command); both go through ensureDevTunnelRelay
+// below and own the child they spawn. If none is running, pairing throws an actionable error
+// pointing at those commands.
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -69,6 +72,9 @@ const REGISTRY_POLL_MS = 100;
 // DEVTUNNEL_STATUS_FILE. Shared by extension.mjs (session.log) and bin/weft.mjs (CLI status line)
 // so both surfaces describe the exact same provisioning step identically.
 export const STAGE_LABELS = {
+  "checking-cli": "checking the devtunnel CLI…",
+  "signing-in": "signing in to dev tunnels (a browser window may open)…",
+  "clearing-stale-relay": "clearing a stale relay that stopped responding…",
   "starting-relay": "starting the local relay server…",
   "creating-tunnel": "creating the dev tunnel…",
   "creating-port": "configuring the tunnel port…",
@@ -125,6 +131,55 @@ export async function findDevTunnelBinary() {
 export async function run(bin, args) {
   const { stdout } = await execFileAsync(bin, args, { shell: process.platform === "win32" });
   return stdout;
+}
+
+// `devtunnel user show` is NOT a reliable exit-code check: the real CLI exits 0 while printing
+// "Login token expired." (or "Not logged in."), so a bare try/catch around it classifies a
+// signed-out machine as signed in — the auto-login below then never fires and the failure
+// resurfaces much later and far more opaquely, from inside `devtunnel create`. Classify from the
+// OUTPUT as well as the exit code: signed-out is the union of {nonzero exit (older CLIs, and the
+// test fake), empty output, any known signed-out phrasing}. Anything else is left as "signed in"
+// on purpose — guessing signed-out for unrecognized output would pop a browser sign-in window at
+// people who are already authenticated.
+const SIGNED_OUT_PATTERN = /not logged in|not signed in|login token expired|token has expired|token expired|please log ?in|please sign ?in|no user is logged in/i;
+
+/** True when the devtunnel CLI reports a usable (non-expired) login. Exported for tests. */
+export async function isDevTunnelLoggedIn(bin) {
+  let stdout;
+  try {
+    stdout = await run(bin, ["user", "show"]);
+  } catch {
+    return false;
+  }
+  const text = String(stdout ?? "").trim();
+  if (!text) return false;
+  return !SIGNED_OUT_PATTERN.test(text);
+}
+
+/**
+ * Guarantees the devtunnel CLI is authenticated before any tunnel operation runs, auto-signing-in
+ * when it isn't. `login -g` (GitHub device/browser flow) is tried first because it's the
+ * zero-friction path for most Weft users; it blocks until the user completes it in their browser.
+ * Crucially the result is RE-VERIFIED with isDevTunnelLoggedIn afterwards rather than trusted on
+ * exit code alone — `devtunnel user login` can exit 0 having done nothing useful (declined,
+ * wrong account, expired-token refresh that didn't take), and silently proceeding from there is
+ * exactly the failure this function exists to prevent. On a genuine failure we surface BOTH
+ * sign-in options (Microsoft work/school account as well as GitHub) instead of the user guessing.
+ */
+export async function ensureDevTunnelLogin(bin, { onProgress } = {}) {
+  if (await isDevTunnelLoggedIn(bin)) return { loggedIn: true, signedIn: false };
+  onProgress?.("signing-in");
+  try {
+    await run(bin, ["user", "login", "-g"]);
+  } catch {
+    // Fall through to the verification below — some CLI versions exit nonzero on an otherwise
+    // successful refresh, so the authoritative answer is `user show`, not this exit code.
+  }
+  if (await isDevTunnelLoggedIn(bin)) return { loggedIn: true, signedIn: true };
+  throw new Error(
+    "couldn't sign in to dev tunnels automatically.\n  " + DEVTUNNEL_LOGIN_HELP + "\n" +
+      "  Then re-run `weft devtunnel start`.",
+  );
 }
 
 /**
@@ -214,6 +269,7 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
   const existing = await healthyRegistryEntry(baseDir);
   if (existing) return { baseUrl: existing.baseUrl, child: null };
 
+  onProgress?.("checking-cli");
   const bin = await findDevTunnelBinary();
   if (!bin) {
     throw new Error(
@@ -223,46 +279,53 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
         "  3. Re-run `weft devtunnel start`.",
     );
   }
-  try {
-    await run(bin, ["user", "show"]);
-  } catch {
-    // Not logged in (or the token expired) — `login -g` opens the user's default browser for a
-    // GitHub device-code flow and blocks until they complete it, so try that first for a
-    // zero-friction path. If it fails (declined, wrong account, or the user actually needs a
-    // Microsoft/work account instead), surface BOTH sign-in options rather than the user
-    // guessing.
-    try {
-      await run(bin, ["user", "login", "-g"]);
-    } catch {
-      throw new Error(
-        "couldn't sign in to dev tunnels automatically.\n  " + DEVTUNNEL_LOGIN_HELP + "\n" +
-          "  Then re-run `weft devtunnel start`.",
-      );
-    }
+  await ensureDevTunnelLogin(bin, { onProgress });
+
+  // Stale-but-claiming-alive relay: the registry says a relay is running (pid alive) yet the
+  // health probe above failed — e.g. the relay wedged, or its port was taken over. Spawning a
+  // second relay on top of that would leak the first process AND overwrite its registry entry,
+  // so tear the old one down first. A PRESERVED persistent entry (alive:false, no live pid) is
+  // deliberately left alone: it carries the durable tunnel identity the next spawn reuses.
+  const stale = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
+  if (stale && stale.alive !== false && isPidAlive(stale.pid)) {
+    onProgress?.("clearing-stale-relay");
+    await forceStopDevTunnel({ baseDir }).catch(() => {});
   }
 
   // Spawn the relay child exactly once, no matter how many PROVISION_TIMEOUT_MS cycles the retry
   // loop below runs — it keeps working regardless of how long we poll for its registry entry, so
   // a later cycle just needs to re-poll, not re-spawn.
   const child = spawnRelayServerProcess({ bin, baseDir });
+  // A child that exits before publishing a healthy entry has failed for good (it tears its own
+  // half-provisioned state down on the way out) — there is nothing left to poll for, so stop
+  // burning the caller's remaining retry budget waiting on a process that's already gone.
+  let childExited = false;
+  child.once("exit", () => {
+    childExited = true;
+  });
 
   const maxAttempts = Math.max(1, Math.ceil(MAX_WAIT_MS / PROVISION_TIMEOUT_MS));
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const entry = await pollForHealthyEntry({ baseDir, onProgress });
+      const entry = await pollForHealthyEntry({ baseDir, onProgress, shouldAbort: () => childExited });
       return { baseUrl: entry.baseUrl, child };
     } catch (err) {
-      if (attempt >= maxAttempts) {
+      if (childExited || attempt >= maxAttempts) {
         // Exhaust path: the child never published a healthy registry entry. Tear it (and any
         // half-provisioned cloud tunnel) down before throwing, otherwise the attached child
         // would keep our parent's event loop alive forever after the CLI already gave up.
         await forceStopDevTunnel({ baseDir }).catch(() => {});
         try { child.kill(); } catch { /* best-effort */ }
         throw new Error(
-          "devtunnel is taking longer than usual to come up on this machine.\n" +
-            "  • Check your network connection (a corporate proxy/VPN can block the tunnel service).\n" +
-            "  • Make sure you're signed in — `devtunnel user login` (GitHub: add -g).\n" +
-            "  • Then re-run `weft devtunnel start`.",
+          childExited
+            ? "the devtunnel relay failed to start.\n" +
+              "  • Check your network connection (a corporate proxy/VPN can block the tunnel service).\n" +
+              "  • Confirm the CLI works on its own:  devtunnel user show   then   devtunnel create\n" +
+              "  • Then try again — `weft start` (or `weft devtunnel start`) reprovisions from scratch."
+            : "devtunnel is taking longer than usual to come up on this machine.\n" +
+              "  • Check your network connection (a corporate proxy/VPN can block the tunnel service).\n" +
+              "  • Make sure you're signed in — `devtunnel user login` (GitHub: add -g).\n" +
+              "  • Then re-run `weft start` (or `weft devtunnel start`).",
         );
       }
       onRetry?.(attempt, maxAttempts);
@@ -280,8 +343,8 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
  * a channelId — channel/room selection happens at socket-construction time in
  * createTransportFromDescriptor (extension) / weftClient.ts (mobile), exactly like Supabase's
  * `createSupabaseTransport({client, channelId})`. Does NOT shell out to the `devtunnel` CLI,
- * spawn any process, or wait — for that, use ensureDevTunnelRelay() (only the standalone
- * `weft devtunnel start` CLI should).
+ * spawn any process, or wait — for that, use ensureDevTunnelRelay() (only the terminal-owning
+ * `weft devtunnel start` / `weft start` commands should).
  */
 export async function resolveDevTunnelTransport({ baseDir } = {}) {
   const entry = await healthyRegistryEntry(baseDir);
@@ -319,12 +382,13 @@ function spawnRelayServerProcess({ bin, baseDir }) {
 /** Polls for up to PROVISION_TIMEOUT_MS for a healthy registry entry, calling `onProgress(stage)`
  * whenever the interim DEVTUNNEL_STATUS_FILE's reported stage changes. Throws on timeout — the
  * caller (ensureDevTunnelRelay's retry loop) decides whether to give up or poll again. */
-async function pollForHealthyEntry({ baseDir, onProgress }) {
+async function pollForHealthyEntry({ baseDir, onProgress, shouldAbort }) {
   let lastStage;
   const deadline = Date.now() + PROVISION_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const entry = await healthyRegistryEntry(baseDir);
     if (entry) return entry;
+    if (shouldAbort?.()) throw new Error("Weft: the devtunnel relay process exited before it came up");
     const status = readRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
     if (status?.stage && status.stage !== lastStage) {
       lastStage = status.stage;

@@ -82,6 +82,50 @@ export async function main() {
   let baseUrl;
   let host;
 
+  // Spawns `devtunnel host <id>` and resolves with the public wss:// URL it prints. Rejects as
+  // soon as the host process exits (the CLI reports fatal problems — unauthorized, tunnel gone —
+  // by exiting, so waiting out the full timeout would just be dead time).
+  const startHost = async (id) => {
+    publishStage("hosting");
+    host = spawn(bin, ["host", id], { stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
+    publishStage("waiting-for-url");
+    return await new Promise((resolve, reject) => {
+      let buffer = "";
+      let stderr = "";
+      const onData = (chunk) => {
+        buffer += chunk.toString();
+        const match = buffer.match(/https:\/\/\S+\.devtunnels\.ms/);
+        if (match) {
+          host.stdout.off("data", onData);
+          resolve(match[0].replace(/^https:/, "wss:"));
+        }
+      };
+      host.stdout.on("data", onData);
+      host.stderr?.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      host.once("error", reject);
+      host.once("exit", (code) =>
+        reject(new Error(`devtunnel host exited early (code ${code})${stderr.trim() ? `: ${stderr.trim()}` : ""}`)),
+      );
+      setTimeout(() => reject(new Error("timed out waiting for devtunnel host")), HOST_STARTUP_TIMEOUT_MS);
+    });
+  };
+
+  // Creates a brand-new tunnel, maps it to the local relay port, and opens anonymous connect
+  // access. Used for the normal (ephemeral / first-run) path and as the fallback when a
+  // remembered tunnel turns out to be unusable.
+  const createFreshTunnel = async () => {
+    publishStage("creating-tunnel");
+    const createOut = await run(bin, ["create", "--json"]);
+    const created = JSON.parse(createOut).tunnel.tunnelId;
+    publishStage("creating-port");
+    await run(bin, ["port", "create", created, "-p", String(relay.port), "--protocol", "http"]);
+    publishStage("creating-access");
+    await run(bin, ["access", "create", created, "--anonymous", "--scopes", "connect"]);
+    return created;
+  };
+
   const teardown = async () => {
     if (host) await killProcessTree(host);
     await relay.close().catch(() => {});
@@ -134,13 +178,7 @@ export async function main() {
         // already granted — fine.
       }
     } else {
-      publishStage("creating-tunnel");
-      const createOut = await run(bin, ["create", "--json"]);
-      tunnelId = JSON.parse(createOut).tunnel.tunnelId;
-      publishStage("creating-port");
-      await run(bin, ["port", "create", tunnelId, "-p", String(relay.port), "--protocol", "http"]);
-      publishStage("creating-access");
-      await run(bin, ["access", "create", tunnelId, "--anonymous", "--scopes", "connect"]);
+      tunnelId = await createFreshTunnel();
     }
   } catch {
     await relay.close().catch(() => {});
@@ -149,29 +187,31 @@ export async function main() {
     return;
   }
 
-  publishStage("hosting");
-  host = spawn(bin, ["host", tunnelId], { stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
   try {
-    publishStage("waiting-for-url");
-    baseUrl = await new Promise((resolve, reject) => {
-      let buffer = "";
-      const onData = (chunk) => {
-        buffer += chunk.toString();
-        const match = buffer.match(/https:\/\/\S+\.devtunnels\.ms/);
-        if (match) {
-          host.stdout.off("data", onData);
-          resolve(match[0].replace(/^https:/, "wss:"));
-        }
-      };
-      host.stdout.on("data", onData);
-      host.once("error", reject);
-      host.once("exit", (code) => reject(new Error(`devtunnel host exited early (code ${code})`)));
-      setTimeout(() => reject(new Error("timed out waiting for devtunnel host")), HOST_STARTUP_TIMEOUT_MS);
-    });
-  } catch {
-    await teardown();
-    process.exitCode = 1;
-    return;
+    baseUrl = await startHost(tunnelId);
+  } catch (hostErr) {
+    // Hosting a REMEMBERED tunnel can fail even though `devtunnel show` succeeded above: `show`
+    // only needs connect scope while `host` needs host scope, so a tunnel created under a
+    // different sign-in (e.g. the Microsoft account, before an auto `devtunnel user login -g`
+    // switched this machine to the GitHub identity) fails here with "Unauthorized tunnel access
+    // … expected [host]" — permanently, no matter how long the caller retries. Drop the
+    // remembered identity and provision a fresh tunnel instead: the public URL changes (paired
+    // phones re-scan) but the relay comes up, rather than hanging until the caller gives up.
+    if (!reuseTunnelId) {
+      await teardown();
+      process.exitCode = 1;
+      return;
+    }
+    if (host) await killProcessTree(host);
+    host = null;
+    try {
+      tunnelId = await createFreshTunnel();
+      baseUrl = await startHost(tunnelId);
+    } catch {
+      await teardown();
+      process.exitCode = 1;
+      return;
+    }
   }
 
   writeRegistryAtomic(
