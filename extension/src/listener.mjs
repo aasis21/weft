@@ -249,6 +249,81 @@ export function createListener({
     }
   };
 
+  /**
+   * Swaps this listener onto a freshly-resolved transport WITHOUT changing its pairing identity
+   * (same channelId + keypair), returning the rebuilt pairing payload so the host can re-render a
+   * QR pointing at the new endpoint. Exists for one real case: the devtunnel relay a station owns
+   * died and came back on a DIFFERENT URL (see `weft start`'s relay watchdog). That URL is baked
+   * into the QR the phone scanned, so without this the station keeps running and looking healthy
+   * while being completely unreachable — the only recovery was restarting `weft start` by hand.
+   *
+   * A bound phone is DROPPED rather than optimistically re-bound: it is still holding the dead URL
+   * and cannot reach the new one until it re-scans, so heartbeating at it would only make the
+   * status line claim a connection that no longer exists. Keeping the identity is what makes that
+   * re-scan cheap — the channel/keys the phone already trusts still apply, only the endpoint moved.
+   */
+  const rebindTransport = async (descriptor = null) => {
+    if (!started || stopped) return { changed: false, descriptor: listenerTransportDescriptor, pairingPayload };
+    const next = descriptor ?? (await resolveTransport());
+    if (JSON.stringify(next) === JSON.stringify(listenerTransportDescriptor)) {
+      return { changed: false, descriptor: listenerTransportDescriptor, pairingPayload };
+    }
+
+    const hadPeer = boundPeerPub !== null && !boundOptimistically;
+    stopHeartbeat();
+    try {
+      controlUnsub?.();
+    } catch {
+      // best-effort
+    }
+    controlUnsub = null;
+    try {
+      pairingStop?.();
+    } catch {
+      // best-effort
+    }
+    pairingStop = null;
+    channel = null;
+    boundPeerPub = null;
+    boundOptimistically = false;
+    // Re-advertise offers to whoever binds next: lastOffersJson is a dedupe of what went out over
+    // the OLD channel, which the next phone has never seen.
+    lastOffersJson = null;
+    try {
+      await listenerTransport?.close?.();
+    } catch {
+      // best-effort
+    }
+
+    listenerTransportDescriptor = next;
+    listenerTransport = createTransportFromDescriptor(next, { channelId: listenerChannelId });
+    pairingPayload = buildPairingPayload({
+      channelId: listenerChannelId,
+      publicKeyB64: listenerKeyPair.publicKeyB64,
+      transport: listenerTransportDescriptor,
+      kind: PAIR_KIND.LISTENER,
+      appVersion: resolveVersion(),
+    });
+    const handle = await listenForPeers({
+      transport: listenerTransport,
+      keyPair: listenerKeyPair,
+      connect: true,
+      channelId: listenerChannelId,
+      senderId: "weft-listener",
+      senderName: listenerDeviceName,
+      onPeer: bindPeer,
+    });
+    pairingStop = handle.stop;
+    if (hadPeer) {
+      try {
+        onDeviceDisconnected?.();
+      } catch {
+        // best-effort UI hook
+      }
+    }
+    return { changed: true, descriptor: next, pairingPayload };
+  };
+
   function stopHeartbeat() {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -740,6 +815,10 @@ export function createListener({
   const api = {
     start,
     stop,
+    // Point this listener at a new endpoint mid-run without re-pairing from scratch — see
+    // rebindTransport above. Returns `{changed, descriptor, pairingPayload}`; `changed:false`
+    // means the resolved transport was identical and nothing was touched.
+    rebindTransport,
     get channelId() {
       return listenerChannelId;
     },

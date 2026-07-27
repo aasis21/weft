@@ -133,7 +133,7 @@ Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidate
 | Command | What it does |
 |---|---|
 | `/weft [supabase\|devtunnel]` | *(inside a Copilot session)* Pair your phone to the current session; optional arg overrides the transport for this session only. |
-| `weft start` | Start the standalone Device Station and print a QR to pair from your phone. On the `devtunnel` transport it also brings the relay up (signing in with `devtunnel user login -g` if needed), health-watches it, and releases it on exit unless another terminal owns it. |
+| `weft start` | Start the standalone Device Station and print a QR to pair from your phone. On the `devtunnel` transport it also brings the relay up (signing in with `devtunnel user login -g` if needed), health-watches it — reprinting a fresh QR inline if the relay comes back on a new URL — and releases it on exit unless another terminal owns it. |
 | `weft add-project <name> <path> [--default]` | Register a project directory Weft can launch sessions in. |
 | `weft remove-project <name>` | Forget a registered project. |
 | `weft list-projects` | List registered projects and which one is default. |

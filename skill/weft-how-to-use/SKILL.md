@@ -111,7 +111,9 @@ spin the relay up for you; if it isn't running you get an actionable error point
    provision a fresh relay — if a remembered tunnel can't be hosted by the current
    identity, it falls back to creating a brand-new one (URL changes → re-scan the QR),
 4. **health-check the relay every 30s** while the station runs, re-provisioning once if it
-   disappears, and
+   disappears — and if the replacement lands on a **new URL**, the station rebinds itself
+   onto it and reprints the QR inline (same channel + keys, so you just re-scan; no
+   restarting `weft start`), and
 5. **release it on exit** — only if this station started it. A relay from
    `weft devtunnel start` is never torn down by a station shutting down.
 

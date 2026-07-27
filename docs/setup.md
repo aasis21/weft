@@ -229,8 +229,9 @@ fast with an actionable error pointing you at `weft devtunnel start`. This is de
 3. **clears a stale registry entry** (a record claiming a relay that is no longer
    running) and provisions a fresh relay, then
 4. **watches its health every 30s** for as long as the station runs, re-provisioning once
-   if it goes away — if the new relay comes back on a different URL you'll be told to
-   re-scan the QR, and
+   if it goes away — if the new relay comes back on a different URL the station moves
+   itself onto it and prints a fresh QR right in the terminal, so you re-scan once
+   instead of restarting `weft start` (the channel and keys are unchanged), and
 5. **releases it on exit** — but only if this station is the process that started it. A
    relay you brought up with `weft devtunnel start` is never torn down by a station
    shutting down.

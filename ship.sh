@@ -54,14 +54,17 @@ PROD_URL="https://useweft.netlify.app"
 # Ask Netlify for the public URL of $SITE so every downstream string (the installers we deploy and
 # the closing banner) points at the site we actually shipped to, not a hardcoded production URL.
 resolve_site_url(){
-  netlify api getSite --data "{\"site_id\":\"$1\"}" 2>/dev/null | node -e '
+  # </dev/null + timeout: in CI there is no TTY, and a Netlify CLI that decides to prompt
+  # (expired token, unlinked site) would otherwise block forever and burn the whole job
+  # timeout. Failing here is safe - the caller falls back to $PROD_URL with a warning.
+  timeout "${NETLIFY_API_TIMEOUT:-60}" netlify api getSite --data "{\"site_id\":\"$1\"}" </dev/null 2>/dev/null | node -e '
     let s = "";
     process.stdin.on("data", d => s += d).on("end", () => {
       const i = s.indexOf("{");
       try { const j = JSON.parse(s.slice(i)); process.stdout.write(j.ssl_url || j.url || ""); }
       catch { process.stdout.write(""); }
     });
-  '
+  ' || true   # never let `set -e` + pipefail kill the script here; an empty URL is handled below
 }
 
 ext_bundle="$root/extension/dist/extension.mjs"
@@ -150,8 +153,10 @@ if [ "$SKIP_DEPLOY" -eq 0 ]; then
   # npm-workspace monorepo so the CLI does not prompt. Site referenced by id.
   args=(deploy --no-build --filter @aasis21/weft-mobile --dir "$dist_dir" --site "$SITE" --message "ship.sh $(date +%FT%T)")
   [ "$DRAFT" -eq 1 ] || args+=(--prod)
-  if ! netlify "${args[@]}"; then
-    echo "netlify deploy failed. Try 'netlify login' and confirm access to site '$SITE'." >&2
+  # </dev/null for the same reason as resolve_site_url - a prompt in CI must fail, not hang -
+  # and an outer timeout so a wedged upload surfaces as a red build instead of a 6h job.
+  if ! timeout "${NETLIFY_DEPLOY_TIMEOUT:-1800}" netlify "${args[@]}" </dev/null; then
+    echo "netlify deploy failed (or timed out). Try 'netlify login' and confirm access to site '$SITE'." >&2
     exit 1
   fi
   ok "$kind deploy complete"

@@ -50,7 +50,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -73,6 +73,9 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     connectionsHome,
     onSessionOffers,
     onSessionClaimed,
+    ...(transportDescriptor ? { transportDescriptor } : {}),
+    onDeviceConnected,
+    onDeviceDisconnected,
   });
   await listener.start();
 
@@ -98,7 +101,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     retryMs: 20,
   });
   await waitFor(() => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST), "project list");
-  return { listener, listenerKeys, channelId, phoneChannel, messages, connectionsHome };
+  return { listener, listenerKeys, channelId, phoneChannel, phoneKeys, messages, connectionsHome };
 }
 
 test("emits PROJECT_LIST when the phone pairs", async () => {
@@ -390,5 +393,85 @@ test("relays SESSION_OFFERS for pending `/weft` sessions and drops them on SESSI
     "empty offers after claim",
   );
   assert.equal(clearMsg.msg.offers.length, 0);
+  await listener.stop();
+});
+
+// --- mid-run transport rebind (devtunnel relay came back on a NEW url) -----------------------
+// `weft start`'s relay watchdog calls listener.rebindTransport() so the station can re-pair
+// inline instead of forcing the user to kill it and re-run. What matters here: the pairing
+// identity survives (so the reprinted QR is the same channel/keys, only a new endpoint), the
+// stale phone is reported as gone rather than silently heartbeated at, and a phone that scans
+// the new QR binds normally.
+
+test("rebindTransport keeps the pairing identity but republishes a new endpoint", async () => {
+  const { listener, listenerKeys, channelId } = await pairedHarness({
+    projects: [],
+    transportDescriptor: { kind: "local", url: "wss://old.devtunnels.ms" },
+  });
+  const before = listener.pairingPayload;
+
+  const result = await listener.rebindTransport({ kind: "local", url: "wss://new.devtunnels.ms" });
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.descriptor, { kind: "local", url: "wss://new.devtunnels.ms" });
+  assert.equal(listener.transportDescriptor.url, "wss://new.devtunnels.ms");
+  assert.equal(listener.pairingPayload.transport.url, "wss://new.devtunnels.ms");
+  assert.equal(listener.pairingPayload.channelId, channelId, "channel id survives the rebind");
+  assert.equal(listener.pairingPayload.channelId, before.channelId);
+  assert.equal(listener.pairingPayload.pub, listenerKeys.publicKeyB64, "listener keypair survives the rebind");
+  await listener.stop();
+});
+
+test("rebindTransport is a no-op when the transport resolves unchanged", async () => {
+  const descriptor = { kind: "local", url: "wss://same.devtunnels.ms" };
+  const { listener } = await pairedHarness({ projects: [], transportDescriptor: descriptor });
+  const before = listener.pairingPayload;
+
+  const result = await listener.rebindTransport({ ...descriptor });
+
+  assert.equal(result.changed, false);
+  assert.equal(listener.pairingPayload, before, "payload object is left untouched");
+  await listener.stop();
+});
+
+test("rebindTransport drops the phone bound to the dead endpoint, then accepts a fresh pairing", async () => {
+  const disconnects = [];
+  const connects = [];
+  const { listener, listenerKeys, channelId } = await pairedHarness({
+    projects: [],
+    transportDescriptor: { kind: "local", url: "wss://old.devtunnels.ms" },
+    onDeviceConnected: () => connects.push("connected"),
+    onDeviceDisconnected: () => disconnects.push("disconnected"),
+  });
+  assert.equal(connects.length, 1);
+
+  await listener.rebindTransport({ kind: "local", url: "wss://new.devtunnels.ms" });
+  // The old phone still holds the dead URL — report it gone instead of heartbeating into a void.
+  assert.equal(disconnects.length, 1, "bound phone is reported disconnected");
+
+  // A phone re-scanning the reprinted QR pairs again on the same channel/keys.
+  const { createLocalTransport } = await import("@aasis21/weft-shared");
+  const rescanTransport = createLocalTransport({ channelId });
+  const rescanKeys = await generateKeyPair();
+  const rescanChannel = new SecureChannel({
+    transport: rescanTransport,
+    key: await deriveSessionKey(rescanKeys.privateKey, listenerKeys.publicKeyB64),
+    identity: { channelId, senderId: "phone2", senderName: "Phone 2" },
+  });
+  const seen = [];
+  rescanChannel.onEvent(EVENT_TYPE.CONTROL, (m) => seen.push(m));
+  await sayHello({
+    transport: rescanTransport,
+    keyPair: rescanKeys,
+    peerPublicKeyB64: listenerKeys.publicKeyB64,
+    channelId,
+    deviceId: "phone-2",
+    senderName: "Phone 2",
+    waitForAck: true,
+    timeoutMs: 1000,
+    retryMs: 20,
+  });
+  await waitFor(() => seen.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST), "project list after re-scan");
+  assert.equal(connects.length, 2, "re-scanned phone binds as a new connection");
   await listener.stop();
 });

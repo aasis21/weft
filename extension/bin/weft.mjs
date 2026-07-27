@@ -467,8 +467,7 @@ async function start() {
   });
 
   console.log(`\n${c.bold("1.")} Scan the QR code below with the Weft app to pair your phone:`);
-  const qr = (await QRCode.toString(JSON.stringify(listener.pairingPayload), { type: "terminal", small: true })).replace(/\n+$/, "");
-  console.log(qr);
+  console.log(await renderPairingQr(listener.pairingPayload));
   console.log(`\n${c.bold("2.")} These identify this station for the pairing/session comms:`);
   console.log(`   ${c.cyan("Device ID")}   ${c.bold(listener.deviceId)}`);
   console.log(`   ${c.cyan("Channel ID")}  ${c.bold(listener.channelId)}`);
@@ -518,7 +517,11 @@ async function start() {
 
   // Keep an eye on the relay we own for the rest of the station's life (no-op for supabase, and
   // for a relay some other terminal owns — that terminal is responsible for it).
-  const relayWatchdog = startRelayHealthWatchdog(ownedRelay, (line) => status.log(line));
+  const relayWatchdog = startRelayHealthWatchdog(ownedRelay, {
+    log: (line) => status.log(line),
+    listener,
+    onWaiting: () => status.setConnected(false),
+  });
 
   const shutdown = async (signal) => {
     appendStationLog("station.stop", { signal: signal ?? "exit" });
@@ -604,11 +607,13 @@ async function ensureRelayForTransport() {
 // longer accepting connections) or one that died outright would otherwise leave the station
 // silently unreachable from the phone — with the spinner still cheerfully saying "waiting for
 // phone to connect". We re-provision once; if the tunnel comes back on the SAME URL (persistent
-// pairing reuses the tunnel identity) the paired phone reconnects on its own, otherwise the
-// station has to be restarted for the new URL to reach the QR, so say so plainly.
+// pairing reuses the tunnel identity) the paired phone reconnects on its own. If it comes back on
+// a NEW URL, the QR already on screen points at a dead endpoint, so we rebind the listener onto
+// the new one (same channel/keys) and print a fresh QR inline — the station stays usable without
+// being restarted; the phone just re-scans.
 const RELAY_HEALTH_INTERVAL_MS = 30_000;
 
-function startRelayHealthWatchdog(relay, log) {
+function startRelayHealthWatchdog(relay, { log, listener, onWaiting } = {}) {
   if (!relay?.owned) return { stop() {} };
   let checking = false;
   const timer = setInterval(async () => {
@@ -623,12 +628,12 @@ function startRelayHealthWatchdog(relay, log) {
       relay.baseUrl = baseUrl;
       relay.child = child ?? relay.child;
       relay.owned = relay.owned || Boolean(child);
-      log(
-        sameUrl
-          ? `${c.green("✓")} devtunnel relay restarted on the same URL — your phone reconnects on its own.`
-          : `${c.yellow("!")} devtunnel relay restarted on a NEW URL (${baseUrl}) — restart \`weft start\` and re-scan the QR.`,
-      );
-      appendStationLog("devtunnel.recovered", { baseUrl, sameUrl }, { level: sameUrl ? "info" : "warn" });
+      if (sameUrl) {
+        log(`${c.green("✓")} devtunnel relay restarted on the same URL — your phone reconnects on its own.`);
+        appendStationLog("devtunnel.recovered", { baseUrl, sameUrl }, { level: "info" });
+        return;
+      }
+      await repairOnNewUrl({ log, listener, onWaiting, baseUrl });
     } catch (err) {
       log(`${c.red("✗")} devtunnel relay is down and could not be restarted: ${err?.message?.split("\n")[0] ?? err}`);
       appendStationLog("devtunnel.recovery_failed", { error: err?.message ?? String(err) }, { level: "error" });
@@ -642,6 +647,42 @@ function startRelayHealthWatchdog(relay, log) {
       clearInterval(timer);
     },
   };
+}
+
+// The relay came back at a different address, so every pairing artifact on screen (and in the
+// phone's memory) points somewhere dead. Move the live listener onto the new endpoint keeping its
+// channel + keys, then reprint the QR right here in the scrollback: re-scanning that is the whole
+// recovery, versus killing and re-running `weft start`. A rebind failure is reported but left
+// non-fatal — the station keeps running, and the next tick retries.
+async function repairOnNewUrl({ log, listener, onWaiting, baseUrl }) {
+  try {
+    const { changed, pairingPayload } = (await listener?.rebindTransport?.()) ?? {};
+    if (!changed) {
+      log(`${c.yellow("!")} devtunnel relay restarted on a NEW URL (${baseUrl}) — restart \`weft start\` and re-scan the QR.`);
+      appendStationLog("devtunnel.recovered", { baseUrl, sameUrl: false, rebound: false }, { level: "warn" });
+      return;
+    }
+    onWaiting?.();
+    log(
+      `${c.yellow("!")} devtunnel relay restarted on a NEW URL ${c.dim(`(${baseUrl})`)} — the old QR is dead.\n` +
+        `${c.bold("Scan this new QR with the Weft app to reconnect")} ${c.dim("(same device, same channel — no re-setup):")}\n` +
+        (await renderPairingQr(pairingPayload)),
+    );
+    appendStationLog("devtunnel.recovered", { baseUrl, sameUrl: false, rebound: true }, { level: "warn" });
+  } catch (err) {
+    log(
+      `${c.red("✗")} devtunnel relay restarted on a NEW URL (${baseUrl}) but re-pairing failed: ` +
+        `${err?.message?.split("\n")[0] ?? err} — restart \`weft start\` and re-scan the QR.`,
+    );
+    appendStationLog("devtunnel.rebind_failed", { baseUrl, error: err?.message ?? String(err) }, { level: "error" });
+  }
+}
+
+/** Terminal-renderable QR for a pairing payload — shared by the station banner and the mid-run
+ * re-pair path so a recovery QR is visually identical to the original one. */
+async function renderPairingQr(payload) {
+  const qr = await QRCode.toString(JSON.stringify(payload), { type: "terminal", small: true });
+  return qr.replace(/\n+$/, "");
 }
 
 // Mirror of `weft devtunnel start`'s Ctrl+C teardown, for the relay a station brought up itself:
