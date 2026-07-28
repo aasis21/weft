@@ -199,3 +199,21 @@ describe('VoiceModeOverlay full-message speech (streaming off, default)', () => 
     expect(speechOutput.enqueue).toHaveBeenCalledWith('Let me read the file.');
   });
 });
+
+describe('VoiceModeOverlay exits (#186)', () => {
+  it('separates collapsing back to the dock from leaving Vox entirely', () => {
+    const onClose = vi.fn();
+    const onExit = vi.fn();
+    const { getByText } = renderOverlay({ onClose, onExit });
+    fireEvent.click(getByText('Collapse'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onExit).not.toHaveBeenCalled();
+    fireEvent.click(getByText('Back to chat'));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('picks up the sentence handed over from the dock', () => {
+    const { container } = renderOverlay({ initialTranscript: 'open the' });
+    expect(container.querySelector('.voice-caption')?.textContent).toContain('open the');
+  });
+});

@@ -16,12 +16,12 @@ describe('settings persistence', () => {
   });
 
   it('persists settings to Preferences and localStorage and applies theme attributes', async () => {
-    expect(await getSettings()).toEqual({ voiceAutoRelisten: false, voiceSpeakStreaming: false, theme: 'system' });
+    expect(await getSettings()).toEqual({ voiceAutoRelisten: false, voiceSpeakStreaming: false, voiceSilenceSeconds: 3.2, theme: 'system' });
 
     await setVoiceAutoRelisten(true);
     await setTheme('dark');
 
-    expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, theme: 'dark' });
+    expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, voiceSilenceSeconds: 3.2, theme: 'dark' });
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(localStorage.getItem('weft.settings.v1')).toContain('voiceAutoRelisten');
     expect((await memoryPreferences.get({ key: 'weft.settings.v1' })).value).toContain('dark');

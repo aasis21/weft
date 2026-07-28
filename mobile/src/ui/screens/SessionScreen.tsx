@@ -379,16 +379,32 @@ export function SessionScreen({
   }, [activeId]);
 
   // Only one Vox surface may exist at a time: they each own a mic and a speech queue, so running
-  // the inline dock behind the expanded overlay would double-transcribe and double-speak.
+  // the inline dock behind the expanded overlay would double-transcribe and double-speak. The
+  // handoff carries whatever the user was midway through saying across the swap (#186).
+  const [voxHandoff, setVoxHandoff] = useState('');
+  const handoffRef = useRef('');
+  const takeHandoff = useCallback((text: string): void => {
+    handoffRef.current = text;
+  }, []);
   const expandVox = useCallback((): void => {
     setVoxOpen(false);
+    setVoxHandoff(handoffRef.current);
     setVoiceOpen(true);
   }, []);
 
   // Collapsing the big view returns you to the inline dock you expanded from, not to the keyboard.
   const collapseVoice = useCallback((): void => {
     setVoiceOpen(false);
+    setVoxHandoff(handoffRef.current);
     setVoxOpen(true);
+  }, []);
+
+  // Leaving Vox for good: both surfaces close and the carried words are dropped.
+  const exitVox = useCallback((): void => {
+    setVoiceOpen(false);
+    setVoxOpen(false);
+    handoffRef.current = '';
+    setVoxHandoff('');
   }, []);
 
   // An approval or ask_user prompt outranks the conversation — Vox stops listening so the words
@@ -613,6 +629,9 @@ export function SessionScreen({
           onActiveChange={handleVoiceModeActive}
           onStateChange={setVoxState}
           onClose={collapseVoice}
+          onExit={exitVox}
+          initialTranscript={voxHandoff}
+          onTranscriptHandoff={takeHandoff}
         />
       ) : null}
 
@@ -824,6 +843,8 @@ export function SessionScreen({
             onOpen: () => setVoxOpen(true),
             onClose: () => setVoxOpen(false),
             onExpand: expandVox,
+            initialTranscript: voxHandoff,
+            onTranscriptHandoff: takeHandoff,
             onStateChange: setVoxState,
             onActiveChange: handleVoiceModeActive,
           }}

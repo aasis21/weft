@@ -569,10 +569,25 @@
 
 .voice-caption {
   min-height: 3.2rem;
+  max-height: 7rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   width: min(100% - 2rem, 440px);
   margin: 0;
   color: var(--fg-dim);
   line-height: 1.45;
+}
+
+/* Collapse (back to the dock) sits next to a true exit — they used to be one mislabelled button. */
+.voice-foot {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.voice-settings-btn {
+  margin-left: auto;
 }
 
 .voice-countdown {
@@ -595,8 +610,9 @@
   opacity: 1;
 }
 
+/* Duration comes from the silence setting so the bar and the auto-submit agree (#186). */
 .voice-countdown.active span {
-  animation: voice-countdown 3200ms linear forwards;
+  animation: voice-countdown var(--voice-countdown-duration, 3200ms) linear forwards;
 }
 
 .voice-hint {
@@ -702,10 +718,11 @@
   line-height: 1.4;
   text-align: center;
   cursor: pointer;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* Long speech scrolls and stays pinned to the newest words instead of clamping to the first
+     sentence — see the scroll effect in VoxDock (#186). */
+  max-height: 5.6rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 button.vox-heard:hover {
@@ -722,6 +739,49 @@ button.vox-heard:hover {
   color: var(--error);
   font-size: 0.82rem;
   text-align: center;
+}
+
+/* Quick settings: the two knobs worth reaching for mid-conversation, without leaving Vox. */
+.vox-settings {
+  width: 100%;
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  text-align: left;
+}
+
+.vox-setting {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+}
+
+.vox-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.vox-setting-row span { color: var(--fg); font-weight: 650; }
+
+.vox-setting input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.vox-setting-value {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+}
+
+.vox-head-btn[aria-expanded='true'] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 
 /* Paused behind an approval / ask_user card: the orb steps back so the card reads

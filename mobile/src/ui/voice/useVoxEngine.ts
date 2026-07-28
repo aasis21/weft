@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getVoiceAutoRelisten, getVoiceSpeakStreaming } from '@/lib/settings';
+import {
+  getVoiceAutoRelisten,
+  getVoiceSilenceSeconds,
+  getVoiceSpeakStreaming,
+  subscribeSettings,
+} from '@/lib/settings';
 import type { AssistantItem } from '@/lib/timeline';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { useSpeechOutput } from '@/ui/hooks/useSpeechOutput';
@@ -31,6 +36,10 @@ export interface VoxEngineOptions {
   onStateChange?(state: VoiceState): void;
   /** Hold the mic (and any auto-relisten) while something else needs the user — e.g. an approval card. */
   paused?: boolean;
+  /** Words already heard on the surface you just came from — swapping dock↔full-page keeps them. */
+  initialTranscript?: string;
+  /** Hand the in-flight transcript to whoever unmounts us, so the swap doesn't drop a half sentence. */
+  onTranscriptHandoff?(text: string): void;
 }
 
 export interface VoxEngine {
@@ -43,6 +52,12 @@ export interface VoxEngine {
   inputSupported: boolean;
   outputSupported: boolean;
   speechError: string | null;
+  /** Silence window in ms, from settings — drives the countdown bar's duration. */
+  silenceMs: number;
+  /** Increments each time the silence window re-arms; use as a React key to replay the countdown. */
+  silenceEpoch: number;
+  /** Whether the mic reopens on its own after Vox finishes speaking — surfaced in quick settings. */
+  autoRelisten: boolean;
   handleOrb(): void;
   /** Whatever is currently on screen for the user's turn — used to hand the words to the text box. */
   currentTranscript(): string;
@@ -80,6 +95,8 @@ export function useVoxEngine({
   onActiveChange,
   onStateChange,
   paused = false,
+  initialTranscript = '',
+  onTranscriptHandoff,
 }: VoxEngineOptions): VoxEngine {
   const { supported: inputSupported, error: speechError, start: startSpeechInput, stop: stopSpeechInput } = useSpeechInput();
   const {
@@ -90,15 +107,25 @@ export function useVoxEngine({
     cancel: cancelSpeech,
   } = useSpeechOutput();
   const [state, setState] = useState<VoiceState>('ready');
-  const [caption, setCaption] = useState('');
+  const [caption, setCaption] = useState(initialTranscript);
   const [autoRelisten, setAutoRelisten] = useState(false);
   const [speakStreaming, setSpeakStreaming] = useState(false);
+  const [silenceMs, setSilenceMs] = useState(SILENCE_MS);
+  // The silence window is read at fire time, not at arm time — nudging the slider mid-listen must
+  // take effect on the very next word rather than the next turn (#186).
+  const silenceMsRef = useRef(SILENCE_MS);
+  silenceMsRef.current = silenceMs;
   const silenceTimerRef = useRef<number | null>(null);
-  const committedRef = useRef('');
+  // Bumped every time the silence window is (re)armed. Surfaces as a React key so the countdown bar
+  // remounts and replays its animation — otherwise it ran once and sat empty for the rest of a long
+  // sentence, making it look like nothing was counting (#186).
+  const [silenceEpoch, setSilenceEpoch] = useState(0);
+  const committedRef = useRef(initialTranscript);
   // What the caption is actually showing, interim words included. `committedRef` only advances on a
   // final result, so on its own it silently drops everything the user can see when the silence timer
   // beats the recognizer's final event.
-  const heardRef = useRef('');
+  const heardRef = useRef(initialTranscript);
+  const carriedRef = useRef(initialTranscript);
   const assistantCursorRef = useRef<{ id: string | null; offset: number }>({
     id: latestAssistant?.id ?? null,
     offset: latestAssistant?.text.length ?? 0,
@@ -139,16 +166,21 @@ export function useVoxEngine({
 
   const armSilence = useCallback((): void => {
     clearSilence();
-    silenceTimerRef.current = window.setTimeout(sendCaptured, SILENCE_MS);
+    setSilenceEpoch((n) => n + 1);
+    silenceTimerRef.current = window.setTimeout(sendCaptured, silenceMsRef.current);
   }, [clearSilence, sendCaptured]);
 
   const startListening = useCallback((): void => {
     if (disabled || pausedRef.current) return;
     cancelSpeech();
     clearSilence();
-    committedRef.current = '';
-    heardRef.current = '';
-    setCaption('');
+    // Words carried over from the surface we just swapped away from survive exactly one start, so
+    // expanding mid-sentence resumes the same sentence instead of starting a new one (#186).
+    const seed = carriedRef.current;
+    carriedRef.current = '';
+    committedRef.current = seed;
+    heardRef.current = seed;
+    setCaption(seed);
     setState('listening');
     startSpeechInput((spokenText, isFinal) => {
       const next = appendSpeechText(committedRef.current, spokenText);
@@ -197,9 +229,28 @@ export function useVoxEngine({
     return () => stateChangeRef.current?.('idle');
   }, []);
 
+  // Swapping surfaces unmounts one engine and mounts the other, and React builds the new tree
+  // before tearing down the old — so the words have to be reported continuously, not on unmount,
+  // or the surface you expand into would start from a stale sentence (#186).
+  const handoffRef = useRef(onTranscriptHandoff);
+  handoffRef.current = onTranscriptHandoff;
   useEffect(() => {
-    void getVoiceAutoRelisten().then(setAutoRelisten);
-    void getVoiceSpeakStreaming().then(setSpeakStreaming);
+    handoffRef.current?.(state === 'listening' ? heardRef.current : '');
+  }, [caption, state]);
+
+  useEffect(() => {
+    const load = (): void => {
+      void getVoiceAutoRelisten().then(setAutoRelisten);
+      void getVoiceSpeakStreaming().then(setSpeakStreaming);
+      void getVoiceSilenceSeconds().then((s) => setSilenceMs(s * 1000));
+    };
+    load();
+    // Live-follow the quick settings in the dock head so a change applies to this very turn (#186).
+    return subscribeSettings((s) => {
+      setAutoRelisten(s.voiceAutoRelisten);
+      setSpeakStreaming(s.voiceSpeakStreaming);
+      setSilenceMs(s.voiceSilenceSeconds * 1000);
+    });
   }, []);
 
   // Hands-free entry: begin listening the moment Vox opens (matches Claude/Gemini voice UX) instead
@@ -322,6 +373,9 @@ export function useVoxEngine({
     inputSupported,
     outputSupported,
     speechError,
+    silenceMs,
+    silenceEpoch,
+    autoRelisten,
     handleOrb,
     currentTranscript,
   };

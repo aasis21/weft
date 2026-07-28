@@ -26,6 +26,10 @@ export interface ComposerVox {
   onActiveChange?(active: boolean): void;
   /** Report the live Vox state so the header pill can mirror the composer (#184). */
   onStateChange?(state: VoiceState): void;
+  /** Words carried over from the expanded surface so collapsing keeps the sentence (#186). */
+  initialTranscript?: string;
+  /** Hand the dock's in-flight words to whichever surface mounts next. */
+  onTranscriptHandoff?(text: string): void;
 }
 
 interface ComposerProps {
@@ -736,6 +740,8 @@ export function Composer({
             onInterrupt={onInterrupt}
             {...(vox.onActiveChange ? { onActiveChange: vox.onActiveChange } : {})}
             {...(vox.onStateChange ? { onStateChange: vox.onStateChange } : {})}
+            {...(vox.onTranscriptHandoff ? { onTranscriptHandoff: vox.onTranscriptHandoff } : {})}
+            initialTranscript={vox.initialTranscript ?? ''}
             onExpand={vox.onExpand}
             onKeyboard={() => exitVox()}
             onEditTranscript={exitVox}

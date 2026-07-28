@@ -1,6 +1,7 @@
-import { useEffect, useRef, type JSX, type TouchEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX, type TouchEvent } from 'react';
 import type { AssistantItem } from '@/lib/timeline';
-import { useVoxEngine } from '@/ui/voice/useVoxEngine';
+import { useVoxEngine, type VoiceState } from '@/ui/voice/useVoxEngine';
+import { VoxSettings } from '@/ui/voice/VoxSettings';
 
 interface VoxDockProps {
   latestAssistant: AssistantItem | null;
@@ -20,6 +21,10 @@ interface VoxDockProps {
   onKeyboard(): void;
   /** Hand the words we heard back to the text box so a misheard sentence can be fixed. */
   onEditTranscript(text: string): void;
+  /** Words carried over from the surface we just came from, so expanding keeps the sentence. */
+  initialTranscript?: string;
+  /** Hand our in-flight words to whoever mounts next. */
+  onTranscriptHandoff?(text: string): void;
 }
 
 /**
@@ -40,6 +45,8 @@ export function VoxDock({
   onExpand,
   onKeyboard,
   onEditTranscript,
+  initialTranscript = '',
+  onTranscriptHandoff,
 }: VoxDockProps): JSX.Element {
   const {
     state,
@@ -49,6 +56,9 @@ export function VoxDock({
     speechError,
     handleOrb,
     currentTranscript,
+    autoRelisten,
+    silenceMs,
+    silenceEpoch,
   } = useVoxEngine({
     latestAssistant,
     agentBusy,
@@ -57,11 +67,15 @@ export function VoxDock({
     paused,
     onPrompt,
     onInterrupt,
+    initialTranscript,
     ...(onActiveChange ? { onActiveChange } : {}),
     ...(onStateChange ? { onStateChange } : {}),
+    ...(onTranscriptHandoff ? { onTranscriptHandoff } : {}),
   });
   const panelRef = useRef<HTMLDivElement>(null);
   const touchStartYRef = useRef<number | null>(null);
+  const heardRef = useRef<HTMLButtonElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Space toggles the orb while focus is inside the dock — same gesture the full-page view uses,
   // minus the modal focus trap (you're still in the chat here).
@@ -81,6 +95,13 @@ export function VoxDock({
   // Words on screen only while the mic is on. Once the turn is in flight the orb (and the tool cards
   // above it) carry the story — a status line and a stale transcript underneath were just noise.
   const showWords = state !== 'working' && state !== 'speaking';
+
+  // A long sentence used to show its own beginning while the user was still talking. Pin to the
+  // bottom so what's on screen is always the last thing said (#186).
+  useEffect(() => {
+    const el = heardRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [caption, state]);
 
   const editHeard = (): void => {
     const text = currentTranscript() || heard;
@@ -139,6 +160,25 @@ export function VoxDock({
         </button>
         <button
           type="button"
+          className="vox-head-btn"
+          onClick={() => setSettingsOpen((open) => !open)}
+          aria-label="Vox settings"
+          title="Vox settings"
+          aria-expanded={settingsOpen}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="2" />
+            <path
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              d="M12 2.8v2.4M12 18.8v2.4M21.2 12h-2.4M5.2 12H2.8M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7M18.5 18.5l-1.7-1.7M7.2 7.2 5.5 5.5"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
           className="vox-head-btn vox-expand-btn"
           onClick={onExpand}
           aria-label="Expand Vox to full screen"
@@ -157,6 +197,8 @@ export function VoxDock({
         </button>
       </div>
 
+      {settingsOpen ? <VoxSettings autoRelisten={autoRelisten} silenceMs={silenceMs} /> : null}
+
       <button
         type="button"
         className="voice-orb vox-dock-orb"
@@ -172,7 +214,13 @@ export function VoxDock({
 
       {showWords ? (
         canEdit ? (
-          <button type="button" className="vox-heard" onClick={editHeard} title="Edit these words as text">
+          <button
+            type="button"
+            className="vox-heard"
+            onClick={editHeard}
+            title="Edit these words as text"
+            ref={heardRef}
+          >
             {heard}
           </button>
         ) : (
@@ -182,8 +230,12 @@ export function VoxDock({
         )
       ) : null}
 
-      <div className={`voice-countdown${state === 'listening' && canEdit ? ' active' : ''}`} aria-hidden="true">
-        <span />
+      <div
+        className={`voice-countdown${state === 'listening' && canEdit ? ' active' : ''}`}
+        aria-hidden="true"
+        style={{ '--voice-countdown-duration': `${silenceMs}ms` } as CSSProperties}
+      >
+        <span key={silenceEpoch} />
       </div>
 
       {speechError ? <div className="vox-dock-error" role="status">{speechError}</div> : null}

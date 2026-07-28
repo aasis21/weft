@@ -5,13 +5,20 @@ export type ThemeSetting = 'system' | 'light' | 'dark';
 export interface WeftSettings {
   voiceAutoRelisten: boolean;
   voiceSpeakStreaming: boolean;
+  /** Seconds of silence before Vox auto-sends what it heard. */
+  voiceSilenceSeconds: number;
   theme: ThemeSetting;
 }
+
+/** Bounds for {@link WeftSettings.voiceSilenceSeconds} — below 1s a breath sends; above 10s feels stuck. */
+export const VOICE_SILENCE_MIN = 1;
+export const VOICE_SILENCE_MAX = 10;
 
 const SETTINGS_KEY = 'weft.settings.v1';
 const DEFAULT_SETTINGS: WeftSettings = {
   voiceAutoRelisten: false,
   voiceSpeakStreaming: false,
+  voiceSilenceSeconds: 3.2,
   theme: 'system',
 };
 const SETTINGS_EVENT = 'weft-settings-change';
@@ -25,6 +32,9 @@ function parseSettings(raw: string | null | undefined): Partial<WeftSettings> {
     const out: Partial<WeftSettings> = {};
     if (typeof record.voiceAutoRelisten === 'boolean') out.voiceAutoRelisten = record.voiceAutoRelisten;
     if (typeof record.voiceSpeakStreaming === 'boolean') out.voiceSpeakStreaming = record.voiceSpeakStreaming;
+    if (typeof record.voiceSilenceSeconds === 'number' && Number.isFinite(record.voiceSilenceSeconds)) {
+      out.voiceSilenceSeconds = record.voiceSilenceSeconds;
+    }
     if (record.theme === 'light' || record.theme === 'dark' || record.theme === 'system') out.theme = record.theme;
     return out;
   } catch {
@@ -32,10 +42,16 @@ function parseSettings(raw: string | null | undefined): Partial<WeftSettings> {
   }
 }
 
+function clampSilence(seconds: number): number {
+  if (!Number.isFinite(seconds)) return DEFAULT_SETTINGS.voiceSilenceSeconds;
+  return Math.min(VOICE_SILENCE_MAX, Math.max(VOICE_SILENCE_MIN, Math.round(seconds * 10) / 10));
+}
+
 function normalize(settings: Partial<WeftSettings>): WeftSettings {
   return {
     voiceAutoRelisten: settings.voiceAutoRelisten ?? DEFAULT_SETTINGS.voiceAutoRelisten,
     voiceSpeakStreaming: settings.voiceSpeakStreaming ?? DEFAULT_SETTINGS.voiceSpeakStreaming,
+    voiceSilenceSeconds: clampSilence(settings.voiceSilenceSeconds ?? DEFAULT_SETTINGS.voiceSilenceSeconds),
     theme: settings.theme ?? DEFAULT_SETTINGS.theme,
   };
 }
@@ -93,6 +109,15 @@ export async function getVoiceSpeakStreaming(): Promise<boolean> {
 export async function setVoiceSpeakStreaming(enabled: boolean): Promise<void> {
   const current = await getSettings();
   await writeSettings({ ...current, voiceSpeakStreaming: enabled });
+}
+
+export async function getVoiceSilenceSeconds(): Promise<number> {
+  return (await getSettings()).voiceSilenceSeconds;
+}
+
+export async function setVoiceSilenceSeconds(seconds: number): Promise<void> {
+  const current = await getSettings();
+  await writeSettings({ ...current, voiceSilenceSeconds: clampSilence(seconds) });
 }
 
 export async function getTheme(): Promise<ThemeSetting> {

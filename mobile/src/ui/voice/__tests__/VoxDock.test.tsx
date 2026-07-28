@@ -157,3 +157,41 @@ describe('VoxDock transcript loss (#voice-transcript-loss)', () => {
     expect(onPrompt).toHaveBeenCalledWith('run the tests');
   });
 });
+
+describe('VoxDock quick settings and countdown (#186)', () => {
+  it('opens the two knobs worth reaching for mid-conversation', () => {
+    const { container, getByLabelText } = renderDock();
+    expect(container.querySelector('.vox-settings')).toBeNull();
+    fireEvent.click(getByLabelText('Vox settings'));
+    const panel = container.querySelector('.vox-settings');
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).toContain('Keep listening after I reply');
+    expect(container.querySelector('input[type="range"]')).not.toBeNull();
+  });
+
+  it('drives the countdown from the silence setting and replays it on every new word', () => {
+    const { container } = renderDock();
+    speak('one', false);
+    const bar = container.querySelector('.voice-countdown') as HTMLDivElement;
+    expect(bar.className).toContain('active');
+    expect(bar.style.getPropertyValue('--voice-countdown-duration')).toBe('3200ms');
+    const first = bar.querySelector('span');
+    speak('one two', false);
+    // A fresh element means the CSS animation restarts instead of sitting at empty.
+    expect(bar.querySelector('span')).not.toBe(first);
+  });
+
+  it('resumes the sentence handed over from the surface it replaced', () => {
+    const { container } = renderDock({ initialTranscript: 'deploy the' });
+    expect(container.querySelector('.vox-heard')?.textContent).toContain('deploy the');
+    speak('deploy the build', false);
+    expect(container.querySelector('.vox-heard')?.textContent).toContain('deploy the build');
+  });
+
+  it('reports the in-flight words so a swap can carry them across', () => {
+    const onTranscriptHandoff = vi.fn();
+    renderDock({ onTranscriptHandoff });
+    speak('hold on', false);
+    expect(onTranscriptHandoff).toHaveBeenLastCalledWith('hold on');
+  });
+});
