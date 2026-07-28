@@ -612,3 +612,136 @@
   from { transform: scaleX(1); }
   to { transform: scaleX(0); }
 }
+
+/* ---- Vox, inline ---------------------------------------------------------
+   The dock takes the keyboard's slot inside the composer instead of covering the
+   screen (the full-page .voice-overlay still exists and is what the expand button
+   opens). It reuses .voice-panel so the per-state orb colors in chat.css apply to
+   both surfaces, then overrides the full-page sizing. */
+.vox-dock {
+  width: 100%;
+  box-sizing: border-box;
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem 0.35rem;
+  border: 0;
+  border-radius: 20px;
+  max-height: none;
+  overflow: visible;
+  box-shadow: none;
+  text-align: center;
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--voice-orb-color, var(--accent)) 12%, transparent), transparent 70%);
+}
+
+.vox-dock-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.vox-dock-label {
+  color: var(--fg-dim);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.vox-expand-btn {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.vox-expand-btn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.vox-expand-btn svg { width: 1.05rem; height: 1.05rem; }
+
+/* Orb sized for the dock rather than the full page — big enough to be a comfortable
+   tap target for interrupting, small enough to leave the thread visible. */
+.voice-orb.vox-dock-orb {
+  width: min(30vw, 108px);
+  min-width: 92px;
+}
+
+.vox-dock-orb .voice-orb-core {
+  font-size: 1.7rem;
+}
+
+.vox-dock-status {
+  margin: 0;
+  font-weight: 750;
+  font-size: 0.95rem;
+}
+
+/* The words Vox heard. Tappable: it hands them to the text box so a misheard
+   sentence can be corrected instead of re-spoken. */
+.vox-heard {
+  width: 100%;
+  min-height: 2.4rem;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  text-align: center;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+button.vox-heard:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.vox-heard-empty {
+  cursor: default;
+}
+
+.vox-dock-error {
+  width: 100%;
+  color: var(--error);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+/* Paused behind an approval / ask_user card: the orb steps back so the card reads
+   as the thing to answer. */
+.vox-dock[data-paused='true'] {
+  opacity: 0.55;
+}
+
+.send-btn.vox-keyboard-btn {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg-dim);
+}
+
+.send-btn.vox-keyboard-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  color: var(--fg);
+}
+
+/* Wide viewports have the room for a taller orb without pushing the thread away. */
+@media (min-width: 1024px) {
+  .voice-orb.vox-dock-orb { width: 132px; }
+  .vox-dock-orb .voice-orb-core { font-size: 2rem; }
+}

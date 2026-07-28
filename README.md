@@ -34,8 +34,9 @@ Everything you'd do at the terminal — now from your phone:
 - **Watch it work** — every command it runs and file it edits, unfolding live in the thread.
 - **Approve before it acts** — the *native* Copilot permission prompt is relayed to your phone;
   allow or deny with a tap. The prompt stays open until you answer or the session ends.
-- **Go hands-free with Vox** — tap the orb and just talk; Vox transcribes, sends, and reads the
-  reply back — eyes-free, hands-free.
+- **Go hands-free with Vox** — tap the waveform and just talk; the orb takes the keyboard's place in
+  the composer, so the thread and any approval stay in view while Vox transcribes, sends, and reads
+  the reply back. Expand it to the full-screen orb when you want to put the phone down.
 - **Show it a screenshot** — attach up to six images from your camera, library, paste, or drag so
   it can *see* the bug, the design, the error.
 - **Keep it on track** — steer an active turn, queue the next instruction, switch

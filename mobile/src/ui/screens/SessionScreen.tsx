@@ -251,6 +251,7 @@ export function SessionScreen({
   const [debugOpen, setDebugOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voxOpen, setVoxOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
@@ -368,6 +369,29 @@ export function SessionScreen({
     (active: boolean): void => onVoiceModeChange?.(activeId, active),
     [activeId, onVoiceModeChange],
   );
+
+  // Vox follows the session you're looking at — switching sessions drops back to the keyboard.
+  useEffect(() => {
+    setVoxOpen(false);
+    setVoiceOpen(false);
+  }, [activeId]);
+
+  // Only one Vox surface may exist at a time: they each own a mic and a speech queue, so running
+  // the inline dock behind the expanded overlay would double-transcribe and double-speak.
+  const expandVox = useCallback((): void => {
+    setVoxOpen(false);
+    setVoiceOpen(true);
+  }, []);
+
+  // Collapsing the big view returns you to the inline dock you expanded from, not to the keyboard.
+  const collapseVoice = useCallback((): void => {
+    setVoiceOpen(false);
+    setVoxOpen(true);
+  }, []);
+
+  // An approval or ask_user prompt outranks the conversation — Vox stops listening so the words
+  // meant for the dialog aren't transcribed into the next prompt.
+  const voxPaused = timeline.approvals.length > 0 || timeline.elicitations.length > 0;
 
   useEffect(() => {
     if (!confirmRemoveId) return undefined;
@@ -574,7 +598,7 @@ export function SessionScreen({
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}
           onActiveChange={handleVoiceModeActive}
-          onClose={() => setVoiceOpen(false)}
+          onClose={collapseVoice}
         />
       ) : null}
 
@@ -778,6 +802,16 @@ export function SessionScreen({
           onModeChange={onModeChange}
           onCommand={onCommand}
           onOpenVoiceMode={() => setVoiceOpen(true)}
+          vox={{
+            open: voxOpen,
+            latestAssistant,
+            toolActive,
+            paused: voxPaused,
+            onOpen: () => setVoxOpen(true),
+            onClose: () => setVoxOpen(false),
+            onExpand: expandVox,
+            onActiveChange: handleVoiceModeActive,
+          }}
         />
       </div>
       </div>

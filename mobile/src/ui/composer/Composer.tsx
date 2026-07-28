@@ -6,8 +6,24 @@ import { MODES } from '@aasis21/weft-shared';
 import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { PHONE_COMMANDS, getPhoneCommand } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
+import { VoxDock } from '@/ui/voice/VoxDock';
+import type { AssistantItem } from '@/lib/timeline';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 import { isDesktopInput } from '@/lib/platform';
+
+/** Inline Vox (voice in / voice out) rendered in the composer where the keyboard would be. */
+export interface ComposerVox {
+  open: boolean;
+  latestAssistant: AssistantItem | null;
+  toolActive?: boolean;
+  /** An approval or ask_user prompt is waiting — Vox holds the mic until it's answered. */
+  paused?: boolean;
+  onOpen(): void;
+  onClose(): void;
+  /** Escalate to the original full-page Vox surface. */
+  onExpand(): void;
+  onActiveChange?(active: boolean): void;
+}
 
 interface ComposerProps {
   sessionId: string;
@@ -22,6 +38,8 @@ interface ComposerProps {
   /** Run a whitelisted Copilot CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
   onCommand(name: string, input?: string): void;
   onOpenVoiceMode(): void;
+  /** Omitted → legacy behavior: the waveform button opens the full-page Vox overlay. */
+  vox?: ComposerVox;
 }
 
 /** Max images per message — keeps the encrypted relay payload under the transport cap. */
@@ -185,6 +203,7 @@ export function Composer({
   onModeChange,
   onCommand,
   onOpenVoiceMode,
+  vox,
 }: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -537,10 +556,30 @@ export function Composer({
     suppressSendUntilRef.current = Math.max(suppressSendUntilRef.current, nowMs() + SEND_AFTER_STOP_SUPPRESS_MS);
   };
 
+  const voxOpen = vox?.open === true;
+
+  const openVox = (): void => {
+    if (vox) {
+      if (speech.listening) speech.stop();
+      vox.onOpen();
+      return;
+    }
+    onOpenVoiceMode();
+  };
+
+  /** Leave Vox for the keyboard, optionally carrying the words Vox heard into the text box. */
+  const exitVox = (carryText?: string): void => {
+    vox?.onClose();
+    if (carryText && carryText.trim()) {
+      applyTextChange(sessionId, appendSpeechText(text, carryText));
+    }
+    window.requestAnimationFrame(() => areaRef.current?.focus());
+  };
+
   const onActionClick = (): void => {
     if (nowMs() < suppressSendUntilRef.current) return;
     if (emptyPrompt && !disabled && !attaching) {
-      onOpenVoiceMode();
+      openVox();
       return;
     }
     void send();
@@ -683,24 +722,41 @@ export function Composer({
         {attachError ? <div className="composer-attach-error" role="status">{attachError}</div> : null}
         {speech.error ? <div className="composer-attach-error" role="status">{speech.error}</div> : null}
 
-        <textarea
-          ref={areaRef}
-          className="composer-input"
-          rows={1}
-          aria-label="Message your Copilot session"
-          disabled={disabled}
-          value={text}
-          spellCheck={false}
-          onKeyDown={onKeyDown}
-          onChange={(event) => onTextChange(event.target.value)}
-          onPaste={onPaste}
-          placeholder={
-            disabled ? disabledPlaceholder : busy ? 'Steer the current turn…' : 'Message your Copilot session…'
-          }
-        />
+        {voxOpen && vox ? (
+          <VoxDock
+            latestAssistant={vox.latestAssistant}
+            agentBusy={busy}
+            toolActive={vox.toolActive ?? false}
+            disabled={disabled}
+            paused={vox.paused ?? false}
+            onPrompt={(value) => onPrompt(value)}
+            onInterrupt={onInterrupt}
+            {...(vox.onActiveChange ? { onActiveChange: vox.onActiveChange } : {})}
+            onExpand={vox.onExpand}
+            onEditTranscript={exitVox}
+          />
+        ) : (
+          <textarea
+            ref={areaRef}
+            className="composer-input"
+            rows={1}
+            aria-label="Message your Copilot session"
+            disabled={disabled}
+            value={text}
+            spellCheck={false}
+            onKeyDown={onKeyDown}
+            onChange={(event) => onTextChange(event.target.value)}
+            onPaste={onPaste}
+            placeholder={
+              disabled ? disabledPlaceholder : busy ? 'Steer the current turn…' : 'Message your Copilot session…'
+            }
+          />
+        )}
 
         <div className="composer-controls">
           <div className="composer-controls-left">
+            {voxOpen ? null : (
+              <>
             <div className="mode-wrap" ref={attachWrapRef}>
               <button
                 ref={attachButtonRef}
@@ -766,10 +822,12 @@ export function Composer({
               ) : null}
             </div>
             {folder ? <span className="cwd-chip" title={cwd ?? undefined}>📁 {folder}</span> : null}
+              </>
+            )}
           </div>
 
           <div className="composer-controls-right">
-            {speech.supported && !disabled ? (
+            {speech.supported && !disabled && !voxOpen ? (
               <button
                 className={`mic-btn${speech.listening ? ' listening' : ''}`}
                 type="button"
@@ -796,7 +854,7 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            {busy && !emptyPrompt ? (
+            {busy && !emptyPrompt && !voxOpen ? (
               <button
                 className="queue-btn"
                 type="button"
@@ -817,7 +875,32 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            {!busy || !emptyPrompt ? (
+            {voxOpen ? (
+              <button
+                className="send-btn vox-keyboard-btn"
+                type="button"
+                onClick={() => exitVox()}
+                aria-label="Switch to typing"
+                title="Switch to typing"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect
+                    x="2.5"
+                    y="6"
+                    width="19"
+                    height="12"
+                    rx="2.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  />
+                  <path
+                    fill="currentColor"
+                    d="M5.6 9h1.8v1.6H5.6zm3 0h1.8v1.6H8.6zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zM5.6 11.9h1.8v1.6H5.6zm3 0h1.8v1.6H8.6zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zM7.6 14.8h8.8v1.6H7.6z"
+                  />
+                </svg>
+              </button>
+            ) : !busy || !emptyPrompt ? (
               <button
                 className={`send-btn${!busy && emptyPrompt ? ' voice-action' : ''}`}
                 type="button"
