@@ -26,20 +26,33 @@ class MockSpeechRecognition {
   }
 }
 
+/** One `onresult` payload. Real engines keep every result of the session in `results`, so callers
+ *  pass the whole list as it stands, not just the newest piece. */
+function speechEventAll(
+  entries: Array<[string, boolean]>,
+  resultIndex = 0,
+): { results: ArrayLike<MockResult> & { item(index: number): MockResult }; resultIndex: number } {
+  const results: Record<number, MockResult> = {};
+  entries.forEach(([transcript, isFinal], index) => {
+    results[index] = { isFinal, 0: { transcript } };
+  });
+  return {
+    resultIndex,
+    results: {
+      ...results,
+      length: entries.length,
+      item(index: number) {
+        return this[index];
+      },
+    } as ArrayLike<MockResult> & { item(index: number): MockResult },
+  };
+}
+
 function speechEvent(
   transcript: string,
   isFinal: boolean,
 ): { results: ArrayLike<MockResult> & { item(index: number): MockResult }; resultIndex: number } {
-  return {
-    resultIndex: 0,
-    results: {
-      0: { isFinal, 0: { transcript } },
-      length: 1,
-      item(index: number) {
-        return this[index];
-      },
-    },
-  };
+  return speechEventAll([[transcript, isFinal]]);
 }
 
 describe('useSpeechInput', () => {
@@ -149,23 +162,36 @@ describe('useSpeechInput', () => {
       result.current.start((text, isFinal) => heard.push({ text, isFinal }));
     });
 
-    // Continuous mode accumulates within a session — each event carries everything so far.
+    // Continuous mode keeps every result of the session in the payload — each event carries
+    // everything so far, so the text we report is rebuilt, not accumulated.
     act(() => {
-      MockSpeechRecognition.instances[0].onresult?.(speechEvent('hey ', true));
-      MockSpeechRecognition.instances[0].onresult?.(speechEvent('man', true));
+      MockSpeechRecognition.instances[0].onresult?.(speechEventAll([['hey ', true]]));
+      MockSpeechRecognition.instances[0].onresult?.(speechEventAll([['hey ', true], ['man', true]]));
     });
     expect(heard.at(-1)).toEqual({ text: 'hey man', isFinal: true });
 
+    // Android re-delivers earlier results with a stale index while it revises them. A running tally
+    // fed by that index re-adds what it already had; rebuilding from the list cannot.
+    act(() => {
+      MockSpeechRecognition.instances[0].onresult?.(
+        speechEventAll([['hey ', true], ['man', true], [" what's up", false]], 0),
+      );
+    });
+    expect(heard.at(-1)).toEqual({ text: "hey man what's up", isFinal: false });
+
     // A restart starts the engine's transcript over, so we carry the earlier text ourselves.
     act(() => {
+      MockSpeechRecognition.instances[0].onresult?.(
+        speechEventAll([['hey ', true], ['man', true], [" what's up", true]]),
+      );
       MockSpeechRecognition.instances[0].onend?.();
     });
     await waitFor(() => expect(MockSpeechRecognition.instances).toHaveLength(2));
 
     act(() => {
-      MockSpeechRecognition.instances[1].onresult?.(speechEvent(" what's up", true));
+      MockSpeechRecognition.instances[1].onresult?.(speechEvent(' doing well', true));
     });
-    expect(heard.at(-1)).toEqual({ text: "hey man what's up", isFinal: true });
+    expect(heard.at(-1)).toEqual({ text: "hey man what's up doing well", isFinal: true });
 
     // A fresh listen starts from nothing.
     act(() => {

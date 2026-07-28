@@ -125,7 +125,7 @@ export function useSpeechInput(): {
     const startRecognition = (): void => {
       if (recognitionGenerationRef.current !== generation || explicitStopRef.current || fatalErrorRef.current) return;
       const recognition = new Ctor();
-      let finalTranscript = '';
+      let sessionFinal = '';
       recognition.lang = navigator.language;
       recognition.interimResults = true;
       // Stay open across pauses. In single-utterance mode the engine ends itself the moment you
@@ -137,13 +137,19 @@ export function useSpeechInput(): {
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
         if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
+        // Rebuild the whole session from `results` every time rather than keeping a running tally
+        // fed by `resultIndex`. Android revises and re-delivers earlier results while it listens,
+        // and its index is not to be trusted in continuous mode — a tally re-adds what it already
+        // had, which is what turned a sentence into "hey heyhey what areheyhey what are the" (#192).
+        let finalTranscript = '';
         let interimTranscript = '';
-        for (let index = event.resultIndex ?? 0; index < event.results.length; index += 1) {
+        for (let index = 0; index < event.results.length; index += 1) {
           const result = event.results[index];
           const transcript = result?.[0]?.transcript ?? '';
           if (result?.isFinal) finalTranscript += transcript;
           else interimTranscript += transcript;
         }
+        sessionFinal = finalTranscript;
         const transcript = `${runTranscriptRef.current}${finalTranscript}${interimTranscript}`;
         if (transcript) onText(transcript, interimTranscript.length === 0);
       };
@@ -171,7 +177,7 @@ export function useSpeechInput(): {
           setListening(false);
           return;
         }
-        runTranscriptRef.current += finalTranscript;
+        runTranscriptRef.current += sessionFinal;
         startRecognition();
       };
       recognitionRef.current = recognition;
