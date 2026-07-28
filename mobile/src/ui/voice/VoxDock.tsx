@@ -12,6 +12,8 @@ interface VoxDockProps {
   onPrompt(text: string): Promise<void> | void;
   onInterrupt(): void;
   onActiveChange?(active: boolean): void;
+  /** Report the live Vox state so the header pill can mirror the composer (#184). */
+  onStateChange?(state: VoiceState): void;
   /** Escalate to the full-page Vox surface. */
   onExpand(): void;
   /** Leave Vox and go back to the keyboard. */
@@ -34,6 +36,7 @@ export function VoxDock({
   onPrompt,
   onInterrupt,
   onActiveChange,
+  onStateChange,
   onExpand,
   onKeyboard,
   onEditTranscript,
@@ -55,6 +58,7 @@ export function VoxDock({
     onPrompt,
     onInterrupt,
     ...(onActiveChange ? { onActiveChange } : {}),
+    ...(onStateChange ? { onStateChange } : {}),
   });
   const panelRef = useRef<HTMLDivElement>(null);
   const touchStartYRef = useRef<number | null>(null);

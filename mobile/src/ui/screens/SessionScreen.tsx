@@ -9,9 +9,10 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
-import { isWorking } from '@/ui/sessions/sessionStatus';
+import { isWorking, type ComposerActivity } from '@/ui/sessions/sessionStatus';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
+import type { VoiceState } from '@/ui/voice/useVoxEngine';
 import { getStableDeviceId } from '@/lib/weftClient';
 import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
 
@@ -394,6 +395,16 @@ export function SessionScreen({
   // meant for the dialog aren't transcribed into the next prompt.
   const voxPaused = timeline.approvals.length > 0 || timeline.elicitations.length > 0;
 
+  // The header pill mirrors the composer while Vox holds the floor (#184). The dock deliberately
+  // shows nothing but the orb once a turn is in flight, so this is where "Listening…"/"Speaking…"
+  // surfaces. Anything else (idle/ready/working) falls through to the normal busy/live derivation.
+  const [voxState, setVoxState] = useState<VoiceState>('idle');
+  useEffect(() => {
+    if (!voxOpen && !voiceOpen) setVoxState('idle');
+  }, [voiceOpen, voxOpen]);
+  const composerActivity: ComposerActivity | undefined =
+    voxState === 'listening' ? 'listening' : voxState === 'speaking' ? 'speaking' : undefined;
+
   useEffect(() => {
     if (!confirmRemoveId) return undefined;
     confirmDialogRef.current?.focus();
@@ -550,6 +561,7 @@ export function SessionScreen({
         cwd={meta.cwd}
         status={status}
         busy={agentBusy}
+        {...(composerActivity ? { activity: composerActivity } : {})}
         onOpenDrawer={() => setDrawerOpen(true)}
         onAddSession={onAddSession}
         onStartSession={onStartSession}
@@ -599,6 +611,7 @@ export function SessionScreen({
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}
           onActiveChange={handleVoiceModeActive}
+          onStateChange={setVoxState}
           onClose={collapseVoice}
         />
       ) : null}
@@ -811,6 +824,7 @@ export function SessionScreen({
             onOpen: () => setVoxOpen(true),
             onClose: () => setVoxOpen(false),
             onExpand: expandVox,
+            onStateChange: setVoxState,
             onActiveChange: handleVoiceModeActive,
           }}
         />

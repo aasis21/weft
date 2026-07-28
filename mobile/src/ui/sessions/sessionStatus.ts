@@ -19,11 +19,20 @@ export type StatusTone =
   | 'live'
   | 'idle'
   | 'busy'
+  | 'listening'
+  | 'speaking'
   | 'connecting'
   | 'initializing'
   | 'archived'
   | 'error'
   | 'ended';
+
+/**
+ * What the composer is doing right now, when that's more specific than "the agent is busy".
+ * Fed by Vox (mic on / speaking aloud) and by plain dictation, so the header pill mirrors the
+ * composer rather than sitting on a flat "Live" while the phone is clearly listening (#184).
+ */
+export type ComposerActivity = 'listening' | 'speaking';
 
 export interface DerivedStatus {
   /** Human label shown in the pill (e.g. "Live", "Quiet", "Archived"). */
@@ -45,8 +54,14 @@ export interface DerivedStatus {
  * - **Offline** (`error`) — something went wrong reaching the laptop, "reconnect".
  *
  * `busy` isn't on {@link SessionView}; the header passes it so a working turn reads "Working…".
+ * `activity` is what the *composer* is doing (Vox listening / speaking aloud) and outranks `busy`,
+ * because "the phone has your mic open" is the more urgent fact — and the dock itself is now silent
+ * while a turn is in flight, so the pill is where that shows (#184).
  */
-export function deriveStatus(view: Pick<SessionView, 'status' | 'cold' | 'error'>, opts: { busy?: boolean } = {}): DerivedStatus {
+export function deriveStatus(
+  view: Pick<SessionView, 'status' | 'cold' | 'error'>,
+  opts: { busy?: boolean; activity?: ComposerActivity } = {},
+): DerivedStatus {
   const { status, cold, error } = view;
 
   if (status === 'ended') return { label: 'Ended', tone: 'ended', active: false };
@@ -54,6 +69,13 @@ export function deriveStatus(view: Pick<SessionView, 'status' | 'cold' | 'error'
   // A reachability error always wins over a stale "Live"/"Quiet" (the #185 invariant): the pill must
   // never contradict the offline banner below it.
   if (error) return { label: 'Offline', tone: 'error', active: false };
+
+  if (status === 'live' && opts.activity === 'listening') {
+    return { label: 'Listening…', tone: 'listening', active: true };
+  }
+  if (status === 'live' && opts.activity === 'speaking') {
+    return { label: 'Speaking…', tone: 'speaking', active: true };
+  }
 
   if (opts.busy && status === 'live') return { label: 'Working…', tone: 'busy', active: true };
 

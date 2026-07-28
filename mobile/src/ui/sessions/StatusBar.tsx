@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { JSX, KeyboardEvent } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
-import { deriveStatus } from './sessionStatus';
+import { deriveStatus, type ComposerActivity } from './sessionStatus';
 
 interface StatusBarProps {
   title: string;
@@ -10,6 +10,8 @@ interface StatusBarProps {
   status: SessionStatus;
   /** True while the agent is actively working (busy). Overrides the "Live" label with "Working…". */
   busy?: boolean;
+  /** What the composer is doing — outranks `busy` so the pill mirrors the mic/speech (#184). */
+  activity?: ComposerActivity;
   onOpenDrawer(): void;
   onAddSession(): void;
   onStartSession?(): void;
@@ -39,6 +41,7 @@ export function StatusBar({
   cwd,
   status,
   busy = false,
+  activity,
   onOpenDrawer,
   onAddSession,
   onStartSession,
@@ -67,7 +70,7 @@ export function StatusBar({
   // "Archived" (cold, tap to reconnect) from the problem "Offline" (error, reconnect).
   const derived = deriveStatus(
     { status, cold: activeSession?.cold ?? false, error: activeSession?.error },
-    { busy },
+    { busy, ...(activity ? { activity } : {}) },
   );
   const lineClass = derived.tone;
   const statusLabel = derived.label;

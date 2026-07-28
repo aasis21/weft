@@ -282,6 +282,20 @@
 }
 .status-line.connecting .status-dot,
 .status-dot.connecting { background: var(--accent); animation: weft-beat 1.2s ease-in-out infinite; }
+/* Vox has the floor — the pill mirrors the composer's mic/speech so the header carries what the
+   dock deliberately stopped showing (#184). Colours match the orb: amber listening, green speaking. */
+.status-line.listening { color: var(--warning); }
+.status-line.listening .status-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 26%, transparent);
+  animation: weft-beat 1.15s ease-in-out infinite;
+}
+.status-line.speaking { color: var(--success); }
+.status-line.speaking .status-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 26%, transparent);
+  animation: weft-beat 1s ease-in-out infinite;
+}
 .status-line.idle .status-dot,
 .status-dot.idle { background: var(--warning); }
 .status-line.ended .status-dot,

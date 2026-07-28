@@ -7,6 +7,7 @@ import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/wef
 import { PHONE_COMMANDS, getPhoneCommand } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { VoxDock } from '@/ui/voice/VoxDock';
+import type { VoiceState } from '@/ui/voice/useVoxEngine';
 import type { AssistantItem } from '@/lib/timeline';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 import { isDesktopInput } from '@/lib/platform';
@@ -23,6 +24,8 @@ export interface ComposerVox {
   /** Escalate to the original full-page Vox surface. */
   onExpand(): void;
   onActiveChange?(active: boolean): void;
+  /** Report the live Vox state so the header pill can mirror the composer (#184). */
+  onStateChange?(state: VoiceState): void;
 }
 
 interface ComposerProps {
@@ -732,6 +735,7 @@ export function Composer({
             onPrompt={(value) => onPrompt(value)}
             onInterrupt={onInterrupt}
             {...(vox.onActiveChange ? { onActiveChange: vox.onActiveChange } : {})}
+            {...(vox.onStateChange ? { onStateChange: vox.onStateChange } : {})}
             onExpand={vox.onExpand}
             onKeyboard={() => exitVox()}
             onEditTranscript={exitVox}

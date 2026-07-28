@@ -27,6 +27,8 @@ export interface VoxEngineOptions {
   onPrompt(text: string): Promise<void> | void;
   onInterrupt(): void;
   onActiveChange?(active: boolean): void;
+  /** Report the live state so the header pill can follow the composer (#184). */
+  onStateChange?(state: VoiceState): void;
   /** Hold the mic (and any auto-relisten) while something else needs the user — e.g. an approval card. */
   paused?: boolean;
 }
@@ -76,6 +78,7 @@ export function useVoxEngine({
   onPrompt,
   onInterrupt,
   onActiveChange,
+  onStateChange,
   paused = false,
 }: VoxEngineOptions): VoxEngine {
   const { supported: inputSupported, error: speechError, start: startSpeechInput, stop: stopSpeechInput } = useSpeechInput();
@@ -182,6 +185,17 @@ export function useVoxEngine({
     onActiveChange?.(true);
     return () => onActiveChange?.(false);
   }, [onActiveChange]);
+
+  // The header pill mirrors the composer, so it reads "Listening…" / "Speaking…" instead of a flat
+  // "Live" while Vox has the floor (#184). Reset on unmount so the pill doesn't keep a stale state.
+  const stateChangeRef = useRef(onStateChange);
+  stateChangeRef.current = onStateChange;
+  useEffect(() => {
+    stateChangeRef.current?.(state);
+  }, [state]);
+  useEffect(() => {
+    return () => stateChangeRef.current?.('idle');
+  }, []);
 
   useEffect(() => {
     void getVoiceAutoRelisten().then(setAutoRelisten);

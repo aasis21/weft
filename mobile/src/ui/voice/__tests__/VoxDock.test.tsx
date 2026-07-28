@@ -88,8 +88,7 @@ describe('VoxDock inline surface', () => {
   });
 });
 
-describe('VoxDock quiet while busy (#183)', () => {
-  it('hides the status line and transcript once the turn is in flight', () => {
+describe('VoxDock quiet while busy (#183)', () => {  it('hides the status line and transcript once the turn is in flight', () => {
     const { container, panel } = renderDock({ agentBusy: true });
     expect(panel.getAttribute('data-state')).toBe('working');
     expect(container.querySelector('.vox-dock-status')).toBeNull();
@@ -101,6 +100,20 @@ describe('VoxDock quiet while busy (#183)', () => {
     speak('run the tests', false);
     expect(container.querySelector('.vox-dock-status')?.textContent).toContain('Listening');
     expect(container.querySelector('.vox-heard')?.textContent).toContain('run the tests');
+  });
+});
+
+describe('VoxDock reports state upward (#184)', () => {
+  it('tells the header when the mic opens and when the turn goes out', () => {
+    vi.useFakeTimers();
+    const onStateChange = vi.fn();
+    renderDock({ onStateChange });
+    expect(onStateChange).toHaveBeenLastCalledWith('listening');
+    speak('ship it', true);
+    act(() => {
+      vi.advanceTimersByTime(3300);
+    });
+    expect(onStateChange).toHaveBeenCalledWith('working');
   });
 });
 

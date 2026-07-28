@@ -1,6 +1,6 @@
 import { useEffect, useRef, type JSX } from 'react';
 import type { AssistantItem } from '@/lib/timeline';
-import { useVoxEngine } from '@/ui/voice/useVoxEngine';
+import { useVoxEngine, type VoiceState } from '@/ui/voice/useVoxEngine';
 
 interface VoiceModeOverlayProps {
   latestAssistant: AssistantItem | null;
@@ -10,6 +10,8 @@ interface VoiceModeOverlayProps {
   onPrompt(text: string): Promise<void> | void;
   onInterrupt(): void;
   onActiveChange?(active: boolean): void;
+  /** Report the live Vox state so the header pill can mirror the composer (#184). */
+  onStateChange?(state: VoiceState): void;
   onClose(): void;
 }
 
@@ -27,6 +29,7 @@ export function VoiceModeOverlay({
   onPrompt,
   onInterrupt,
   onActiveChange,
+  onStateChange,
   onClose,
 }: VoiceModeOverlayProps): JSX.Element {
   const {
@@ -45,6 +48,7 @@ export function VoiceModeOverlay({
     onPrompt,
     onInterrupt,
     ...(onActiveChange ? { onActiveChange } : {}),
+    ...(onStateChange ? { onStateChange } : {}),
   });
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);

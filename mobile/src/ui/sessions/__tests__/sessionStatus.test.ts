@@ -67,3 +67,35 @@ describe('deriveStatus (#163 single source of truth)', () => {
     });
   });
 });
+
+describe('deriveStatus composer activity (#184)', () => {
+  it('mirrors the mic instead of a flat Live', () => {
+    expect(deriveStatus(view({ status: 'live' }), { activity: 'listening' })).toEqual({
+      label: 'Listening…',
+      tone: 'listening',
+      active: true,
+    });
+  });
+
+  it('mirrors speech-out instead of a flat Live', () => {
+    expect(deriveStatus(view({ status: 'live' }), { activity: 'speaking' })).toEqual({
+      label: 'Speaking…',
+      tone: 'speaking',
+      active: true,
+    });
+  });
+
+  it('outranks busy — the open mic is the more urgent fact', () => {
+    const s = deriveStatus(view({ status: 'live' }), { busy: true, activity: 'listening' });
+    expect(s.label).toBe('Listening…');
+  });
+
+  it('never masks Offline or Ended', () => {
+    expect(deriveStatus(view({ status: 'live', error: 'boom' }), { activity: 'listening' }).label).toBe('Offline');
+    expect(deriveStatus(view({ status: 'ended' }), { activity: 'speaking' }).label).toBe('Ended');
+  });
+
+  it('is ignored when the session isn’t live', () => {
+    expect(deriveStatus(view({ status: 'idle' }), { activity: 'listening' }).label).toBe('Quiet');
+  });
+});
