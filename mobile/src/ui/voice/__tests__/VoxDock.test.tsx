@@ -239,3 +239,51 @@ describe('VoxDock follows the chat you switch to (#187)', () => {
     expect(speechOutput.enqueue).not.toHaveBeenCalled();
   });
 });
+
+describe('VoxDock does not barge into a busy chat (#188)', () => {
+  function dock(conversationKey: string, agentBusy: boolean, latestAssistant: React.ComponentProps<typeof VoxDock>['latestAssistant']) {
+    return (
+      <VoxDock
+        latestAssistant={latestAssistant}
+        agentBusy={agentBusy}
+        toolActive={false}
+        disabled={false}
+        conversationKey={conversationKey}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onExpand={vi.fn()}
+        onKeyboard={vi.fn()}
+        onEditTranscript={vi.fn()}
+      />
+    );
+  }
+
+  it('holds the mic when the chat you switch to is mid-turn', () => {
+    const { rerender, container } = render(dock('chat-a', false, null));
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+
+    rerender(dock('chat-b', true, null));
+
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+    expect(speechInput.stop).toHaveBeenCalled();
+    expect(container.querySelector('.vox-dock')?.getAttribute('data-state')).toBe('working');
+  });
+
+  it('stays silent through the turn it walked in on, then joins in', () => {
+    const growing = { id: 'b1', kind: 'assistant', text: 'half an answer', final: false } as never;
+    const landed = { id: 'b1', kind: 'assistant', text: 'half an answer and the rest', final: true } as never;
+    const { rerender } = render(dock('chat-a', false, null));
+    speechOutput.enqueue.mockClear();
+
+    rerender(dock('chat-b', true, growing));
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+
+    rerender(dock('chat-b', false, landed));
+    // The turn we interrupted is swallowed whole, not read out after the fact.
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+
+    const next = { id: 'b2', kind: 'assistant', text: 'this one is ours', final: true } as never;
+    rerender(dock('chat-b', false, next));
+    expect(speechOutput.enqueue).toHaveBeenCalledWith('this one is ours');
+  });
+});

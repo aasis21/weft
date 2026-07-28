@@ -295,37 +295,71 @@ export function useVoxEngine({
   }, [agentBusy, state]);
 
   // Switching chats with Vox on: stop mid-sentence, forget the words meant for the old chat, and
-  // arm the cursor so the reply already sitting in the new chat isn't read out from the top (#187).
-  const skipExistingReplyRef = useRef(false);
+  // don't barge into a turn that's already running there (#188). If the new chat is busy we stand
+  // by silently — mic off, nothing spoken — and pick up from whatever the agent says next.
+  const skipUntilIdleRef = useRef(false);
+  const skipCurrentReplyRef = useRef(false);
   const startRef = useRef(startListening);
   startRef.current = startListening;
+  const busyRef = useRef(agentBusy);
+  busyRef.current = agentBusy;
   const firstConversationRef = useRef(true);
   useEffect(() => {
     if (firstConversationRef.current) {
       firstConversationRef.current = false;
       return;
     }
-    skipExistingReplyRef.current = true;
     clearSilence();
     cancelSpeech();
+    stopListening();
     sawReplyRef.current = false;
     committedRef.current = '';
     heardRef.current = '';
     carriedRef.current = '';
     setCaption('');
+    // Whatever reply is already sitting in that chat is old news either way.
+    skipCurrentReplyRef.current = true;
+    if (busyRef.current) {
+      // Mid-turn over there. Don't take the mic (we'd transcribe over its answer) and don't read out
+      // a reply that's half-written — wait for it to finish, then behave normally.
+      skipUntilIdleRef.current = true;
+      setState('working');
+      return;
+    }
     setState('ready');
     startRef.current();
-  }, [cancelSpeech, clearSilence, conversationKey]);
+  }, [cancelSpeech, clearSilence, conversationKey, stopListening]);
+
+  // The turn we walked in on has finished — swallow it whole (it wasn't ours to narrate) and be a
+  // full participant from the next one onward.
+  useEffect(() => {
+    if (agentBusy || !skipUntilIdleRef.current) return;
+    skipUntilIdleRef.current = false;
+    const cursor = assistantCursorRef.current;
+    if (latestAssistant) {
+      cursor.id = latestAssistant.id;
+      cursor.offset = latestAssistant.text.length;
+    }
+    sawReplyRef.current = false;
+    skipCurrentReplyRef.current = false;
+  }, [agentBusy, latestAssistant]);
 
   useEffect(() => {
     if (!latestAssistant) return;
+    // Standing by on a turn that was already running when we arrived — say nothing until it lands.
+    if (skipUntilIdleRef.current && agentBusy) return;
     const cursor = assistantCursorRef.current;
     if (cursor.id !== latestAssistant.id) {
       cursor.id = latestAssistant.id;
       // Right after a chat switch the "new" message is old news — start at its end so Vox picks up
       // from whatever the agent says next instead of reciting the backlog (#187).
-      cursor.offset = skipExistingReplyRef.current ? latestAssistant.text.length : 0;
-      skipExistingReplyRef.current = false;
+      cursor.offset = skipCurrentReplyRef.current ? latestAssistant.text.length : 0;
+      skipCurrentReplyRef.current = false;
+      sawReplyRef.current = false;
+    } else if (skipCurrentReplyRef.current) {
+      // Same message still growing — skip everything written so far, speak only what comes next.
+      cursor.offset = latestAssistant.text.length;
+      skipCurrentReplyRef.current = false;
       sawReplyRef.current = false;
     }
     // Full-message mode (streaming off): hold TTS while the agent is still *narrating* (busy, no tool
