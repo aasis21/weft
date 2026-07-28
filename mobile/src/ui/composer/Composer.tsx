@@ -30,6 +30,8 @@ export interface ComposerVox {
   initialTranscript?: string;
   /** Hand the dock's in-flight words to whichever surface mounts next. */
   onTranscriptHandoff?(text: string): void;
+  /** Which chat Vox is pointed at — changing it repoints it instead of closing it (#187). */
+  conversationKey?: string;
 }
 
 interface ComposerProps {
@@ -742,6 +744,7 @@ export function Composer({
             {...(vox.onStateChange ? { onStateChange: vox.onStateChange } : {})}
             {...(vox.onTranscriptHandoff ? { onTranscriptHandoff: vox.onTranscriptHandoff } : {})}
             initialTranscript={vox.initialTranscript ?? ''}
+            {...(vox.conversationKey ? { conversationKey: vox.conversationKey } : {})}
             onExpand={vox.onExpand}
             onKeyboard={() => exitVox()}
             onEditTranscript={exitVox}

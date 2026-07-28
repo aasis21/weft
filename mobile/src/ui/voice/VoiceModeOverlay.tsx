@@ -21,6 +21,8 @@ interface VoiceModeOverlayProps {
   initialTranscript?: string;
   /** Hand our in-flight words back to the dock on collapse. */
   onTranscriptHandoff?(text: string): void;
+  /** Which chat we're pointed at — changing it repoints Vox instead of closing it (#187). */
+  conversationKey?: string;
 }
 
 /**
@@ -42,6 +44,7 @@ export function VoiceModeOverlay({
   onExit,
   initialTranscript = '',
   onTranscriptHandoff,
+  conversationKey,
 }: VoiceModeOverlayProps): JSX.Element {
   const {
     state,
@@ -62,6 +65,7 @@ export function VoiceModeOverlay({
     onPrompt,
     onInterrupt,
     initialTranscript,
+    ...(conversationKey ? { conversationKey } : {}),
     ...(onActiveChange ? { onActiveChange } : {}),
     ...(onStateChange ? { onStateChange } : {}),
     ...(onTranscriptHandoff ? { onTranscriptHandoff } : {}),

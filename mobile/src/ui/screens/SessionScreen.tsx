@@ -368,15 +368,13 @@ export function SessionScreen({
     setConfirmRemoveId(null);
   };
   const handleVoiceModeActive = useCallback(
-    (active: boolean): void => onVoiceModeChange?.(activeId, active),
+    (active: boolean): void => {
+      // Ownership is now driven by the mode + active session (see the effect below), not by a
+      // surface mounting. Only the "released" edge still matters here, as a safety net.
+      if (!active) onVoiceModeChange?.(activeId, false);
+    },
     [activeId, onVoiceModeChange],
   );
-
-  // Vox follows the session you're looking at — switching sessions drops back to the keyboard.
-  useEffect(() => {
-    setVoxOpen(false);
-    setVoiceOpen(false);
-  }, [activeId]);
 
   // Only one Vox surface may exist at a time: they each own a mic and a speech queue, so running
   // the inline dock behind the expanded overlay would double-transcribe and double-speak. The
@@ -386,6 +384,22 @@ export function SessionScreen({
   const takeHandoff = useCallback((text: string): void => {
     handoffRef.current = text;
   }, []);
+
+  // Vox is a mode, not a per-chat toggle: switching sessions keeps the mic open and simply points
+  // it at the new conversation (#187). The laptop still needs to know which session has the floor,
+  // so ownership moves with `activeId` — the cleanup hands it back before the new one claims it.
+  useEffect(() => {
+    if (!voxOpen && !voiceOpen) return undefined;
+    onVoiceModeChange?.(activeId, true);
+    return () => onVoiceModeChange?.(activeId, false);
+  }, [activeId, voiceOpen, voxOpen, onVoiceModeChange]);
+
+  // Words spoken at the old chat don't belong to the new one.
+  useEffect(() => {
+    handoffRef.current = '';
+    setVoxHandoff('');
+  }, [activeId]);
+
   const expandVox = useCallback((): void => {
     setVoxOpen(false);
     setVoxHandoff(handoffRef.current);
@@ -632,6 +646,7 @@ export function SessionScreen({
           onExit={exitVox}
           initialTranscript={voxHandoff}
           onTranscriptHandoff={takeHandoff}
+          conversationKey={activeId}
         />
       ) : null}
 
@@ -845,6 +860,7 @@ export function SessionScreen({
             onExpand: expandVox,
             initialTranscript: voxHandoff,
             onTranscriptHandoff: takeHandoff,
+            conversationKey: activeId,
             onStateChange: setVoxState,
             onActiveChange: handleVoiceModeActive,
           }}

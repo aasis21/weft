@@ -25,6 +25,8 @@ interface VoxDockProps {
   initialTranscript?: string;
   /** Hand our in-flight words to whoever mounts next. */
   onTranscriptHandoff?(text: string): void;
+  /** Which chat we're pointed at — changing it repoints Vox instead of closing it (#187). */
+  conversationKey?: string;
 }
 
 /**
@@ -47,6 +49,7 @@ export function VoxDock({
   onEditTranscript,
   initialTranscript = '',
   onTranscriptHandoff,
+  conversationKey,
 }: VoxDockProps): JSX.Element {
   const {
     state,
@@ -68,6 +71,7 @@ export function VoxDock({
     onPrompt,
     onInterrupt,
     initialTranscript,
+    ...(conversationKey ? { conversationKey } : {}),
     ...(onActiveChange ? { onActiveChange } : {}),
     ...(onStateChange ? { onStateChange } : {}),
     ...(onTranscriptHandoff ? { onTranscriptHandoff } : {}),

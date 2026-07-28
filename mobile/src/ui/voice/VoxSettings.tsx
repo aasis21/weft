@@ -1,10 +1,5 @@
 import { type JSX } from 'react';
-import {
-  VOICE_SILENCE_MAX,
-  VOICE_SILENCE_MIN,
-  setVoiceAutoRelisten,
-  setVoiceSilenceSeconds,
-} from '@/lib/settings';
+import { setVoiceAutoRelisten, setVoiceSilenceSeconds } from '@/lib/settings';
 
 interface VoxSettingsProps {
   autoRelisten: boolean;
@@ -12,38 +7,62 @@ interface VoxSettingsProps {
 }
 
 /**
- * The two knobs worth reaching for in the middle of a conversation: whether Vox picks the mic back
- * up after it finishes speaking, and how long a pause counts as "done talking" (#186).
- *
- * Writes straight to settings — the engine subscribes, so a change lands on the very next word.
+ * Vox quick settings, in the shape of the real Settings screen (same switch and segment controls),
+ * because this is a hands-free mode — it gets used one-handed, or not-handed, at arm's length. Big
+ * targets, plain words, no slider to land precisely on while you're driving (#187).
  */
+const PAUSE_CHOICES = [
+  { seconds: 1.5, label: 'Snappy' },
+  { seconds: 3.2, label: 'Normal' },
+  { seconds: 5, label: 'Relaxed' },
+  { seconds: 8, label: 'Thinking' },
+];
+
 export function VoxSettings({ autoRelisten, silenceMs }: VoxSettingsProps): JSX.Element {
   const seconds = Math.round((silenceMs / 1000) * 10) / 10;
+  const closest = PAUSE_CHOICES.reduce((best, option) =>
+    Math.abs(option.seconds - seconds) < Math.abs(best.seconds - seconds) ? option : best,
+  );
+
   return (
-    <div className="vox-settings">
-      <label className="vox-setting vox-setting-row">
-        <span>Keep listening after I reply</span>
-        <input
-          type="checkbox"
-          checked={autoRelisten}
-          onChange={(event) => void setVoiceAutoRelisten(event.target.checked)}
-        />
-      </label>
-      <label className="vox-setting">
-        <span className="vox-setting-row">
-          <span>Pause before sending</span>
-          <span className="vox-setting-value">{seconds.toFixed(1)}s</span>
-        </span>
-        <input
-          type="range"
-          min={VOICE_SILENCE_MIN}
-          max={VOICE_SILENCE_MAX}
-          step={0.5}
-          value={seconds}
-          aria-label="Pause before sending, in seconds"
-          onChange={(event) => void setVoiceSilenceSeconds(Number(event.target.value))}
-        />
-      </label>
-    </div>
+    <section className="vox-settings settings-group" aria-label="Vox settings">
+      <div className="settings-row-head">
+        <div>
+          <h2 id="vox-relisten-title">Keep listening</h2>
+          <p>Reopen the mic on its own once Weft finishes speaking.</p>
+        </div>
+        <label className="settings-switch">
+          <input
+            type="checkbox"
+            aria-labelledby="vox-relisten-title"
+            checked={autoRelisten}
+            onChange={(event) => void setVoiceAutoRelisten(event.currentTarget.checked)}
+          />
+          <span aria-hidden="true" />
+        </label>
+      </div>
+
+      <div className="settings-row-head">
+        <div>
+          <h2 id="vox-pause-title">Pause before sending</h2>
+          <p>How long a silence means you're done talking.</p>
+        </div>
+      </div>
+      <div className="settings-segments" role="radiogroup" aria-labelledby="vox-pause-title">
+        {PAUSE_CHOICES.map((option) => (
+          <button
+            key={option.seconds}
+            type="button"
+            role="radio"
+            aria-checked={option.seconds === closest.seconds}
+            className={`settings-segment${option.seconds === closest.seconds ? ' active' : ''}`}
+            onClick={() => void setVoiceSilenceSeconds(option.seconds)}
+          >
+            <span className="vox-segment-label">{option.label}</span>
+            <span className="vox-segment-value">{option.seconds}s</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }

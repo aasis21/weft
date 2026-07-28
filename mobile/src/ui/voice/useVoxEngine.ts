@@ -40,6 +40,12 @@ export interface VoxEngineOptions {
   initialTranscript?: string;
   /** Hand the in-flight transcript to whoever unmounts us, so the swap doesn't drop a half sentence. */
   onTranscriptHandoff?(text: string): void;
+  /**
+   * Which conversation we're pointed at. Vox stays on when you switch chats (#187) — changing this
+   * repoints the mic at the new session, drops the old session's half-sentence, and refuses to read
+   * out the reply that was already sitting there.
+   */
+  conversationKey?: string;
 }
 
 export interface VoxEngine {
@@ -97,6 +103,7 @@ export function useVoxEngine({
   paused = false,
   initialTranscript = '',
   onTranscriptHandoff,
+  conversationKey,
 }: VoxEngineOptions): VoxEngine {
   const { supported: inputSupported, error: speechError, start: startSpeechInput, stop: stopSpeechInput } = useSpeechInput();
   const {
@@ -287,12 +294,38 @@ export function useVoxEngine({
     }
   }, [agentBusy, state]);
 
+  // Switching chats with Vox on: stop mid-sentence, forget the words meant for the old chat, and
+  // arm the cursor so the reply already sitting in the new chat isn't read out from the top (#187).
+  const skipExistingReplyRef = useRef(false);
+  const startRef = useRef(startListening);
+  startRef.current = startListening;
+  const firstConversationRef = useRef(true);
+  useEffect(() => {
+    if (firstConversationRef.current) {
+      firstConversationRef.current = false;
+      return;
+    }
+    skipExistingReplyRef.current = true;
+    clearSilence();
+    cancelSpeech();
+    sawReplyRef.current = false;
+    committedRef.current = '';
+    heardRef.current = '';
+    carriedRef.current = '';
+    setCaption('');
+    setState('ready');
+    startRef.current();
+  }, [cancelSpeech, clearSilence, conversationKey]);
+
   useEffect(() => {
     if (!latestAssistant) return;
     const cursor = assistantCursorRef.current;
     if (cursor.id !== latestAssistant.id) {
       cursor.id = latestAssistant.id;
-      cursor.offset = 0;
+      // Right after a chat switch the "new" message is old news — start at its end so Vox picks up
+      // from whatever the agent says next instead of reciting the backlog (#187).
+      cursor.offset = skipExistingReplyRef.current ? latestAssistant.text.length : 0;
+      skipExistingReplyRef.current = false;
       sawReplyRef.current = false;
     }
     // Full-message mode (streaming off): hold TTS while the agent is still *narrating* (busy, no tool

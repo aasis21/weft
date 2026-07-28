@@ -165,8 +165,9 @@ describe('VoxDock quick settings and countdown (#186)', () => {
     fireEvent.click(getByLabelText('Vox settings'));
     const panel = container.querySelector('.vox-settings');
     expect(panel).not.toBeNull();
-    expect(panel?.textContent).toContain('Keep listening after I reply');
-    expect(container.querySelector('input[type="range"]')).not.toBeNull();
+    expect(panel?.textContent).toContain('Keep listening');
+    // Segments, not a slider — this gets used at arm's length.
+    expect(panel?.querySelectorAll('.settings-segment').length).toBe(4);
   });
 
   it('drives the countdown from the silence setting and replays it on every new word', () => {
@@ -193,5 +194,48 @@ describe('VoxDock quick settings and countdown (#186)', () => {
     renderDock({ onTranscriptHandoff });
     speak('hold on', false);
     expect(onTranscriptHandoff).toHaveBeenLastCalledWith('hold on');
+  });
+});
+
+describe('VoxDock follows the chat you switch to (#187)', () => {
+  function dockFor(conversationKey: string, latestAssistant: React.ComponentProps<typeof VoxDock>['latestAssistant']) {
+    return (
+      <VoxDock
+        latestAssistant={latestAssistant}
+        agentBusy={false}
+        toolActive={false}
+        disabled={false}
+        conversationKey={conversationKey}
+        onPrompt={vi.fn()}
+        onInterrupt={vi.fn()}
+        onExpand={vi.fn()}
+        onKeyboard={vi.fn()}
+        onEditTranscript={vi.fn()}
+      />
+    );
+  }
+
+  it('stays open and reopens the mic on the new chat', () => {
+    const { rerender, container } = render(dockFor('chat-a', null));
+    speak('this was for the old chat', false);
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+
+    rerender(dockFor('chat-b', null));
+
+    expect(container.querySelector('.vox-dock')).not.toBeNull();
+    expect(speechInput.start).toHaveBeenCalledTimes(2);
+    // Words meant for the previous chat don't follow you into the new one.
+    expect(container.querySelector('.vox-heard')?.textContent).not.toContain('old chat');
+  });
+
+  it('does not read out the reply that was already sitting in the new chat', () => {
+    const oldReply = { id: 'a1', kind: 'assistant', text: 'done with chat A', final: true } as never;
+    const newReply = { id: 'b1', kind: 'assistant', text: 'a stale answer from chat B', final: true } as never;
+    const { rerender } = render(dockFor('chat-a', oldReply));
+    speechOutput.enqueue.mockClear();
+
+    rerender(dockFor('chat-b', newReply));
+
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
   });
 });

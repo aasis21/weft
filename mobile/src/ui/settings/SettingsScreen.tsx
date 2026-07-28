@@ -34,6 +34,7 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
   const [settings, setSettingsState] = useState<WeftSettings>({
     voiceAutoRelisten: false,
     voiceSpeakStreaming: false,
+    voiceSilenceSeconds: 3.2,
     theme: 'system',
   });
   const overlayRef = useRef<HTMLDivElement>(null);
