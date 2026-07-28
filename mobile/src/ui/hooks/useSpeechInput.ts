@@ -36,6 +36,8 @@ interface SpeechRecognition {
   onend: (() => void) | null;
   start(): void;
   stop(): void;
+  /** Not in every engine, but where it exists it tears down immediately instead of draining. */
+  abort?(): void;
 }
 
 interface SpeechRecognitionConstructor {
@@ -66,6 +68,27 @@ function speechErrorMessage(code: string): string {
       return 'Network error during voice input.';
     default:
       return "Voice input isn't available right now.";
+  }
+}
+
+/**
+ * Let go of the mic for real.
+ *
+ * `stop()` is a polite request: the engine drains the audio it already has, fires one more result,
+ * and only then ends — so the mic indicator stays lit and stray words keep arriving well after we
+ * asked it to quit. `abort()` cuts it dead. Either way we detach the handlers first, so nothing
+ * late can slip through and `onend` can't kick off the auto-restart (#189).
+ */
+function teardown(recognition: SpeechRecognition | null): void {
+  if (!recognition) return;
+  recognition.onresult = null;
+  recognition.onerror = null;
+  recognition.onend = null;
+  try {
+    if (typeof recognition.abort === 'function') recognition.abort();
+    else recognition.stop();
+  } catch {
+    // Already dead — nothing to release.
   }
 }
 
@@ -154,7 +177,7 @@ export function useSpeechInput(): {
   const stop = useCallback((): void => {
     explicitStopRef.current = true;
     recognitionGenerationRef.current += 1;
-    recognitionRef.current?.stop();
+    teardown(recognitionRef.current);
     recognitionRef.current = null;
     setListening(false);
   }, []);
@@ -162,7 +185,7 @@ export function useSpeechInput(): {
   useEffect(() => () => {
     explicitStopRef.current = true;
     recognitionGenerationRef.current += 1;
-    recognitionRef.current?.stop();
+    teardown(recognitionRef.current);
     recognitionRef.current = null;
   }, []);
 

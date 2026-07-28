@@ -19,6 +19,7 @@ class MockSpeechRecognition {
   onend: (() => void) | null = null;
   start = vi.fn();
   stop = vi.fn();
+  abort = vi.fn();
 
   constructor() {
     MockSpeechRecognition.instances.push(this);
@@ -101,5 +102,44 @@ describe('useSpeechInput', () => {
 
     expect(result.current.listening).toBe(false);
     expect(MockSpeechRecognition.instances).toHaveLength(2);
+  });
+
+  it('aborts the engine on stop so nothing keeps listening (#189)', () => {
+    const heard: Array<{ text: string; isFinal: boolean }> = [];
+    const { result } = renderHook(() => useSpeechInput());
+
+    act(() => {
+      result.current.start((text, isFinal) => heard.push({ text, isFinal }));
+    });
+    const engine = MockSpeechRecognition.instances[0];
+
+    act(() => {
+      result.current.stop();
+    });
+
+    expect(engine.abort).toHaveBeenCalledTimes(1);
+    expect(engine.stop).not.toHaveBeenCalled();
+    expect(engine.onresult).toBeNull();
+    expect(engine.onend).toBeNull();
+    expect(engine.onerror).toBeNull();
+    expect(heard).toEqual([]);
+    expect(MockSpeechRecognition.instances).toHaveLength(1);
+  });
+
+  it('falls back to stop when the engine has no abort', () => {
+    const { result } = renderHook(() => useSpeechInput());
+
+    act(() => {
+      result.current.start(() => {});
+    });
+    const engine = MockSpeechRecognition.instances[0];
+    (engine as { abort?: unknown }).abort = undefined;
+
+    act(() => {
+      result.current.stop();
+    });
+
+    expect(engine.stop).toHaveBeenCalledTimes(1);
+    expect(result.current.listening).toBe(false);
   });
 });

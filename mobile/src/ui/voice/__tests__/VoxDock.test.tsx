@@ -286,4 +286,19 @@ describe('VoxDock does not barge into a busy chat (#188)', () => {
     rerender(dock('chat-b', false, next));
     expect(speechOutput.enqueue).toHaveBeenCalledWith('this one is ours');
   });
+
+  it('never leaves the mic open outside listening (#189)', () => {
+    const reply = { id: 'b1', kind: 'assistant', text: 'talking now', final: true } as never;
+    const { rerender, container } = render(dock('chat-a', false, null));
+
+    // Standing by in a busy chat: the mic must be released, not merely asked to wind down.
+    rerender(dock('chat-b', true, null));
+    expect(container.querySelector('.vox-dock')?.getAttribute('data-state')).toBe('working');
+    const stopsWhileWorking = speechInput.stop.mock.calls.length;
+    expect(stopsWhileWorking).toBeGreaterThan(0);
+
+    // And it stays released while the assistant speaks — no restart sneaks in behind the audio.
+    rerender(dock('chat-b', true, reply));
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+  });
 });

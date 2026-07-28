@@ -294,6 +294,14 @@ export function useVoxEngine({
     }
   }, [agentBusy, state]);
 
+  // The one invariant worth enforcing structurally: the mic is open only while we're listening.
+  // Every path out of listening already drops it, but "already" is doing a lot of work there —
+  // one missed call site and the phone quietly transcribes the room while Vox is talking (#189).
+  useEffect(() => {
+    if (state === 'listening') return;
+    stopSpeechInput();
+  }, [state, stopSpeechInput]);
+
   // Switching chats with Vox on: stop mid-sentence, forget the words meant for the old chat, and
   // don't barge into a turn that's already running there (#188). If the new chat is busy we stand
   // by silently — mic off, nothing spoken — and pick up from whatever the agent says next.
