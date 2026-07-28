@@ -139,6 +139,9 @@ export function useVoxEngine({
   });
   const sawReplyRef = useRef(false);
   const autoStartedRef = useRef(false);
+  // Whether we currently intend to hold the mic. Tracks intent rather than rendered state so the
+  // safety net below can tell "not listening yet" from "no longer listening".
+  const micWantedRef = useRef(false);
   const stateRef = useRef<VoiceState>('ready');
   stateRef.current = state;
   const pausedRef = useRef(paused);
@@ -150,6 +153,7 @@ export function useVoxEngine({
   }, []);
 
   const stopListening = useCallback((): void => {
+    micWantedRef.current = false;
     clearSilence();
     stopSpeechInput();
   }, [clearSilence, stopSpeechInput]);
@@ -189,6 +193,7 @@ export function useVoxEngine({
     heardRef.current = seed;
     setCaption(seed);
     setState('listening');
+    micWantedRef.current = true;
     startSpeechInput((spokenText, isFinal) => {
       const next = appendSpeechText(committedRef.current, spokenText);
       heardRef.current = next;
@@ -276,6 +281,7 @@ export function useVoxEngine({
   useEffect(() => {
     if (!paused) return;
     clearSilence();
+    micWantedRef.current = false;
     stopSpeechInput();
     if (stateRef.current === 'listening') setState('ready');
   }, [clearSilence, paused, stopSpeechInput]);
@@ -283,6 +289,7 @@ export function useVoxEngine({
   useEffect(() => {
     return () => {
       clearSilence();
+      micWantedRef.current = false;
       stopSpeechInput();
       cancelSpeech();
     };
@@ -294,11 +301,15 @@ export function useVoxEngine({
     }
   }, [agentBusy, state]);
 
-  // The one invariant worth enforcing structurally: the mic is open only while we're listening.
+  // The one invariant worth enforcing structurally: the mic is open only while we mean to listen.
   // Every path out of listening already drops it, but "already" is doing a lot of work there —
   // one missed call site and the phone quietly transcribes the room while Vox is talking (#189).
+  //
+  // The check is against intent, not the rendered state: `state` here is a snapshot from the render
+  // this effect belongs to, so an effect that started the mic earlier in the same commit hasn't
+  // shown up in it yet — trusting it would close the mic the instant Vox opened.
   useEffect(() => {
-    if (state === 'listening') return;
+    if (state === 'listening' || micWantedRef.current) return;
     stopSpeechInput();
   }, [state, stopSpeechInput]);
 

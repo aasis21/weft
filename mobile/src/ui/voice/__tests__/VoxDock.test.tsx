@@ -291,11 +291,15 @@ describe('VoxDock does not barge into a busy chat (#188)', () => {
     const reply = { id: 'b1', kind: 'assistant', text: 'talking now', final: true } as never;
     const { rerender, container } = render(dock('chat-a', false, null));
 
+    // The safety net must not undo the auto-start it shares a commit with.
+    expect(container.querySelector('.vox-dock')?.getAttribute('data-state')).toBe('listening');
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+    expect(speechInput.stop).not.toHaveBeenCalled();
+
     // Standing by in a busy chat: the mic must be released, not merely asked to wind down.
     rerender(dock('chat-b', true, null));
     expect(container.querySelector('.vox-dock')?.getAttribute('data-state')).toBe('working');
-    const stopsWhileWorking = speechInput.stop.mock.calls.length;
-    expect(stopsWhileWorking).toBeGreaterThan(0);
+    expect(speechInput.stop).toHaveBeenCalled();
 
     // And it stays released while the assistant speaks — no restart sneaks in behind the audio.
     rerender(dock('chat-b', true, reply));
