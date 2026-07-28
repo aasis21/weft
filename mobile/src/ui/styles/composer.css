@@ -672,7 +672,8 @@
   height: 36px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 50%;
+  /* Squircle, not a circle — a round chip around a round icon read as a lightbulb. */
+  border-radius: 11px;
   background: transparent;
   color: var(--fg-dim);
   display: inline-flex;
@@ -767,8 +768,8 @@ button.vox-heard:hover {
 .vox-segment-value { font-size: 0.72rem; opacity: 0.7; font-variant-numeric: tabular-nums; }
 
 .vox-head-btn[aria-expanded='true'] {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 /* Paused behind an approval / ask_user card: the orb steps back so the card reads
