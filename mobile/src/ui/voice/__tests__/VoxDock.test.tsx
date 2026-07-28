@@ -81,6 +81,21 @@ describe('VoxDock inline surface', () => {
     expect(onEditTranscript).toHaveBeenCalledWith('delete the temp folder');
   });
 
+  it('shows the run once, not once per update (#192)', () => {
+    const { container } = renderDock();
+    const heard = (): string => container.querySelector('button.vox-heard')?.textContent ?? '';
+
+    // The recognizer reports everything heard so far on every update, so each one replaces the
+    // last. Treating them as fragments to append turned "hey man" into "hey heyman".
+    speak('hey', true);
+    speak('hey man', true);
+    speak("hey man what's up", false);
+
+    expect(heard()).toContain("hey man what's up");
+    expect(heard()).not.toContain('heyhey');
+    expect(heard()).not.toContain('hey hey');
+  });
+
   it('surfaces mic errors instead of swallowing them', () => {
     speechInput.error = 'Microphone access blocked — allow it in your browser settings.';
     const { container } = renderDock();
@@ -240,8 +255,7 @@ describe('VoxDock follows the chat you switch to (#187)', () => {
   });
 });
 
-describe('VoxDock does not barge into a busy chat (#188)', () => {
-  function dock(conversationKey: string, agentBusy: boolean, latestAssistant: React.ComponentProps<typeof VoxDock>['latestAssistant']) {
+describe('VoxDock does not barge into a busy chat (#188)', () => {  function dock(conversationKey: string, agentBusy: boolean, latestAssistant: React.ComponentProps<typeof VoxDock>['latestAssistant']) {
     return (
       <VoxDock
         latestAssistant={latestAssistant}
@@ -287,8 +301,7 @@ describe('VoxDock does not barge into a busy chat (#188)', () => {
     expect(speechOutput.enqueue).toHaveBeenCalledWith('this one is ours');
   });
 
-  it('never leaves the mic open outside listening (#189)', () => {
-    const reply = { id: 'b1', kind: 'assistant', text: 'talking now', final: true } as never;
+  it('never leaves the mic open outside listening (#189)', () => {    const reply = { id: 'b1', kind: 'assistant', text: 'talking now', final: true } as never;
     const { rerender, container } = render(dock('chat-a', false, null));
 
     // The safety net must not undo the auto-start it shares a commit with.

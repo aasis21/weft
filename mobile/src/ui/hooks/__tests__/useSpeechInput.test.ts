@@ -61,7 +61,7 @@ describe('useSpeechInput', () => {
     delete (window as { SpeechRecognition?: unknown }).SpeechRecognition;
   });
 
-  it('restarts after engine end with a fresh transcript buffer until explicitly stopped', async () => {
+  it('restarts after engine end and keeps reporting the whole run until explicitly stopped', async () => {
     const heard: Array<{ text: string; isFinal: boolean }> = [];
     const { result } = renderHook(() => useSpeechInput());
 
@@ -91,7 +91,7 @@ describe('useSpeechInput', () => {
     act(() => {
       MockSpeechRecognition.instances[1].onresult?.(speechEvent('world', true));
     });
-    expect(heard.at(-1)).toEqual({ text: 'world', isFinal: true });
+    expect(heard.at(-1)).toEqual({ text: 'helloworld', isFinal: true });
 
     act(() => {
       result.current.stop();
@@ -139,6 +139,43 @@ describe('useSpeechInput', () => {
 
     expect(result.current.error).toBeNull();
     expect(result.current.listening).toBe(true);
+  });
+
+  it('reports the whole run, not a fragment, across engine restarts (#192)', async () => {
+    const heard: Array<{ text: string; isFinal: boolean }> = [];
+    const { result } = renderHook(() => useSpeechInput());
+
+    act(() => {
+      result.current.start((text, isFinal) => heard.push({ text, isFinal }));
+    });
+
+    // Continuous mode accumulates within a session — each event carries everything so far.
+    act(() => {
+      MockSpeechRecognition.instances[0].onresult?.(speechEvent('hey ', true));
+      MockSpeechRecognition.instances[0].onresult?.(speechEvent('man', true));
+    });
+    expect(heard.at(-1)).toEqual({ text: 'hey man', isFinal: true });
+
+    // A restart starts the engine's transcript over, so we carry the earlier text ourselves.
+    act(() => {
+      MockSpeechRecognition.instances[0].onend?.();
+    });
+    await waitFor(() => expect(MockSpeechRecognition.instances).toHaveLength(2));
+
+    act(() => {
+      MockSpeechRecognition.instances[1].onresult?.(speechEvent(" what's up", true));
+    });
+    expect(heard.at(-1)).toEqual({ text: "hey man what's up", isFinal: true });
+
+    // A fresh listen starts from nothing.
+    act(() => {
+      result.current.stop();
+      result.current.start((text, isFinal) => heard.push({ text, isFinal }));
+    });
+    act(() => {
+      MockSpeechRecognition.instances.at(-1)?.onresult?.(speechEvent('brand new', true));
+    });
+    expect(heard.at(-1)).toEqual({ text: 'brand new', isFinal: true });
   });
 
   it('falls back to stop when the engine has no abort', () => {    const { result } = renderHook(() => useSpeechInput());

@@ -106,6 +106,7 @@ export function useSpeechInput(): {
   const recognitionGenerationRef = useRef(0);
   const explicitStopRef = useRef(true);
   const fatalErrorRef = useRef(false);
+  const runTranscriptRef = useRef('');
 
   const start = useCallback((onText: (text: string, isFinal: boolean) => void): void => {
     const Ctor = getSpeechRecognition();
@@ -115,6 +116,11 @@ export function useSpeechInput(): {
     explicitStopRef.current = false;
     fatalErrorRef.current = false;
     setError(null);
+    // Everything finalised by earlier recognition sessions in this listening run. Sessions end and
+    // restart on their own (engine timeouts, or engines that ignore continuous), and each new one
+    // starts its transcript from empty — so we carry the earlier text here and always report the
+    // whole run. Callers get one absolute transcript to replace, never a fragment to append (#192).
+    runTranscriptRef.current = '';
 
     const startRecognition = (): void => {
       if (recognitionGenerationRef.current !== generation || explicitStopRef.current || fatalErrorRef.current) return;
@@ -138,7 +144,7 @@ export function useSpeechInput(): {
           if (result?.isFinal) finalTranscript += transcript;
           else interimTranscript += transcript;
         }
-        const transcript = `${finalTranscript}${interimTranscript}`;
+        const transcript = `${runTranscriptRef.current}${finalTranscript}${interimTranscript}`;
         if (transcript) onText(transcript, interimTranscript.length === 0);
       };
       recognition.onerror = (event) => {
@@ -165,6 +171,7 @@ export function useSpeechInput(): {
           setListening(false);
           return;
         }
+        runTranscriptRef.current += finalTranscript;
         startRecognition();
       };
       recognitionRef.current = recognition;

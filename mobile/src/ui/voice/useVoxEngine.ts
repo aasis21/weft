@@ -142,6 +142,9 @@ export function useVoxEngine({
   // Whether we currently intend to hold the mic. Tracks intent rather than rendered state so the
   // safety net below can tell "not listening yet" from "no longer listening".
   const micWantedRef = useRef(false);
+  /** Text carried in from another surface — the recognizer's transcript is appended to this, not to
+   *  itself, since each callback already carries everything heard this listen. */
+  const seedRef = useRef('');
   const stateRef = useRef<VoiceState>('ready');
   stateRef.current = state;
   const pausedRef = useRef(paused);
@@ -189,13 +192,16 @@ export function useVoxEngine({
     // expanding mid-sentence resumes the same sentence instead of starting a new one (#186).
     const seed = carriedRef.current;
     carriedRef.current = '';
+    seedRef.current = seed;
     committedRef.current = seed;
     heardRef.current = seed;
     setCaption(seed);
     setState('listening');
     micWantedRef.current = true;
     startSpeechInput((spokenText, isFinal) => {
-      const next = appendSpeechText(committedRef.current, spokenText);
+      // What arrives is the whole run, not the newest fragment — so this replaces rather than
+      // accumulates. Appending it turned "hey man" into "hey heyman" and grew from there (#192).
+      const next = appendSpeechText(seedRef.current, spokenText);
       heardRef.current = next;
       setCaption(next || 'Listening…');
       if (isFinal) committedRef.current = next;
