@@ -122,7 +122,12 @@ export function useSpeechInput(): {
       let finalTranscript = '';
       recognition.lang = navigator.language;
       recognition.interimResults = true;
-      recognition.continuous = false;
+      // Stay open across pauses. In single-utterance mode the engine ends itself the moment you
+      // stop for breath and we immediately open another — which costs an OS close/open earcon each
+      // time (the endless ta-da ta-da), and drops whatever you said in the gap between the two.
+      // Support is uneven on Android, so the restart loop below stays as the fallback: engines that
+      // ignore this simply behave as they did before (#190).
+      recognition.continuous = true;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
         if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
@@ -139,6 +144,9 @@ export function useSpeechInput(): {
       recognition.onerror = (event) => {
         if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
         if (event.error === 'aborted') return;
+        // Staying open across pauses means the engine reports silence as an error. That's just a
+        // quiet moment, not something worth putting on screen.
+        if (event.error === 'no-speech') return;
         console.warn('voice error', event.error);
         setError(speechErrorMessage(event.error));
         if (

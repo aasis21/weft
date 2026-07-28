@@ -71,7 +71,7 @@ describe('useSpeechInput', () => {
 
     expect(result.current.listening).toBe(true);
     expect(MockSpeechRecognition.instances).toHaveLength(1);
-    expect(MockSpeechRecognition.instances[0].continuous).toBe(false);
+    expect(MockSpeechRecognition.instances[0].continuous).toBe(true);
 
     act(() => {
       MockSpeechRecognition.instances[0].onresult?.(speechEvent('hello', false));
@@ -126,8 +126,22 @@ describe('useSpeechInput', () => {
     expect(MockSpeechRecognition.instances).toHaveLength(1);
   });
 
-  it('falls back to stop when the engine has no abort', () => {
+  it('treats a silent pause as silence, not an error (#190)', () => {
     const { result } = renderHook(() => useSpeechInput());
+
+    act(() => {
+      result.current.start(() => {});
+    });
+
+    act(() => {
+      MockSpeechRecognition.instances[0].onerror?.({ error: 'no-speech' });
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.listening).toBe(true);
+  });
+
+  it('falls back to stop when the engine has no abort', () => {    const { result } = renderHook(() => useSpeechInput());
 
     act(() => {
       result.current.start(() => {});
