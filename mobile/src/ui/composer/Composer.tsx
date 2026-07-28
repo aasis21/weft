@@ -585,12 +585,13 @@ export function Composer({
     window.requestAnimationFrame(() => areaRef.current?.focus());
   };
 
+  const onVoxClick = (): void => {
+    if (nowMs() < suppressSendUntilRef.current) return;
+    openVox();
+  };
+
   const onActionClick = (): void => {
     if (nowMs() < suppressSendUntilRef.current) return;
-    if (emptyPrompt && !disabled && !attaching) {
-      openVox();
-      return;
-    }
     void send();
   };
 
@@ -854,6 +855,23 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
+            {voxOpen ? null : (
+              <button
+                className="send-btn voice-action"
+                type="button"
+                onClick={onVoxClick}
+                disabled={disabled || attaching}
+                aria-label="Open Vox"
+                title="Open Vox"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <rect x="5" y="10" width="2.4" height="4" rx="1.2" fill="currentColor" />
+                  <rect x="9" y="6.5" width="2.4" height="11" rx="1.2" fill="currentColor" />
+                  <rect x="13" y="4" width="2.4" height="16" rx="1.2" fill="currentColor" />
+                  <rect x="17" y="8" width="2.4" height="8" rx="1.2" fill="currentColor" />
+                </svg>
+              </button>
+            )}
             {busy && !voxOpen ? (
               <button
                 className="stop-btn"
@@ -889,29 +907,20 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            {voxOpen ? null : !busy || !emptyPrompt ? (
+            {voxOpen || emptyPrompt ? null : (
               <button
-                className={`send-btn${!busy && emptyPrompt ? ' voice-action' : ''}`}
+                className="send-btn"
                 type="button"
                 onClick={onActionClick}
                 disabled={disabled || attaching}
-                aria-label={busy ? 'Steer current turn' : emptyPrompt ? 'Open Vox' : 'Send'}
-                title={busy ? 'Steer current turn' : emptyPrompt ? 'Open Vox' : undefined}
+                aria-label={busy ? 'Steer current turn' : 'Send'}
+                title={busy ? 'Steer current turn' : undefined}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  {!busy && emptyPrompt ? (
-                    <>
-                      <rect x="5" y="10" width="2.4" height="4" rx="1.2" fill="currentColor" />
-                      <rect x="9" y="6.5" width="2.4" height="11" rx="1.2" fill="currentColor" />
-                      <rect x="13" y="4" width="2.4" height="16" rx="1.2" fill="currentColor" />
-                      <rect x="17" y="8" width="2.4" height="8" rx="1.2" fill="currentColor" />
-                    </>
-                  ) : (
-                    <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
-                  )}
+                  <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
                 </svg>
               </button>
-            ) : null}
+            )}
           </div>
         </div>
       </div>

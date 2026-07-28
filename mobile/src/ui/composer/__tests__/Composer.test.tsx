@@ -403,6 +403,18 @@ describe('Composer', () => {
     expect(textbox).toHaveValue('keep this draft');
   });
 
+  it('keeps Vox reachable while a turn is running (#191)', () => {
+    const onOpenVoiceMode = vi.fn();
+    renderComposer({ busy: true, onOpenVoiceMode });
+
+    // Stop, Queue and Steer own the row while busy, but the wave has to stay — otherwise the only
+    // way into hands-free is to wait for the agent to finish.
+    const wave = screen.getByRole('button', { name: 'Open Vox' });
+    expect(wave).toBeEnabled();
+    fireEvent.click(wave);
+    expect(onOpenVoiceMode).toHaveBeenCalledTimes(1);
+  });
+
   it('does not open Vox when a stop tap finishes after busy clears', () => {
     const onOpenVoiceMode = vi.fn();
     const rendered = renderComposer({ busy: true, onOpenVoiceMode });
