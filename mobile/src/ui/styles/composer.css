@@ -639,8 +639,7 @@
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .vox-dock-label {
@@ -649,9 +648,10 @@
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  margin-right: auto;
 }
 
-.vox-expand-btn {
+.vox-head-btn {
   width: 36px;
   height: 36px;
   flex: 0 0 auto;
@@ -666,8 +666,8 @@
   transition: color 140ms ease, background 140ms ease;
 }
 
-.vox-expand-btn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.vox-expand-btn svg { width: 1.05rem; height: 1.05rem; }
+.vox-head-btn:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.vox-head-btn svg { width: 1.05rem; height: 1.05rem; }
 
 /* Orb sized for the dock rather than the full page — big enough to be a comfortable
    tap target for interrupting, small enough to leave the thread visible. */
@@ -728,16 +728,6 @@ button.vox-heard:hover {
    as the thing to answer. */
 .vox-dock[data-paused='true'] {
   opacity: 0.55;
-}
-
-.send-btn.vox-keyboard-btn {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  color: var(--fg-dim);
-}
-
-.send-btn.vox-keyboard-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 16%, transparent);
-  color: var(--fg);
 }
 
 /* Wide viewports have the room for a taller orb without pushing the thread away. */

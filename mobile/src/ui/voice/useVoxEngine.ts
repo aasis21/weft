@@ -6,13 +6,15 @@ import { useSpeechOutput } from '@/ui/hooks/useSpeechOutput';
 
 export const SILENCE_MS = 3200;
 
-export type VoiceState = 'idle' | 'ready' | 'listening' | 'thinking' | 'working' | 'speaking';
+// One busy state, deliberately. The wire only carries a single `busy` boolean — there is no
+// reasoning signal — so "thinking" was only ever an inference from "busy and no tool running".
+// Splitting the label invited a distinction the app cannot actually observe (#183).
+export type VoiceState = 'idle' | 'ready' | 'listening' | 'working' | 'speaking';
 
 const LABELS: Record<VoiceState, string> = {
   idle: 'Tap the orb to start',
   ready: 'Tap the orb to talk',
   listening: 'Listening — pause to send',
-  thinking: 'Thinking…',
   working: 'Working…',
   speaking: 'Speaking — tap to interrupt',
 };
@@ -128,7 +130,7 @@ export function useVoxEngine({
       return;
     }
     setCaption(prompt);
-    setState('thinking');
+    setState('working');
     void onPrompt(prompt);
   }, [disabled, onPrompt, stopListening]);
 
@@ -161,10 +163,9 @@ export function useVoxEngine({
       startListening();
       return;
     }
-    // Interrupt a turn in flight — reasoning ('thinking') OR a running tool ('working'). Previously
-    // only 'speaking' could be interrupted, so a tap while the agent worked was silently swallowed
-    // by startListening's thinking-guard (#179).
-    if (stateRef.current === 'thinking' || stateRef.current === 'working') {
+    // Interrupt a turn in flight. Previously only 'speaking' could be interrupted, so a tap while
+    // the agent worked was silently swallowed by startListening's busy-guard (#179).
+    if (stateRef.current === 'working') {
       cancelSpeech();
       onInterrupt();
       startListening();
@@ -217,9 +218,9 @@ export function useVoxEngine({
 
   useEffect(() => {
     if (agentBusy && state !== 'listening' && state !== 'speaking') {
-      setState(toolActive ? 'working' : 'thinking');
+      setState('working');
     }
-  }, [agentBusy, state, toolActive]);
+  }, [agentBusy, state]);
 
   useEffect(() => {
     if (!latestAssistant) return;
@@ -251,8 +252,8 @@ export function useVoxEngine({
   }, [agentBusy, flushSpeech]);
 
   // Speaking + settle. TTS speaking → speaking. When speech stops mid-turn (agent still busy — e.g. a
-  // narration block finished before a tool call) fall back to working/thinking so the orb tracks the
-  // live turn (#181). When the turn is fully done → ready or auto-relisten.
+  // narration block finished before a tool call) fall back to working so the orb tracks the live
+  // turn (#181). When the turn is fully done → ready or auto-relisten.
   useEffect(() => {
     if (outputSpeaking) {
       setState('speaking');
@@ -260,36 +261,36 @@ export function useVoxEngine({
     }
     if (state === 'speaking') {
       if (agentBusy) {
-        setState(toolActive ? 'working' : 'thinking');
+        setState('working');
       } else {
         sawReplyRef.current = false;
         if (autoRelisten && !paused) startListening();
         else setState('ready');
       }
     }
-  }, [agentBusy, autoRelisten, outputSpeaking, paused, startListening, state, toolActive]);
+  }, [agentBusy, autoRelisten, outputSpeaking, paused, startListening, state]);
 
   // Turn ended with nothing (more) to speak — an empty/whitespace-only reply, or speech output is
-  // unavailable. Don't leave the orb stuck on Thinking…/Working…; settle to ready or auto-relisten.
+  // unavailable. Don't leave the orb stuck on Working…; settle to ready or auto-relisten.
   useEffect(() => {
     if (agentBusy || outputSpeaking || sawReplyRef.current) return;
-    if (state !== 'thinking' && state !== 'working') return;
+    if (state !== 'working') return;
     if (autoRelisten && !paused) startListening();
     else setState('ready');
   }, [agentBusy, autoRelisten, outputSpeaking, paused, startListening, state]);
 
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
-    if (!outputSupported && (state === 'speaking' || state === 'thinking' || state === 'working')) return 'Speech output unavailable — showing text only.';
+    if (!outputSupported && (state === 'speaking' || state === 'working')) return 'Speech output unavailable — showing text only.';
     if (paused) return 'Paused — answer the request above';
     return LABELS[state];
   }, [inputSupported, outputSupported, paused, state]);
 
   const orbGlyph =
-    state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : state === 'thinking' ? '⋯' : '🎙';
+    state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : '🎙';
 
   const replyText = latestAssistant?.text ?? '';
-  const showReply = (state === 'thinking' || state === 'working' || state === 'speaking') && replyText.trim().length > 0;
+  const showReply = (state === 'working' || state === 'speaking') && replyText.trim().length > 0;
 
   const currentTranscript = useCallback((): string => {
     const heard = heardRef.current.trim() || committedRef.current.trim();

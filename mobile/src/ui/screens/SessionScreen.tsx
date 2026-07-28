@@ -318,8 +318,9 @@ export function SessionScreen({
   // which is exactly what the phone Stop aborts. Fall back to a running tool so a
   // tool-first turn still shows Stop even if the activity signal is missed.
   const agentBusy = status === 'live' && isWorking(timeline);
-  // A tool actively running (vs. pure reasoning) drives the voice overlay's "Working…" state so the
-  // orb distinguishes thinking from acting (#177).
+  // A tool actively running. This no longer drives a separate orb label — Vox has one busy state,
+  // "Working…", matching the header pill (#183) — but it still gates TTS: full-message mode holds
+  // speech until a tool starts, so narration is spoken as whole sentences before the tool runs (#181).
   const toolActive =
     status === 'live' && timeline.items.some((i) => i.kind === 'tool' && i.status === 'running');
   // Approval/elicitation decisions can only reach the laptop while it's on the line. Off-live, disable

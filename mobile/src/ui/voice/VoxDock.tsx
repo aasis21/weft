@@ -14,6 +14,8 @@ interface VoxDockProps {
   onActiveChange?(active: boolean): void;
   /** Escalate to the full-page Vox surface. */
   onExpand(): void;
+  /** Leave Vox and go back to the keyboard. */
+  onKeyboard(): void;
   /** Hand the words we heard back to the text box so a misheard sentence can be fixed. */
   onEditTranscript(text: string): void;
 }
@@ -33,6 +35,7 @@ export function VoxDock({
   onInterrupt,
   onActiveChange,
   onExpand,
+  onKeyboard,
   onEditTranscript,
 }: VoxDockProps): JSX.Element {
   const {
@@ -71,6 +74,9 @@ export function VoxDock({
 
   const heard = caption.trim();
   const canEdit = heard.length > 0 && heard !== 'Listening…';
+  // Words on screen only while the mic is on. Once the turn is in flight the orb (and the tool cards
+  // above it) carry the story — a status line and a stale transcript underneath were just noise.
+  const showWords = state !== 'working' && state !== 'speaking';
 
   const editHeard = (): void => {
     const text = currentTranscript() || heard;
@@ -102,7 +108,34 @@ export function VoxDock({
         <span className="vox-dock-label">Vox</span>
         <button
           type="button"
-          className="vox-expand-btn"
+          className="vox-head-btn"
+          onClick={onKeyboard}
+          aria-label="Switch to typing"
+          title="Switch to typing"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect
+              x="2.5"
+              y="6"
+              width="19"
+              height="12"
+              rx="2.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              d="M6.5 9.5h.01M10 9.5h.01M13.5 9.5h.01M17 9.5h.01M8 14.5h8"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="vox-head-btn vox-expand-btn"
           onClick={onExpand}
           aria-label="Expand Vox to full screen"
           title="Expand Vox"
@@ -131,17 +164,19 @@ export function VoxDock({
         <span className="voice-orb-core" aria-hidden="true">{orbGlyph}</span>
       </button>
 
-      <p className="vox-dock-status" aria-live="polite">{status}</p>
+      {showWords ? <p className="vox-dock-status" aria-live="polite">{status}</p> : null}
 
-      {canEdit ? (
-        <button type="button" className="vox-heard" onClick={editHeard} title="Edit these words as text">
-          {heard}
-        </button>
-      ) : (
-        <p className="vox-heard vox-heard-empty" aria-live="polite">
-          {state === 'listening' ? 'Listening…' : '\u00A0'}
-        </p>
-      )}
+      {showWords ? (
+        canEdit ? (
+          <button type="button" className="vox-heard" onClick={editHeard} title="Edit these words as text">
+            {heard}
+          </button>
+        ) : (
+          <p className="vox-heard vox-heard-empty" aria-live="polite">
+            {state === 'listening' ? 'Listening…' : '\u00A0'}
+          </p>
+        )
+      ) : null}
 
       <div className={`voice-countdown${state === 'listening' && canEdit ? ' active' : ''}`} aria-hidden="true">
         <span />

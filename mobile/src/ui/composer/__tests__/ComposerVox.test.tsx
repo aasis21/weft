@@ -68,9 +68,10 @@ describe('Composer Vox mode', () => {
     expect(queryByLabelText('Switch to typing')).not.toBeNull();
   });
 
-  it('keeps stop-generating reachable while the agent is working', () => {
-    const { getByLabelText } = renderComposer({ busy: true, vox: voxProps({ open: true }) });
-    expect(getByLabelText('Stop generating')).toBeTruthy();
+  it('hands stop-generating to the orb — no separate stop button while Vox is open', () => {
+    const { queryByLabelText, container } = renderComposer({ busy: true, vox: voxProps({ open: true }) });
+    expect(queryByLabelText('Stop generating')).toBeNull();
+    expect(container.querySelector('.vox-dock-orb')).not.toBeNull();
   });
 
   it('switches back to typing via the keyboard button', () => {

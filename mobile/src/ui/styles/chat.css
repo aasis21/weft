@@ -1885,11 +1885,6 @@
   --voice-orb-glow: color-mix(in srgb, var(--warning) 44%, transparent);
 }
 
-.weft-session .voice-panel[data-state='thinking'] {
-  --voice-orb-color: var(--fg);
-  --voice-orb-glow: color-mix(in srgb, var(--fg-dim) 34%, transparent);
-}
-
 .weft-session .voice-panel[data-state='working'] {
   --voice-orb-color: var(--accent);
   --voice-orb-glow: color-mix(in srgb, var(--accent) 44%, transparent);
@@ -1922,10 +1917,6 @@
 @media (prefers-reduced-motion: no-preference) {
   .weft-session .voice-panel[data-state='listening'] .voice-orb-ring {
     animation: voice-ring 1.15s ease-in-out infinite;
-  }
-
-  .weft-session .voice-panel[data-state='thinking'] .voice-orb-ring {
-    animation: voice-ring 1.8s ease-in-out infinite;
   }
 
   .weft-session .voice-panel[data-state='working'] .voice-orb-ring {

@@ -57,22 +57,22 @@ describe('VoiceModeOverlay hands-free entry', () => {
   });
 });
 
-describe('VoiceModeOverlay thinking vs working (#177)', () => {
-  it('shows "Thinking…" with a distinct glyph while the agent reasons (no tool running)', () => {
+describe('VoiceModeOverlay one busy state (#183)', () => {
+  it('shows "Working…" while the agent reasons (no tool running)', () => {
     const { panel, orb } = renderOverlay({ agentBusy: true, toolActive: false });
-    expect(panel.getAttribute('data-state')).toBe('thinking');
-    expect(orb.textContent).toContain('⋯');
+    expect(panel.getAttribute('data-state')).toBe('working');
+    expect(orb.textContent).toContain('⚙');
   });
 
-  it('shows "Working…" with a distinct glyph while a tool is running', () => {
+  it('shows "Working…" while a tool is running', () => {
     const { panel, orb } = renderOverlay({ agentBusy: true, toolActive: true });
     expect(panel.getAttribute('data-state')).toBe('working');
     expect(orb.textContent).toContain('⚙');
   });
 
-  it('switches thinking → working when a tool starts mid-turn', () => {
+  it('stays on working when a tool starts mid-turn — the label never flips', () => {
     const { panel, rerender } = renderOverlay({ agentBusy: true, toolActive: false });
-    expect(panel.getAttribute('data-state')).toBe('thinking');
+    expect(panel.getAttribute('data-state')).toBe('working');
     rerender(
       <VoiceModeOverlay
         latestAssistant={null}
@@ -89,7 +89,7 @@ describe('VoiceModeOverlay thinking vs working (#177)', () => {
 });
 
 describe('VoiceModeOverlay interrupt while busy (#179)', () => {
-  it('interrupts the agent when the orb is tapped during thinking', () => {
+  it('interrupts the agent when the orb is tapped with no tool running', () => {
     const { orb, onInterrupt } = renderOverlay({ agentBusy: true, toolActive: false });
     fireEvent.click(orb);
     expect(onInterrupt).toHaveBeenCalledTimes(1);

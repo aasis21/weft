@@ -733,6 +733,7 @@ export function Composer({
             onInterrupt={onInterrupt}
             {...(vox.onActiveChange ? { onActiveChange: vox.onActiveChange } : {})}
             onExpand={vox.onExpand}
+            onKeyboard={() => exitVox()}
             onEditTranscript={exitVox}
           />
         ) : (
@@ -840,7 +841,7 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            {busy ? (
+            {busy && !voxOpen ? (
               <button
                 className="stop-btn"
                 type="button"
@@ -875,32 +876,7 @@ export function Composer({
                 </svg>
               </button>
             ) : null}
-            {voxOpen ? (
-              <button
-                className="send-btn vox-keyboard-btn"
-                type="button"
-                onClick={() => exitVox()}
-                aria-label="Switch to typing"
-                title="Switch to typing"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <rect
-                    x="2.5"
-                    y="6"
-                    width="19"
-                    height="12"
-                    rx="2.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                  />
-                  <path
-                    fill="currentColor"
-                    d="M5.6 9h1.8v1.6H5.6zm3 0h1.8v1.6H8.6zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zM5.6 11.9h1.8v1.6H5.6zm3 0h1.8v1.6H8.6zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zm3 0h1.8v1.6h-1.8zM7.6 14.8h8.8v1.6H7.6z"
-                  />
-                </svg>
-              </button>
-            ) : !busy || !emptyPrompt ? (
+            {voxOpen ? null : !busy || !emptyPrompt ? (
               <button
                 className={`send-btn${!busy && emptyPrompt ? ' voice-action' : ''}`}
                 type="button"
