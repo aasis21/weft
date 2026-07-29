@@ -5,6 +5,12 @@ export type ThemeSetting = 'system' | 'light' | 'dark';
 export interface WeftSettings {
   voiceAutoRelisten: boolean;
   voiceSpeakStreaming: boolean;
+  /**
+   * Keep one recognition session open across pauses instead of letting the engine end at every
+   * breath and reopening it. Off by default: Android's continuous mode revises and re-delivers
+   * results, which garbles long dictation on some devices (#194).
+   */
+  voiceContinuous: boolean;
   /** Seconds of silence before Vox auto-sends what it heard. */
   voiceSilenceSeconds: number;
   theme: ThemeSetting;
@@ -18,6 +24,7 @@ const SETTINGS_KEY = 'weft.settings.v1';
 const DEFAULT_SETTINGS: WeftSettings = {
   voiceAutoRelisten: false,
   voiceSpeakStreaming: false,
+  voiceContinuous: false,
   voiceSilenceSeconds: 3.2,
   theme: 'system',
 };
@@ -32,6 +39,7 @@ function parseSettings(raw: string | null | undefined): Partial<WeftSettings> {
     const out: Partial<WeftSettings> = {};
     if (typeof record.voiceAutoRelisten === 'boolean') out.voiceAutoRelisten = record.voiceAutoRelisten;
     if (typeof record.voiceSpeakStreaming === 'boolean') out.voiceSpeakStreaming = record.voiceSpeakStreaming;
+    if (typeof record.voiceContinuous === 'boolean') out.voiceContinuous = record.voiceContinuous;
     if (typeof record.voiceSilenceSeconds === 'number' && Number.isFinite(record.voiceSilenceSeconds)) {
       out.voiceSilenceSeconds = record.voiceSilenceSeconds;
     }
@@ -51,6 +59,7 @@ function normalize(settings: Partial<WeftSettings>): WeftSettings {
   return {
     voiceAutoRelisten: settings.voiceAutoRelisten ?? DEFAULT_SETTINGS.voiceAutoRelisten,
     voiceSpeakStreaming: settings.voiceSpeakStreaming ?? DEFAULT_SETTINGS.voiceSpeakStreaming,
+    voiceContinuous: settings.voiceContinuous ?? DEFAULT_SETTINGS.voiceContinuous,
     voiceSilenceSeconds: clampSilence(settings.voiceSilenceSeconds ?? DEFAULT_SETTINGS.voiceSilenceSeconds),
     theme: settings.theme ?? DEFAULT_SETTINGS.theme,
   };
@@ -111,8 +120,16 @@ export async function setVoiceSpeakStreaming(enabled: boolean): Promise<void> {
   await writeSettings({ ...current, voiceSpeakStreaming: enabled });
 }
 
-export async function getVoiceSilenceSeconds(): Promise<number> {
-  return (await getSettings()).voiceSilenceSeconds;
+export async function getVoiceContinuous(): Promise<boolean> {
+  return (await getSettings()).voiceContinuous;
+}
+
+export async function setVoiceContinuous(enabled: boolean): Promise<void> {
+  const current = await getSettings();
+  await writeSettings({ ...current, voiceContinuous: enabled });
+}
+
+export async function getVoiceSilenceSeconds(): Promise<number> {  return (await getSettings()).voiceSilenceSeconds;
 }
 
 export async function setVoiceSilenceSeconds(seconds: number): Promise<void> {

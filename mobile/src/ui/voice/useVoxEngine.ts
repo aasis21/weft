@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  getSettings,
   getVoiceAutoRelisten,
   getVoiceSilenceSeconds,
   getVoiceSpeakStreaming,
@@ -122,6 +123,8 @@ export function useVoxEngine({
   // take effect on the very next word rather than the next turn (#186).
   const silenceMsRef = useRef(SILENCE_MS);
   silenceMsRef.current = silenceMs;
+  // Read when a listening session opens, so it can't change the mode of a session already running.
+  const continuousRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
   // Bumped every time the silence window is (re)armed. Surfaces as a React key so the countdown bar
   // remounts and replays its animation — otherwise it ran once and sat empty for the rest of a long
@@ -206,7 +209,7 @@ export function useVoxEngine({
       setCaption(next || 'Listening…');
       if (isFinal) committedRef.current = next;
       if (next.trim()) armSilence();
-    });
+    }, { continuous: continuousRef.current });
   }, [armSilence, cancelSpeech, clearSilence, disabled, startSpeechInput]);
 
   const handleOrb = useCallback((): void => {
@@ -261,6 +264,9 @@ export function useVoxEngine({
       void getVoiceAutoRelisten().then(setAutoRelisten);
       void getVoiceSpeakStreaming().then(setSpeakStreaming);
       void getVoiceSilenceSeconds().then((s) => setSilenceMs(s * 1000));
+      void getSettings().then((s) => {
+        continuousRef.current = s.voiceContinuous;
+      });
     };
     load();
     // Live-follow the quick settings in the dock head so a change applies to this very turn (#186).
@@ -268,6 +274,8 @@ export function useVoxEngine({
       setAutoRelisten(s.voiceAutoRelisten);
       setSpeakStreaming(s.voiceSpeakStreaming);
       setSilenceMs(s.voiceSilenceSeconds * 1000);
+      // Takes effect on the next listening session — the open one keeps the mode it started with.
+      continuousRef.current = s.voiceContinuous;
     });
   }, []);
 

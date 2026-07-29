@@ -74,12 +74,24 @@ describe('useSpeechInput', () => {
     delete (window as { SpeechRecognition?: unknown }).SpeechRecognition;
   });
 
+  it('listens one utterance at a time unless continuous is asked for (#194)', () => {
+    const { result } = renderHook(() => useSpeechInput());
+
+    act(() => {
+      result.current.start(() => {});
+    });
+
+    expect(MockSpeechRecognition.instances[0].continuous).toBe(false);
+    // Interim results are a separate switch — live captions work in either mode.
+    expect(MockSpeechRecognition.instances[0].interimResults).toBe(true);
+  });
+
   it('restarts after engine end and keeps reporting the whole run until explicitly stopped', async () => {
     const heard: Array<{ text: string; isFinal: boolean }> = [];
     const { result } = renderHook(() => useSpeechInput());
 
     act(() => {
-      result.current.start((text, isFinal) => heard.push({ text, isFinal }));
+      result.current.start((text, isFinal) => heard.push({ text, isFinal }), { continuous: true });
     });
 
     expect(result.current.listening).toBe(true);

@@ -96,7 +96,7 @@ export function useSpeechInput(): {
   supported: boolean;
   listening: boolean;
   error: string | null;
-  start: (onText: (text: string, isFinal: boolean) => void) => void;
+  start: (onText: (text: string, isFinal: boolean) => void, options?: { continuous?: boolean }) => void;
   stop: () => void;
 } {
   const [listening, setListening] = useState(false);
@@ -108,7 +108,9 @@ export function useSpeechInput(): {
   const fatalErrorRef = useRef(false);
   const runTranscriptRef = useRef('');
 
-  const start = useCallback((onText: (text: string, isFinal: boolean) => void): void => {
+  const start = useCallback(
+    (onText: (text: string, isFinal: boolean) => void, options?: { continuous?: boolean }): void => {
+    const continuous = options?.continuous ?? false;
     const Ctor = getSpeechRecognition();
     if (!Ctor || recognitionRef.current) return;
     const generation = recognitionGenerationRef.current + 1;
@@ -128,12 +130,13 @@ export function useSpeechInput(): {
       let sessionFinal = '';
       recognition.lang = navigator.language;
       recognition.interimResults = true;
-      // Stay open across pauses. In single-utterance mode the engine ends itself the moment you
-      // stop for breath and we immediately open another — which costs an OS close/open earcon each
-      // time (the endless ta-da ta-da), and drops whatever you said in the gap between the two.
-      // Support is uneven on Android, so the restart loop below stays as the fallback: engines that
-      // ignore this simply behave as they did before (#190).
-      recognition.continuous = true;
+      // Stay open across pauses when asked. In single-utterance mode the engine ends itself the
+      // moment you stop for breath and we immediately open another — which costs an OS close/open
+      // earcon each time (the endless ta-da ta-da), and drops whatever you said in the gap between
+      // the two (#190). But Android's continuous mode revises and re-delivers earlier results,
+      // which garbles long dictation on some devices, so it's opt-in from Vox settings (#194).
+      // Either way the restart loop below stays as the fallback.
+      recognition.continuous = continuous;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
         if (recognitionGenerationRef.current !== generation || recognitionRef.current !== recognition) return;
@@ -193,7 +196,9 @@ export function useSpeechInput(): {
     };
 
     startRecognition();
-  }, []);
+    },
+    [],
+  );
 
   const stop = useCallback((): void => {
     explicitStopRef.current = true;

@@ -1,5 +1,11 @@
-import { type JSX } from 'react';
-import { setVoiceAutoRelisten, setVoiceSilenceSeconds } from '@/lib/settings';
+import { useEffect, useState, type JSX } from 'react';
+import {
+  getSettings,
+  setVoiceAutoRelisten,
+  setVoiceContinuous,
+  setVoiceSilenceSeconds,
+  subscribeSettings,
+} from '@/lib/settings';
 
 interface VoxSettingsProps {
   autoRelisten: boolean;
@@ -23,6 +29,13 @@ export function VoxSettings({ autoRelisten, silenceMs }: VoxSettingsProps): JSX.
   const closest = PAUSE_CHOICES.reduce((best, option) =>
     Math.abs(option.seconds - seconds) < Math.abs(best.seconds - seconds) ? option : best,
   );
+  // Owned here rather than threaded through the engine: nothing else on screen reflects it, and it
+  // only takes effect when the next listening session opens.
+  const [continuous, setContinuous] = useState(false);
+  useEffect(() => {
+    void getSettings().then((s) => setContinuous(s.voiceContinuous));
+    return subscribeSettings((s) => setContinuous(s.voiceContinuous));
+  }, []);
 
   return (
     <section className="vox-settings settings-group" aria-label="Vox settings">
@@ -37,6 +50,23 @@ export function VoxSettings({ autoRelisten, silenceMs }: VoxSettingsProps): JSX.
             aria-labelledby="vox-relisten-title"
             checked={autoRelisten}
             onChange={(event) => void setVoiceAutoRelisten(event.currentTarget.checked)}
+          />
+          <span aria-hidden="true" />
+        </label>
+      </div>
+
+      <div className="settings-row-head">
+        <div>
+          <h2 id="vox-continuous-title">Hold the mic open</h2>
+          <p>One long listen instead of reopening at every pause. Quieter, but some phones garble
+            long dictation — turn it off if words repeat themselves.</p>
+        </div>
+        <label className="settings-switch">
+          <input
+            type="checkbox"
+            aria-labelledby="vox-continuous-title"
+            checked={continuous}
+            onChange={(event) => void setVoiceContinuous(event.currentTarget.checked)}
           />
           <span aria-hidden="true" />
         </label>

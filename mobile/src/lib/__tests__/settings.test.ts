@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   applyTheme,
   getSettings,
+  getVoiceContinuous,
   getVoiceSpeakStreaming,
   initTheme,
   setTheme,
   setVoiceAutoRelisten,
+  setVoiceContinuous,
   setVoiceSpeakStreaming,
 } from '@/lib/settings';
 import { memoryPreferences } from '@/test/helpers/mockPreferences';
@@ -16,12 +18,12 @@ describe('settings persistence', () => {
   });
 
   it('persists settings to Preferences and localStorage and applies theme attributes', async () => {
-    expect(await getSettings()).toEqual({ voiceAutoRelisten: false, voiceSpeakStreaming: false, voiceSilenceSeconds: 3.2, theme: 'system' });
+    expect(await getSettings()).toEqual({ voiceAutoRelisten: false, voiceSpeakStreaming: false, voiceContinuous: false, voiceSilenceSeconds: 3.2, theme: 'system' });
 
     await setVoiceAutoRelisten(true);
     await setTheme('dark');
 
-    expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, voiceSilenceSeconds: 3.2, theme: 'dark' });
+    expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, voiceContinuous: false, voiceSilenceSeconds: 3.2, theme: 'dark' });
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(localStorage.getItem('weft.settings.v1')).toContain('voiceAutoRelisten');
     expect((await memoryPreferences.get({ key: 'weft.settings.v1' })).value).toContain('dark');
@@ -42,5 +44,14 @@ describe('settings persistence', () => {
     expect((await getSettings()).voiceSpeakStreaming).toBe(true);
     await setVoiceSpeakStreaming(false);
     expect(await getVoiceSpeakStreaming()).toBe(false);
+  });
+
+  it('persists the voiceContinuous toggle (defaults off, so the mic reopens per utterance)', async () => {
+    expect(await getVoiceContinuous()).toBe(false);
+    await setVoiceContinuous(true);
+    expect(await getVoiceContinuous()).toBe(true);
+    expect((await getSettings()).voiceContinuous).toBe(true);
+    await setVoiceContinuous(false);
+    expect(await getVoiceContinuous()).toBe(false);
   });
 });
