@@ -67,6 +67,16 @@ const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mj
 const PROVISION_TIMEOUT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_TIMEOUT_MS", 45_000);
 const MAX_WAIT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_MAX_WAIT_MS", 120_000);
 const REGISTRY_POLL_MS = 100;
+// How long to wait on the public tunnel handshake before calling it unreachable. Generous enough
+// to survive a slow link (this is a full round trip to Microsoft's tunnel service and back), short
+// enough that `weft start` doesn't feel stalled when the box is offline.
+const PUBLIC_PROBE_TIMEOUT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_PUBLIC_PROBE_MS", 8_000);
+// Escape hatch for networks where the probe can't give a trustworthy answer — e.g. a corporate
+// proxy that intercepts the handshake and returns its own 4xx, which would look exactly like a
+// dead tunnel and send Weft into a reprovision loop against a relay that was fine. Also what the
+// test suite sets, since its fake CLI reports a made-up devtunnels.ms host that the real service
+// (correctly) reports as forwarding nowhere.
+const publicProbeDisabled = () => process.env.WEFT_DEVTUNNEL_PUBLIC_PROBE === "off";
 
 // Ordered, human-readable labels for each stage relayServerProcess.mjs reports through
 // DEVTUNNEL_STATUS_FILE. Shared by extension.mjs (session.log) and bin/weft.mjs (CLI status line)
@@ -237,14 +247,72 @@ export function probeRelay(port, timeoutMs = 1500) {
   });
 }
 
+/**
+ * Probe the PUBLIC side of the tunnel — the thing the phone actually dials. This exists because a
+ * local-port probe is not enough: the relay server and the `devtunnel host` process are separate,
+ * so the host can lose its cloud connection (auth expiry, network change, sleep) and never
+ * recover while the relay keeps happily listening on 127.0.0.1. From the outside the tunnel then
+ * answers 404 forever, but every local check says "healthy", so each new station reuses the
+ * corpse and every pairing fails with no path to self-heal.
+ *
+ * Resolves one of:
+ *   - "ok"          the tunnel forwarded us to the relay and the socket opened
+ *   - "rejected"    we reached the tunnel service and it refused (404/502/…) — the tunnel is dead
+ *   - "unreachable" we couldn't get an answer at all (offline, DNS, timeout)
+ *
+ * Only "rejected" is treated as grounds for tearing the relay down. "unreachable" usually means
+ * THIS machine is offline, in which case replacing a working relay would help nobody.
+ */
+export function probePublicRelay(baseUrl, timeoutMs = PUBLIC_PROBE_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket.terminate();
+      } catch {
+        // best-effort
+      }
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish("unreachable"), timeoutMs);
+    let socket;
+    try {
+      socket = new WebSocket(`${baseUrl}/?channelId=__weft_healthcheck__`);
+    } catch {
+      clearTimeout(timer);
+      resolve("unreachable");
+      return;
+    }
+    socket.once("open", () => finish("ok"));
+    socket.once("unexpected-response", () => finish("rejected"));
+    socket.once("error", (err) => {
+      // `ws` reports an HTTP handshake refusal as "Unexpected server response: <status>". That's a
+      // real answer from the tunnel service, so it's definitive; anything else (ENOTFOUND,
+      // ECONNRESET, ETIMEDOUT) just means we couldn't get through from here.
+      finish(/unexpected server response/i.test(err?.message ?? "") ? "rejected" : "unreachable");
+    });
+  });
+}
+
 /** Reads DEVTUNNEL_REGISTRY_FILE and confirms it's a live, connectable relay (not a stale entry
  * from a pid that's since exited or a port nothing is listening on). Exported for the standalone
- * `weft devtunnel status` CLI command. */
-export async function healthyRegistryEntry(baseDir) {
+ * `weft devtunnel status` CLI command.
+ *
+ * Pass `verifyPublic: true` at "should I reuse the relay that's already running?" decision points
+ * to also confirm the tunnel still forwards from the internet (see probePublicRelay). It is
+ * deliberately NOT the default: the poll that waits on a freshly-spawned relay would otherwise
+ * pay a network round trip per tick and, worse, reject a perfectly good relay whose tunnel simply
+ * hasn't finished propagating yet. */
+export async function healthyRegistryEntry(baseDir, { verifyPublic = false } = {}) {
   const entry = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
   if (!entry || !isPidAlive(entry.pid) || !entry.relayPort || !entry.baseUrl) return null;
   const alive = await probeRelay(entry.relayPort);
-  return alive ? entry : null;
+  if (!alive) return null;
+  if (verifyPublic && !publicProbeDisabled() && (await probePublicRelay(entry.baseUrl)) === "rejected") return null;
+  return entry;
 }
 
 /**
@@ -266,7 +334,11 @@ export async function healthyRegistryEntry(baseDir) {
  * long we watch it.
  */
 export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}) {
-  const existing = await healthyRegistryEntry(baseDir);
+  // verifyPublic: a relay whose tunnel has stopped forwarding looks perfectly healthy from here
+  // (own pid alive, own port listening) but 404s for every phone that dials it. Catching that at
+  // the reuse decision is what makes a wedged relay self-heal on the next `weft start` instead of
+  // failing identically forever.
+  const existing = await healthyRegistryEntry(baseDir, { verifyPublic: true });
   if (existing) return { baseUrl: existing.baseUrl, child: null };
 
   onProgress?.("checking-cli");
@@ -347,7 +419,9 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
  * `weft devtunnel start` / `weft start` commands should).
  */
 export async function resolveDevTunnelTransport({ baseDir } = {}) {
-  const entry = await healthyRegistryEntry(baseDir);
+  // verifyPublic: handing the phone a URL that no longer forwards produces a baffling 404 at scan
+  // time. Better to fail here with instructions than to mint a QR code that can't work.
+  const entry = await healthyRegistryEntry(baseDir, { verifyPublic: true });
   if (!entry) {
     throw new Error(
       "no devtunnel relay is running on this machine, so pairing over the devtunnel transport can't start.\n" +

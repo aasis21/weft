@@ -21,6 +21,23 @@ import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// The fake CLI below reports a made-up devtunnels.ms host. That domain wildcard-resolves for real,
+// so the reuse path's public-side health probe would send an actual request to Microsoft's tunnel
+// service and — correctly — be told that this invented tunnel forwards nowhere, failing every test
+// that expects a relay to be reusable. Turn the probe off globally here; the tests that exist to
+// exercise it re-enable it around themselves and point it at local servers they control.
+process.env.WEFT_DEVTUNNEL_PUBLIC_PROBE = "off";
+
+/** Runs `fn` with the public-side probe re-enabled, then restores the file-wide off switch. */
+async function withPublicProbe(fn) {
+  delete process.env.WEFT_DEVTUNNEL_PUBLIC_PROBE;
+  try {
+    return await fn();
+  } finally {
+    process.env.WEFT_DEVTUNNEL_PUBLIC_PROBE = "off";
+  }
+}
+
 const FAKE_CLI_SCRIPT = `
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 function sleepSync(ms) {
@@ -658,3 +675,191 @@ test("persistent pairing: a restart reuses the preserved tunnel (same identity, 
   }
 });
 
+
+// --- Public-side tunnel health (the "relay up, tunnel dead" failure) ---------------------------
+// A local-port probe alone can't see the failure that actually bit us: the relay server and the
+// `devtunnel host` process are separate, so the host can lose its cloud connection and never
+// recover while the relay keeps listening on 127.0.0.1. Every local check then says "healthy",
+// each new station reuses the corpse, and every phone gets a bare 404 with no way to self-heal.
+
+/** Real ws server that accepts — stands in for a tunnel that still forwards. */
+async function startAcceptingServer() {
+  const { WebSocketServer } = await import("ws");
+  const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise((r) => wss.once("listening", r));
+  return { port: wss.address().port, close: () => new Promise((r) => wss.close(r)) };
+}
+
+/** HTTP server that refuses every upgrade with 404 — exactly what devtunnels returns once the
+ * tunnel has no host connected. */
+async function startRejectingServer(status = "404 Not Found") {
+  const { createServer } = await import("node:http");
+  const server = createServer((_req, res) => {
+    res.writeHead(404);
+    res.end();
+  });
+  server.on("upgrade", (_req, socket) => {
+    socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { port: server.address().port, close: () => new Promise((r) => server.close(r)) };
+}
+
+test("probePublicRelay reports ok when the tunnel still forwards to the relay", async () => {
+  const server = await startAcceptingServer();
+  try {
+    const { probePublicRelay } = await freshModule();
+    assert.equal(await probePublicRelay(`ws://127.0.0.1:${server.port}`), "ok");
+  } finally {
+    await server.close();
+  }
+});
+
+test("probePublicRelay reports rejected when the tunnel answers 404 (no host connected)", async () => {
+  const server = await startRejectingServer();
+  try {
+    const { probePublicRelay } = await freshModule();
+    assert.equal(await probePublicRelay(`ws://127.0.0.1:${server.port}`), "rejected");
+  } finally {
+    await server.close();
+  }
+});
+
+test("probePublicRelay reports rejected on a 502 too — any answer from the service is definitive", async () => {
+  const server = await startRejectingServer("502 Bad Gateway");
+  try {
+    const { probePublicRelay } = await freshModule();
+    assert.equal(await probePublicRelay(`ws://127.0.0.1:${server.port}`), "rejected");
+  } finally {
+    await server.close();
+  }
+});
+
+test("probePublicRelay reports unreachable — not rejected — when nothing answers at all", async () => {
+  // Being offline must never be grounds for tearing down a relay: replacing it would help nobody.
+  const server = await startAcceptingServer();
+  const deadPort = server.port;
+  await server.close();
+  const { probePublicRelay } = await freshModule();
+  assert.equal(await probePublicRelay(`ws://127.0.0.1:${deadPort}`), "unreachable");
+});
+
+test("healthyRegistryEntry only checks the local port by default, so a fresh relay is never rejected", async () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const local = await startAcceptingServer();
+  const dead = await startRejectingServer();
+  try {
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ pid: process.pid, relayPort: local.port, baseUrl: `ws://127.0.0.1:${dead.port}`, alive: true }),
+    );
+    const { healthyRegistryEntry } = await freshModule();
+    const entry = await withPublicProbe(() => healthyRegistryEntry(homeDir));
+    assert.ok(entry, "default lookup must not pay for (or fail on) a public round trip");
+  } finally {
+    await local.close();
+    await dead.close();
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("healthyRegistryEntry({verifyPublic}) rejects a relay whose tunnel stopped forwarding", async () => {
+  // The exact production wedge: own pid alive, own port listening, public URL 404s forever.
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const local = await startAcceptingServer();
+  const dead = await startRejectingServer();
+  try {
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ pid: process.pid, relayPort: local.port, baseUrl: `ws://127.0.0.1:${dead.port}`, alive: true }),
+    );
+    const { healthyRegistryEntry } = await freshModule();
+    assert.equal(await withPublicProbe(() => healthyRegistryEntry(homeDir, { verifyPublic: true })), null);
+  } finally {
+    await local.close();
+    await dead.close();
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("healthyRegistryEntry({verifyPublic}) keeps a relay that is healthy end to end", async () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const local = await startAcceptingServer();
+  const publicSide = await startAcceptingServer();
+  try {
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ pid: process.pid, relayPort: local.port, baseUrl: `ws://127.0.0.1:${publicSide.port}`, alive: true }),
+    );
+    const { healthyRegistryEntry } = await freshModule();
+    const entry = await withPublicProbe(() => healthyRegistryEntry(homeDir, { verifyPublic: true }));
+    assert.ok(entry);
+    assert.equal(entry.relayPort, local.port);
+  } finally {
+    await local.close();
+    await publicSide.close();
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("healthyRegistryEntry({verifyPublic}) keeps the relay when this machine is simply offline", async () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const local = await startAcceptingServer();
+  const gone = await startAcceptingServer();
+  const dealPort = gone.port;
+  await gone.close();
+  try {
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ pid: process.pid, relayPort: local.port, baseUrl: `ws://127.0.0.1:${dealPort}`, alive: true }),
+    );
+    const { healthyRegistryEntry } = await freshModule();
+    assert.ok(await withPublicProbe(() => healthyRegistryEntry(homeDir, { verifyPublic: true })));
+  } finally {
+    await local.close();
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveDevTunnelTransport refuses to mint a QR for a tunnel that no longer forwards", async () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const local = await startAcceptingServer();
+  const dead = await startRejectingServer();
+  try {
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ pid: process.pid, relayPort: local.port, baseUrl: `ws://127.0.0.1:${dead.port}`, alive: true }),
+    );
+    const { resolveDevTunnelTransport } = await freshModule();
+    await withPublicProbe(() =>
+      assert.rejects(resolveDevTunnelTransport({ baseDir: homeDir }), /weft devtunnel start/),
+    );
+  } finally {
+    await local.close();
+    await dead.close();
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("WEFT_DEVTUNNEL_PUBLIC_PROBE=off skips the public check entirely", async () => {
+  // Escape hatch for proxied networks that answer the handshake themselves: an intercepted 4xx
+  // looks exactly like a dead tunnel, and acting on it would reprovision a relay that was fine.
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const local = await startAcceptingServer();
+  const dead = await startRejectingServer();
+  try {
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ pid: process.pid, relayPort: local.port, baseUrl: `ws://127.0.0.1:${dead.port}`, alive: true }),
+    );
+    const { healthyRegistryEntry } = await freshModule();
+    assert.equal(await withPublicProbe(() => healthyRegistryEntry(homeDir, { verifyPublic: true })), null);
+    // Same call, probe disabled — the wedged relay is accepted rather than torn down.
+    assert.ok(await healthyRegistryEntry(homeDir, { verifyPublic: true }));
+  } finally {
+    await local.close();
+    await dead.close();
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});

@@ -16,6 +16,7 @@ import {
   ensureDevTunnelRelay,
   describeStage,
   healthyRegistryEntry,
+  probePublicRelay,
   forceStopDevTunnel,
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
@@ -182,7 +183,7 @@ async function devtunnelStart() {
   // this terminal spawned, whose lifetime is now tied to it (Ctrl+C or terminal close → tear it
   // all down, including the cloud tunnel).
   const status = createProvisionStatusLine();
-  const existing = await healthyRegistryEntry();
+  const existing = await healthyRegistryEntry(undefined, { verifyPublic: true });
   // Capture the URL a prior (possibly-preserved) run left behind BEFORE we provision, so after
   // startup we can tell the user whether the URL survived — in persistent mode a matching URL means
   // already-paired phones reconnect with no re-scan; a changed URL (e.g. port fallback) means they
@@ -303,9 +304,23 @@ async function devtunnelStatus() {
     console.log(c.dim(`Run ${c.bold("weft devtunnel stop")} then ${c.bold("weft devtunnel start")} to reset it.`));
     return;
   }
+  // The local relay answering says nothing about whether the tunnel still forwards from the
+  // internet — those are two separate processes, and the tunnel side is the half that silently
+  // dies (auth expiry, sleep, network change). Report them separately so "running" never lies.
+  const publicState = await probePublicRelay(healthy.baseUrl);
+  if (publicState === "rejected") {
+    console.log(`${c.red("✗")} ${c.bold("relay up, tunnel dead")}  ${c.dim(healthy.baseUrl)}`);
+    console.log(c.dim(`   The local relay (pid ${registryEntry.pid}) is fine, but the public tunnel refuses connections —`));
+    console.log(c.dim("   your phone would see a 404. The devtunnel host lost its cloud connection."));
+    console.log(c.dim(`Run ${c.bold("weft devtunnel stop")} then ${c.bold("weft devtunnel start")} to reset it.`));
+    return;
+  }
   const upForMs = Date.now() - (registryEntry.startedAt ?? Date.now());
   console.log(`${c.green("●")} ${c.bold("running")}  ${c.dim(healthy.baseUrl)}`);
   console.log(c.dim(`   pid ${registryEntry.pid} · up ${Math.round(upForMs / 1000)}s · tunnel ${registryEntry.tunnelId ?? "?"}`));
+  if (publicState === "unreachable") {
+    console.log(c.yellow("   Couldn't reach the tunnel from here — this machine may be offline."));
+  }
 }
 
 async function devtunnelStop() {
@@ -559,7 +574,10 @@ async function ensureRelayForTransport() {
   }
   if (configured?.kind !== "devtunnel") return { owned: false, child: null, baseUrl: null, failed: false };
 
-  const healthy = await healthyRegistryEntry();
+  // verifyPublic: this is the exact spot the "reusing the shared relay" line gets printed, and
+  // reusing a relay whose tunnel has stopped forwarding is what makes every subsequent pairing
+  // fail with a bare 404. Checking the public side here turns that into an automatic reprovision.
+  const healthy = await healthyRegistryEntry(undefined, { verifyPublic: true });
   if (healthy) {
     console.log(
       `${c.green("✓")} ${c.bold("devtunnel relay ready")}  ${c.dim(healthy.baseUrl)}\n` +
@@ -569,7 +587,13 @@ async function ensureRelayForTransport() {
     return { owned: false, child: null, baseUrl: healthy.baseUrl, failed: false };
   }
 
-  console.log(c.dim("\nNo devtunnel relay running yet — starting one for this station…"));
+  const wedged = readRegistry(DEVTUNNEL_REGISTRY_FILE);
+  if (wedged?.alive !== false && isPidAlive(wedged?.pid)) {
+    console.log(c.yellow("\nThe shared relay stopped forwarding from the internet — replacing it…"));
+    appendStationLog("devtunnel.wedged", { baseUrl: wedged?.baseUrl ?? null, pid: wedged?.pid ?? null });
+  } else {
+    console.log(c.dim("\nNo devtunnel relay running yet — starting one for this station…"));
+  }
   const provision = createProvisionStatusLine();
   provision.start();
   try {
