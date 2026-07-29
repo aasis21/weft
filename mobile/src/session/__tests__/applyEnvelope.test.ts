@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EnvelopeBase, EventEnvelope } from '@aasis21/weft-shared';
 import * as B from '@/test/helpers/builders';
 import { emptySession, type Session, type SessionMeta } from '../model';
-import { applyEnvelope, markHistoryLoading } from '../reducers/applyEnvelope';
+import { applyEnvelope, appendUser, makeUserItem, markHistoryLoading } from '../reducers/applyEnvelope';
 
 const at = <T extends EnvelopeBase>(msg: T, ts: number): T => B.stamp(msg, { ts });
 
@@ -23,6 +23,52 @@ function reduceAll(session: Session, messages: EventEnvelope[]): Session {
 }
 
 describe('session applyEnvelope', () => {
+  it('does not show a phone prompt twice when the laptop echoes it back (#193)', () => {
+    const session = makeSession();
+    appendUser(session, makeUserItem('p1', 'restart the build', 40));
+
+    // The laptop failed to recognise its own relay and echoed it as terminal-typed.
+    reduceAll(session, [at(B.userMessage('restart the build\n', 'terminal', 'u9'), 41)]);
+    expect(session.transcript.items.filter((i) => i.kind === 'user')).toHaveLength(1);
+    expect(session.transcript.items[0]).toMatchObject({ origin: 'phone', text: 'restart the build' });
+
+    // Voice mode prepends a directive on the way in — still the same prompt.
+    appendUser(session, makeUserItem('p2', 'and deploy it', 42));
+    reduceAll(session, [at(B.userMessage('[directive]\n\nand deploy it', 'terminal', 'u10'), 43)]);
+    expect(session.transcript.items.filter((i) => i.kind === 'user')).toHaveLength(2);
+
+    // Saying the same thing again is a real second message.
+    reduceAll(session, [at(B.userMessage('and deploy it', 'terminal', 'u11'), 44)]);
+    expect(session.transcript.items.filter((i) => i.kind === 'user')).toHaveLength(3);
+
+    // And a laptop message that merely ENDS with an earlier prompt is its own message.
+    appendUser(session, makeUserItem('p3', 'yes', 45));
+    reduceAll(session, [at(B.userMessage('actually yes', 'terminal', 'u12'), 46)]);
+    expect(session.transcript.items.filter((i) => i.kind === 'user')).toHaveLength(5);
+    expect(session.transcript.items.at(-1)).toMatchObject({ origin: 'terminal', text: 'actually yes' });
+  });
+
+  it('does not backfill a phone prompt the laptop prefixed before sending (#193)', () => {
+    const session = makeSession();
+    appendUser(session, makeUserItem('p1', 'what is up', 10));
+
+    reduceAll(session, [
+      at(
+        B.recentTurnsSnapshot([
+          B.recentTurnItem('user', '[Voice Mode is on]\n\nwhat is up', 20, 'u1'),
+          B.recentTurnItem('assistant', 'not much', 30, 'a1'),
+        ]),
+        40,
+      ),
+    ]);
+
+    expect(session.transcript.items.filter((i) => i.kind === 'user')).toHaveLength(1);
+    expect(session.transcript.items.filter((i) => i.kind === 'user' || i.kind === 'assistant').map((i) => ('text' in i ? i.text : i.kind))).toEqual([
+      'what is up',
+      'not much',
+    ]);
+  });
+
   it('folds stream deltas, inline tool status, and busy activity into session aspects', () => {
     const session = makeSession();
 

@@ -26,6 +26,8 @@ export interface UserItem {
   failed?: boolean;
   delivery?: PromptDelivery;
   origin?: 'phone' | 'terminal';
+  /** This phone prompt already absorbed a laptop echo, so it can't absorb another. */
+  echoed?: boolean;
   attachments?: PromptAttachment[];
 }
 

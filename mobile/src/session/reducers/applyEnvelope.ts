@@ -343,9 +343,56 @@ function pushNotice(session: Session, message: LogLine): void {
   appendNotice(session, message.msg.level, message.msg.message, message.ts);
 }
 
+/** Compare prompt text across the wire loosely — whitespace and line endings don't survive the
+ *  round trip intact, and a difference of one trailing newline shouldn't read as a new message. */
+function normalizeEcho(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * True when `incoming` is really `existing` coming back to us. That's either the same text once
+ * whitespace is normalized, or the same text with a block prepended by the laptop — voice mode
+ * puts a directive in front of the prompt before handing it to the SDK, so the echo is longer
+ * than what we optimistically showed.
+ *
+ * A prepended block must be separated by a line break. Typing "ok yes" at the terminal is a real
+ * new message even though a "yes" is already on screen, and it has to keep showing up (#193).
+ */
+function promptAbsorbs(existing: string, incoming: string): boolean {
+  const mine = normalizeEcho(existing);
+  if (!mine) return false;
+  const lines = incoming.replace(/\r\n/g, '\n').trimEnd().split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (normalizeEcho(lines.slice(i).join('\n')) === mine) return true;
+  }
+  return false;
+}
+
+/**
+ * Append a user prompt echoed from the laptop. Phone-typed prompts already appear optimistically,
+ * so the extension only broadcasts terminal-origin echoes; we still dedup by the stable SDK event
+ * id so a re-delivery (e.g. reconnect) can't double-add it.
+ *
+ * The laptop decides which echoes to broadcast by matching text it relayed on our behalf, which is
+ * a guess — the session event carries no source device, and voice mode prepends a directive before
+ * handing the prompt to the SDK, so the guess misses and the prompt comes back a second time
+ * wearing a Laptop chip. Match here too, and let each prompt absorb at most one echo so a
+ * genuinely repeated message still shows twice (#193).
+ */
 function appendUserEcho(session: Session, message: UserMessageEcho): void {
   const id = `umsg-${message.msg.id ?? message.ts}`;
   if (session.transcript.items.some((item) => item.id === id)) return;
+  const twin = session.transcript.items.find(
+    (item): item is UserItem =>
+      item.kind === 'user' &&
+      item.origin === 'phone' &&
+      item.echoed !== true &&
+      promptAbsorbs(item.text, message.msg.text),
+  );
+  if (twin) {
+    twin.echoed = true;
+    return;
+  }
   session.transcript.items = cap([
     ...session.transcript.items,
     { kind: 'user', id, text: message.msg.text, ts: message.ts, origin: message.msg.origin ?? 'terminal' },
@@ -397,17 +444,27 @@ function applyRecentTurns(session: Session, message: RecentTurnsMsg): void {
 
   const dedupeKey = (role: string, text: string) => `${role}\u0000${text.slice(0, RECENT_DEDUPE_PREFIX)}`;
   const existingIds = new Set(session.transcript.items.map((i) => i.id));
-  const overlapKeys = new Set(
-    session.transcript.items
-      .slice(-RECENT_OVERLAP_SCAN)
-      .filter((i): i is UserItem | AssistantItem => i.kind === 'user' || i.kind === 'assistant')
-      .map((i) => dedupeKey(i.kind, i.text)),
-  );
+  const recentTail = session.transcript.items
+    .slice(-RECENT_OVERLAP_SCAN)
+    .filter((i): i is UserItem | AssistantItem => i.kind === 'user' || i.kind === 'assistant');
+  const overlapKeys = new Set(recentTail.map((i) => dedupeKey(i.kind, i.text)));
+  // The snapshot carries the text the SDK actually received, which for a phone prompt sent in
+  // voice mode is our text with a directive prepended — so an exact key can miss and the prompt
+  // gets backfilled a second time wearing a Laptop chip (#193). Match those loosely too, and
+  // consume each candidate so a genuinely repeated prompt still comes back.
+  const unclaimedUserTexts = recentTail.filter((i) => i.kind === 'user').map((i) => i.text);
 
   const additions: TimelineItem[] = [];
   for (const it of incoming) {
     if ((it.role !== 'user' && it.role !== 'assistant') || !it.text) continue;
     if (existingIds.has(it.id) || overlapKeys.has(dedupeKey(it.role, it.text))) continue;
+    if (it.role === 'user') {
+      const twin = unclaimedUserTexts.findIndex((text) => promptAbsorbs(text, it.text));
+      if (twin !== -1) {
+        unclaimedUserTexts.splice(twin, 1);
+        continue;
+      }
+    }
     existingIds.add(it.id);
     additions.push(
       it.role === 'user'
