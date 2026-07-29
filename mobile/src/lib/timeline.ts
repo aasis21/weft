@@ -458,12 +458,25 @@ function normalizeEcho(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** True when `incoming` is really `existing` coming back to us — identical once whitespace is
- *  normalized, or the same text with something prepended by the laptop (voice mode adds a
- *  directive before handing the prompt to the SDK, so the echo is longer than what we showed). */
+/**
+ * True when `incoming` is really `existing` coming back to us. That's either the same text once
+ * whitespace is normalized, or the same text with a block prepended by the laptop — voice mode
+ * puts a directive in front of the prompt before handing it to the SDK, so the echo is longer
+ * than what we optimistically showed.
+ *
+ * A prepended block must be separated by a line break. Typing "ok yes" at the terminal is a real
+ * new message even though a "yes" is already on screen, and it has to keep showing up (#193).
+ */
 function promptAbsorbs(existing: string, incoming: string): boolean {
   const mine = normalizeEcho(existing);
-  return mine.length > 0 && normalizeEcho(incoming).endsWith(mine);
+  if (!mine) return false;
+  const theirs = incoming.replace(/\r\n/g, '\n').trimEnd();
+  const lines = theirs.split('\n');
+  // Walk back from the end: the tail after any line boundary can be the prompt we already show.
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (normalizeEcho(lines.slice(i).join('\n')) === mine) return true;
+  }
+  return false;
 }
 
 function pushNotice(state: TimelineState, message: LogLine): TimelineState {  return appendNotice(state, message.msg.level, message.msg.message, message.ts);

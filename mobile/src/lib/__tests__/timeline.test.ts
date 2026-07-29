@@ -105,6 +105,13 @@ describe('timeline reducer', () => {
     state = reduceTimeline(state, at(B.userMessage('and deploy it', 'terminal', 'u11'), 44));
     expect(state.items.filter((item) => item.kind === 'user')).toHaveLength(3);
     expect(state.items.at(-1)).toMatchObject({ origin: 'terminal', text: 'and deploy it' });
+
+    // And a genuinely laptop-typed message that merely ENDS with an earlier phone prompt is its
+    // own message — only a prepended block ending in a line break reads as the same prompt.
+    state = appendUser(state, 'yes', 45).state;
+    state = reduceTimeline(state, at(B.userMessage('actually yes', 'terminal', 'u12'), 46));
+    expect(state.items.filter((item) => item.kind === 'user')).toHaveLength(5);
+    expect(state.items.at(-1)).toMatchObject({ origin: 'terminal', text: 'actually yes' });
   });
 
   it('applies channel lifecycle, heartbeat, and mode messages', () => {
