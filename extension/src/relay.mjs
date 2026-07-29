@@ -64,8 +64,14 @@ export function createPromptOriginTracker({
   maxPending = MAX_PENDING_PROMPT_CORRELATIONS,
 } = {}) {
   let pending = [];
+  // Match loosely: the text we hand the SDK and the text that comes back on the session event are
+  // the same prompt, but not always the same string — whitespace and line endings get normalised
+  // along the way, and one differing newline used to be enough to call a phone prompt terminal and
+  // broadcast it back, so it appeared twice on the phone (#193).
+  const key = (text) => text.replace(/\s+/g, " ").trim();
   const drop = (text) => {
-    const idx = pending.findIndex((p) => p.text === text);
+    const wanted = key(text);
+    const idx = pending.findIndex((p) => p.key === wanted);
     if (idx === -1) return false;
     pending.splice(idx, 1);
     return true;
@@ -73,7 +79,7 @@ export function createPromptOriginTracker({
   return {
     record(text) {
       if (typeof text !== "string") return;
-      pending.push({ text });
+      pending.push({ key: key(text) });
       if (pending.length > maxPending) pending = pending.slice(pending.length - maxPending);
     },
     forget(text) {

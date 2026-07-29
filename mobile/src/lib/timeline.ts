@@ -37,6 +37,8 @@ export interface UserItem {
   /** Which device typed this prompt: 'phone' (this device) or 'terminal' (the laptop).
    *  Undefined for backfilled history (turns carry no device). */
   origin?: 'phone' | 'terminal';
+  /** This phone prompt already absorbed a laptop echo, so it can't absorb another. */
+  echoed?: boolean;
   /** Images the phone user attached (base64), for optimistic render + retry. Stripped
    *  from persistence so the stored transcript stays small. */
   attachments?: PromptAttachment[];
@@ -450,18 +452,54 @@ function completeTool(state: TimelineState, message: ToolComplete): TimelineStat
   };
 }
 
-function pushNotice(state: TimelineState, message: LogLine): TimelineState {
-  return appendNotice(state, message.msg.level, message.msg.message, message.ts);
+/** Compare prompt text across the wire loosely — whitespace and line endings don't survive the
+ *  round trip intact, and a difference of one trailing newline shouldn't read as a new message. */
+function normalizeEcho(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** True when `incoming` is really `existing` coming back to us — identical once whitespace is
+ *  normalized, or the same text with something prepended by the laptop (voice mode adds a
+ *  directive before handing the prompt to the SDK, so the echo is longer than what we showed). */
+function promptAbsorbs(existing: string, incoming: string): boolean {
+  const mine = normalizeEcho(existing);
+  return mine.length > 0 && normalizeEcho(incoming).endsWith(mine);
+}
+
+function pushNotice(state: TimelineState, message: LogLine): TimelineState {  return appendNotice(state, message.msg.level, message.msg.message, message.ts);
 }
 
 /**
  * Append a user prompt echoed from the laptop. Phone-typed prompts already appear via
  * `appendUser`, so the extension only broadcasts terminal-origin echoes; we still dedup
  * by the stable SDK event id so a re-delivery (e.g. reconnect) can't double-add it.
+ *
+ * The laptop decides which echoes to broadcast by matching text it relayed on our behalf, which
+ * is a guess — the session event carries no source device. When that guess misses, the prompt you
+ * just sent comes back a second time wearing a Laptop chip. So match here too: an echo that ends
+ * with a phone prompt we're already showing is that same prompt (the laptop may prepend to it, as
+ * voice mode does), and each prompt can absorb at most one echo so a genuinely repeated message
+ * still shows twice (#193).
  */
 function appendUserEcho(state: TimelineState, message: UserMessageEcho): TimelineState {
   const id = `umsg-${message.msg.id ?? message.ts}`;
   if (state.items.some((item) => item.id === id)) return state;
+  const echoed = normalizeEcho(message.msg.text);
+  const twin = echoed
+    ? state.items.find(
+        (item) =>
+          item.kind === 'user' &&
+          item.origin === 'phone' &&
+          item.echoed !== true &&
+          promptAbsorbs(item.text, message.msg.text),
+      )
+    : undefined;
+  if (twin) {
+    return {
+      ...state,
+      items: state.items.map((item) => (item === twin ? { ...item, echoed: true } : item)),
+    };
+  }
   const item: UserItem = {
     kind: 'user',
     id,
@@ -488,17 +526,27 @@ function applyRecentTurns(state: TimelineState, message: RecentTurnsMsg): Timeli
 
   const dedupeKey = (role: string, text: string) => `${role}\u0000${text.slice(0, RECENT_DEDUPE_PREFIX)}`;
   const existingIds = new Set(state.items.map((i) => i.id));
-  const overlapKeys = new Set(
-    state.items
-      .slice(-RECENT_OVERLAP_SCAN)
-      .filter((i): i is UserItem | AssistantItem => i.kind === 'user' || i.kind === 'assistant')
-      .map((i) => dedupeKey(i.kind, i.text)),
-  );
+  const recentTail = state.items
+    .slice(-RECENT_OVERLAP_SCAN)
+    .filter((i): i is UserItem | AssistantItem => i.kind === 'user' || i.kind === 'assistant');
+  const overlapKeys = new Set(recentTail.map((i) => dedupeKey(i.kind, i.text)));
+  // The snapshot carries the text the SDK actually received, which for a phone prompt sent in
+  // voice mode is our text with a directive prepended — so an exact key can miss and the prompt
+  // gets backfilled a second time wearing a Laptop chip (#193). Match those loosely too, and
+  // consume each candidate so a genuinely repeated prompt still comes back.
+  const unclaimedUserTexts = recentTail.filter((i) => i.kind === 'user').map((i) => i.text);
 
   const additions: TimelineItem[] = [];
   for (const it of incoming) {
     if ((it.role !== 'user' && it.role !== 'assistant') || !it.text) continue;
     if (existingIds.has(it.id) || overlapKeys.has(dedupeKey(it.role, it.text))) continue;
+    if (it.role === 'user') {
+      const twin = unclaimedUserTexts.findIndex((text) => promptAbsorbs(text, it.text));
+      if (twin !== -1) {
+        unclaimedUserTexts.splice(twin, 1);
+        continue;
+      }
+    }
     // Dedup exact-id re-entries within THIS snapshot; do NOT add its content key so a legitimately
     // repeated short turn ("ok") later in the same snapshot is still kept.
     existingIds.add(it.id);

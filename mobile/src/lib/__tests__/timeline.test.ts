@@ -87,6 +87,26 @@ describe('timeline reducer', () => {
     ]);
   });
 
+  it('does not show a phone prompt twice when the laptop echoes it back (#193)', () => {
+    let state = appendUser(emptyTimeline(), 'restart the build', 40).state;
+
+    // The laptop failed to recognise its own relay and echoed it as terminal-typed. It's the same
+    // prompt, so it absorbs into the one already on screen rather than appearing again.
+    state = reduceTimeline(state, at(B.userMessage('restart the build\n', 'terminal', 'u9'), 41));
+    expect(state.items.filter((item) => item.kind === 'user')).toHaveLength(1);
+    expect(state.items[0]).toMatchObject({ kind: 'user', origin: 'phone', text: 'restart the build' });
+
+    // A prefix the laptop adds on the way in (voice mode does this) still counts as the same prompt.
+    state = appendUser(state, 'and deploy it', 42).state;
+    state = reduceTimeline(state, at(B.userMessage('[directive]\n\nand deploy it', 'terminal', 'u10'), 43));
+    expect(state.items.filter((item) => item.kind === 'user')).toHaveLength(2);
+
+    // But saying the same thing again is a real second message, not an echo.
+    state = reduceTimeline(state, at(B.userMessage('and deploy it', 'terminal', 'u11'), 44));
+    expect(state.items.filter((item) => item.kind === 'user')).toHaveLength(3);
+    expect(state.items.at(-1)).toMatchObject({ origin: 'terminal', text: 'and deploy it' });
+  });
+
   it('applies channel lifecycle, heartbeat, and mode messages', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -162,6 +182,28 @@ describe('timeline reducer', () => {
     ]);
     // Empty transcript backfill carries no "N new while you were away" divider.
     expect(state.items.some((i) => i.kind === 'notice')).toBe(false);
+  });
+
+  it('does not backfill a phone prompt the laptop prefixed before sending (#193)', () => {
+    let state = appendUser(emptyTimeline(), 'what is up', 10).state;
+    state = reduceTimeline(
+      state,
+      at(
+        B.recentTurnsSnapshot([
+          // Voice mode prepends a directive before handing the prompt to the SDK, so the
+          // snapshot text is longer than what the phone showed optimistically.
+          B.recentTurnItem('user', '[Voice Mode is on]\n\nwhat is up', 20, 'u1'),
+          B.recentTurnItem('assistant', 'not much', 30, 'a1'),
+        ]),
+        40,
+      ),
+    );
+
+    expect(state.items.filter((i) => i.kind === 'user')).toHaveLength(1);
+    expect(state.items.map((i) => ('text' in i ? i.text : i.kind))).toEqual([
+      'what is up',
+      'not much',
+    ]);
   });
 
   it('reconnect recent-turns dedups seen turns, appends new ones, and prepends an away divider', () => {
