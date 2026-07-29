@@ -31,48 +31,103 @@ export function splitSpeechSentences(text: string): { sentences: string[]; rest:
   return takeSentences(text);
 }
 
+/** How often the watchdog checks whether the engine is still making sound. */
+const WATCHDOG_TICK_MS = 1000;
+/** How long an utterance may take to start before silence counts as it having been dropped. */
+const WATCHDOG_START_GRACE_MS = 5000;
+
 export function useSpeechOutput(): {
   supported: boolean;
   speaking: boolean;
+  /** Something is queued, buffered, or mid-utterance — i.e. this reply isn't finished being read. */
+  pending: boolean;
   enqueue(text: string): void;
   flush(): void;
   cancel(): void;
 } {
   const supported = typeof window !== 'undefined' && 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
   const [speaking, setSpeaking] = useState(false);
+  const [pending, setPending] = useState(false);
   const queueRef = useRef<string[]>([]);
   const bufferRef = useRef('');
   const speakingRef = useRef(false);
+  // Bumped by cancel() so an utterance we've already abandoned can't drive the queue from its
+  // onend/onerror — cancel() fires those, and the callback would race a freshly started reply.
+  const generationRef = useRef(0);
+  const watchdogRef = useRef<number | null>(null);
+
+  const syncPending = useCallback((): void => {
+    setPending(speakingRef.current || queueRef.current.length > 0 || bufferRef.current.trim().length > 0);
+  }, []);
+
+  const stopWatchdog = useCallback((): void => {
+    if (watchdogRef.current != null) window.clearInterval(watchdogRef.current);
+    watchdogRef.current = null;
+  }, []);
 
   const playNext = useCallback((): void => {
     if (!supported) return;
+    const generation = generationRef.current;
     const text = queueRef.current.shift();
     if (!text) {
       speakingRef.current = false;
       setSpeaking(false);
+      stopWatchdog();
+      syncPending();
       return;
     }
     speakingRef.current = true;
     setSpeaking(true);
+    syncPending();
+    const advance = (): void => {
+      if (generationRef.current !== generation) return;
+      playNext();
+    };
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.02;
       utterance.pitch = 1;
-      utterance.onend = () => playNext();
-      utterance.onerror = () => playNext();
+      let started = false;
+      utterance.onstart = () => {
+        started = true;
+      };
+      utterance.onend = advance;
+      utterance.onerror = advance;
       window.speechSynthesis.speak(utterance);
+      // Android silently drops an utterance now and then — the engine goes quiet and `onend` never
+      // arrives, which used to strand Vox on Working… for the rest of the session. Watch the engine
+      // and move on ourselves if it stops reporting speech. Before the utterance has started that
+      // needs a long fuse (the engine can take a moment to warm up); after it has started, the
+      // moment it goes quiet without telling us is enough.
+      const openedAt = Date.now();
+      stopWatchdog();
+      watchdogRef.current = window.setInterval(() => {
+        if (generationRef.current !== generation) {
+          stopWatchdog();
+          return;
+        }
+        try {
+          if (window.speechSynthesis.speaking || window.speechSynthesis.pending) return;
+          if (!started && Date.now() - openedAt < WATCHDOG_START_GRACE_MS) return;
+          stopWatchdog();
+          advance();
+        } catch {
+          stopWatchdog();
+        }
+      }, WATCHDOG_TICK_MS);
     } catch {
-      playNext();
+      advance();
     }
-  }, [supported]);
+  }, [stopWatchdog, supported, syncPending]);
 
   const enqueueChunk = useCallback((text: string): void => {
     if (!supported) return;
     const clean = text.trim();
     if (!clean) return;
     queueRef.current.push(clean);
+    syncPending();
     if (!speakingRef.current) playNext();
-  }, [playNext, supported]);
+  }, [playNext, supported, syncPending]);
 
   const enqueue = useCallback((text: string): void => {
     if (!supported) return;
@@ -80,28 +135,33 @@ export function useSpeechOutput(): {
     const { sentences, rest } = takeSentences(bufferRef.current);
     bufferRef.current = rest;
     for (const sentence of sentences) enqueueChunk(sentence);
-  }, [enqueueChunk, supported]);
+    syncPending();
+  }, [enqueueChunk, supported, syncPending]);
 
   const flush = useCallback((): void => {
     if (!supported) return;
     const rest = bufferRef.current.trim();
     bufferRef.current = '';
     if (rest) enqueueChunk(rest);
-  }, [enqueueChunk, supported]);
+    syncPending();
+  }, [enqueueChunk, supported, syncPending]);
 
   const cancel = useCallback((): void => {
+    generationRef.current += 1;
+    stopWatchdog();
     queueRef.current = [];
     bufferRef.current = '';
     speakingRef.current = false;
     setSpeaking(false);
+    setPending(false);
     try {
       window.speechSynthesis?.cancel();
     } catch {
       // speechSynthesis can throw in partially implemented browsers.
     }
-  }, []);
+  }, [stopWatchdog]);
 
   useEffect(() => cancel, [cancel]);
 
-  return { supported, speaking, enqueue, flush, cancel };
+  return { supported, speaking, pending, enqueue, flush, cancel };
 }

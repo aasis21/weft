@@ -6,6 +6,7 @@ const speechInput = { supported: true, listening: false, error: null as string |
 const speechOutput = {
   supported: true,
   speaking: false,
+  pending: false,
   enqueue: vi.fn(),
   flush: vi.fn(),
   cancel: vi.fn(),
@@ -48,6 +49,71 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
   speechInput.error = null;
+  speechOutput.speaking = false;
+  speechOutput.pending = false;
+});
+
+describe('Vox keeps its turn (#195)', () => {
+  it('stays on working after sending, instead of reopening the mic before the turn starts', () => {
+    vi.useFakeTimers();
+    const { panel, onPrompt } = renderDock();
+
+    speak('restart the build', true);
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+
+    expect(onPrompt).toHaveBeenCalledWith('restart the build');
+    // agentBusy is still false — the laptop hasn't reported the turn yet. Vox must hold, not settle
+    // out and grab the mic in time to transcribe its own reply.
+    expect(panel.getAttribute('data-state')).toBe('working');
+    expect(speechInput.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles instead of hanging on working when the turn never starts', () => {
+    vi.useFakeTimers();
+    const { panel } = renderDock();
+
+    speak('are you there', true);
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(panel.getAttribute('data-state')).toBe('working');
+
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(panel.getAttribute('data-state')).toBe('ready');
+  });
+
+  it('settles once speech drains even though a reply was spoken this turn', () => {
+    vi.useFakeTimers();
+    speechOutput.pending = true;
+    const { panel, rerender } = renderDock({ agentBusy: true, latestAssistant: { id: 'a1', text: 'All done.' } });
+
+    expect(panel.getAttribute('data-state')).toBe('working');
+
+    // Turn ends and the queue drains without `speaking` ever flipping — the engine took the text
+    // and made no sound. Vox used to sit on working… forever from here.
+    speechOutput.pending = false;
+    act(() => {
+      rerender(
+        <VoxDock
+          latestAssistant={{ id: 'a1', text: 'All done.' }}
+          agentBusy={false}
+          toolActive={false}
+          disabled={false}
+          onPrompt={vi.fn()}
+          onInterrupt={vi.fn()}
+          onExpand={vi.fn()}
+          onKeyboard={vi.fn()}
+          onEditTranscript={vi.fn()}
+        />,
+      );
+    });
+
+    expect(panel.getAttribute('data-state')).toBe('ready');
+  });
 });
 
 describe('VoxDock inline surface', () => {
