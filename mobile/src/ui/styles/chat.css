@@ -1940,10 +1940,34 @@
   border-color: color-mix(in srgb, var(--voice-orb-color) 48%, transparent);
   box-shadow: 0 0 42px var(--voice-orb-glow);
   animation: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .weft-session .voice-orb-core {
   filter: drop-shadow(0 10px 30px var(--voice-orb-glow));
+  transition: filter 180ms ease;
+}
+
+/* The agent can finish while Vox is still reading the tail of the reply, so the halo drops from the
+   blended colour back to plain speaking part-way through a sentence. That transition is real
+   information — the work is done, you are only hearing the rest of the words — but at the snappy
+   duration used for ordinary state changes it reads as a glitch. Arriving at `speaking` from any
+   direction is therefore a slow cross-fade, so the accent looks like it is cooling off rather than
+   twitching. Every other transition stays quick, because mic-open in particular has to feel
+   immediate. */
+.weft-session .voice-panel[data-state='speaking'] .voice-orb,
+.weft-session .voice-panel[data-state='speaking'] .voice-orb-ring,
+.weft-session .voice-panel[data-state='speaking'] .voice-orb-core {
+  transition-duration: 900ms;
+  transition-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weft-session .voice-panel[data-state='speaking'] .voice-orb,
+  .weft-session .voice-panel[data-state='speaking'] .voice-orb-ring,
+  .weft-session .voice-panel[data-state='speaking'] .voice-orb-core {
+    transition-duration: 180ms;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
