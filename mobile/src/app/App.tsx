@@ -3,7 +3,7 @@ import type { JSX } from 'react';
 import type { PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
-import { StartSessionScreen } from '@/ui/screens/StartSessionScreen';
+import { StartSessionScreen, type StartMode } from '@/ui/screens/StartSessionScreen';
 import { DevicesScreen } from '@/ui/screens/DevicesScreen';
 import { DeviceDetailsScreen } from '@/ui/screens/DeviceDetailsScreen';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
@@ -17,6 +17,9 @@ export default function App(): JSX.Element {
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startDeviceId, setStartDeviceId] = useState<string | undefined>(undefined);
+  /** Which tab the start screen opens on — "Resume a session" on a device lands straight on the
+   *  resumable list rather than making you find the tab yourself. */
+  const [startMode, setStartMode] = useState<StartMode>('new');
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);
   const [addManual, setAddManual] = useState(false);
@@ -58,13 +61,14 @@ export default function App(): JSX.Element {
     setAdding(true);
   }, []);
 
-  const openStart = useCallback((channelId?: string): void => {
+  const openStart = useCallback((channelId?: string, mode: StartMode = 'new'): void => {
     window.history.replaceState(null, '');
     setError(null);
     setAdding(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
     setStartDeviceId(channelId);
+    setStartMode(mode);
     setStarting(true);
   }, []);
 
@@ -249,13 +253,7 @@ export default function App(): JSX.Element {
           sessions={snapshot.sessions}
           devices={snapshot.devices}
           onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
-          onRefreshSessions={(id) => void sessionRuntime.refreshSessions(id)}
-          onResumeSession={(deviceId, sessionId, mode, title, cwd) => {
-            closeDeviceScreens();
-            void sessionRuntime.resumeSession(deviceId, { sessionId, mode, title, cwd }).catch((err) => {
-              setError(err instanceof Error ? err.message : 'Could not resume the session.');
-            });
-          }}
+          onResumeOnDevice={(id) => openStart(id, 'resume')}
           onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
           onForget={async (id) => {
             await sessionRuntime.forgetDevice(id);
@@ -304,12 +302,26 @@ export default function App(): JSX.Element {
         hasSessions={hasSessions}
         devices={snapshot.devices}
         initialChannelId={startDeviceId}
+        initialMode={startMode}
         onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
         onStart={async (id, opts) => {
           await sessionRuntime.spawnSession(id, opts);
           setStarting(false);
           setStartDeviceId(undefined);
           setShowLanding(false);
+        }}
+        onRefreshSessions={(id) => void sessionRuntime.refreshSessions(id)}
+        onResume={async (id, req) => {
+          await sessionRuntime.resumeSession(id, req);
+          setStarting(false);
+          setStartDeviceId(undefined);
+          setShowLanding(false);
+        }}
+        onOpenSession={(id) => {
+          setStarting(false);
+          setStartDeviceId(undefined);
+          setShowLanding(false);
+          sessionRuntime.setActive(id);
         }}
         onScanListener={() => openJoin(false)}
         onManageDevices={openDevices}

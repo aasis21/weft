@@ -45,6 +45,22 @@ describe('folderOptions', () => {
   it('is empty for an empty list', () => {
     expect(folderOptions([])).toEqual([]);
   });
+
+  it('offers registered folders that have no sessions in them, above the ones that do', () => {
+    // A registered project with nothing resumable in it yet is the normal state of a fresh
+    // checkout, and it is exactly the folder you are most likely to want — deriving the picker
+    // from session cwds alone would hide it.
+    const options = folderOptions(sessions, ['/srv/fresh', 'C:\\CLP\\ModernOrder']);
+    expect(options).toEqual([
+      { path: 'C:\\CLP\\ModernOrder', label: 'ModernOrder', count: 3 },
+      { path: '/srv/fresh', label: 'fresh', count: 0 },
+      { path: '/home/me/weft', label: 'weft', count: 1 },
+    ]);
+  });
+
+  it('ignores blank registered paths rather than offering a nameless folder', () => {
+    expect(folderOptions([], ['']).length).toBe(0);
+  });
 });
 
 describe('filterStoredSessions', () => {

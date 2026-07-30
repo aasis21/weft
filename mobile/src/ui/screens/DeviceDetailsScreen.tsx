@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { JSX } from 'react';
-import type { SpawnMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
@@ -11,7 +10,6 @@ import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { transportIdentity } from '@aasis21/weft-shared';
 import { useNowTick } from '@/ui/hooks/useNowTick';
-import { ALL_FOLDERS, basename, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -21,10 +19,10 @@ interface DeviceDetailsScreenProps {
   /** Every registered listener device, so the sidebar's "Devices" group stays visible here too. */
   devices: ListenerDeviceState[];
   onRefreshProjects(channelId: string): void;
-  /** On-demand pull of this device's recent resumable CLI sessions (the "Resume a session" list). */
-  onRefreshSessions(channelId: string): void;
-  /** Resume a past CLI session: spawn `copilot --resume=<id>` in its cwd and pair to it. */
-  onResumeSession(deviceChannelId: string, sessionId: string, mode: SpawnMode, title: string, cwd: string): void;
+  /** Open the start screen on its Resume tab for this device. The resumable-session list lives
+   *  there, next to the folder picker and permission toggle it shares with starting a new one —
+   *  this screen is device administration, not a second place to launch sessions from. */
+  onResumeOnDevice(channelId: string): void;
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
@@ -58,8 +56,7 @@ export function DeviceDetailsScreen({
   sessions,
   devices,
   onRefreshProjects,
-  onRefreshSessions,
-  onResumeSession,
+  onResumeOnDevice,
   onSetDefault,
   onForget,
   onStartOnDevice,
@@ -77,15 +74,6 @@ export function DeviceDetailsScreen({
   const [logOpen, setLogOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [resumeMode, setResumeMode] = useState<SpawnMode>('allow-all');
-  // Client-side narrowing of the resumable-session list. The list is capped at SESSION_LIST_MAX and
-  // already in memory, so filtering never re-hits the laptop — no debounce or refetch needed.
-  const [sessionQuery, setSessionQuery] = useState('');
-  const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
-  /** Whether the user has picked a folder themselves. The device's projects arrive asynchronously,
-   *  so the default can't be a useState initialiser — and once it has been applied, a later refresh
-   *  must not yank the picker back out from under a choice the user has made. */
-  const folderTouchedRef = useRef(false);
   const now = useNowTick();
   const status = deviceStatus(device);
   const lastSeen = formatLastSeen(device.lastSeenAt, now);
@@ -97,52 +85,6 @@ export function DeviceDetailsScreen({
   // channel we already track (already joined) so a lingering offer can't show a duplicate row.
   const tracked = new Set(sessions.map((s) => s.meta.channelId));
   const offers = (device.offers ?? []).filter((o) => o && o.channelId && !tracked.has(o.channelId));
-
-  // Dedupe the resumable-session list against sessions we're already driving: a store row whose CLI
-  // sessionId matches a live/spawning card on the phone is "Open" (route to it), not "Resume" (which
-  // would launch a second `copilot --resume` on an already-attached session). Keyed on meta.sessionId
-  // — the CLI session UUID, populated from session_meta on live sessions.
-  const liveBySessionId = new Map<string, SessionView>();
-  for (const s of sessions) {
-    if (s.meta.sessionId) liveBySessionId.set(s.meta.sessionId, s);
-  }
-  const storeSessions = device.sessions ?? [];
-  // Whether the resumable-session list has ever been pulled this run (undefined = never asked; the
-  // reply always sets it to an array, even if empty). Drives the "Load sessions" vs "none found"
-  // empty state. The pull is strictly manual (a button) — never auto-run on mount — because the
-  // session store is large and rewritten every turn, and the comms are async (the reply arrives
-  // later via SESSION_LIST), so a blocking auto-load would just make the screen look stuck.
-  const sessionsPulled = device.sessions !== undefined;
-  // The folder this laptop is configured to default to. Sessions are almost always resumed in the
-  // folder you work in, so the picker opens there rather than on the full unfiltered list.
-  const defaultFolder = device.projects.find((p) => p.isDefault)?.path ?? null;
-  const folders = folderOptions(storeSessions);
-  // The default folder may have no rows in the store list (nothing resumable there yet, or the list
-  // hasn't been pulled). Offer it anyway, so the preselection is visible and honest instead of
-  // silently collapsing to "All folders".
-  const folderChoices =
-    defaultFolder && !folders.some((f) => f.path === defaultFolder)
-      ? [{ path: defaultFolder, label: basename(defaultFolder), count: 0 }, ...folders]
-      : folders;
-  // A folder that vanished from a refresh is rendered as "All folders" rather than as a dangling
-  // selection matching nothing (filterStoredSessions applies the same fallback to the rows).
-  const activeFolder = folderChoices.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
-  const sessionFilter = { query: sessionQuery, folder: activeFolder };
-  const visibleSessions = filterStoredSessions(storeSessions, sessionFilter, folderChoices.map((f) => f.path));
-  const filtering = isFiltering(sessionFilter);
-  const clearSessionFilters = (): void => {
-    setSessionQuery('');
-    // Clear returns to the device's default folder, not to everything — that default is the state
-    // the screen opens in, so anything else would make Clear a different, wider view than the one
-    // the user started from.
-    folderTouchedRef.current = false;
-    setSessionFolder(defaultFolder ?? ALL_FOLDERS);
-  };
-
-  useEffect(() => {
-    if (folderTouchedRef.current || !defaultFolder) return;
-    setSessionFolder(defaultFolder);
-  }, [defaultFolder]);
 
   return (
     <main className="weft-session join-session device-details-screen">
@@ -206,6 +148,15 @@ export function DeviceDetailsScreen({
               <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
               Start session
             </button>
+            <button
+              type="button"
+              className="session-link-btn"
+              disabled={!device.connected}
+              title={device.connected ? 'Reopen a past session from this laptop' : 'Device is offline — reconnect it to resume a session.'}
+              onClick={() => onResumeOnDevice(device.channelId)}
+            >
+              Resume a session
+            </button>
             <button type="button" className="session-link-btn" onClick={() => onRefreshProjects(device.channelId)}>
               <span className="device-action-icon" aria-hidden="true"><RefreshGlyph /></span>
               Refresh
@@ -245,121 +196,6 @@ export function DeviceDetailsScreen({
             </ul>
           </section>
         ) : null}
-
-        <section className="session-join-fallback device-sessions device-resume">
-          <div className="device-resume-head">
-            <h3>Resume a session</h3>
-            <button
-              type="button"
-              className="session-link-btn"
-              onClick={() => onRefreshSessions(device.channelId)}
-              disabled={device.sessionsLoading}
-            >
-              {device.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}
-            </button>
-          </div>
-          <p className="device-card-sub">
-            Recent Copilot CLI sessions on this laptop — tap Load, then pick one to reopen on your phone.
-          </p>
-          <div className="start-mode-toggle" role="radiogroup" aria-label="Permission mode for resumed session">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={resumeMode === 'default'}
-              className={resumeMode === 'default' ? 'selected' : ''}
-              onClick={() => setResumeMode('default')}
-            >
-              Default
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={resumeMode === 'allow-all'}
-              className={resumeMode === 'allow-all' ? 'selected' : ''}
-              onClick={() => setResumeMode('allow-all')}
-            >
-              Allow all
-            </button>
-          </div>
-          {storeSessions.length === 0 ? (
-            <p className="device-card-sub">
-              {device.sessionsLoading
-                ? 'Loading sessions…'
-                : sessionsPulled
-                  ? 'No resumable sessions found.'
-                  : 'Tap Load to fetch this laptop’s recent sessions.'}
-            </p>
-          ) : (
-            <>
-              <div className="session-filter-bar">
-                <input
-                  type="search"
-                  className="session-filter-search"
-                  placeholder="Search title, repo or branch"
-                  aria-label="Search recent sessions"
-                  value={sessionQuery}
-                  onChange={(e) => setSessionQuery(e.currentTarget.value)}
-                />
-                <select
-                  className="session-filter-folder"
-                  aria-label="Filter recent sessions by folder"
-                  value={activeFolder}
-                  onChange={(e) => {
-                    folderTouchedRef.current = true;
-                    setSessionFolder(e.currentTarget.value);
-                  }}
-                >
-                  <option value={ALL_FOLDERS}>All folders ({storeSessions.length})</option>
-                  {folderChoices.map((folder) => (
-                    <option key={folder.path} value={folder.path} title={folder.path}>
-                      {folder.label} ({folder.count})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {filtering ? (
-                <p className="device-card-sub session-filter-count">
-                  Showing {visibleSessions.length} of {storeSessions.length}
-                  <button type="button" className="session-link-btn" onClick={clearSessionFilters}>
-                    Clear
-                  </button>
-                </p>
-              ) : null}
-              {visibleSessions.length === 0 ? (
-                <p className="device-card-sub">No sessions match this filter.</p>
-              ) : (
-                <ul className="devices-list device-sessions-list">
-                  {visibleSessions.map((s) => {
-                    const live = liveBySessionId.get(s.sessionId);
-                    const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
-                    const when = formatLastSeen(s.updatedAt ?? undefined, now);
-                    const label = s.title || s.cwd;
-                    return (
-                      <li key={s.sessionId} className="device-card device-session-row">
-                        <button
-                          type="button"
-                          className="device-session-open"
-                          onClick={() =>
-                            live
-                              ? onOpenSession(live.meta.channelId)
-                              : onResumeSession(device.channelId, s.sessionId, resumeMode, label, s.cwd)
-                          }
-                        >
-                          <span className="device-card-name">{label}</span>
-                          <span className="device-card-sub device-session-status">
-                            {live ? 'live · Open' : 'Resume'}
-                            {subtitle ? ` · ${subtitle}` : ''}
-                            {when ? ` · ${when}` : ''}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </>
-          )}
-        </section>
 
         <section className="session-join-fallback device-sessions">
           <h3>Sessions from this device</h3>

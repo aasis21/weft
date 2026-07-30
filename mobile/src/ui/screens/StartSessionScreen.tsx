@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { SpawnMode } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
@@ -7,6 +7,21 @@ import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/scr
 import { DeviceAvatar, PlusGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { ALL_FOLDERS, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
+
+/** Which of the two ways into a session this screen is showing. They share every step — device,
+ *  folder, permissions — and differ only in what the folder step is choosing *within*. */
+export type StartMode = 'new' | 'resume';
+
+export interface ResumeRequest {
+  sessionId: string;
+  mode: SpawnMode;
+  title: string;
+  cwd: string;
+  /** Close a session the laptop reports as already attached, and resume anyway. Only ever set from
+   *  the second, confirmed tap — see the `blocked` state below. */
+  force?: boolean;
+}
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
@@ -14,8 +29,17 @@ interface StartSessionScreenProps {
   /** Preselect a device (e.g. arriving from the "Start session" button on a DevicesScreen row)
    *  instead of defaulting to the top of the sorted list. */
   initialChannelId?: string;
+  /** Open straight onto the Resume tab (arriving from "Resume a session" on a device). */
+  initialMode?: StartMode;
   onConnectDevice(channelId: string): void;
   onStart(channelId: string, opts: { projectName: string; mode: SpawnMode; name?: string }): Promise<void>;
+  /** On-demand pull of the device's recent resumable CLI sessions. Never automatic: the store is
+   *  large and rewritten every turn, and the reply arrives asynchronously. */
+  onRefreshSessions(channelId: string): void;
+  /** Resume a past CLI session: spawn `copilot --resume=<id>` in its cwd and pair to it. */
+  onResume(channelId: string, req: ResumeRequest): Promise<void>;
+  /** Route to a session the phone is already driving, instead of resuming a second copy of it. */
+  onOpenSession(channelId: string): void;
   onScanListener(): void;
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
   onManageDevices?(): void;
@@ -30,12 +54,22 @@ interface StartSessionScreenProps {
   onGoHome(): void;
 }
 
+/** The laptop's refusal to fork a second CLI onto a live session (see extension/src/listener.mjs).
+ *  Matched loosely on purpose — the point is to recognise the class of failure, not the wording. */
+function isAlreadyAttached(message: string): boolean {
+  return /already running/i.test(message);
+}
+
 export function StartSessionScreen({
   hasSessions,
   devices,
   initialChannelId,
+  initialMode,
   onConnectDevice,
   onStart,
+  onRefreshSessions,
+  onResume,
+  onOpenSession,
   onScanListener,
   onManageDevices,
   onCancel,
@@ -47,12 +81,27 @@ export function StartSessionScreen({
   onGoHome,
 }: StartSessionScreenProps): JSX.Element {
   const [selectedId, setSelectedId] = useState<string>(initialChannelId ?? '');
+  const [startMode, setStartMode] = useState<StartMode>(initialMode ?? 'new');
   const [projectName, setProjectName] = useState('');
-  const [mode, setMode] = useState<SpawnMode>('allow-all');
+  // Permission mode is shared by both tabs and opens on the safe one. It used to reset to allow-all
+  // on every visit to the resume list, which quietly re-granted full permissions to a session you
+  // had deliberately opened restricted.
+  const [mode, setMode] = useState<SpawnMode>('default');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The session the laptop refused to resume because it is already attached, held so the CTA can
+   *  offer the override rather than making the user find the row again. */
+  const [blocked, setBlocked] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // --- resume-tab state -------------------------------------------------------------------------
+  const [sessionQuery, setSessionQuery] = useState('');
+  const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
+  const [resumeSessionId, setResumeSessionId] = useState<string>('');
+  /** Whether the user has picked a folder themselves. The device's projects arrive asynchronously,
+   *  so the default can't be a useState initialiser — and once it has been applied, a later refresh
+   *  must not yank the picker back out from under a choice the user has made. */
+  const folderTouchedRef = useRef(false);
   const now = useNowTick();
 
   const sortedDevices = sortDevices(devices);
@@ -74,7 +123,62 @@ export function StartSessionScreen({
     setProjectName(defaultProject?.name ?? '');
   }, [selected?.channelId, selected?.projects, selected?.lastProjectName]);
 
-  const submit = async (): Promise<void> => {
+  // --- resume derivations -----------------------------------------------------------------------
+  const storeSessions = selected?.sessions ?? [];
+  // Whether the resumable list has ever been pulled this run (undefined = never asked; the reply
+  // always sets an array, even when empty). Drives "Load" vs "none found".
+  const sessionsPulled = selected?.sessions !== undefined;
+  // The folder this laptop is configured to default to. Sessions are almost always resumed in the
+  // folder you work in, so the picker opens there rather than on the full unfiltered list.
+  const defaultFolder = selected?.projects.find((p) => p.isDefault)?.path ?? null;
+  // Registered projects and store cwds are different sets, so resume offers the union — see
+  // folderOptions. New sessions stay registered-only, because you can only launch into a project.
+  const folderChoices = folderOptions(storeSessions, selected?.projects.map((p) => p.path) ?? []);
+  const activeFolder = folderChoices.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
+  const visibleSessions = filterStoredSessions(
+    storeSessions,
+    { query: sessionQuery, folder: activeFolder },
+    folderChoices.map((f) => f.path),
+  );
+
+  // Sessions the phone is already driving, keyed by CLI session id: a store row that matches one is
+  // "Open" (route to the card we have) rather than "Resume" (which would fork a second CLI).
+  const liveBySessionId = new Map<string, SessionView>();
+  for (const s of sessions) {
+    if (s.meta.sessionId) liveBySessionId.set(s.meta.sessionId, s);
+  }
+
+  const chosenSession = visibleSessions.find((s) => s.sessionId === resumeSessionId) ?? null;
+  const chosenLive = chosenSession ? liveBySessionId.get(chosenSession.sessionId) ?? null : null;
+
+  useEffect(() => {
+    if (folderTouchedRef.current || !defaultFolder) return;
+    setSessionFolder(defaultFolder);
+  }, [defaultFolder]);
+
+  // A selection that scrolls out of the filtered list is no longer a thing the CTA can act on.
+  useEffect(() => {
+    if (resumeSessionId && !visibleSessions.some((s) => s.sessionId === resumeSessionId)) {
+      setResumeSessionId('');
+    }
+  }, [resumeSessionId, visibleSessions]);
+
+  const clearSessionFilters = (): void => {
+    setSessionQuery('');
+    // Clear returns to the device's default folder, not to everything — that default is the state
+    // the screen opens in, so anything else would make Clear a different, wider view than the one
+    // the user started from.
+    folderTouchedRef.current = false;
+    setSessionFolder(defaultFolder ?? ALL_FOLDERS);
+  };
+
+  const switchMode = (next: StartMode): void => {
+    setStartMode(next);
+    setError(null);
+    setBlocked(null);
+  };
+
+  const submitNew = async (): Promise<void> => {
     if (!selected || !selected.connected || !projectName) return;
     setBusy(true);
     setError(null);
@@ -86,10 +190,57 @@ export function StartSessionScreen({
     }
   };
 
+  const submitResume = async (force = false): Promise<void> => {
+    if (!selected || !selected.connected || !chosenSession) return;
+    // Already on the phone: open the card we have rather than asking the laptop for a second one.
+    if (chosenLive) {
+      onOpenSession(chosenLive.meta.channelId);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setBlocked(null);
+    try {
+      await onResume(selected.channelId, {
+        sessionId: chosenSession.sessionId,
+        mode,
+        title: chosenSession.title || chosenSession.cwd,
+        cwd: chosenSession.cwd,
+        ...(force ? { force: true } : {}),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not resume the session.';
+      setError(message);
+      // The laptop is running this session and still healthy. Offering the override matters: if
+      // weft on the laptop has broken, resuming is the only way back, and refusing outright would
+      // leave no route at all.
+      if (!force && isAlreadyAttached(message)) setBlocked(chosenSession.sessionId);
+      setBusy(false);
+    }
+  };
+
   const onlineCount = sortedDevices.filter((d) => deviceStatus(d).tone === 'online').length;
   const deviceCountLabel = sortedDevices.length === 0
     ? 'No devices yet'
     : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'} · ${onlineCount} online`;
+
+  const resuming = startMode === 'resume';
+  const forcing = blocked !== null && blocked === chosenSession?.sessionId;
+  const ctaDisabled = busy
+    || !selected
+    || !selected.connected
+    || (resuming ? !chosenSession : !projectName || selected.projectsLoading);
+  const ctaLabel = resuming
+    ? busy
+      ? 'Resuming…'
+      : chosenLive
+        ? `Open ${chosenLive.meta.title || 'session'}`
+        : forcing
+          ? 'Close it and resume anyway'
+          : `Resume on ${selected ? deviceLabel(selected) : 'device'}`
+    : busy
+      ? 'Starting…'
+      : `Start on ${selected ? deviceLabel(selected) : 'device'}`;
 
   return (
     <main className="weft-session join-session start-session-v2">
@@ -107,7 +258,7 @@ export function StartSessionScreen({
           </span>
         </button>
         <div className="status-id">
-          <span className="status-title">Start a session</span>
+          <span className="status-title">{resuming ? 'Resume a session' : 'Start a session'}</span>
           <span className="status-line">
             <span className="status-dot" aria-hidden="true" />
             {deviceCountLabel}
@@ -134,6 +285,27 @@ export function StartSessionScreen({
           </section>
         ) : (
           <>
+            <div className="start-mode-tabs" role="tablist" aria-label="New or resume">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!resuming}
+                className={!resuming ? 'selected' : ''}
+                onClick={() => switchMode('new')}
+              >
+                New session
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={resuming}
+                className={resuming ? 'selected' : ''}
+                onClick={() => switchMode('resume')}
+              >
+                Resume
+              </button>
+            </div>
+
             <section className="start-section">
               <h3 className="start-section-title">
                 1. Device
@@ -183,33 +355,131 @@ export function StartSessionScreen({
 
             </section>
 
-            <section className="start-section">
-              <h3 className="start-section-title">2. Project</h3>
-              {selected?.projectsLoading ? (
-                <p className="session-join-hint start-loading">Loading projects from the device…</p>
-              ) : selected && selected.projects.length === 0 ? (
-                <p className="session-join-hint">No projects received yet. Refresh after the device is online.</p>
-              ) : (
-                <label className="session-field start-project-field">
-                  <select
-                    value={projectName}
-                    disabled={!selected || selected.projects.length === 0}
-                    onChange={(e) => setProjectName(e.target.value)}
+            {resuming ? (
+              <section className="start-section start-resume-section">
+                <h3 className="start-section-title">
+                  2. Folder &amp; session
+                  <button
+                    type="button"
+                    className="session-link-btn"
+                    onClick={() => selected && onRefreshSessions(selected.channelId)}
+                    disabled={!selected || selected.sessionsLoading}
                   >
-                    {selected?.projects.map((project) => (
-                      <option key={project.name} value={project.name}>
-                        {project.name}{project.isDefault ? ' (default)' : ''}
+                    {selected?.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}
+                  </button>
+                </h3>
+                <div className="session-filter-bar">
+                  <select
+                    className="session-filter-folder"
+                    aria-label="Folder"
+                    value={activeFolder}
+                    onChange={(e) => {
+                      folderTouchedRef.current = true;
+                      setSessionFolder(e.currentTarget.value);
+                    }}
+                  >
+                    <option value={ALL_FOLDERS}>All folders ({storeSessions.length})</option>
+                    {folderChoices.map((folder) => (
+                      <option key={folder.path} value={folder.path} title={folder.path}>
+                        {folder.label} ({folder.count})
                       </option>
                     ))}
                   </select>
-                </label>
-              )}
-              {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
-            </section>
+                  <input
+                    type="search"
+                    className="session-filter-search"
+                    placeholder="Search title, repo or branch"
+                    aria-label="Search recent sessions"
+                    value={sessionQuery}
+                    onChange={(e) => setSessionQuery(e.currentTarget.value)}
+                  />
+                </div>
+                {storeSessions.length === 0 ? (
+                  <p className="session-join-hint">
+                    {selected?.sessionsLoading
+                      ? 'Loading sessions…'
+                      : sessionsPulled
+                        ? 'No resumable sessions found on this device.'
+                        : 'Tap Load to fetch this laptop’s recent sessions.'}
+                  </p>
+                ) : (
+                  <>
+                    {isFiltering({ query: sessionQuery, folder: activeFolder }) ? (
+                      <p className="device-card-sub session-filter-count">
+                        Showing {visibleSessions.length} of {storeSessions.length}
+                        <button type="button" className="session-link-btn" onClick={clearSessionFilters}>
+                          Clear
+                        </button>
+                      </p>
+                    ) : null}
+                    {visibleSessions.length === 0 ? (
+                      <p className="session-join-hint">No sessions match this filter.</p>
+                    ) : (
+                      <ul className="devices-list device-sessions-list" role="radiogroup" aria-label="Session to resume">
+                        {visibleSessions.map((s) => {
+                          const live = liveBySessionId.get(s.sessionId);
+                          const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
+                          const when = formatLastSeen(s.updatedAt ?? undefined, now);
+                          const label = s.title || s.cwd;
+                          const isChosen = s.sessionId === resumeSessionId;
+                          return (
+                            <li key={s.sessionId} className="device-card device-session-row">
+                              <button
+                                type="button"
+                                role="radio"
+                                aria-checked={isChosen}
+                                className={`device-session-open${isChosen ? ' selected' : ''}`}
+                                onClick={() => {
+                                  setResumeSessionId(s.sessionId);
+                                  setError(null);
+                                }}
+                              >
+                                <span className="device-card-name">{label}</span>
+                                <span className="device-card-sub device-session-status">
+                                  {live ? 'already on this phone' : 'resumable'}
+                                  {subtitle ? ` · ${subtitle}` : ''}
+                                  {when ? ` · ${when}` : ''}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
+                )}
+                {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
+              </section>
+            ) : (
+              <section className="start-section">
+                <h3 className="start-section-title">2. Folder</h3>
+                {selected?.projectsLoading ? (
+                  <p className="session-join-hint start-loading">Loading projects from the device…</p>
+                ) : selected && selected.projects.length === 0 ? (
+                  <p className="session-join-hint">No projects received yet. Refresh after the device is online.</p>
+                ) : (
+                  <label className="session-field start-project-field">
+                    <select
+                      value={projectName}
+                      disabled={!selected || selected.projects.length === 0}
+                      onChange={(e) => setProjectName(e.target.value)}
+                    >
+                      {selected?.projects.map((project) => (
+                        <option key={project.name} value={project.name}>
+                          {project.name}{project.isDefault ? ' (default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
+              </section>
+            )}
 
             <section className="start-section">
               <h3 className="start-section-title">3. Options</h3>
-              <div className="start-mode-toggle" role="radiogroup" aria-label="Permission mode">
+              <span className="start-field-label" id="start-mode-label">Permissions</span>
+              <div className="start-mode-toggle" role="radiogroup" aria-labelledby="start-mode-label">
                 <button
                   type="button"
                   role="radio"
@@ -235,10 +505,12 @@ export function StartSessionScreen({
                 </p>
               ) : null}
 
-              <label className="session-field start-name-field">
-                <span>Session name (optional)</span>
-                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mobile bug sweep" />
-              </label>
+              {resuming ? null : (
+                <label className="session-field start-name-field">
+                  <span>Session name (optional)</span>
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mobile bug sweep" />
+                </label>
+              )}
             </section>
 
             {error ? <p className="error-banner">{error}</p> : null}
@@ -247,11 +519,11 @@ export function StartSessionScreen({
               <button
                 type="button"
                 className="session-primary-action"
-                disabled={busy || !selected || !selected.connected || !projectName || selected.projectsLoading}
+                disabled={ctaDisabled}
                 title={selected && !selected.connected ? 'Device is offline — reconnect it to start a session.' : undefined}
-                onClick={() => void submit()}
+                onClick={() => void (resuming ? submitResume(forcing) : submitNew())}
               >
-                {busy ? 'Starting…' : `Start on ${selected ? deviceLabel(selected) : 'device'}`}
+                {ctaLabel}
               </button>
             </div>
           </>

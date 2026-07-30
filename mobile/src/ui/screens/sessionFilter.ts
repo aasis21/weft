@@ -23,16 +23,33 @@ export function basename(path: string): string {
 }
 
 /** Distinct cwds across the list, most-sessions-first then alphabetical, so the folders you actually
- *  work in surface at the top of the picker instead of being ordered by an accident of mtime. */
-export function folderOptions(sessions: StoredSession[]): FolderOption[] {
+ *  work in surface at the top of the picker instead of being ordered by an accident of mtime.
+ *
+ * @param registered Folders the device has registered as projects. These are offered whether or not
+ *   anything resumable has been run in them yet, and always sort above the rest: the two sets
+ *   demonstrably diverge (the store knows every folder a session has ever run in, including ones
+ *   that were never registered and ones that no longer exist), and a picker that only listed cwds
+ *   would hide the folder you are most likely to want simply because it is empty today.
+ */
+export function folderOptions(sessions: StoredSession[], registered: readonly string[] = []): FolderOption[] {
   const counts = new Map<string, number>();
+  for (const path of registered) {
+    if (path) counts.set(path, 0);
+  }
   for (const session of sessions) {
     if (!session.cwd) continue;
     counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1);
   }
+  const isRegistered = new Set(registered.filter(Boolean));
   return [...counts.entries()]
     .map(([path, count]) => ({ path, label: basename(path), count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label) || a.path.localeCompare(b.path));
+    .sort(
+      (a, b) =>
+        Number(isRegistered.has(b.path)) - Number(isRegistered.has(a.path)) ||
+        b.count - a.count ||
+        a.label.localeCompare(b.label) ||
+        a.path.localeCompare(b.path),
+    );
 }
 
 /** Every term must match somewhere in the row (AND, not OR) so adding a word always narrows the
