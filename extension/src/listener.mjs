@@ -133,6 +133,10 @@ export function createListener({
   let pairingStop = null;
   let controlUnsub = null;
   let boundPeerPub = null;
+  // The phone's own stable id (localStorage-backed, survives rescans and app restarts), captured
+  // from its hello. A rescan mints a FRESH keypair, so the public key alone cannot tell "the same
+  // phone re-paired" apart from "a different phone showed up" — this can.
+  let boundPeerDeviceId = null;
   // True while `boundPeerPub`/`channel` were set OPTIMISTICALLY (see optimisticBind) — i.e. from a
   // remembered peer key, before this run's phone has actually said hello. Flips to false the
   // moment a genuine hello confirms (or contradicts) the guess. Never true in ephemeral mode.
@@ -232,6 +236,7 @@ export function createListener({
     pairingStop = null;
     const hadPeer = boundPeerPub !== null && !boundOptimistically;
     boundPeerPub = null;
+    boundPeerDeviceId = null;
     boundOptimistically = false;
     channel = null;
     if (hadPeer) removeConnection(listenerChannelId, connectionsHome);
@@ -285,6 +290,7 @@ export function createListener({
     pairingStop = null;
     channel = null;
     boundPeerPub = null;
+    boundPeerDeviceId = null;
     boundOptimistically = false;
     // Re-advertise offers to whoever binds next: lastOffersJson is a dedupe of what went out over
     // the OLD channel, which the next phone has never seen.
@@ -419,8 +425,26 @@ export function createListener({
       boundPeerPub = null;
       boundOptimistically = false;
     } else if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
-      log?.warn?.(`Weft Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
-      return;
+      // A different key is NOT automatically a different phone. Re-scanning the QR generates a new
+      // keypair on the phone, so the same handset coming back looks exactly like an impostor here
+      // — and the old code refused it, leaving the user unable to re-pair the very phone that was
+      // already paired. The phone's stable device id is what actually identifies it, so accept the
+      // rebind when that matches and only refuse a genuinely different device.
+      if (peer.deviceId && peer.deviceId === boundPeerDeviceId) {
+        stopHeartbeat();
+        try {
+          controlUnsub?.();
+        } catch {
+          // best-effort
+        }
+        controlUnsub = null;
+        channel = null;
+        boundPeerPub = null;
+        boundOptimistically = false;
+      } else {
+        log?.warn?.(`Weft Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
+        return;
+      }
     } else if (boundPeerPub === peer.publicKeyB64) {
       if (boundOptimistically) {
         // A genuine hello confirms our optimistic guess — the encrypted channel + heartbeat are
@@ -460,6 +484,7 @@ export function createListener({
       if (channel) return;
     }
     boundPeerPub = peer.publicKeyB64;
+    boundPeerDeviceId = peer.deviceId ?? boundPeerDeviceId;
     if (isPersistentPairingEnabled()) markPersistedIdentityConnected(listenerChannelId, peer.publicKeyB64);
     try {
       controlUnsub?.();

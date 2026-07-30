@@ -285,6 +285,52 @@ test("RESUME_SESSION for an unknown / vanished session emits SPAWN_RESULT ok:fal
   await listener.stop();
 });
 
+test("the same phone re-scanning the QR is re-paired, not rejected as a different phone", async () => {
+  const { createLocalTransport } = await import("@aasis21/weft-shared");
+  const warnings = [];
+  const { listener, listenerKeys, channelId } = await pairedHarness({
+    projects: [],
+    log: { warn: (m) => warnings.push(m) },
+  });
+
+  // A re-scan mints a FRESH keypair on the phone but keeps its stable localStorage device id, so
+  // this is what "same handset, scanned the QR again" actually looks like on the wire.
+  const rescanTransport = createLocalTransport({ channelId });
+  const rescanKeys = await generateKeyPair();
+  const rescanKey = await deriveSessionKey(rescanKeys.privateKey, listenerKeys.publicKeyB64);
+  const rescanChannel = new SecureChannel({
+    transport: rescanTransport,
+    key: rescanKey,
+    identity: { channelId, senderId: "phone-1", senderName: "Phone" },
+  });
+  const rescanMessages = [];
+  rescanChannel.onEvent(EVENT_TYPE.CONTROL, (m) => rescanMessages.push(m));
+
+  try {
+    await sayHello({
+      transport: rescanTransport,
+      keyPair: rescanKeys,
+      peerPublicKeyB64: listenerKeys.publicKeyB64,
+      channelId,
+      deviceId: "phone-1",
+      senderName: "Phone",
+      waitForAck: true,
+      timeoutMs: 1000,
+      retryMs: 20,
+    });
+
+    await waitFor(
+      () => rescanMessages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST),
+      "project list on the re-scanned channel",
+    );
+    assert.deepEqual(warnings, [], "re-pairing the same phone must not warn about a different phone");
+  } finally {
+    // Always stop: a regression here leaves the listener holding its transport, and the test
+    // runner then hangs on the open handles instead of reporting the failure.
+    await listener.stop();
+  }
+});
+
 test("a second different phone public key is ignored after first binding", async () => {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const warnings = [];
