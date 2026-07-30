@@ -361,12 +361,20 @@ export const sessionList = (sessions) =>
  * Phone -> listener: resume an existing CLI session. `requestId` correlates the reply (reusing the
  * SPAWN_PAIRING / SPAWN_RESULT path); `sessionId` is the CLI session UUID from sessionList(); `mode`
  * is "default" | "allow-all" (the resumed session's permission mode).
+ *
+ * `force` is the user's second tap. The listener refuses to resume a session that is already
+ * attached to a phone and healthy, because doing so forks a second CLI process onto one session
+ * store entry. But the phone cannot always tell a healthy attachment from a wedged one, and if weft
+ * on the laptop has broken then resume is the ONLY way back — so `force` lets the user override the
+ * refusal, after being told what it will cost (the running session is closed first, not left to run
+ * alongside).
  */
-export const resumeSession = (requestId, sessionId, mode = "default") =>
+export const resumeSession = (requestId, sessionId, mode = "default", force = false) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RESUME_SESSION, {
     requestId,
     sessionId: typeof sessionId === "string" ? sessionId : "",
     mode,
+    force: Boolean(force),
   });
 /**
  * Listener -> phone: the pre-minted pairing payload of a freshly spawned session, so the phone

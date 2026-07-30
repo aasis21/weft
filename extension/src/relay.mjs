@@ -27,6 +27,7 @@ import {
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
+import { clearAttachedSession, recordAttachedSession } from "./attachedSessions.mjs";
 
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
@@ -418,8 +419,21 @@ export async function attachRelay({
   };
 
   await sendSafe(channelUp(cwd, lastTitle));
+  // This session is now attached to a phone. Publish that, so a RESUME_SESSION arriving at the
+  // station for this same CLI session can be answered with "it's already running" instead of
+  // forking a second `copilot --resume` onto it. Refreshed on every beat below: the station trusts
+  // the stamp, not the pid, so that a wedged weft can still be recovered by resuming.
+  const markAttached = () => {
+    try {
+      recordAttachedSession({ sessionId, channelId, cwd });
+    } catch {
+      // best-effort — losing the guard is never worth failing the session over.
+    }
+  };
+  markAttached();
   const heartbeatTimer = setInterval(() => {
     void (async () => {
+      markAttached();
       // Carry the store's latest turn_index so a connected phone keeps a fresh forward cursor
       // (readLatestTurnIndex is best-effort and returns null on any read failure), plus the
       // authoritative busy flag so a dropped assistant.idle self-corrects within one beat.
@@ -539,6 +553,11 @@ export async function attachRelay({
     if (stopped) return;
     stopped = true;
     clearInterval(heartbeatTimer);
+    try {
+      clearAttachedSession(sessionId);
+    } catch {
+      // best-effort — a stale entry self-prunes on pid death anyway.
+    }
     for (const unsubscribe of unsubscribers.splice(0)) unsubscribe?.();
     approvals.close?.();
     elicitations.close?.();

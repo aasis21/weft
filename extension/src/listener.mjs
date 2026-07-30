@@ -25,6 +25,7 @@ import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import * as pendingStore from "./pendingSessions.mjs";
 import * as sessionStore from "./store.mjs";
+import * as attachedStore from "./attachedSessions.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./pairingIdentity.mjs";
 import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
@@ -87,6 +88,9 @@ export function createListener({
   // Read-only CLI session store access (see store.mjs) — injectable so tests can stub the
   // resumable-session list instead of reading the real ~/.copilot/session-store.db.
   sessionsApi = sessionStore,
+  // Attached-session registry access (see attachedSessions.mjs) — injectable so tests can drive the
+  // "already running" guard without spawning real CLI processes.
+  attachedApi = attachedStore,
   log = console,
   // ~/.weft by default (see projects.mjs's weftHome()) — overridable so tests don't touch a real
   // user's Weft home when exercising the connections.json / pending-sessions.json registries.
@@ -744,7 +748,7 @@ export function createListener({
   // the session's OWN cwd (read from the store) instead of a registered project. The cwd is
   // re-validated here even though listSessions() already filtered dead ones, in case the folder
   // vanished between listing and resuming.
-  async function handleResume({ requestId, sessionId, mode = "default" }) {
+  async function handleResume({ requestId, sessionId, mode = "default", force = false }) {
     const id = requestId || `request-${Date.now()}`;
     const cleanSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
     try {
@@ -773,6 +777,32 @@ export function createListener({
       if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
         await failResume(`The session's folder no longer exists: ${cwd}`);
         return;
+      }
+      // Don't fork a second `copilot --resume` onto a session that is already running and paired:
+      // both processes would write the same session-store entry. The phone catches the cases it can
+      // see, but it only knows sessions it holds a card for — a session paired to a DIFFERENT phone,
+      // or one whose card was deleted, is invisible to it and can only be caught here.
+      //
+      // The test is health, not liveness. A live pid whose weft has wedged is precisely when resume
+      // is the user's only way back, so refusing on the pid alone would hand back a pairing nobody
+      // is listening on and leave them stuck (see attachedSessions.mjs). An entry that has stopped
+      // heartbeating is therefore treated as resumable.
+      const attached = attachedApi.findAttachedSession(cleanSessionId, { baseDir: connectionsHome });
+      if (attached?.healthy && !force) {
+        await failResume(
+          "That session is already running on this laptop and connected to a phone. Resume again to close it and take it over.",
+        );
+        return;
+      }
+      if (attached?.healthy && force) {
+        // Explicitly asked for. Close the old process rather than leaving it running alongside —
+        // two CLIs on one session store entry is the thing this whole guard exists to prevent.
+        try {
+          process.kill(attached.pid);
+          log?.info?.(`weft: closed the session already attached on pid ${attached.pid} before resuming.`);
+        } catch (err) {
+          log?.warn?.(`weft: could not close the attached session (pid ${attached.pid}): ${err?.message ?? err}`);
+        }
       }
       const newChannelId = randomChannelId();
       const newKeyPair = await generateKeyPair();

@@ -225,6 +225,9 @@ interface ResumeRequestOptions {
    *  resumed CLI session re-reports its own title/cwd via session_meta once paired. */
   title?: string | null;
   cwd?: string | null;
+  /** Close a session already attached on the laptop and resume anyway. Set only on the user's
+   *  second, confirmed tap — see {@link resumeSessionMessage}. */
+  force?: boolean;
 }
 
 interface PendingSpawn {
@@ -1330,7 +1333,7 @@ export class SessionRuntime {
       await this.connectDevice(channelId);
       const ctrl = this.listenerController(channelId);
       if (!ctrl?.client) throw new Error('Listener device is not connected.');
-      const message = resumeSessionMessage(requestId, opts.sessionId, opts.mode);
+      const message = resumeSessionMessage(requestId, opts.sessionId, opts.mode, opts.force === true);
       this.recordDeviceEvent(channelId, 'out', message);
       await ctrl.client.send(message);
     } catch (err) {

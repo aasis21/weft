@@ -324,6 +324,9 @@ export interface ResumeSessionMsg {
   /** CLI session UUID from StoredSession.sessionId. */
   sessionId: string;
   mode: SpawnMode;
+  /** Close an already-attached session and resume anyway — the user's explicit second tap, used
+   *  when weft on the laptop has wedged and resuming is the only way back. */
+  force?: boolean;
 }
 export interface SpawnPairingMsg {
   requestId: string;
@@ -554,7 +557,8 @@ export function sessionList(sessions: StoredSession[]): SessionListMessage;
 export function resumeSession(
   requestId: string,
   sessionId: string,
-  mode?: SpawnMode
+  mode?: SpawnMode,
+  force?: boolean
 ): ResumeSessionMessage;
 export function spawnPairing(
   requestId: string,
