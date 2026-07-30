@@ -15,10 +15,9 @@
 // where the parent dies uncleanly (kill -9) and the OS delivers SIGHUP down the process group.
 import { fileURLToPath } from "node:url";
 import { startRelayServer } from "./relayServer.mjs";
-import { findDevTunnelBinary, killProcessTree, run, DEVTUNNEL_REGISTRY_FILE, DEVTUNNEL_STATUS_FILE } from "./devtunnel.mjs";
+import { findDevTunnelBinary, killProcessTree, run, spawnDevTunnelHost, DEVTUNNEL_REGISTRY_FILE, DEVTUNNEL_STATUS_FILE } from "./devtunnel.mjs";
 import { clearRegistry, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { isPersistentPairingEnabled } from "./transportConfig.mjs";
-import { spawn } from "node:child_process";
 
 const HOST_STARTUP_TIMEOUT_MS = 20_000;
 
@@ -87,7 +86,7 @@ export async function main() {
   // by exiting, so waiting out the full timeout would just be dead time).
   const startHost = async (id) => {
     publishStage("hosting");
-    host = spawn(bin, ["host", id], { stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
+    host = spawnDevTunnelHost(bin, id);
     publishStage("waiting-for-url");
     return await new Promise((resolve, reject) => {
       let buffer = "";

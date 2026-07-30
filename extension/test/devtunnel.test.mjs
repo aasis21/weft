@@ -20,6 +20,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 // The fake CLI below reports a made-up devtunnels.ms host. That domain wildcard-resolves for real,
 // so the reuse path's public-side health probe would send an actual request to Microsoft's tunnel
@@ -99,16 +101,37 @@ if (cmd === "host") {
   }
   if (stageDelayMs) sleepSync(stageDelayMs);
   console.log("Connect via browser: https://fake-abc123-9999.usw2.devtunnels.ms");
-  setInterval(() => {}, 1000);
+  const parentPid = process.ppid;
+  setInterval(() => {
+    try { process.kill(parentPid, 0); } catch { process.exit(0); }
+  }, 250);
   process.exitCode = undefined;
 } else {
   process.exit(1);
 }
 `;
 
+const FAKE_HOST_NO_PARENT_POLL_SCRIPT = `
+import { writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "--version") { console.log("fake 1.0"); process.exit(0); }
+if (args[0] === "host") {
+  writeFileSync(process.env.FAKE_DEVTUNNEL_HOST_PID_FILE, String(process.pid));
+  console.log("Connect via browser: https://fake-abc123-9999.usw2.devtunnels.ms");
+  setInterval(() => {}, 1000);
+  process.exitCode = undefined;
+} else {
+  process.exit(0);
+}
+`;
+
 function makeFakeCli(dir) {
+  return makeFakeCliFromScript(dir, FAKE_CLI_SCRIPT);
+}
+
+function makeFakeCliFromScript(dir, script) {
   const scriptPath = join(dir, "fake-devtunnel.mjs");
-  writeFileSync(scriptPath, FAKE_CLI_SCRIPT);
+  writeFileSync(scriptPath, script);
   const isWindows = process.platform === "win32";
   const shimPath = join(dir, isWindows ? "devtunnel.cmd" : "devtunnel");
   if (isWindows) {
@@ -153,6 +176,105 @@ async function forceKill(pid) {
     // best-effort
   }
 }
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("devtunnelHostWatchdog kills a host that does not self-exit when its relay owner is hard-killed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-watchdog-"));
+  const pidFile = join(dir, "host.pid");
+  let owner;
+  let watchdog;
+  let hostPid;
+  try {
+    const bin = makeFakeCliFromScript(dir, FAKE_HOST_NO_PARENT_POLL_SCRIPT);
+    owner = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    assert.ok(owner.pid, "expected relay-owner placeholder to have a pid");
+
+    const watchdogPath = fileURLToPath(new URL("../src/devtunnelHostWatchdog.mjs", import.meta.url));
+    watchdog = spawn(process.execPath, [watchdogPath, String(owner.pid), bin, "fake-tunnel-id"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, FAKE_DEVTUNNEL_HOST_PID_FILE: pidFile },
+    });
+    watchdog.stdout.resume();
+    watchdog.stderr.resume();
+
+    hostPid = await waitFor(
+      () => (existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) : null),
+      "watchdog-spawned fake host pid",
+    );
+    assert.ok(pidAlive(hostPid), "fake host must be alive before the relay owner is killed");
+
+    process.kill(owner.pid, "SIGKILL");
+    await waitFor(() => !pidAlive(hostPid), "watchdog to kill the fake host after parent death", 8000);
+    await waitFor(() => watchdog.exitCode !== null, "watchdog process to exit after killing host", 8000);
+  } finally {
+    if (pidAlive(owner?.pid)) await forceKill(owner.pid);
+    if (pidAlive(watchdog?.pid)) await forceKill(watchdog.pid);
+    if (pidAlive(hostPid)) await forceKill(hostPid);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("selectOrphanedTunnelHosts only selects devtunnel hosts whose parent chain is gone", async () => {
+  const { selectOrphanedTunnelHosts } = await freshModule();
+  const processes = [
+    { pid: 10, ppid: 999, commandLine: "C:\\tools\\devtunnel.exe host stale-tunnel" },
+    { pid: 20, ppid: 777, commandLine: "C:\\tools\\devtunnel.exe host live-tunnel" },
+    { pid: 21, ppid: 20, commandLine: "node child-of-live-host" },
+    { pid: 30, ppid: 999, commandLine: "C:\\tools\\devtunnel.exe create --json" },
+    { pid: 40, ppid: 999, commandLine: "node fake-devtunnel.mjs host fake-tunnel-id" },
+  ];
+
+  assert.deepEqual(
+    selectOrphanedTunnelHosts(processes, { liveRelayPid: 777, platform: "win32" }).map((entry) => entry.pid),
+    [10, 40],
+  );
+});
+
+test("selectOrphanedTunnelHosts does not kill a host owned by the registered relay", async () => {
+  const { selectOrphanedTunnelHosts } = await freshModule();
+  const processes = [
+    { pid: 777, ppid: 100, commandLine: "node relayServerProcess.mjs" },
+    { pid: 778, ppid: 777, commandLine: "node devtunnelHostWatchdog.mjs 777 C:\\tools\\devtunnel.exe live-tunnel" },
+    { pid: 779, ppid: 778, commandLine: "C:\\tools\\devtunnel.exe host live-tunnel" },
+  ];
+
+  assert.deepEqual(selectOrphanedTunnelHosts(processes, { liveRelayPid: 777, platform: "win32" }), []);
+});
+
+test("reapOrphanedTunnelHosts is best-effort and kills only selected orphan pids", async () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  try {
+    writeFileSync(join(homeDir, "devtunnel.json"), JSON.stringify({ pid: 777, relayPort: 1, baseUrl: "wss://example" }));
+    const killed = [];
+    const { reapOrphanedTunnelHosts } = await freshModule();
+    const reaped = await reapOrphanedTunnelHosts({
+      baseDir: homeDir,
+      platform: "win32",
+      isPidAliveFn: (pid) => pid === 777,
+      listProcesses: async () => [
+        { pid: 10, ppid: 999, commandLine: "C:\\tools\\devtunnel.exe host stale-tunnel" },
+        { pid: 779, ppid: 777, commandLine: "C:\\tools\\devtunnel.exe host live-tunnel" },
+      ],
+      killPid: async (pid) => {
+        killed.push(pid);
+      },
+    });
+
+    assert.deepEqual(reaped.map((entry) => entry.pid), [10]);
+    assert.deepEqual(killed, [10]);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
 
 test("findDevTunnelBinary resolves WEFT_DEVTUNNEL_BIN when it runs successfully", async () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
@@ -382,6 +504,7 @@ test("ensureDevTunnelRelay reports stage progress via onProgress as the relay co
       "checking-cli",
       "signing-in",
       "clearing-stale-relay",
+      "reaping-orphans",
       "starting-relay",
       "creating-tunnel",
       "creating-port",

@@ -55,6 +55,7 @@ export const DEVTUNNEL_LOGIN_HELP =
   "    • On a headless box / over SSH (no browser):      add -d, e.g. devtunnel user login -d";
 
 const RELAY_SERVER_PROCESS_PATH = fileURLToPath(new URL("./relayServerProcess.mjs", import.meta.url));
+const DEVTUNNEL_HOST_WATCHDOG_PATH = fileURLToPath(new URL("./devtunnelHostWatchdog.mjs", import.meta.url));
 // First-ever provision on a machine has to: spawn the relay child process, have IT shell out to
 // `devtunnel host` (a real network call to Microsoft's tunnel service), and wait for that tunnel's
 // URL to come back before the registry read here sees a healthy entry — 20s cut this close on a
@@ -85,6 +86,7 @@ export const STAGE_LABELS = {
   "checking-cli": "checking the devtunnel CLI…",
   "signing-in": "signing in to dev tunnels (a browser window may open)…",
   "clearing-stale-relay": "clearing a stale relay that stopped responding…",
+  "reaping-orphans": "clearing orphaned devtunnel host processes…",
   "starting-relay": "starting the local relay server…",
   "creating-tunnel": "creating the dev tunnel…",
   "creating-port": "configuring the tunnel port…",
@@ -119,17 +121,36 @@ function candidateBinaries() {
 
 let cachedBin; // resolved once per process — the binary's location doesn't change mid-run.
 
+function shouldUseShellForCommand(command) {
+  if (process.platform !== "win32") return false;
+  return /\.(?:cmd|bat)$/i.test(command) || (!/[\\/]/.test(command) && !/\.[a-z0-9]+$/i.test(command));
+}
+
+async function candidateVariants(candidate) {
+  if (process.platform !== "win32" || candidate !== "devtunnel") return [candidate];
+  try {
+    const { stdout } = await execFileAsync("where.exe", [candidate]);
+    const found = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const exeFirst = found.sort((a, b) => Number(!/\.exe$/i.test(a)) - Number(!/\.exe$/i.test(b)));
+    return exeFirst.length ? exeFirst : [candidate];
+  } catch {
+    return [candidate];
+  }
+}
+
 /** Locate a working `devtunnel` binary, or null if none of the candidates run. */
 export async function findDevTunnelBinary() {
   if (cachedBin !== undefined) return cachedBin;
   for (const candidate of candidateBinaries()) {
-    try {
-      if (candidate !== "devtunnel" && !existsSync(candidate)) continue;
-      await execFileAsync(candidate, ["--version"], { shell: process.platform === "win32" });
-      cachedBin = candidate;
-      return cachedBin;
-    } catch {
-      // Try the next candidate.
+    for (const variant of await candidateVariants(candidate)) {
+      try {
+        if (variant !== "devtunnel" && !existsSync(variant)) continue;
+        await execFileAsync(variant, ["--version"], { shell: shouldUseShellForCommand(variant) });
+        cachedBin = variant;
+        return cachedBin;
+      } catch {
+        // Try the next candidate.
+      }
     }
   }
   cachedBin = null;
@@ -139,7 +160,7 @@ export async function findDevTunnelBinary() {
 /** Run a `devtunnel` subcommand to completion and return its stdout. Exported for
  * relayServerProcess.mjs's use — this is the ONE shared exec helper for the CLI. */
 export async function run(bin, args) {
-  const { stdout } = await execFileAsync(bin, args, { shell: process.platform === "win32" });
+  const { stdout } = await execFileAsync(bin, args, { shell: shouldUseShellForCommand(bin) });
   return stdout;
 }
 
@@ -200,19 +221,113 @@ export async function ensureDevTunnelLogin(bin, { onProgress } = {}) {
  * POSIX doesn't need this since there's no shell wrapper. Exported for relayServerProcess.mjs.
  */
 export async function killProcessTree(child) {
-  if (!child.pid) return;
+  await killProcessTreeByPid(child?.pid);
+}
+
+export async function killProcessTreeByPid(pid) {
+  if (!pid) return;
   if (process.platform === "win32") {
     try {
-      await execFileAsync("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
+      await execFileAsync("taskkill", ["/pid", String(pid), "/t", "/f"]);
     } catch {
       // best-effort — process may have already exited.
     }
     return;
   }
   try {
-    child.kill();
+    process.kill(-pid);
+  } catch {
+    // Most children here are not process-group leaders; fall back to the process itself.
+  }
+  try {
+    process.kill(pid);
   } catch {
     // best-effort
+  }
+}
+
+export function spawnDevTunnelHost(bin, tunnelId) {
+  return spawn(process.execPath, [DEVTUNNEL_HOST_WATCHDOG_PATH, String(process.pid), bin, tunnelId], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function normalizeProcessEntry(processEntry) {
+  return {
+    pid: Number(processEntry.pid ?? processEntry.ProcessId),
+    ppid: Number(processEntry.ppid ?? processEntry.ParentProcessId),
+    commandLine: String(processEntry.commandLine ?? processEntry.CommandLine ?? ""),
+  };
+}
+
+function isDevTunnelHostCommand(commandLine) {
+  const text = String(commandLine ?? "").toLowerCase();
+  return /\b(?:fake-)?devtunnel(?:\.exe|\.cmd|\.mjs)?\b/.test(text) && /\bhost\b/.test(text);
+}
+
+function parentChainContains(processByPid, processEntry, ancestorPid) {
+  if (!ancestorPid) return false;
+  let current = processEntry;
+  const seen = new Set();
+  for (let i = 0; i < 64; i += 1) {
+    const ppid = Number(current?.ppid);
+    if (!ppid || seen.has(ppid)) return false;
+    if (ppid === ancestorPid) return true;
+    seen.add(ppid);
+    current = processByPid.get(ppid);
+    if (!current) return false;
+  }
+  return false;
+}
+
+export function selectOrphanedTunnelHosts(processes, { liveRelayPid = null, platform = process.platform } = {}) {
+  const normalized = processes.map(normalizeProcessEntry).filter((entry) => Number.isInteger(entry.pid) && entry.pid > 0);
+  const processByPid = new Map(normalized.map((entry) => [entry.pid, entry]));
+  return normalized.filter((entry) => {
+    if (!isDevTunnelHostCommand(entry.commandLine)) return false;
+    if (entry.pid === liveRelayPid || parentChainContains(processByPid, entry, liveRelayPid)) return false;
+    // Be deliberately conservative: only reap hosts whose direct parent has disappeared
+    // (Windows keeps the dead ParentProcessId) or POSIX hosts reparented to init. If the parent
+    // is alive but merely "not ours", leave it alone; another tool may legitimately be hosting.
+    if (platform === "win32") return Boolean(entry.ppid) && !processByPid.has(entry.ppid);
+    return entry.ppid === 1;
+  });
+}
+
+async function listProcessesWithCommandLines() {
+  if (process.platform === "win32") {
+    const script =
+      "Get-CimInstance Win32_Process | " +
+      "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress";
+    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", script], { maxBuffer: 10 * 1024 * 1024 });
+    if (!stdout.trim()) return [];
+    const parsed = JSON.parse(stdout);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  }
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,command="], { maxBuffer: 10 * 1024 * 1024 });
+  return stdout.split(/\r?\n/).map((line) => {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    return match ? { pid: Number(match[1]), ppid: Number(match[2]), commandLine: match[3] } : null;
+  }).filter(Boolean);
+}
+
+export async function reapOrphanedTunnelHosts({
+  baseDir,
+  listProcesses = listProcessesWithCommandLines,
+  killPid = killProcessTreeByPid,
+  isPidAliveFn = isPidAlive,
+  platform = process.platform,
+} = {}) {
+  try {
+    const registered = readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
+    const liveRelayPid = isPidAliveFn(registered?.pid) ? registered.pid : null;
+    const orphans = selectOrphanedTunnelHosts(await listProcesses(), { liveRelayPid, platform });
+    for (const orphan of orphans) {
+      await killPid(orphan.pid);
+    }
+    return orphans;
+  } catch {
+    return [];
   }
 }
 
@@ -363,6 +478,9 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
     onProgress?.("clearing-stale-relay");
     await forceStopDevTunnel({ baseDir }).catch(() => {});
   }
+
+  onProgress?.("reaping-orphans");
+  await reapOrphanedTunnelHosts({ baseDir });
 
   // Spawn the relay child exactly once, no matter how many PROVISION_TIMEOUT_MS cycles the retry
   // loop below runs — it keeps working regardless of how long we poll for its registry entry, so
