@@ -133,6 +133,10 @@ import { selectAllSessions, selectManagerSnapshot, toTimelineState } from '@/ses
 const IDLE_AFTER_MS = 20_000;
 const OFFLINE_AFTER_MS = 30_000;
 const HOST_CONFIRM_MS = 30_000;
+/** How often {@link SessionManager.reconnectAndConfirm} re-reads the card while waiting for the
+ *  laptop to confirm. Coarse on purpose — nothing here is racing, and the wait is bounded by
+ *  HOST_CONFIRM_MS either way. */
+const RECONNECT_POLL_MS = 250;
 // Device (listener) channel heartbeat cadence is 2min (extension/src/listener.mjs). Rule: allow the
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
@@ -1252,6 +1256,37 @@ export class SessionRuntime {
   async resumeSession(channelId: string, opts: ResumeRequestOptions): Promise<string> {
     const device = this.device(channelId);
     if (!device) throw new Error('Choose a registered listener device first.');
+
+    // Resume forks a fresh `copilot --resume` on a brand-new channel, so tapping a row we are
+    // already driving would leave two CLI processes writing one session-store entry — and the
+    // reconcile that follows disposes the duplicate *card* while the orphaned process runs on.
+    // Prefer what we already have. (Cards are keyed by channel, so the only way to recognise the
+    // same CLI session is meta.sessionId, which live sessions report via session_meta.)
+    const existing = opts.sessionId
+      ? selectAllSessions(this.store.getState()).find(
+          (s) => s.meta.sessionId === opts.sessionId && s.connection.status !== 'ended',
+        )
+      : undefined;
+    if (existing) {
+      const existingId = existing.meta.channelId;
+      this.store.dispatch(sessionActivated(existingId));
+      const status = existing.connection.status;
+      // Already attached, or on its way: opening it is the whole of what the user asked for. A cold
+      // card is excluded even though it reads as `idle` — archiving releases the socket, so idle
+      // there means "deliberately parked", not "connected and quiet".
+      if (
+        !existing.connection.cold &&
+        (status === 'live' || status === 'idle' || status === 'connecting' || status === 'initializing')
+      ) {
+        return existingId;
+      }
+      // Archived (cold) or Offline (error). The pairing we hold may well still be good — the laptop
+      // was merely asleep, or the app was closed past the archive window. Reconnecting is cheaper
+      // than a resume, keeps the transcript attached to the same card, and cannot fork a process.
+      // Only when it fails to come back do we fall through and genuinely resume.
+      if (await this.reconnectAndConfirm(existingId)) return existingId;
+    }
+
     const requestId = `resume-${this.clock()}-${Math.random().toString(36).slice(2, 8)}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.title?.trim() || basename(opts.cwd) || 'Resuming session';
@@ -1664,6 +1699,22 @@ export class SessionRuntime {
       );
     } finally {
       ctrl.reconnecting = false;
+    }
+  }
+
+  /** Reconnect and wait to find out whether it actually took. {@link reconnect} only reports that a
+   *  socket opened; the laptop confirms the session separately, and a `weft` that has gone away
+   *  leaves the card sitting in `connecting` until the watchdog times it out. Resolves true once the
+   *  session is genuinely back, false on error or if the confirmation never arrives. */
+  private async reconnectAndConfirm(channelId: string): Promise<boolean> {
+    await this.reconnect(channelId);
+    const deadline = this.clock() + HOST_CONFIRM_MS;
+    for (;;) {
+      const status = this.session(channelId)?.connection.status;
+      if (status === undefined || status === 'error' || status === 'ended') return false;
+      if (status === 'live' || status === 'idle') return true;
+      if (this.clock() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL_MS));
     }
   }
 
