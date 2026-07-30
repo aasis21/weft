@@ -41,6 +41,12 @@ export function useSpeechOutput(): {
   speaking: boolean;
   /** Something is queued, buffered, or mid-utterance — i.e. this reply isn't finished being read. */
   pending: boolean;
+  /** The same fact as {@link pending}, read straight from the refs that back it, so it is correct
+   *  *within* the commit that queued the text rather than one render later. `pending` is React
+   *  state: an effect that enqueues speech and an effect that checks "is anything outstanding?" run
+   *  in the same commit, and the checker would see the pre-enqueue value and wrongly conclude the
+   *  turn was silent. Anything gating on "may I stop speaking now?" must use this, not `pending`. */
+  hasOutstandingSpeech(): boolean;
   enqueue(text: string): void;
   flush(): void;
   cancel(): void;
@@ -56,9 +62,14 @@ export function useSpeechOutput(): {
   const generationRef = useRef(0);
   const watchdogRef = useRef<number | null>(null);
 
+  const outstanding = useCallback(
+    (): boolean => speakingRef.current || queueRef.current.length > 0 || bufferRef.current.trim().length > 0,
+    [],
+  );
+
   const syncPending = useCallback((): void => {
-    setPending(speakingRef.current || queueRef.current.length > 0 || bufferRef.current.trim().length > 0);
-  }, []);
+    setPending(outstanding());
+  }, [outstanding]);
 
   const stopWatchdog = useCallback((): void => {
     if (watchdogRef.current != null) window.clearInterval(watchdogRef.current);
@@ -163,5 +174,5 @@ export function useSpeechOutput(): {
 
   useEffect(() => cancel, [cancel]);
 
-  return { supported, speaking, pending, enqueue, flush, cancel };
+  return { supported, speaking, pending, hasOutstandingSpeech: outstanding, enqueue, flush, cancel };
 }

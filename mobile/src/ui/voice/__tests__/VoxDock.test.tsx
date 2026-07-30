@@ -7,10 +7,17 @@ const speechOutput = {
   supported: true,
   speaking: false,
   pending: false,
+  // Mirrors the real hook's synchronous ref-read: whatever `speaking`/`pending` say RIGHT NOW,
+  // without waiting for a re-render. Tests toggle the fields directly, so reading them here is
+  // exactly the "truth ahead of React state" the engine depends on.
+  hasOutstandingSpeech: (): boolean => speechOutput.speaking || speechOutput.pending,
   enqueue: vi.fn(),
   flush: vi.fn(),
   cancel: vi.fn(),
 };
+
+/** A finished reply. Cast like the other fixtures here — the tests only ever read id and text. */
+const settledReply = { id: 'a1', text: 'All done.' } as never;
 
 vi.mock('@/ui/hooks/useSpeechInput', () => ({ useSpeechInput: () => speechInput }));
 vi.mock('@/ui/hooks/useSpeechOutput', () => ({ useSpeechOutput: () => speechOutput }));
@@ -83,13 +90,18 @@ describe('Vox keeps its turn (#195)', () => {
     act(() => {
       vi.advanceTimersByTime(15_000);
     });
+    // The turn-start grace expiring only re-opens the question; settling then waits out its own
+    // quiet window (#196) so a reply landing a beat late still gets spoken.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     expect(panel.getAttribute('data-state')).toBe('ready');
   });
 
   it('settles once speech drains even though a reply was spoken this turn', () => {
     vi.useFakeTimers();
     speechOutput.pending = true;
-    const { panel, rerender } = renderDock({ agentBusy: true, latestAssistant: { id: 'a1', text: 'All done.' } });
+    const { panel, rerender } = renderDock({ agentBusy: true, latestAssistant: settledReply });
 
     expect(panel.getAttribute('data-state')).toBe('working');
 
@@ -110,9 +122,40 @@ describe('Vox keeps its turn (#195)', () => {
           onEditTranscript={vi.fn()}
         />,
       );
+      vi.advanceTimersByTime(1000);
     });
 
-    expect(panel.getAttribute('data-state')).toBe('ready');
+    // Vox opened mid-turn, so its hands-free first listen was held back; with the turn now over it
+    // takes the mic. Either way the point stands — it is off working…, not stuck on it.
+    expect(panel.getAttribute('data-state')).toBe('listening');
+  });
+
+  it('does not settle on a turn whose last sentence is still queued to speak (#196)', () => {
+    vi.useFakeTimers();
+    speechOutput.pending = true;
+    const { panel, rerender } = renderDock({ agentBusy: true, latestAssistant: settledReply });
+
+    // The turn goes idle in the same breath as the reply is handed to TTS. Settling here would call
+    // startListening(), which opens by cancelling speech — destroying the reply before it is said.
+    act(() => {
+      rerender(
+        <VoxDock
+          latestAssistant={{ id: 'a1', text: 'All done.' }}
+          agentBusy={false}
+          toolActive={false}
+          disabled={false}
+          onPrompt={vi.fn()}
+          onInterrupt={vi.fn()}
+          onExpand={vi.fn()}
+          onKeyboard={vi.fn()}
+          onEditTranscript={vi.fn()}
+        />,
+      );
+      vi.advanceTimersByTime(2000);
+    });
+
+    expect(panel.getAttribute('data-state')).toBe('working');
+    expect(speechOutput.cancel).not.toHaveBeenCalled();
   });
 });
 

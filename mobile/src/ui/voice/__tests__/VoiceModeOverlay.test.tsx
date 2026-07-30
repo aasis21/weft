@@ -7,6 +7,8 @@ const speechInput = { supported: true, start: vi.fn(), stop: vi.fn() };
 const speechOutput = {
   supported: true,
   speaking: false,
+  pending: false,
+  hasOutstandingSpeech: (): boolean => speechOutput.speaking || speechOutput.pending,
   enqueue: vi.fn(),
   flush: vi.fn(),
   cancel: vi.fn(),

@@ -16,6 +16,12 @@ export const SILENCE_MS = 3200;
  *  orb on Working…. Generous: a queued or steering prompt can sit a while before it runs. */
 const TURN_START_GRACE_MS = 12_000;
 
+/** How long "the turn is over and nothing is outstanding" must hold before Vox actually settles out
+ *  of Working…. A turn can go idle a beat BEFORE its last text lands, so settling on the first quiet
+ *  observation reopens the mic and cancels the reply that was about to be spoken. Re-checked from
+ *  refs when it fires, and torn down the moment anything starts speaking again (#196). */
+const SETTLE_QUIET_MS = 400;
+
 // One busy state, deliberately. The wire only carries a single `busy` boolean — there is no
 // reasoning signal — so "thinking" was only ever an inference from "busy and no tool running".
 // Splitting the label invited a distinction the app cannot actually observe (#183).
@@ -115,6 +121,7 @@ export function useVoxEngine({
     supported: outputSupported,
     speaking: outputSpeaking,
     pending: speechPending,
+    hasOutstandingSpeech,
     enqueue: enqueueSpeech,
     flush: flushSpeech,
     cancel: cancelSpeech,
@@ -303,12 +310,18 @@ export function useVoxEngine({
   // of parking on "Tap the orb to talk". Fires once, and only when the mic is usable and no turn is
   // already in flight — if opened mid-turn it holds off until the agent is idle. After the first
   // listen, subsequent turns are governed by the auto-relisten setting (#169).
+  //
+  // "Idle" has to include the speech queue, not just the agent. Opening mid-turn parks this effect
+  // until agentBusy clears, which is the same instant the turn's closing reply is handed to TTS —
+  // and startListening() opens by cancelling speech, so firing here would swallow that reply
+  // outright (#196). Waiting for the queue to drain costs nothing; the effect re-runs when it does.
   useEffect(() => {
     if (autoStartedRef.current) return;
     if (disabled || !inputSupported || agentBusy || paused) return;
+    if (hasOutstandingSpeech()) return;
     autoStartedRef.current = true;
     startListening();
-  }, [disabled, inputSupported, agentBusy, paused, startListening]);
+  }, [disabled, inputSupported, agentBusy, hasOutstandingSpeech, outputSpeaking, paused, speechPending, startListening]);
 
   // Something else needs the user (an approval card) — drop the mic so it doesn't transcribe them
   // reading the dialog, and don't auto-relisten behind it.
@@ -366,6 +379,21 @@ export function useVoxEngine({
   startRef.current = startListening;
   const busyRef = useRef(agentBusy);
   busyRef.current = agentBusy;
+  const autoRelistenRef = useRef(autoRelisten);
+  autoRelistenRef.current = autoRelisten;
+  // Armed by the settle effect, fired only if the quiet has held. Cleared by anything that resumes
+  // speaking or by leaving 'working', so a late trailing sentence always wins over the settle.
+  const settleTimerRef = useRef<number | null>(null);
+  const clearSettleTimer = useCallback((): void => {
+    if (settleTimerRef.current != null) window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = null;
+  }, []);
+  /** Leave Working… — reopen the mic if auto-relisten is on, otherwise go quiet. */
+  const settleOut = useCallback((): void => {
+    sawReplyRef.current = false;
+    if (autoRelistenRef.current && !pausedRef.current) startRef.current();
+    else setState('ready');
+  }, []);
   const firstConversationRef = useRef(true);
   useEffect(() => {
     if (firstConversationRef.current) {
@@ -450,24 +478,18 @@ export function useVoxEngine({
     if (!agentBusy && sawReplyRef.current) flushSpeech();
   }, [agentBusy, flushSpeech, latestAssistant]);
 
-  // Speaking + settle. TTS speaking → speaking. When speech stops mid-turn (agent still busy — e.g. a
-  // narration block finished before a tool call) fall back to working so the orb tracks the live
-  // turn (#181). When the turn is fully done → ready or auto-relisten.
+  // Speaking + settle. TTS speaking → speaking. When speech stops, always fall back to `working` and
+  // let the quiet-grace settle effect below decide whether the turn is genuinely over. Routing both
+  // exits through one grace window is what stops a trailing sentence — one that lands just after the
+  // turn goes idle — from being talked over by a freshly reopened mic (#196).
   useEffect(() => {
     if (outputSpeaking) {
+      clearSettleTimer();
       setState('speaking');
       return;
     }
-    if (state === 'speaking') {
-      if (agentBusy) {
-        setState('working');
-      } else {
-        sawReplyRef.current = false;
-        if (autoRelisten && !paused) startListening();
-        else setState('ready');
-      }
-    }
-  }, [agentBusy, autoRelisten, outputSpeaking, paused, startListening, state]);
+    if (state === 'speaking') setState('working');
+  }, [clearSettleTimer, outputSpeaking, state]);
 
   // Turn ended with nothing (more) to speak — an empty/whitespace-only reply, speech output is
   // unavailable, or the engine took the text and never made a sound. Don't leave the orb stuck on
@@ -477,14 +499,31 @@ export function useVoxEngine({
   // flag was set the moment text was handed to TTS and only cleared on the way out of `speaking`,
   // so if the utterance never actually started there was no way back — Vox sat on Working… for
   // the rest of the session and the mic never reopened.
+  //
+  // Two things make that gate trustworthy (#196). It reads `hasOutstandingSpeech()` — straight from
+  // the speech engine's refs — rather than the `pending` STATE, which is a render behind: the effect
+  // that enqueues the final sentence and this one run in the SAME commit, so the state copy still
+  // says "nothing queued" and we would settle, and startListening() opens by cancelling speech —
+  // silently destroying the reply we had just queued. And it waits SETTLE_QUIET_MS before acting,
+  // because a turn can go idle a beat before its last text arrives; the timer re-checks from refs
+  // and is torn down by anything that starts speaking again.
   useEffect(() => {
-    if (agentBusy || outputSpeaking || speechPending) return;
-    if (awaitingTurnRef.current) return;
-    if (state !== 'working') return;
-    sawReplyRef.current = false;
-    if (autoRelisten && !paused) startListening();
-    else setState('ready');
-  }, [agentBusy, autoRelisten, outputSpeaking, paused, settleEpoch, speechPending, startListening, state]);
+    const quiet = !agentBusy && !outputSpeaking && !hasOutstandingSpeech() && !awaitingTurnRef.current;
+    if (!quiet || state !== 'working') {
+      clearSettleTimer();
+      return;
+    }
+    if (settleTimerRef.current != null) return;
+    settleTimerRef.current = window.setTimeout(() => {
+      settleTimerRef.current = null;
+      if (busyRef.current || awaitingTurnRef.current) return;
+      if (hasOutstandingSpeech()) return;
+      if (stateRef.current !== 'working') return;
+      settleOut();
+    }, SETTLE_QUIET_MS);
+  }, [agentBusy, clearSettleTimer, hasOutstandingSpeech, outputSpeaking, settleEpoch, settleOut, speechPending, state]);
+
+  useEffect(() => clearSettleTimer, [clearSettleTimer]);
 
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
