@@ -11,6 +11,9 @@
 /relayServerProcess.mjs
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: text/javascript; charset=utf-8
+/devtunnelHostWatchdog.mjs
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/javascript; charset=utf-8
 /weft.mjs
   Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: text/javascript; charset=utf-8

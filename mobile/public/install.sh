@@ -128,7 +128,7 @@ mkdir -p "$INSTALL_DIR"
 curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"
 WEFT_INSTALL_BASE="$BASE" WEFT_INSTALL_DIR="$INSTALL_DIR" node "$INSTALL_DIR/weft.mjs" install >/dev/null
 SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
-ok "extension.mjs, relayServerProcess.mjs, weft.mjs -> $INSTALL_DIR"
+ok "extension.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $INSTALL_DIR"
 ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"
 
 # ---------------------------------------------------------------------------

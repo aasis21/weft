@@ -73,7 +73,11 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     connectionsHome,
     onSessionOffers,
     onSessionClaimed,
-    ...(transportDescriptor ? { transportDescriptor } : {}),
+    // Always hand the listener a descriptor. Without one, start() calls resolveTransport(), which
+    // reads the REAL ~/.weft config and — on a devtunnel-configured machine — demands a live relay,
+    // so the whole suite passed or failed depending on whether the developer happened to have
+    // `weft start` running. Tests that care about the descriptor override this explicitly.
+    transportDescriptor: transportDescriptor ?? { kind: "local", channelId },
     onDeviceConnected,
     onDeviceDisconnected,
   });

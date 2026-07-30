@@ -87,6 +87,7 @@ function Resolve-SiteUrl([string]$SiteId) {
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
     $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
+    $watchdogBundle = Join-Path $root 'extension\dist\devtunnelHostWatchdog.mjs'
     $weftCliBundle = Join-Path $root 'extension\dist\weft.mjs'
     $publicBundle = Join-Path $root 'mobile\public\extension.mjs'
     $distDir      = Join-Path $root 'mobile\dist'
@@ -104,6 +105,8 @@ try {
         Ok 'extension/dist/extension.mjs'
         if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
         Ok 'extension/dist/relayServerProcess.mjs  (spawned as an attached child by the shared devtunnel relay)'
+        if (-not (Test-Path $watchdogBundle)) { throw "extension build did not produce $watchdogBundle" }
+        Ok 'extension/dist/devtunnelHostWatchdog.mjs  (supervises the devtunnel host so it cannot outlive the relay)'
         if (-not (Test-Path $weftCliBundle)) { throw "extension build did not produce $weftCliBundle" }
         Ok 'extension/dist/weft.mjs  (standalone Device Station CLI, no repo checkout needed)'
 
@@ -113,6 +116,9 @@ try {
         $publicRelayBundle = Join-Path $root 'mobile\public\relayServerProcess.mjs'
         Copy-Item $relayBundle $publicRelayBundle -Force
         Ok 'mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)'
+        $publicWatchdogBundle = Join-Path $root 'mobile\public\devtunnelHostWatchdog.mjs'
+        Copy-Item $watchdogBundle $publicWatchdogBundle -Force
+        Ok 'mobile/public/devtunnelHostWatchdog.mjs  (served as /devtunnelHostWatchdog.mjs by the installer)'
         $publicWeftCliBundle = Join-Path $root 'mobile\public\weft.mjs'
         Copy-Item $weftCliBundle $publicWeftCliBundle -Force
         Ok 'mobile/public/weft.mjs  (served as /weft.mjs by the installer)'
@@ -144,6 +150,7 @@ try {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $relayBundle)) { throw "no $relayBundle - run once without -SkipBuild first" }
+        if (-not (Test-Path $watchdogBundle)) { throw "no $watchdogBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $weftCliBundle)) { throw "no $weftCliBundle - run once without -SkipBuild first" }
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "no $distDir - run once without -SkipBuild first" }
     }
@@ -197,6 +204,12 @@ try {
             Ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
         } else {
             Warn "no $relayBundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
+        }
+        if (Test-Path $watchdogBundle) {
+            Copy-Item $watchdogBundle (Join-Path $dest 'devtunnelHostWatchdog.mjs') -Force
+            Ok "devtunnelHostWatchdog.mjs -> $dest  (sibling of relayServerProcess.mjs - devtunnel.mjs resolves it the same way)"
+        } else {
+            Warn "no $watchdogBundle - the devtunnel host will fail to start until rebuilt"
         }
         if (Test-Path $weftCliBundle) {
             Copy-Item $weftCliBundle (Join-Path $dest 'weft.mjs') -Force

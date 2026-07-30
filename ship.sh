@@ -69,6 +69,7 @@ resolve_site_url(){
 
 ext_bundle="$root/extension/dist/extension.mjs"
 relay_bundle="$root/extension/dist/relayServerProcess.mjs"
+watchdog_bundle="$root/extension/dist/devtunnelHostWatchdog.mjs"
 weft_cli_bundle="$root/extension/dist/weft.mjs"
 public_bundle="$root/mobile/public/extension.mjs"
 dist_dir="$root/mobile/dist"
@@ -86,6 +87,8 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   ok "extension/dist/extension.mjs"
   [ -f "$relay_bundle" ] || { echo "extension build did not produce $relay_bundle" >&2; exit 1; }
   ok "extension/dist/relayServerProcess.mjs  (spawned as an attached child by the shared devtunnel relay)"
+  [ -f "$watchdog_bundle" ] || { echo "extension build did not produce $watchdog_bundle" >&2; exit 1; }
+  ok "extension/dist/devtunnelHostWatchdog.mjs  (supervises the devtunnel host so it cannot outlive the relay)"
   [ -f "$weft_cli_bundle" ] || { echo "extension build did not produce $weft_cli_bundle" >&2; exit 1; }
   ok "extension/dist/weft.mjs  (standalone Device Station CLI, no repo checkout needed)"
 
@@ -94,6 +97,8 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   ok "mobile/public/extension.mjs  (served as /extension.mjs by the installer)"
   cp "$relay_bundle" "$root/mobile/public/relayServerProcess.mjs"
   ok "mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)"
+  cp "$watchdog_bundle" "$root/mobile/public/devtunnelHostWatchdog.mjs"
+  ok "mobile/public/devtunnelHostWatchdog.mjs  (served as /devtunnelHostWatchdog.mjs by the installer)"
   cp "$weft_cli_bundle" "$root/mobile/public/weft.mjs"
   ok "mobile/public/weft.mjs  (served as /weft.mjs by the installer)"
   skill_source="$root/skill/weft-how-to-use/SKILL.md"
@@ -176,6 +181,12 @@ if [ "$INSTALL" -eq 1 ]; then
     ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
   else
     warn "no $relay_bundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
+  fi
+  if [ -f "$watchdog_bundle" ]; then
+    cp "$watchdog_bundle" "$dest/devtunnelHostWatchdog.mjs"
+    ok "devtunnelHostWatchdog.mjs -> $dest  (sibling of relayServerProcess.mjs - devtunnel.mjs resolves it the same way)"
+  else
+    warn "no $watchdog_bundle - the devtunnel host will fail to start until rebuilt"
   fi
   if [ -f "$weft_cli_bundle" ]; then
     cp "$weft_cli_bundle" "$dest/weft.mjs"

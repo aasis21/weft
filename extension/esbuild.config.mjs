@@ -31,28 +31,34 @@ await build({
   logLevel: "info",
 });
 
-// devtunnel.mjs spawns relayServerProcess.mjs as a sibling file (resolved relative to its own
-// import.meta.url at runtime — see devtunnel.mjs's RELAY_SERVER_PROCESS_PATH) so the shared
-// devtunnel relay/tunnel can be brought up and torn down by an ordinary `weft devtunnel start`
-// terminal. Since the main bundle above inlines everything into a single extension.mjs, that
-// sibling file has to be produced (and installed) as ITS OWN standalone bundle — otherwise
-// "./relayServerProcess.mjs" resolves to a file that was never written to disk. Must be built
-// with the same bundle:true/platform/format so it has zero dependency on files outside dist/
-// once installed.
-await build({
-  entryPoints: ["src/relayServerProcess.mjs"],
-  outfile: "dist/relayServerProcess.mjs",
-  bundle: true,
-  platform: "node",
-  target: "node18",
-  format: "esm",
-  sourcemap: true,
-  define,
-  banner: {
-    js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
-  },
-  logLevel: "info",
-});
+// devtunnel.mjs spawns these as SIBLING files, resolved relative to its own import.meta.url at
+// runtime (see RELAY_SERVER_PROCESS_PATH / DEVTUNNEL_HOST_WATCHDOG_PATH). Since the main bundle
+// above inlines everything into a single extension.mjs, each sibling has to be produced (and
+// installed) as ITS OWN standalone bundle — otherwise "./<name>.mjs" resolves to a file that was
+// never written to disk and the spawn dies with ERR_MODULE_NOT_FOUND. Built with the same
+// bundle:true/platform/format so they have zero dependency on files outside dist/ once installed.
+//
+// KEEP IN SYNC: every entry here must also appear in BUNDLE_NAMES in bin/weft.mjs (which is what
+// `weft install` / `weft update` actually download) and be copied by ship.ps1 / ship.sh.
+// extension/test/bundleEntrypoints.test.mjs enforces that — it scans src/ for sibling-path
+// constants and fails if any of them is missing from this list or from BUNDLE_NAMES.
+const SIBLING_ENTRYPOINTS = ["relayServerProcess.mjs", "devtunnelHostWatchdog.mjs"];
+for (const name of SIBLING_ENTRYPOINTS) {
+  await build({
+    entryPoints: [`src/${name}`],
+    outfile: `dist/${name}`,
+    bundle: true,
+    platform: "node",
+    target: "node18",
+    format: "esm",
+    sourcemap: true,
+    define,
+    banner: {
+      js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
+    },
+    logLevel: "info",
+  });
+}
 
 // weft.mjs (the "Device Station" CLI) imports relative ../src/*.mjs files today, so it only
 // works when the FULL repo is checked out — it can't be copied standalone onto a machine that

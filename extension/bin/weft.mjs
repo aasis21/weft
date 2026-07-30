@@ -33,11 +33,14 @@ const [, , command, ...args] = process.argv;
 // this dir and ~/.weft, then re-runs the bootstrap installer. Both honor env overrides so they can
 // be exercised against a local mirror without touching a real install or the network.
 const INSTALL_BASE = (process.env.WEFT_INSTALL_BASE || "https://useweft.netlify.app").replace(/\/+$/, "");
-// The three standalone code bundles esbuild emits and every install ships: the Copilot CLI
-// extension, the devtunnel relay child (spawned relative to the bundle), and the weft CLI itself.
-// Declared up here (not next to its helpers) so it's initialized before the top-level command
-// dispatch can reach placeBundles — a later `const` would be in the temporal dead zone.
-const BUNDLE_NAMES = ["extension.mjs", "relayServerProcess.mjs", "weft.mjs"];
+// The standalone code bundles esbuild emits and every install ships: the Copilot CLI extension,
+// the weft CLI itself, and the two children devtunnel.mjs spawns as siblings of whichever bundle
+// it was inlined into (the relay process and the tunnel-host watchdog). Miss one and the spawn
+// fails with ERR_MODULE_NOT_FOUND on installed machines only — the repo checkout still has the
+// source file, so it works in dev and breaks in prod. Declared up here (not next to its helpers)
+// so it's initialized before the top-level command dispatch can reach placeBundles — a later
+// `const` would be in the temporal dead zone.
+const BUNDLE_NAMES = ["extension.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
 function extensionInstallDir() {
   return process.env.WEFT_INSTALL_DIR || join(homedir(), ".copilot", "extensions", "weft");
 }

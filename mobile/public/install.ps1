@@ -168,7 +168,7 @@ $env:WEFT_INSTALL_DIR = $InstallDir
 if ($LASTEXITCODE -ne 0) { throw "weft install failed (exit code $LASTEXITCODE)" }
 # $skillDir is referenced again in the Step 6 uninstall hint; keep it defined here.
 $skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
-Ok "extension.mjs, relayServerProcess.mjs, weft.mjs -> $InstallDir"
+Ok "extension.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $InstallDir"
 Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"
 
 # ---------------------------------------------------------------------------------------------
