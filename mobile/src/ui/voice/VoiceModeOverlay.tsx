@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type JSX } from 'react';
+import type { PromptDelivery } from '@aasis21/weft-shared';
 import type { AssistantItem } from '@/lib/timeline';
 import { useVoxEngine, type VoiceState } from '@/ui/voice/useVoxEngine';
 import { VoxSettings } from '@/ui/voice/VoxSettings';
@@ -8,7 +9,7 @@ interface VoiceModeOverlayProps {
   agentBusy: boolean;
   toolActive?: boolean;
   disabled: boolean;
-  onPrompt(text: string): Promise<void> | void;
+  onPrompt(text: string, delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onActiveChange?(active: boolean): void;
   /** Report the live Vox state so the header pill can mirror the composer (#184). */

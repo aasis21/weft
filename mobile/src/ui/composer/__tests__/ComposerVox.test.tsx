@@ -5,7 +5,15 @@ import type { SessionMode } from '@aasis21/weft-shared';
 import { Composer } from '@/ui/composer/Composer';
 
 const speechInput = { supported: true, listening: false, error: null as string | null, start: vi.fn(), stop: vi.fn() };
-const speechOutput = { supported: true, speaking: false, enqueue: vi.fn(), flush: vi.fn(), cancel: vi.fn() };
+const speechOutput = {
+  supported: true,
+  speaking: false,
+  pending: false,
+  hasOutstandingSpeech: (): boolean => speechOutput.speaking || speechOutput.pending,
+  enqueue: vi.fn(),
+  flush: vi.fn(),
+  cancel: vi.fn(),
+};
 
 vi.mock('@/ui/hooks/useSpeechInput', () => ({ useSpeechInput: () => speechInput }));
 vi.mock('@/ui/hooks/useSpeechOutput', () => ({ useSpeechOutput: () => speechOutput }));

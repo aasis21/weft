@@ -133,6 +133,10 @@ import { selectAllSessions, selectManagerSnapshot, toTimelineState } from '@/ses
 const IDLE_AFTER_MS = 20_000;
 const OFFLINE_AFTER_MS = 30_000;
 const HOST_CONFIRM_MS = 30_000;
+/** How often {@link SessionManager.reconnectAndConfirm} re-reads the card while waiting for the
+ *  laptop to confirm. Coarse on purpose — nothing here is racing, and the wait is bounded by
+ *  HOST_CONFIRM_MS either way. */
+const RECONNECT_POLL_MS = 250;
 // Device (listener) channel heartbeat cadence is 2min (extension/src/listener.mjs). Rule: allow the
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
@@ -195,6 +199,14 @@ const LIVENESS_PERSIST_THROTTLE_MS = 30_000;
 // a session is cooled down (Archived); after AUTO_DELETE_MS of witnessed silence it is purged.
 const AUTO_ARCHIVE_MS = 6 * 60 * 60 * 1_000; // 6 hours
 const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
+// Witnessed silence only accrues while the app is actually running, so a phone that was closed for a
+// week comes back with a session that looks freshly-seen — subscribed and beaten within moments of
+// each other — and stays Live/Offline in the list next to a twelve-day-old last message. This is the
+// second, additive archive rule: judge BOTH clocks against `now` rather than against each other, and
+// archive only when both are stale. Either one alone would be wrong. Heartbeat-alone would archive a
+// laptop closed for the weekend that the phone never got the chance to check on; subscribed-alone
+// would archive sessions the phone simply hasn't looked at yet.
+const AUTO_ARCHIVE_STALE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
 const SPAWN_TIMEOUT_MS = 30_000;
 
@@ -213,6 +225,9 @@ interface ResumeRequestOptions {
    *  resumed CLI session re-reports its own title/cwd via session_meta once paired. */
   title?: string | null;
   cwd?: string | null;
+  /** Close a session already attached on the laptop and resume anyway. Set only on the user's
+   *  second, confirmed tap — see {@link resumeSessionMessage}. */
+  force?: boolean;
 }
 
 interface PendingSpawn {
@@ -303,6 +318,11 @@ export class SessionRuntime {
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
+  /** Last observed pulse per session, surviving a reload. `connection.lastHeartbeat` lives only in
+   *  memory and comes back null for every restored card, so anything that reads it alone treats a
+   *  session that has never reconnected as "no pulse ever" and skips it forever. Seeded from stored
+   *  `lastHeartbeatAt` at boot and kept in step with the live beat. */
+  private readonly lastKnownHeartbeat = new Map<string, number>();
   // requestIds of approvals/elicitations whose decision send is in flight. Guards a double-tap from
   // dispatching twice (#88) and lets onMessage strip an already-answered card from a racing state
   // snapshot before the send settles (#79).
@@ -445,6 +465,7 @@ export class SessionRuntime {
     for (const s of stored) {
       const channelId = s.pairing.channelId;
       allowTranscriptWrites(channelId);
+      if (s.lastHeartbeatAt != null) this.lastKnownHeartbeat.set(channelId, s.lastHeartbeatAt);
       const timeline = restoreTimeline(persistedById.get(channelId) ?? null);
       const session = this.buildRestoredSession(
         s,
@@ -1238,6 +1259,37 @@ export class SessionRuntime {
   async resumeSession(channelId: string, opts: ResumeRequestOptions): Promise<string> {
     const device = this.device(channelId);
     if (!device) throw new Error('Choose a registered listener device first.');
+
+    // Resume forks a fresh `copilot --resume` on a brand-new channel, so tapping a row we are
+    // already driving would leave two CLI processes writing one session-store entry — and the
+    // reconcile that follows disposes the duplicate *card* while the orphaned process runs on.
+    // Prefer what we already have. (Cards are keyed by channel, so the only way to recognise the
+    // same CLI session is meta.sessionId, which live sessions report via session_meta.)
+    const existing = opts.sessionId
+      ? selectAllSessions(this.store.getState()).find(
+          (s) => s.meta.sessionId === opts.sessionId && s.connection.status !== 'ended',
+        )
+      : undefined;
+    if (existing) {
+      const existingId = existing.meta.channelId;
+      this.store.dispatch(sessionActivated(existingId));
+      const status = existing.connection.status;
+      // Already attached, or on its way: opening it is the whole of what the user asked for. A cold
+      // card is excluded even though it reads as `idle` — archiving releases the socket, so idle
+      // there means "deliberately parked", not "connected and quiet".
+      if (
+        !existing.connection.cold &&
+        (status === 'live' || status === 'idle' || status === 'connecting' || status === 'initializing')
+      ) {
+        return existingId;
+      }
+      // Archived (cold) or Offline (error). The pairing we hold may well still be good — the laptop
+      // was merely asleep, or the app was closed past the archive window. Reconnecting is cheaper
+      // than a resume, keeps the transcript attached to the same card, and cannot fork a process.
+      // Only when it fails to come back do we fall through and genuinely resume.
+      if (await this.reconnectAndConfirm(existingId)) return existingId;
+    }
+
     const requestId = `resume-${this.clock()}-${Math.random().toString(36).slice(2, 8)}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.title?.trim() || basename(opts.cwd) || 'Resuming session';
@@ -1281,7 +1333,7 @@ export class SessionRuntime {
       await this.connectDevice(channelId);
       const ctrl = this.listenerController(channelId);
       if (!ctrl?.client) throw new Error('Listener device is not connected.');
-      const message = resumeSessionMessage(requestId, opts.sessionId, opts.mode);
+      const message = resumeSessionMessage(requestId, opts.sessionId, opts.mode, opts.force === true);
       this.recordDeviceEvent(channelId, 'out', message);
       await ctrl.client.send(message);
     } catch (err) {
@@ -1544,6 +1596,7 @@ export class SessionRuntime {
     }
     this.store.dispatch(sessionRemoved(channelId));
     this.lastLivenessWriteAt.delete(channelId);
+    this.lastKnownHeartbeat.delete(channelId);
     if (wasActive) {
       const nextId = (this.store.getState().sessions.ids[0] as string | undefined) ?? null;
       if (nextId) {
@@ -1599,10 +1652,21 @@ export class SessionRuntime {
     }
   }
 
-  /** True when a stored session should start (or be moved) in the calm **Archived** state (#163):
-   *  its *witnessed* silence exceeds AUTO_ARCHIVE_MS (6h) but not yet AUTO_DELETE_MS (2d, at which
-   *  point {@link isDeleteEligible} purges it instead). Pinned and the spared (active/last-active)
-   *  session are never auto-archived. Sessions never witnessed with a pulse are ineligible. */
+  /** True when a stored session should start (or be moved) in the calm **Archived** state (#163).
+   *
+   *  Two independent rules, either of which is enough:
+   *
+   *  1. *Witnessed silence* — the app-observed gap between the last time we looked (`lastSubscribedAt`)
+   *     and the last real pulse (`lastHeartbeatAt`) is past AUTO_ARCHIVE_MS (6h) but not yet
+   *     AUTO_DELETE_MS (2d, at which point {@link isDeleteEligible} purges it instead).
+   *  2. *Both clocks stale* — each of the two clocks, measured against `now` rather than against each
+   *     other, is older than AUTO_ARCHIVE_STALE_MS. This is the rule that catches a phone that was
+   *     simply closed: witnessed silence can't accrue while nothing is running, so rule 1 never sees
+   *     the gap, and the session comes back looking freshly-seen no matter how long it has been.
+   *
+   *  Pinned and the spared (active/last-active) session are never auto-archived, and a session we
+   *  have never witnessed with a pulse (either clock missing) is ineligible under both rules — a
+   *  freshly-paired card is safe. */
   private isArchiveEligible(s: StoredSession, spareId: string | null): boolean {
     if (s.pinned) return false;
     if (s.pairing.channelId === spareId) return false;
@@ -1610,7 +1674,9 @@ export class SessionRuntime {
     const witnessed = s.lastSubscribedAt;
     if (beat == null || witnessed == null) return false;
     const silence = witnessed - beat;
-    return silence > AUTO_ARCHIVE_MS && silence <= AUTO_DELETE_MS;
+    if (silence > AUTO_ARCHIVE_MS && silence <= AUTO_DELETE_MS) return true;
+    const now = this.clock();
+    return now - beat > AUTO_ARCHIVE_STALE_MS && now - witnessed > AUTO_ARCHIVE_STALE_MS;
   }
 
   async reconnect(channelId: string): Promise<void> {
@@ -1636,6 +1702,22 @@ export class SessionRuntime {
       );
     } finally {
       ctrl.reconnecting = false;
+    }
+  }
+
+  /** Reconnect and wait to find out whether it actually took. {@link reconnect} only reports that a
+   *  socket opened; the laptop confirms the session separately, and a `weft` that has gone away
+   *  leaves the card sitting in `connecting` until the watchdog times it out. Resolves true once the
+   *  session is genuinely back, false on error or if the confirmation never arrives. */
+  private async reconnectAndConfirm(channelId: string): Promise<boolean> {
+    await this.reconnect(channelId);
+    const deadline = this.clock() + HOST_CONFIRM_MS;
+    for (;;) {
+      const status = this.session(channelId)?.connection.status;
+      if (status === undefined || status === 'error' || status === 'ended') return false;
+      if (status === 'live' || status === 'idle') return true;
+      if (this.clock() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL_MS));
     }
   }
 
@@ -1954,7 +2036,10 @@ export class SessionRuntime {
     // erase the real last-beat clock from a prior run and break the witnessed-silence math. In that
     // case advance only lastSubscribedAt; the stored lastHeartbeatAt stays put.
     const patch: Parameters<typeof patchSession>[1] = { lastSubscribedAt: now };
-    if (s.connection.lastHeartbeat) patch.lastHeartbeatAt = s.connection.lastHeartbeat;
+    if (s.connection.lastHeartbeat) {
+      patch.lastHeartbeatAt = s.connection.lastHeartbeat;
+      this.lastKnownHeartbeat.set(channelId, s.connection.lastHeartbeat);
+    }
     void patchSession(channelId, patch);
   }
 
@@ -1967,6 +2052,13 @@ export class SessionRuntime {
       for (const session of selectAllSessions(this.store.getState())) {
         const ctrl = this.controllers.get(session.id);
         if (!ctrl || ctrl.ephemeral) continue;
+        // Advance the witness clock for every stored session on every pass, cold ones included.
+        // Without this the only writers are subscribe-success, coolDown and pagehide, so a session
+        // that can never subscribe never moves `lastSubscribedAt` — its witnessed silence stays
+        // pinned near zero and neither the archive nor the delete window can ever be reached. That
+        // is how a card with a twelve-day-old last message sits in Offline forever. The write is
+        // throttled internally, so a per-second tick costs nothing.
+        this.persistLiveness(session.id);
         const status = session.connection.status;
         if (status === 'connecting') {
           if (ctrl.connectingSince == null) {
@@ -1988,14 +2080,20 @@ export class SessionRuntime {
         }
         ctrl.connectingSince = null;
         const beat = session.connection.lastHeartbeat;
+        if (beat != null) this.lastKnownHeartbeat.set(session.id, beat);
+        // The pulse to judge staleness by. `connection.lastHeartbeat` is in-memory only and is null
+        // for every card restored from disk, so gating on it alone left a session that never manages
+        // to reconnect stuck: connecting → timeout → Offline, and never archived, because there was
+        // no beat to measure from. Fall back to the last pulse we ever saw, which outlives reloads.
+        const lastBeat = beat ?? this.lastKnownHeartbeat.get(session.id) ?? null;
         // Auto-archive (#163): once we've heard nothing from the laptop for AUTO_ARCHIVE_MS, drop
         // to the calm Archived state (cold, socket released, out of the warm pool) regardless of
         // whether the card is still Live/Quiet or already flipped to Offline. Runs before the
         // live/idle guard so an Offline (error) card can still cool down. Never archive the card the
         // user is viewing, a busy turn, or one already cold/ended.
         if (
-          beat != null &&
-          now - beat > AUTO_ARCHIVE_MS &&
+          lastBeat != null &&
+          now - lastBeat > AUTO_ARCHIVE_MS &&
           !session.connection.cold &&
           !session.connection.busy &&
           session.connection.status !== 'ended' &&

@@ -122,3 +122,120 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(h!.active()?.error).toBe('That session no longer exists.');
   });
 });
+
+describe('scenario: resuming a session the phone is already driving', () => {
+  let h: ReturnType<typeof makeManager> | undefined;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    h = makeManager();
+  });
+
+  afterEach(() => {
+    h?.dispose();
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  /** Pair a session card and let it report the CLI sessionId, which is the only handle the resume
+   *  list and the phone's cards have in common. */
+  async function liveCard(channelId: string, sessionId: string): Promise<void> {
+    const { client } = await h!.pair(channelId);
+    client.emit(B.channelUp(channelId, sessionId, 'C:\\repo\\weft', 'Fix the bug'));
+    client.emit(B.heartbeat(1, false));
+    await h!.flush();
+  }
+
+  it('opens the live card instead of forking a second CLI onto the same session', async () => {
+    await h!.manager.addByQr(listenerQr('listener-3'));
+    await h!.flush();
+    const listener = registry.get('listener-3');
+    await liveCard('already-here', 'sid-42');
+    expect(h!.byChannel('already-here')?.meta.sessionId).toBe('sid-42');
+
+    const id = await h!.manager.resumeSession('listener-3', {
+      sessionId: 'sid-42',
+      mode: 'allow-all',
+      title: 'Fix the bug',
+      cwd: 'C:\\repo\\weft',
+    });
+    await h!.flush();
+
+    // No message to the laptop at all — the only thing a resume could have achieved is already true.
+    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(0);
+    expect(id).toBe('already-here');
+    expect(h!.snapshot().activeId).toBe('already-here');
+    // And no second card: the reconcile that used to clean this up disposed the duplicate card but
+    // left the extra `copilot --resume` process running.
+    expect(h!.sessions().filter((s) => s.meta.sessionId === 'sid-42')).toHaveLength(1);
+  });
+
+  it('still resumes a session whose card has ended', async () => {
+    await h!.manager.addByQr(listenerQr('listener-4'));
+    await h!.flush();
+    const listener = registry.get('listener-4');
+    const { client } = await h!.pair('finished');
+    client.emit(B.channelUp('finished', 'sid-99', 'C:\\repo\\weft', 'All done'));
+    await h!.flush();
+    client.emit(B.channelDown('Session ended.'));
+    await h!.flush();
+    expect(h!.byChannel('finished')?.status).toBe('ended');
+
+    await h!.manager.resumeSession('listener-4', {
+      sessionId: 'sid-99',
+      mode: 'allow-all',
+      title: 'All done',
+      cwd: 'C:\\repo\\weft',
+    });
+    await h!.flush();
+
+    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(1);
+  });
+
+  it('resumes normally when no card on this phone knows the session', async () => {
+    await h!.manager.addByQr(listenerQr('listener-5'));
+    await h!.flush();
+    const listener = registry.get('listener-5');
+    await liveCard('unrelated', 'sid-other');
+
+    await h!.manager.resumeSession('listener-5', {
+      sessionId: 'sid-brand-new',
+      mode: 'allow-all',
+      title: 'Elsewhere',
+      cwd: 'C:\\repo\\weft',
+    });
+    await h!.flush();
+
+    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(1);
+  });
+
+  it('reconnects an archived card first, and only resumes if it does not come back', async () => {
+    await h!.manager.addByQr(listenerQr('listener-6'));
+    await h!.flush();
+    const listener = registry.get('listener-6');
+    await liveCard('napping', 'sid-7');
+    h!.manager.archive('napping');
+    await h!.flush();
+    expect(h!.byChannel('napping')?.cold).toBe(true);
+
+    const pending = h!.manager.resumeSession('listener-6', {
+      sessionId: 'sid-7',
+      mode: 'allow-all',
+      title: 'Fix the bug',
+      cwd: 'C:\\repo\\weft',
+    });
+    await h!.flush();
+
+    // Reconnect is tried first: it keeps the transcript on the same card and cannot fork a process.
+    expect(h!.snapshot().activeId).toBe('napping');
+    expect(h!.byChannel('napping')?.status).toBe('connecting');
+    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(0);
+
+    // The laptop never confirms the session, so the pairing really is dead — now a resume is the
+    // only way back, and the ladder falls through to it.
+    await vi.advanceTimersByTimeAsync(31_000);
+    await pending;
+
+    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(1);
+  });
+});

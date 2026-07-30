@@ -45,6 +45,22 @@ describe('folderOptions', () => {
   it('is empty for an empty list', () => {
     expect(folderOptions([])).toEqual([]);
   });
+
+  it('offers registered folders that have no sessions in them, above the ones that do', () => {
+    // A registered project with nothing resumable in it yet is the normal state of a fresh
+    // checkout, and it is exactly the folder you are most likely to want — deriving the picker
+    // from session cwds alone would hide it.
+    const options = folderOptions(sessions, ['/srv/fresh', 'C:\\CLP\\ModernOrder']);
+    expect(options).toEqual([
+      { path: 'C:\\CLP\\ModernOrder', label: 'ModernOrder', count: 3 },
+      { path: '/srv/fresh', label: 'fresh', count: 0 },
+      { path: '/home/me/weft', label: 'weft', count: 1 },
+    ]);
+  });
+
+  it('ignores blank registered paths rather than offering a nameless folder', () => {
+    expect(folderOptions([], ['']).length).toBe(0);
+  });
 });
 
 describe('filterStoredSessions', () => {
@@ -82,6 +98,22 @@ describe('filterStoredSessions', () => {
 
   it('falls back to all folders when the selected folder is gone after a refresh', () => {
     expect(ids(filterStoredSessions(sessions, { query: '', folder: 'C:\\deleted' }))).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps an empty folder empty when the caller says it is a real choice', () => {
+    // A device's configured default folder is a legitimate selection before anything has ever been
+    // run there. Inferring "real" from the rows alone cannot tell it apart from a folder that has
+    // gone away, and widening back out to everything makes the picker look broken.
+    expect(ids(filterStoredSessions(sessions, { query: '', folder: 'C:\\fresh' }, ['C:\\fresh']))).toEqual([]);
+  });
+
+  it('still falls back when the folder is absent from the offered list', () => {
+    expect(ids(filterStoredSessions(sessions, { query: '', folder: 'C:\\deleted' }, ['/home/me/weft']))).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
   });
 
   it('tolerates rows with null metadata', () => {

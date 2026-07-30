@@ -739,7 +739,7 @@ export function Composer({
             toolActive={vox.toolActive ?? false}
             disabled={disabled}
             paused={vox.paused ?? false}
-            onPrompt={(value) => onPrompt(value)}
+            onPrompt={(value, delivery) => onPrompt(value, undefined, delivery)}
             onInterrupt={onInterrupt}
             {...(vox.onActiveChange ? { onActiveChange: vox.onActiveChange } : {})}
             {...(vox.onStateChange ? { onStateChange: vox.onStateChange } : {})}

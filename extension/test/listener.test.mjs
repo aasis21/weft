@@ -22,6 +22,7 @@ import {
 import { createListener } from "../src/listener.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
 import { registerPendingSession } from "../src/pendingSessions.mjs";
+import { HEALTHY_WINDOW_MS } from "../src/attachedSessions.mjs";
 
 let dirs = [];
 let identityFiles = [];
@@ -50,7 +51,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -68,6 +69,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     heartbeatMs,
     projectsApi,
     ...(sessionsApi ? { sessionsApi } : {}),
+    ...(attachedApi ? { attachedApi } : {}),
     spawnFn,
     log,
     connectionsHome,
@@ -286,6 +288,111 @@ test("RESUME_SESSION for an unknown / vanished session emits SPAWN_RESULT ok:fal
   );
   assert.equal(result.msg.ok, false);
   assert.match(result.msg.error, /no longer in the CLI session store/);
+  await listener.stop();
+});
+
+// --- the "already attached" guard -------------------------------------------------------------
+// A resume that forks a second `copilot --resume` onto a session already running and paired leaves
+// two CLI processes writing one session-store entry. The phone catches what it can see, but it is
+// blind to a session paired to a DIFFERENT phone, so the station has to answer for itself.
+
+/** A resume harness whose store always resolves `sid-live`, with a scripted attachment registry. */
+async function resumeGuardHarness(attached, { kills } = {}) {
+  // Same terminal-detection scrubbing as the plain resume test: with a terminal in the environment
+  // the station launches through it rather than spawning directly, which changes the argv shape.
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
+  dirs.push(sessionCwd);
+  const spawnCalls = [];
+  const h = await pairedHarness({
+    projects: [],
+    sessionsApi: { listSessions: () => [], readSessionCwd: (id) => (id === "sid-live" ? sessionCwd : null) },
+    attachedApi: { findAttachedSession: () => attached },
+    spawnFn(command, args, options) {
+      spawnCalls.push({ command, args, options });
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  return { ...h, spawnCalls, sessionCwd, kills };
+}
+
+test("RESUME_SESSION refuses to fork a second CLI onto a session that is already attached and healthy", async () => {
+  const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness({
+    sessionId: "sid-live", channelId: "chan-other", pid: process.pid, lastHealthyAt: Date.now(), healthy: true,
+  });
+
+  await phoneChannel.send(resumeSession("req-dup", "sid-live", "default"));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-dup"),
+    "refused resume result",
+  );
+
+  assert.equal(spawnCalls.length, 0, "no second process is started");
+  assert.equal(result.msg.ok, false);
+  assert.match(result.msg.error, /already running/);
+  await listener.stop();
+});
+
+test("RESUME_SESSION still spawns when the attachment has stopped heartbeating — resume is the only way back from a wedged weft", async () => {
+  // The important one. A pid-only guard would refuse here and leave the user with no route at all:
+  // the process is alive, so it would be told "already running", but nothing inside it is listening.
+  const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness({
+    sessionId: "sid-live", channelId: "chan-wedged", pid: process.pid,
+    lastHealthyAt: Date.now() - HEALTHY_WINDOW_MS - 1_000, healthy: false,
+  });
+
+  await phoneChannel.send(resumeSession("req-wedged", "sid-live", "default"));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-wedged"),
+    "recovery resume result",
+  );
+
+  assert.equal(spawnCalls.length, 1, "the wedged session is resumable");
+  assert.ok(
+    JSON.stringify(spawnCalls[0].args).includes("--resume=sid-live"),
+    "and it is resumed, not started fresh",
+  );
+  assert.equal(result.msg.ok, true);
+  await listener.stop();
+});
+
+test("RESUME_SESSION spawns normally when nothing is attached to the session", async () => {
+  const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness(null);
+
+  await phoneChannel.send(resumeSession("req-free", "sid-live", "default"));
+  await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-free"),
+    "resume result",
+  );
+
+  assert.equal(spawnCalls.length, 1);
+  await listener.stop();
+});
+
+test("RESUME_SESSION with force closes the attached session first, rather than leaving two running", async () => {
+  const attached = {
+    sessionId: "sid-live", channelId: "chan-other", pid: 999_999, lastHealthyAt: Date.now(), healthy: true,
+  };
+  const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness(attached);
+
+  const realKill = process.kill;
+  const killed = [];
+  process.kill = (pid, signal) => { killed.push(pid); return true; };
+  try {
+    await phoneChannel.send(resumeSession("req-force", "sid-live", "default", true));
+    const result = await waitFor(
+      () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-force"),
+      "forced resume result",
+    );
+    assert.deepEqual(killed, [999_999], "the old process is closed, not left running alongside");
+    assert.equal(spawnCalls.length, 1);
+    assert.equal(result.msg.ok, true);
+  } finally {
+    process.kill = realKill;
+  }
   await listener.stop();
 });
 
