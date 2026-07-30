@@ -93,56 +93,67 @@ process.on("uncaughtException", (err) => {
   appendStationLog("process.uncaught_exception", { error: err?.stack ?? String(err) }, { level: "error" });
 });
 
-try {
-  if (!command || command === "help" || command === "--help" || command === "-h") {
-    usage();
-  } else if (command === "version" || command === "--version" || command === "-v") {
-    printVersion();
-  } else if (command === "start") {
-    await start();
-  } else if (command === "add-project") {
-    const [name, path, ...rest] = args;
-    if (!name || !path) throw new Error("Usage: weft add-project <name> <path> [--default]");
-    const project = addProject(name, path, { makeDefault: rest.includes("--default") });
-    console.log(`Added project ${project.name}: ${project.path}${project.default ? " (default)" : ""}`);
-  } else if (command === "remove-project") {
-    const [name] = args;
-    if (!name) throw new Error("Usage: weft remove-project <name>");
-    removeProject(name);
-    console.log(`Removed project ${name}`);
-  } else if (command === "list-projects") {
-    printProjects(listProjects());
-  } else if (command === "set-default") {
-    const [name] = args;
-    if (!name) throw new Error("Usage: weft set-default <name>");
-    setDefault(name);
-    console.log(`Default project set to ${name}`);
-  } else if (command === "set-transport") {
-    setTransport(args);
-  } else if (command === "show-transport") {
-    showTransport();
-  } else if (command === "set-name") {
-    setName(args);
-  } else if (command === "show-name") {
-    showName();
-  } else if (command === "set-pairing") {
-    await setPairing(args);
-  } else if (command === "rotate-pairing") {
-    await rotatePairing();
-  } else if (command === "devtunnel") {
-    await devtunnelCommand(args);
-  } else if (command === "update") {
-    await update();
-  } else if (command === "install") {
-    await install(args);
-  } else if (command === "clean-install") {
-    await cleanInstall(args);
-  } else {
-    throw new Error(`Unknown command: ${command}`);
+// Every command runs inside main(), which is CALLED AT THE VERY BOTTOM of this file — never
+// inline here. Long-running commands (`weft start`, `weft devtunnel start`) never return, so a
+// top-level `await` at this point would suspend module evaluation forever and leave every
+// `const` below it permanently uninitialized. That is not theoretical: RELAY_HEALTH_INTERVAL_MS
+// and friends live near the bottom, and while the dispatch ran here esbuild lowered them to
+// `var`, so instead of a loud ReferenceError the watchdog silently got `undefined` — a 15ms
+// timer that declared the relay wedged without probing it once, then died on an undefined
+// `stamp()`. Keeping the call last means the whole module is initialized before any command
+// starts. test/cliDispatch.test.mjs enforces it.
+async function main() {
+  try {
+    if (!command || command === "help" || command === "--help" || command === "-h") {
+      usage();
+    } else if (command === "version" || command === "--version" || command === "-v") {
+      printVersion();
+    } else if (command === "start") {
+      await start();
+    } else if (command === "add-project") {
+      const [name, path, ...rest] = args;
+      if (!name || !path) throw new Error("Usage: weft add-project <name> <path> [--default]");
+      const project = addProject(name, path, { makeDefault: rest.includes("--default") });
+      console.log(`Added project ${project.name}: ${project.path}${project.default ? " (default)" : ""}`);
+    } else if (command === "remove-project") {
+      const [name] = args;
+      if (!name) throw new Error("Usage: weft remove-project <name>");
+      removeProject(name);
+      console.log(`Removed project ${name}`);
+    } else if (command === "list-projects") {
+      printProjects(listProjects());
+    } else if (command === "set-default") {
+      const [name] = args;
+      if (!name) throw new Error("Usage: weft set-default <name>");
+      setDefault(name);
+      console.log(`Default project set to ${name}`);
+    } else if (command === "set-transport") {
+      setTransport(args);
+    } else if (command === "show-transport") {
+      showTransport();
+    } else if (command === "set-name") {
+      setName(args);
+    } else if (command === "show-name") {
+      showName();
+    } else if (command === "set-pairing") {
+      await setPairing(args);
+    } else if (command === "rotate-pairing") {
+      await rotatePairing();
+    } else if (command === "devtunnel") {
+      await devtunnelCommand(args);
+    } else if (command === "update") {
+      await update();
+    } else if (command === "install") {
+      await install(args);
+    } else if (command === "clean-install") {
+      await cleanInstall(args);
+    } else {
+      throw new Error(`Unknown command: ${command}`);
+    }
+  } catch (err) {
+    console.error(err?.message ?? String(err));
+    process.exitCode = 1;
   }
-} catch (err) {
-  console.error(err?.message ?? String(err));
-  process.exitCode = 1;
 }
 
 async function setPairing([mode]) {
@@ -1281,3 +1292,7 @@ extension code dir, then re-runs the bootstrap installer for a fresh from-basics
 (pass --yes to skip the confirmation).`);
 }
 
+
+// Everything above is now fully initialized — run the requested command. This call MUST stay the
+// last statement in the file; see the comment on main().
+await main();
