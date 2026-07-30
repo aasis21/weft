@@ -61,7 +61,10 @@ afterEach(() => {
 });
 
 describe('Vox keeps its turn (#195)', () => {
-  it('records while the agent is busy and queues the prompt instead of interrupting', () => {
+  it('records over a busy agent and steers the running turn rather than queueing behind it', () => {
+    // Mid-turn speech is nearly always a redirection of the work in flight, so it goes out as a
+    // normal immediate send -- which the SDK applies to the turn already running. Queueing stays an
+    // explicit choice on the composer's queue button.
     vi.useFakeTimers();
     const onPrompt = vi.fn();
     const onInterrupt = vi.fn();
@@ -73,12 +76,12 @@ describe('Vox keeps its turn (#195)', () => {
     expect(panel.getAttribute('data-state')).toBe('listening');
     expect(onInterrupt).not.toHaveBeenCalled();
 
-    speak('run this after current task', true);
+    speak('actually check the other branch first', true);
     act(() => {
       vi.advanceTimersByTime(4000);
     });
 
-    expect(onPrompt).toHaveBeenCalledWith('run this after current task', 'enqueue');
+    expect(onPrompt).toHaveBeenCalledWith('actually check the other branch first');
   });
 
   it('stays on working after sending, instead of reopening the mic before the turn starts', () => {

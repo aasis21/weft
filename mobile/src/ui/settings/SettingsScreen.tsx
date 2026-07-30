@@ -186,7 +186,7 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
             <div className="settings-row-head">
               <div>
                 <h2 id="settings-voice-stream-title">Stream spoken reply</h2>
-                <p>On: speak words as they generate. Off: speak each reply once it's complete (more natural).</p>
+                <p>On: speak words as they generate. Off: speak each stretch of the reply once it's finished — you still hear it while the agent works on (more natural).</p>
               </div>
               <label className="settings-switch">
                 <input

@@ -93,8 +93,8 @@ describe('VoiceModeOverlay one busy state (#183)', () => {
 describe('VoiceModeOverlay tapping the orb while busy (#179)', () => {
   it('opens the mic without cutting the agent off when no tool is running', () => {
     // Tapping used to be swallowed by startListening's busy-guard, then was made to interrupt.
-    // It now captures alongside the running turn instead: the prompt is queued for after it, so a
-    // follow-up thought costs you nothing that was already in flight.
+    // It now records over the running turn and steers it with what you say, so a follow-up thought
+    // costs you nothing that was already in flight.
     const { orb, onInterrupt } = renderOverlay({ agentBusy: true, toolActive: false });
     fireEvent.click(orb);
     expect(speechInput.start).toHaveBeenCalled();
@@ -203,6 +203,44 @@ describe('VoiceModeOverlay full-message speech (streaming off, default)', () => 
       />,
     );
     expect(speechOutput.enqueue).toHaveBeenCalledWith('Let me read the file.');
+  });
+
+  it('speaks each stretch of text between tools while the agent runs the next one', async () => {
+    // A turn is text, tool, text, tool… Each stretch is a finished thought once the next tool
+    // starts, so it is spoken then rather than being held to the end of the whole turn — and the
+    // half-written stretch that follows stays held while that tool runs, because the release is the
+    // tool's rising edge and not "a tool is running".
+    const render = (text: string, toolActive: boolean) =>
+      rerender(
+        <VoiceModeOverlay
+          latestAssistant={mkAssistant(text, false)}
+          agentBusy
+          toolActive={toolActive}
+          disabled={false}
+          onPrompt={vi.fn()}
+          onInterrupt={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+    const { rerender } = renderOverlay({ agentBusy: true, toolActive: false, latestAssistant: null });
+    await Promise.resolve();
+
+    render('First I will read the file.', false);
+    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+
+    render('First I will read the file.', true);
+    expect(speechOutput.enqueue).toHaveBeenCalledWith('First I will read the file.');
+
+    // Second stretch arrives while that same tool is still running — still a half-written thought.
+    render('First I will read the file. Now I will patch it.', true);
+    expect(speechOutput.enqueue).toHaveBeenCalledTimes(1);
+
+    // Tool ends, the next one starts: the second stretch is finished and gets spoken while the
+    // agent is already busy with the new tool call.
+    render('First I will read the file. Now I will patch it.', false);
+    render('First I will read the file. Now I will patch it.', true);
+    expect(speechOutput.enqueue).toHaveBeenCalledWith(' Now I will patch it.');
+    expect(speechOutput.enqueue).toHaveBeenCalledTimes(2);
   });
 });
 

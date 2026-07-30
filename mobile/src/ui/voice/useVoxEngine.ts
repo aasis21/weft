@@ -139,9 +139,10 @@ export function useVoxEngine({
   // Read when a listening session opens, so it can't change the mode of a session already running.
   const continuousRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
-  // Delivery for the current listen cycle. When listening starts while a turn is already running,
-  // the captured prompt is queued for after that turn instead of barging into it.
-  const listenDeliveryRef = useRef<PromptDelivery>('immediate');
+  // Tool-run edge detection for full-message speech. `segmentEndedRef` says the text written so far
+  // is a finished thought and may be spoken even though the turn is still going.
+  const toolWasActiveRef = useRef(false);
+  const segmentEndedRef = useRef(false);
   // A prompt has been sent but the laptop hasn't reported the turn yet. Held so the settle effect
   // doesn't mistake "hasn't started" for "already finished".
   const awaitingTurnRef = useRef(false);
@@ -209,13 +210,7 @@ export function useVoxEngine({
       // Nudge the settle effect: if the turn never started, don't sit on Working… forever.
       setSettleEpoch((n) => n + 1);
     }, TURN_START_GRACE_MS);
-    const delivery = listenDeliveryRef.current;
-    listenDeliveryRef.current = 'immediate';
-    if (delivery === 'enqueue') {
-      void onPrompt(prompt, 'enqueue');
-    } else {
-      void onPrompt(prompt);
-    }
+    void onPrompt(prompt);
   }, [disabled, onPrompt, stopListening]);
 
   const armSilence = useCallback((): void => {
@@ -224,11 +219,10 @@ export function useVoxEngine({
     silenceTimerRef.current = window.setTimeout(sendCaptured, silenceMsRef.current);
   }, [clearSilence, sendCaptured]);
 
-  const startListening = useCallback((delivery: PromptDelivery = 'immediate'): void => {
+  const startListening = useCallback((): void => {
     if (disabled || pausedRef.current) return;
     cancelSpeech();
     clearSilence();
-    listenDeliveryRef.current = delivery;
     // Words carried over from the surface we just swapped away from survive exactly one start, so
     // expanding mid-sentence resumes the same sentence instead of starting a new one (#186).
     const seed = carriedRef.current;
@@ -257,10 +251,13 @@ export function useVoxEngine({
       startListening();
       return;
     }
-    // Interrupt a turn in flight. Previously only 'speaking' could be interrupted, so a tap while
-    // the agent worked was silently swallowed by startListening's busy-guard (#179).
+    // Talking over a running turn steers it. The mic opens without cancelling anything, the agent
+    // keeps working while you speak, and the prompt goes out as a normal immediate send -- which
+    // the SDK applies to the turn already in flight. Queueing is left to the composer's explicit
+    // queue button, because "wait until you're done" is a deliberate choice, not what a mid-turn
+    // interjection means. Before #179 this tap was swallowed by startListening's busy-guard.
     if (stateRef.current === 'working') {
-      startListening(agentBusy ? 'enqueue' : 'immediate');
+      startListening();
       return;
     }
     if (stateRef.current === 'listening') {
@@ -268,7 +265,7 @@ export function useVoxEngine({
       return;
     }
     startListening();
-  }, [agentBusy, cancelSpeech, onInterrupt, outputSpeaking, sendCaptured, startListening]);
+  }, [cancelSpeech, onInterrupt, outputSpeaking, sendCaptured, startListening]);
 
   useEffect(() => {
     onActiveChange?.(true);
@@ -462,19 +459,26 @@ export function useVoxEngine({
       skipCurrentReplyRef.current = false;
       sawReplyRef.current = false;
     }
-    // Full-message mode (streaming off): hold TTS while the agent is still *narrating* (busy, no tool
-    // running yet, not finalized) so speech is whole sentences instead of partial deltas. Release —
-    // and speak the narration so far — the moment a tool starts (toolActive), the message finalizes
-    // (assistant_message → item.final), or the turn goes idle. This is what makes Vox voice "I'll read
-    // the file…" BEFORE it flips to Working…, then speak the summary after (#181). Streaming on: speak
-    // each delta as it arrives.
+    // Full-message mode (streaming off) speaks a text segment only once that segment is finished,
+    // so you hear whole thoughts instead of half-written ones. A turn is usually text, tool, text,
+    // tool… and each stretch of text between tools is its own finished thing: the segment ends when
+    // the message finalizes, when a tool starts, or when the turn goes idle. Releasing on the tool's
+    // RISING EDGE rather than on `toolActive` being true is what makes that work — while a long tool
+    // runs, `toolActive` stays true, and a level check would let the *next* segment out word by word
+    // as it was still being written. Speech and the agent run independently, so a segment released
+    // here keeps being spoken while the agent moves on to the next tool call (#181).
+    const toolStarted = toolActive && !toolWasActiveRef.current;
+    if (toolStarted) segmentEndedRef.current = true;
+    if (!toolActive && toolWasActiveRef.current) segmentEndedRef.current = false;
+    toolWasActiveRef.current = toolActive;
     const holdForFullMessage =
-      !speakStreaming && latestAssistant.final !== true && agentBusy && !toolActive;
+      !speakStreaming && latestAssistant.final !== true && agentBusy && !segmentEndedRef.current;
     if (holdForFullMessage) return;
     if (latestAssistant.text.length <= cursor.offset) return;
     const delta = latestAssistant.text.slice(cursor.offset);
     cursor.offset = latestAssistant.text.length;
     if (!delta.trim()) return;
+    segmentEndedRef.current = false;
     sawReplyRef.current = true;
     enqueueSpeech(delta);
   }, [agentBusy, enqueueSpeech, latestAssistant, speakStreaming, toolActive]);
