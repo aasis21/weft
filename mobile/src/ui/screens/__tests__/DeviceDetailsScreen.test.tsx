@@ -135,3 +135,67 @@ describe('DeviceDetailsScreen — resumable-session filters', () => {
     expect(onResumeSession).toHaveBeenCalledWith('chan-1', 'c', 'allow-all', 'Weft pairing', '/home/me/weft');
   });
 });
+
+describe('DeviceDetailsScreen — the folder picker opens on the device default', () => {
+  const withDefault = (path: string, sessionList: StoredSession[] | undefined = sessions): ListenerDeviceState =>
+    makeDevice({
+      sessions: sessionList,
+      projects: [
+        { path: 'C:\\CLP\\Other', name: 'Other', isDefault: false },
+        { path, name: 'Default', isDefault: true },
+      ],
+    });
+
+  it('preselects the configured default instead of showing every folder', () => {
+    renderDetails({ device: withDefault('/home/me/weft') });
+
+    const picker = screen.getByLabelText(/filter recent sessions by folder/i) as HTMLSelectElement;
+    expect(picker.value).toBe('/home/me/weft');
+    expect(resumeTitles()).toEqual(['Weft pairing']);
+  });
+
+  it('counts the preselected default as filtering, so the count line and Clear are offered', () => {
+    renderDetails({ device: withDefault('/home/me/weft') });
+    expect(screen.getByText(/showing 1 of 3/i)).toBeTruthy();
+  });
+
+  it('returns to the default on Clear rather than widening to all folders', () => {
+    renderDetails({ device: withDefault('/home/me/weft') });
+    fireEvent.change(screen.getByLabelText(/filter recent sessions by folder/i), {
+      target: { value: 'C:\\CLP\\ModernOrder' },
+    });
+    expect(resumeTitles()).toEqual(['Fix the auth bug', 'Add retries']);
+
+    fireEvent.click(screen.getByRole('button', { name: /^clear$/i }));
+    expect((screen.getByLabelText(/filter recent sessions by folder/i) as HTMLSelectElement).value).toBe(
+      '/home/me/weft',
+    );
+  });
+
+  it('offers a default folder with nothing in it, and shows it empty rather than showing everything', () => {
+    renderDetails({ device: withDefault('C:\\CLP\\Untouched') });
+
+    const picker = screen.getByLabelText(/filter recent sessions by folder/i) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toContain('Untouched (0)');
+    expect(picker.value).toBe('C:\\CLP\\Untouched');
+    expect(resumeTitles()).toEqual([]);
+  });
+
+  it('does not yank a folder the user chose when a later projects refresh lands', () => {
+    const { rerender, props } = renderDetails({ device: withDefault('/home/me/weft') });
+    fireEvent.change(screen.getByLabelText(/filter recent sessions by folder/i), {
+      target: { value: 'C:\\CLP\\ModernOrder' },
+    });
+
+    rerender(<DeviceDetailsScreen {...props} device={withDefault('C:\\CLP\\Other')} />);
+
+    expect((screen.getByLabelText(/filter recent sessions by folder/i) as HTMLSelectElement).value).toBe(
+      'C:\\CLP\\ModernOrder',
+    );
+  });
+
+  it('leaves the picker on all folders when the device has no default configured', () => {
+    renderDetails();
+    expect((screen.getByLabelText(/filter recent sessions by folder/i) as HTMLSelectElement).value).toBe('all');
+  });
+});

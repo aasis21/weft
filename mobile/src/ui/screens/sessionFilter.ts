@@ -17,7 +17,7 @@ export const ALL_FOLDERS = 'all';
 /** Split a path on either separator — the laptop may be Windows or POSIX, and the phone has no way
  *  to know which, so both are always treated as separators. Trailing separators are ignored so
  *  `C:\repo\` and `C:\repo` produce the same label. */
-function basename(path: string): string {
+export function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
 }
@@ -49,16 +49,30 @@ function matchesQuery(session: StoredSession, terms: string[]): boolean {
 
 export interface SessionFilter {
   query: string;
-  /** An absolute cwd, or {@link ALL_FOLDERS}. A folder that is not in the current list is treated as
+  /** An absolute cwd, or {@link ALL_FOLDERS}. A folder that is not a real choice is treated as
    *  {@link ALL_FOLDERS} rather than matching nothing: refreshing can drop the folder you had
    *  selected, and silently showing an empty list reads as "the refresh broke" instead of "that
    *  folder is gone". */
   folder: string;
 }
 
-export function filterStoredSessions(sessions: StoredSession[], { query, folder }: SessionFilter): StoredSession[] {
+/**
+ * @param knownFolders The folders actually on offer in the picker. Without it, "real choice" is
+ *   inferred from the rows themselves, which cannot tell a folder that has gone away from one that
+ *   is simply empty — and a folder can be a legitimate selection with no sessions in it, which is
+ *   the normal state of a device's configured default before anything has been run there. Passing
+ *   the picker's own options keeps the list honest: an empty folder shows empty rather than
+ *   quietly widening back out to everything.
+ */
+export function filterStoredSessions(
+  sessions: StoredSession[],
+  { query, folder }: SessionFilter,
+  knownFolders?: readonly string[],
+): StoredSession[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const known = folder !== ALL_FOLDERS && sessions.some((s) => s.cwd === folder);
+  const known =
+    folder !== ALL_FOLDERS &&
+    (knownFolders ? knownFolders.includes(folder) : sessions.some((s) => s.cwd === folder));
   return sessions.filter((session) => {
     if (known && session.cwd !== folder) return false;
     return matchesQuery(session, terms);

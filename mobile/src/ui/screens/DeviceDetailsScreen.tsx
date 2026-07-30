@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { SpawnMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
@@ -11,7 +11,7 @@ import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { transportIdentity } from '@aasis21/weft-shared';
 import { useNowTick } from '@/ui/hooks/useNowTick';
-import { ALL_FOLDERS, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
+import { ALL_FOLDERS, basename, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -82,6 +82,10 @@ export function DeviceDetailsScreen({
   // already in memory, so filtering never re-hits the laptop — no debounce or refetch needed.
   const [sessionQuery, setSessionQuery] = useState('');
   const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
+  /** Whether the user has picked a folder themselves. The device's projects arrive asynchronously,
+   *  so the default can't be a useState initialiser — and once it has been applied, a later refresh
+   *  must not yank the picker back out from under a choice the user has made. */
+  const folderTouchedRef = useRef(false);
   const now = useNowTick();
   const status = deviceStatus(device);
   const lastSeen = formatLastSeen(device.lastSeenAt, now);
@@ -109,17 +113,36 @@ export function DeviceDetailsScreen({
   // session store is large and rewritten every turn, and the comms are async (the reply arrives
   // later via SESSION_LIST), so a blocking auto-load would just make the screen look stuck.
   const sessionsPulled = device.sessions !== undefined;
+  // The folder this laptop is configured to default to. Sessions are almost always resumed in the
+  // folder you work in, so the picker opens there rather than on the full unfiltered list.
+  const defaultFolder = device.projects.find((p) => p.isDefault)?.path ?? null;
   const folders = folderOptions(storeSessions);
+  // The default folder may have no rows in the store list (nothing resumable there yet, or the list
+  // hasn't been pulled). Offer it anyway, so the preselection is visible and honest instead of
+  // silently collapsing to "All folders".
+  const folderChoices =
+    defaultFolder && !folders.some((f) => f.path === defaultFolder)
+      ? [{ path: defaultFolder, label: basename(defaultFolder), count: 0 }, ...folders]
+      : folders;
   // A folder that vanished from a refresh is rendered as "All folders" rather than as a dangling
   // selection matching nothing (filterStoredSessions applies the same fallback to the rows).
-  const activeFolder = folders.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
+  const activeFolder = folderChoices.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
   const sessionFilter = { query: sessionQuery, folder: activeFolder };
-  const visibleSessions = filterStoredSessions(storeSessions, sessionFilter);
+  const visibleSessions = filterStoredSessions(storeSessions, sessionFilter, folderChoices.map((f) => f.path));
   const filtering = isFiltering(sessionFilter);
   const clearSessionFilters = (): void => {
     setSessionQuery('');
-    setSessionFolder(ALL_FOLDERS);
+    // Clear returns to the device's default folder, not to everything — that default is the state
+    // the screen opens in, so anything else would make Clear a different, wider view than the one
+    // the user started from.
+    folderTouchedRef.current = false;
+    setSessionFolder(defaultFolder ?? ALL_FOLDERS);
   };
+
+  useEffect(() => {
+    if (folderTouchedRef.current || !defaultFolder) return;
+    setSessionFolder(defaultFolder);
+  }, [defaultFolder]);
 
   return (
     <main className="weft-session join-session device-details-screen">
@@ -281,10 +304,13 @@ export function DeviceDetailsScreen({
                   className="session-filter-folder"
                   aria-label="Filter recent sessions by folder"
                   value={activeFolder}
-                  onChange={(e) => setSessionFolder(e.currentTarget.value)}
+                  onChange={(e) => {
+                    folderTouchedRef.current = true;
+                    setSessionFolder(e.currentTarget.value);
+                  }}
                 >
                   <option value={ALL_FOLDERS}>All folders ({storeSessions.length})</option>
-                  {folders.map((folder) => (
+                  {folderChoices.map((folder) => (
                     <option key={folder.path} value={folder.path} title={folder.path}>
                       {folder.label} ({folder.count})
                     </option>

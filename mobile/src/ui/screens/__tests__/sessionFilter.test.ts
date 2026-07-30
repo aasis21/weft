@@ -84,6 +84,22 @@ describe('filterStoredSessions', () => {
     expect(ids(filterStoredSessions(sessions, { query: '', folder: 'C:\\deleted' }))).toEqual(['a', 'b', 'c', 'd']);
   });
 
+  it('keeps an empty folder empty when the caller says it is a real choice', () => {
+    // A device's configured default folder is a legitimate selection before anything has ever been
+    // run there. Inferring "real" from the rows alone cannot tell it apart from a folder that has
+    // gone away, and widening back out to everything makes the picker look broken.
+    expect(ids(filterStoredSessions(sessions, { query: '', folder: 'C:\\fresh' }, ['C:\\fresh']))).toEqual([]);
+  });
+
+  it('still falls back when the folder is absent from the offered list', () => {
+    expect(ids(filterStoredSessions(sessions, { query: '', folder: 'C:\\deleted' }, ['/home/me/weft']))).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
+  });
+
   it('tolerates rows with null metadata', () => {
     const sparse = [session({ sessionId: 'n', title: null, repository: null, branch: null, cwd: 'C:\\repo' })];
     expect(ids(filterStoredSessions(sparse, { query: 'repo', folder: ALL_FOLDERS }))).toEqual(['n']);
