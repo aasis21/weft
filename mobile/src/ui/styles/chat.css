@@ -2478,6 +2478,44 @@
   padding: 0;
 }
 
+/* Narrowing controls for the resumable-session list. Search takes the flexible share and the folder
+   picker is capped, so a long absolute path can never squeeze the search box off a narrow phone. */
+.weft-session .session-filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.weft-session .session-filter-search,
+.weft-session .session-filter-folder {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.weft-session .session-filter-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.weft-session .session-filter-folder {
+  flex: 0 1 40%;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.weft-session .session-filter-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
 .weft-session .device-session-open {
   display: flex;
   flex-direction: column;

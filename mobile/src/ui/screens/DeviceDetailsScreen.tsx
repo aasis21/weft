@@ -11,6 +11,7 @@ import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { transportIdentity } from '@aasis21/weft-shared';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { ALL_FOLDERS, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -77,6 +78,10 @@ export function DeviceDetailsScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resumeMode, setResumeMode] = useState<SpawnMode>('allow-all');
+  // Client-side narrowing of the resumable-session list. The list is capped at SESSION_LIST_MAX and
+  // already in memory, so filtering never re-hits the laptop — no debounce or refetch needed.
+  const [sessionQuery, setSessionQuery] = useState('');
+  const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
   const now = useNowTick();
   const status = deviceStatus(device);
   const lastSeen = formatLastSeen(device.lastSeenAt, now);
@@ -104,6 +109,17 @@ export function DeviceDetailsScreen({
   // session store is large and rewritten every turn, and the comms are async (the reply arrives
   // later via SESSION_LIST), so a blocking auto-load would just make the screen look stuck.
   const sessionsPulled = device.sessions !== undefined;
+  const folders = folderOptions(storeSessions);
+  // A folder that vanished from a refresh is rendered as "All folders" rather than as a dangling
+  // selection matching nothing (filterStoredSessions applies the same fallback to the rows).
+  const activeFolder = folders.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
+  const sessionFilter = { query: sessionQuery, folder: activeFolder };
+  const visibleSessions = filterStoredSessions(storeSessions, sessionFilter);
+  const filtering = isFiltering(sessionFilter);
+  const clearSessionFilters = (): void => {
+    setSessionQuery('');
+    setSessionFolder(ALL_FOLDERS);
+  };
 
   return (
     <main className="weft-session join-session device-details-screen">
@@ -251,34 +267,71 @@ export function DeviceDetailsScreen({
                   : 'Tap Load to fetch this laptop’s recent sessions.'}
             </p>
           ) : (
-            <ul className="devices-list device-sessions-list">
-              {storeSessions.map((s) => {
-                const live = liveBySessionId.get(s.sessionId);
-                const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
-                const when = formatLastSeen(s.updatedAt ?? undefined, now);
-                const label = s.title || s.cwd;
-                return (
-                  <li key={s.sessionId} className="device-card device-session-row">
-                    <button
-                      type="button"
-                      className="device-session-open"
-                      onClick={() =>
-                        live
-                          ? onOpenSession(live.meta.channelId)
-                          : onResumeSession(device.channelId, s.sessionId, resumeMode, label, s.cwd)
-                      }
-                    >
-                      <span className="device-card-name">{label}</span>
-                      <span className="device-card-sub device-session-status">
-                        {live ? 'live · Open' : 'Resume'}
-                        {subtitle ? ` · ${subtitle}` : ''}
-                        {when ? ` · ${when}` : ''}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <div className="session-filter-bar">
+                <input
+                  type="search"
+                  className="session-filter-search"
+                  placeholder="Search title, repo or branch"
+                  aria-label="Search recent sessions"
+                  value={sessionQuery}
+                  onChange={(e) => setSessionQuery(e.currentTarget.value)}
+                />
+                <select
+                  className="session-filter-folder"
+                  aria-label="Filter recent sessions by folder"
+                  value={activeFolder}
+                  onChange={(e) => setSessionFolder(e.currentTarget.value)}
+                >
+                  <option value={ALL_FOLDERS}>All folders ({storeSessions.length})</option>
+                  {folders.map((folder) => (
+                    <option key={folder.path} value={folder.path} title={folder.path}>
+                      {folder.label} ({folder.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {filtering ? (
+                <p className="device-card-sub session-filter-count">
+                  Showing {visibleSessions.length} of {storeSessions.length}
+                  <button type="button" className="session-link-btn" onClick={clearSessionFilters}>
+                    Clear
+                  </button>
+                </p>
+              ) : null}
+              {visibleSessions.length === 0 ? (
+                <p className="device-card-sub">No sessions match this filter.</p>
+              ) : (
+                <ul className="devices-list device-sessions-list">
+                  {visibleSessions.map((s) => {
+                    const live = liveBySessionId.get(s.sessionId);
+                    const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
+                    const when = formatLastSeen(s.updatedAt ?? undefined, now);
+                    const label = s.title || s.cwd;
+                    return (
+                      <li key={s.sessionId} className="device-card device-session-row">
+                        <button
+                          type="button"
+                          className="device-session-open"
+                          onClick={() =>
+                            live
+                              ? onOpenSession(live.meta.channelId)
+                              : onResumeSession(device.channelId, s.sessionId, resumeMode, label, s.cwd)
+                          }
+                        >
+                          <span className="device-card-name">{label}</span>
+                          <span className="device-card-sub device-session-status">
+                            {live ? 'live · Open' : 'Resume'}
+                            {subtitle ? ` · ${subtitle}` : ''}
+                            {when ? ` · ${when}` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
           )}
         </section>
 
