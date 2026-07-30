@@ -90,19 +90,23 @@ describe('VoiceModeOverlay one busy state (#183)', () => {
   });
 });
 
-describe('VoiceModeOverlay interrupt while busy (#179)', () => {
-  it('interrupts the agent when the orb is tapped with no tool running', () => {
+describe('VoiceModeOverlay tapping the orb while busy (#179)', () => {
+  it('opens the mic without cutting the agent off when no tool is running', () => {
+    // Tapping used to be swallowed by startListening's busy-guard, then was made to interrupt.
+    // It now captures alongside the running turn instead: the prompt is queued for after it, so a
+    // follow-up thought costs you nothing that was already in flight.
     const { orb, onInterrupt } = renderOverlay({ agentBusy: true, toolActive: false });
     fireEvent.click(orb);
-    expect(onInterrupt).toHaveBeenCalledTimes(1);
+    expect(speechInput.start).toHaveBeenCalled();
     expect(speechOutput.cancel).toHaveBeenCalled();
+    expect(onInterrupt).not.toHaveBeenCalled();
   });
 
-  it('interrupts the agent when the orb is tapped during working', () => {
+  it('does the same while a tool is running', () => {
     const { orb, onInterrupt } = renderOverlay({ agentBusy: true, toolActive: true });
     fireEvent.click(orb);
-    expect(onInterrupt).toHaveBeenCalledTimes(1);
     expect(speechInput.start).toHaveBeenCalled();
+    expect(onInterrupt).not.toHaveBeenCalled();
   });
 });
 

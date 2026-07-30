@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PromptDelivery } from '@aasis21/weft-shared';
 import {
   getSettings,
   getVoiceAutoRelisten,
@@ -40,7 +41,7 @@ export interface VoxEngineOptions {
   agentBusy: boolean;
   toolActive?: boolean;
   disabled: boolean;
-  onPrompt(text: string): Promise<void> | void;
+  onPrompt(text: string, delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onActiveChange?(active: boolean): void;
   /** Report the live state so the header pill can follow the composer (#184). */
@@ -138,6 +139,9 @@ export function useVoxEngine({
   // Read when a listening session opens, so it can't change the mode of a session already running.
   const continuousRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
+  // Delivery for the current listen cycle. When listening starts while a turn is already running,
+  // the captured prompt is queued for after that turn instead of barging into it.
+  const listenDeliveryRef = useRef<PromptDelivery>('immediate');
   // A prompt has been sent but the laptop hasn't reported the turn yet. Held so the settle effect
   // doesn't mistake "hasn't started" for "already finished".
   const awaitingTurnRef = useRef(false);
@@ -205,7 +209,13 @@ export function useVoxEngine({
       // Nudge the settle effect: if the turn never started, don't sit on Working… forever.
       setSettleEpoch((n) => n + 1);
     }, TURN_START_GRACE_MS);
-    void onPrompt(prompt);
+    const delivery = listenDeliveryRef.current;
+    listenDeliveryRef.current = 'immediate';
+    if (delivery === 'enqueue') {
+      void onPrompt(prompt, 'enqueue');
+    } else {
+      void onPrompt(prompt);
+    }
   }, [disabled, onPrompt, stopListening]);
 
   const armSilence = useCallback((): void => {
@@ -214,10 +224,11 @@ export function useVoxEngine({
     silenceTimerRef.current = window.setTimeout(sendCaptured, silenceMsRef.current);
   }, [clearSilence, sendCaptured]);
 
-  const startListening = useCallback((): void => {
+  const startListening = useCallback((delivery: PromptDelivery = 'immediate'): void => {
     if (disabled || pausedRef.current) return;
     cancelSpeech();
     clearSilence();
+    listenDeliveryRef.current = delivery;
     // Words carried over from the surface we just swapped away from survive exactly one start, so
     // expanding mid-sentence resumes the same sentence instead of starting a new one (#186).
     const seed = carriedRef.current;
@@ -249,9 +260,7 @@ export function useVoxEngine({
     // Interrupt a turn in flight. Previously only 'speaking' could be interrupted, so a tap while
     // the agent worked was silently swallowed by startListening's busy-guard (#179).
     if (stateRef.current === 'working') {
-      cancelSpeech();
-      onInterrupt();
-      startListening();
+      startListening(agentBusy ? 'enqueue' : 'immediate');
       return;
     }
     if (stateRef.current === 'listening') {
@@ -259,7 +268,7 @@ export function useVoxEngine({
       return;
     }
     startListening();
-  }, [cancelSpeech, onInterrupt, outputSpeaking, sendCaptured, startListening]);
+  }, [agentBusy, cancelSpeech, onInterrupt, outputSpeaking, sendCaptured, startListening]);
 
   useEffect(() => {
     onActiveChange?.(true);

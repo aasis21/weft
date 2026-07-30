@@ -638,7 +638,7 @@ export function SessionScreen({
           agentBusy={agentBusy}
           toolActive={toolActive}
           disabled={ended || offline}
-          onPrompt={onPrompt}
+          onPrompt={(text, delivery) => onPrompt(text, undefined, delivery)}
           onInterrupt={onInterrupt}
           onActiveChange={handleVoiceModeActive}
           onStateChange={setVoxState}

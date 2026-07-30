@@ -61,6 +61,26 @@ afterEach(() => {
 });
 
 describe('Vox keeps its turn (#195)', () => {
+  it('records while the agent is busy and queues the prompt instead of interrupting', () => {
+    vi.useFakeTimers();
+    const onPrompt = vi.fn();
+    const onInterrupt = vi.fn();
+    const { panel, getByRole } = renderDock({ agentBusy: true, onPrompt, onInterrupt });
+
+    expect(panel.getAttribute('data-state')).toBe('working');
+
+    fireEvent.click(getByRole('button', { name: /working/i }));
+    expect(panel.getAttribute('data-state')).toBe('listening');
+    expect(onInterrupt).not.toHaveBeenCalled();
+
+    speak('run this after current task', true);
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+
+    expect(onPrompt).toHaveBeenCalledWith('run this after current task', 'enqueue');
+  });
+
   it('stays on working after sending, instead of reopening the mic before the turn starts', () => {
     vi.useFakeTimers();
     const { panel, onPrompt } = renderDock();
