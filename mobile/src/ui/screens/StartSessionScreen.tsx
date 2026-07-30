@@ -82,6 +82,7 @@ export function StartSessionScreen({
 }: StartSessionScreenProps): JSX.Element {
   const [selectedId, setSelectedId] = useState<string>(initialChannelId ?? '');
   const [startMode, setStartMode] = useState<StartMode>(initialMode ?? 'new');
+  const resuming = startMode === 'resume';
   const [projectName, setProjectName] = useState('');
   // Permission mode is shared by both tabs and opens on the safe one. It used to reset to allow-all
   // on every visit to the resume list, which quietly re-granted full permissions to a session you
@@ -94,6 +95,11 @@ export function StartSessionScreen({
    *  offer the override rather than making the user find the row again. */
   const [blocked, setBlocked] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** Arriving with a device already chosen (the "Start session" / "Resume a session" buttons on a
+   *  device row) means the device question is already answered, so step 1 opens collapsed to a
+   *  single summary row. Coming in cold from home there is nothing to summarise, so it opens as
+   *  the full list. Either way "Change" re-expands it — this only picks the starting state. */
+  const [deviceOpen, setDeviceOpen] = useState(!initialChannelId);
   // --- resume-tab state -------------------------------------------------------------------------
   const [sessionQuery, setSessionQuery] = useState('');
   const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
@@ -102,6 +108,11 @@ export function StartSessionScreen({
    *  so the default can't be a useState initialiser — and once it has been applied, a later refresh
    *  must not yank the picker back out from under a choice the user has made. */
   const folderTouchedRef = useRef(false);
+  /** Devices whose resumable list this screen has already asked for. The reply always sets an
+   *  array — an empty one when the laptop has no sessions — so without this the auto-load would
+   *  see "still nothing" and re-ask forever. Keyed by device so switching devices loads the new
+   *  one, and a manual Refresh stays available for a genuine re-pull. */
+  const autoLoadedRef = useRef<Set<string>>(new Set());
   const now = useNowTick();
 
   const sortedDevices = sortDevices(devices);
@@ -122,6 +133,24 @@ export function StartSessionScreen({
       ?? selected.projects[0];
     setProjectName(defaultProject?.name ?? '');
   }, [selected?.channelId, selected?.projects, selected?.lastProjectName]);
+
+  // Opening the Resume tab is itself the request to see what is resumable, so pull the list rather
+  // than parking behind a Load button — the empty and loading states already cover the wait. Only
+  // while the device is connected: asking an offline laptop just produces a timeout.
+  useEffect(() => {
+    if (!resuming || !selected?.connected) return;
+    if (selected.sessions !== undefined || selected.sessionsLoading) return;
+    if (autoLoadedRef.current.has(selected.channelId)) return;
+    autoLoadedRef.current.add(selected.channelId);
+    onRefreshSessions(selected.channelId);
+  }, [
+    resuming,
+    selected?.channelId,
+    selected?.connected,
+    selected?.sessions,
+    selected?.sessionsLoading,
+    onRefreshSessions,
+  ]);
 
   // --- resume derivations -----------------------------------------------------------------------
   const storeSessions = selected?.sessions ?? [];
@@ -224,7 +253,6 @@ export function StartSessionScreen({
     ? 'No devices yet'
     : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'} · ${onlineCount} online`;
 
-  const resuming = startMode === 'resume';
   const forcing = blocked !== null && blocked === chosenSession?.sessionId;
   const ctaDisabled = busy
     || !selected
@@ -309,19 +337,35 @@ export function StartSessionScreen({
             <section className="start-section">
               <h3 className="start-section-title">
                 1. Device
-                {sortedDevices.length > 1 ? <span className="start-section-count">{sortedDevices.length}</span> : null}
-                <button
-                  type="button"
-                  className="start-add-device"
-                  onClick={onScanListener}
-                  aria-label="Add a new device"
-                >
-                  <span className="device-action-icon" aria-hidden="true"><PlusGlyph /></span>
-                  Add device
-                </button>
+                {sortedDevices.length > 1 && deviceOpen
+                  ? <span className="start-section-count">{sortedDevices.length}</span>
+                  : null}
+                {deviceOpen || sortedDevices.length < 2 ? (
+                  <button
+                    type="button"
+                    className="start-add-device"
+                    onClick={onScanListener}
+                    aria-label="Add a new device"
+                  >
+                    <span className="device-action-icon" aria-hidden="true"><PlusGlyph /></span>
+                    Add device
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="session-link-btn"
+                    onClick={() => setDeviceOpen(true)}
+                  >
+                    Change
+                  </button>
+                )}
               </h3>
-              <div className="start-device-list" role="radiogroup" aria-label="Device">
-                {sortedDevices.map((device) => {
+              <div
+                className="start-device-list"
+                role={deviceOpen ? 'radiogroup' : undefined}
+                aria-label={deviceOpen ? 'Device' : undefined}
+              >
+                {(deviceOpen ? sortedDevices : sortedDevices.filter((d) => d.channelId === selected?.channelId)).map((device) => {
                   const status = deviceStatus(device);
                   const isSelected = device.channelId === selected?.channelId;
                   const lastSeen = formatLastSeen(device.lastSeenAt, now);
@@ -329,10 +373,10 @@ export function StartSessionScreen({
                     <button
                       key={device.channelId}
                       type="button"
-                      role="radio"
-                      aria-checked={isSelected}
+                      role={deviceOpen ? 'radio' : undefined}
+                      aria-checked={deviceOpen ? isSelected : undefined}
                       className={`start-device-card${isSelected ? ' selected' : ''}`}
-                      onClick={() => setSelectedId(device.channelId)}
+                      onClick={() => (deviceOpen ? setSelectedId(device.channelId) : setDeviceOpen(true))}
                     >
                       <DeviceAvatar tone={status.tone} />
                       <span className="start-device-info">
@@ -400,7 +444,9 @@ export function StartSessionScreen({
                       ? 'Loading sessions…'
                       : sessionsPulled
                         ? 'No resumable sessions found on this device.'
-                        : 'Tap Load to fetch this laptop’s recent sessions.'}
+                        : selected?.connected
+                          ? 'Loading sessions…'
+                          : 'Device is offline — reconnect it to see resumable sessions.'}
                   </p>
                 ) : (
                   <>

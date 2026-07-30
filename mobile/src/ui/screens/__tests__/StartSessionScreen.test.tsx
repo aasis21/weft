@@ -136,8 +136,7 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
     expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('names the device in the call to action, and says which thing it will do', () => {
-    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
+  it('names the device in the call to action, and says which thing it will do', () => {    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
     expect(cta().textContent).toMatch(/start on macbook pro/i);
 
     fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
@@ -146,14 +145,85 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
   });
 });
 
+describe('StartSessionScreen — the device step folds away once it is answered', () => {
+  const second = () => makeDevice({ channelId: 'chan-2', name: 'ThinkPad', isDefault: false, deviceId: 'device-2' });
+
+  it('collapses to the chosen device when you arrive from that device', () => {
+    // Coming in from a device row, the device question is already answered — showing the whole
+    // list again just pushes the folder and session steps below the fold.
+    renderScreen({ devices: [makeDevice(), second()], initialChannelId: 'chan-2', initialMode: 'resume' });
+
+    expect(screen.queryByRole('radiogroup', { name: /^device$/i })).toBeNull();
+    expect(screen.getByText('ThinkPad')).toBeTruthy();
+    expect(screen.queryByText('MacBook Pro')).toBeNull();
+  });
+
+  it('re-opens the full list on Change, and keeps the arrival choice until you make another', () => {
+    renderScreen({ devices: [makeDevice(), second()], initialChannelId: 'chan-2' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
+    expect(screen.getByRole('radiogroup', { name: /^device$/i })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /thinkpad/i })).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByRole('radio', { name: /macbook pro/i }));
+    expect(cta().textContent).toMatch(/macbook pro/i);
+  });
+
+  it('stays open when you arrive without a device, since there is nothing to summarise', () => {
+    renderScreen({ devices: [makeDevice(), second()] });
+    expect(screen.getByRole('radiogroup', { name: /^device$/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^change$/i })).toBeNull();
+  });
+
+  it('offers Add device rather than Change when there is nothing else to change to', () => {
+    renderScreen({ devices: [makeDevice()], initialChannelId: 'chan-1' });
+    expect(screen.queryByRole('button', { name: /^change$/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /add a new device/i })).toBeTruthy();
+  });
+});
+
 describe('StartSessionScreen — the resumable list', () => {
-  it('asks before loading, because the store is large and the reply is asynchronous', () => {
+  it('pulls the list itself when the Resume tab opens, because opening it is the request', () => {
+    // It used to park behind a Load button, which made the tab arrive empty and look broken.
     const onRefreshSessions = vi.fn();
     renderScreen({ devices: [makeDevice({ sessions: undefined })], initialMode: 'resume', onRefreshSessions });
 
-    expect(screen.getByText(/tap load to fetch/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /^load$/i }));
     expect(onRefreshSessions).toHaveBeenCalledWith('chan-1');
+    expect(screen.getByText(/loading sessions/i)).toBeTruthy();
+  });
+
+  it('does not re-ask a device that answered with nothing', () => {
+    // The reply always sets an array, empty included, so "still no sessions" is a real answer and
+    // not a reason to ask again — otherwise an empty laptop is polled forever.
+    const onRefreshSessions = vi.fn();
+    const { rerender, props } = renderScreen({
+      devices: [makeDevice({ sessions: undefined })],
+      initialMode: 'resume',
+      onRefreshSessions,
+    });
+    rerender(<StartSessionScreen {...props} devices={[makeDevice({ sessions: [] })]} />);
+    rerender(<StartSessionScreen {...props} devices={[makeDevice({ sessions: [] })]} />);
+
+    expect(onRefreshSessions).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/no resumable sessions found/i)).toBeTruthy();
+  });
+
+  it('leaves an offline device alone rather than waiting on a reply that cannot come', () => {
+    const onRefreshSessions = vi.fn();
+    renderScreen({
+      devices: [makeDevice({ sessions: undefined, connected: false })],
+      initialMode: 'resume',
+      onRefreshSessions,
+    });
+
+    expect(onRefreshSessions).not.toHaveBeenCalled();
+    expect(screen.getByText(/device is offline/i)).toBeTruthy();
+  });
+
+  it('does not pull anything while the New tab is showing', () => {
+    const onRefreshSessions = vi.fn();
+    renderScreen({ devices: [makeDevice({ sessions: undefined })], onRefreshSessions });
+    expect(onRefreshSessions).not.toHaveBeenCalled();
   });
 
   it('narrows the list as you type and restores it when cleared', () => {
