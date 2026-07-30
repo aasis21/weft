@@ -54,6 +54,7 @@ export function VoxDock({
 }: VoxDockProps): JSX.Element {
   const {
     state,
+    speakingWhileWorking,
     caption,
     status,
     orbGlyph,
@@ -129,6 +130,7 @@ export function VoxDock({
     <div
       className="vox-dock voice-panel"
       data-state={paused ? 'idle' : state}
+      data-working={speakingWhileWorking ? 'true' : undefined}
       data-paused={paused ? 'true' : undefined}
       ref={panelRef}
       onTouchStart={onTouchStart}

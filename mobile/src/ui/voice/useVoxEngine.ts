@@ -62,6 +62,8 @@ export interface VoxEngineOptions {
 
 export interface VoxEngine {
   state: VoiceState;
+  /** Vox has the floor while the laptop is still on its turn — the two overlap by design now. */
+  speakingWhileWorking: boolean;
   caption: string;
   status: string;
   orbGlyph: string;
@@ -139,10 +141,6 @@ export function useVoxEngine({
   // Read when a listening session opens, so it can't change the mode of a session already running.
   const continuousRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
-  // Tool-run edge detection for full-message speech. `segmentEndedRef` says the text written so far
-  // is a finished thought and may be spoken even though the turn is still going.
-  const toolWasActiveRef = useRef(false);
-  const segmentEndedRef = useRef(false);
   // A prompt has been sent but the laptop hasn't reported the turn yet. Held so the settle effect
   // doesn't mistake "hasn't started" for "already finished".
   const awaitingTurnRef = useRef(false);
@@ -247,7 +245,10 @@ export function useVoxEngine({
   const handleOrb = useCallback((): void => {
     if (stateRef.current === 'speaking' || outputSpeaking) {
       cancelSpeech();
-      onInterrupt();
+      // Only cut the turn short when there is no turn left to protect. Speech routinely outlives the
+      // work that produced it now, so a tap here usually means "stop talking", not "throw away what
+      // you are doing" — and killing a running turn is not something a silence gesture should do.
+      if (!agentBusy) onInterrupt();
       startListening();
       return;
     }
@@ -265,7 +266,7 @@ export function useVoxEngine({
       return;
     }
     startListening();
-  }, [cancelSpeech, onInterrupt, outputSpeaking, sendCaptured, startListening]);
+  }, [agentBusy, cancelSpeech, onInterrupt, outputSpeaking, sendCaptured, startListening]);
 
   useEffect(() => {
     onActiveChange?.(true);
@@ -459,29 +460,22 @@ export function useVoxEngine({
       skipCurrentReplyRef.current = false;
       sawReplyRef.current = false;
     }
-    // Full-message mode (streaming off) speaks a text segment only once that segment is finished,
-    // so you hear whole thoughts instead of half-written ones. A turn is usually text, tool, text,
-    // tool… and each stretch of text between tools is its own finished thing: the segment ends when
-    // the message finalizes, when a tool starts, or when the turn goes idle. Releasing on the tool's
-    // RISING EDGE rather than on `toolActive` being true is what makes that work — while a long tool
-    // runs, `toolActive` stays true, and a level check would let the *next* segment out word by word
-    // as it was still being written. Speech and the agent run independently, so a segment released
-    // here keeps being spoken while the agent moves on to the next tool call (#181).
-    const toolStarted = toolActive && !toolWasActiveRef.current;
-    if (toolStarted) segmentEndedRef.current = true;
-    if (!toolActive && toolWasActiveRef.current) segmentEndedRef.current = false;
-    toolWasActiveRef.current = toolActive;
-    const holdForFullMessage =
-      !speakStreaming && latestAssistant.final !== true && agentBusy && !segmentEndedRef.current;
-    if (holdForFullMessage) return;
+    // Hand text over the moment it lands, tool call or not. The speech queue is the thing that
+    // decides what is *speakable*: `enqueue` splits on sentence boundaries and keeps any trailing
+    // fragment buffered, so releasing early can never produce half a sentence -- which means
+    // waiting for the segment to finish was pure delay. And delay is expensive here, because
+    // speaking takes real time: while the queue drains the agent has already written the next few
+    // lines and started another tool, so anything held just accumulates as silence with a backlog
+    // behind it. Vox therefore keeps talking straight through tool calls (#181).
     if (latestAssistant.text.length <= cursor.offset) return;
     const delta = latestAssistant.text.slice(cursor.offset);
     cursor.offset = latestAssistant.text.length;
     if (!delta.trim()) return;
-    segmentEndedRef.current = false;
     sawReplyRef.current = true;
     enqueueSpeech(delta);
-  }, [agentBusy, enqueueSpeech, latestAssistant, speakStreaming, toolActive]);
+    // Streaming on: don't even wait for the sentence to close — say the words as they generate.
+    if (speakStreaming) flushSpeech();
+  }, [enqueueSpeech, flushSpeech, latestAssistant, speakStreaming]);
 
   // Speak whatever is left in the buffer once the turn is over. This has to watch the reply as well
   // as the busy flag: a turn can go idle before its last text lands, and keying only on `agentBusy`
@@ -542,11 +536,20 @@ export function useVoxEngine({
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
     if (!outputSupported && (state === 'speaking' || state === 'working')) return 'Speech output unavailable — showing text only.';
     if (paused) return 'Paused — answer the request above';
+    // Speaking and working are two different machines: the phone's voice and the laptop's turn. They
+    // now overlap as a matter of course, so the label says both rather than letting the voice hide
+    // the fact that work is still running.
+    if (state === 'speaking' && agentBusy) return 'Speaking — agent still working';
     return LABELS[state];
-  }, [inputSupported, outputSupported, paused, state]);
+  }, [agentBusy, inputSupported, outputSupported, paused, state]);
 
   const orbGlyph =
     state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : '🎙';
+
+  /** Vox has the floor while the laptop is still on its turn. Surfaced so the dock and the overlay
+   *  can keep the working indicator up underneath the speaking orb, instead of the two states
+   *  taking turns and flickering as each segment drains. */
+  const speakingWhileWorking = state === 'speaking' && agentBusy;
 
   const replyText = latestAssistant?.text ?? '';
   const showReply = (state === 'working' || state === 'speaking') && replyText.trim().length > 0;
@@ -559,6 +562,7 @@ export function useVoxEngine({
 
   return {
     state,
+    speakingWhileWorking,
     caption,
     status,
     orbGlyph,

@@ -186,7 +186,7 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
             <div className="settings-row-head">
               <div>
                 <h2 id="settings-voice-stream-title">Stream spoken reply</h2>
-                <p>On: speak words as they generate. Off: speak each stretch of the reply once it's finished — you still hear it while the agent works on (more natural).</p>
+                <p>Vox speaks each sentence as soon as it lands, and keeps talking while the agent works on. On: also speak the last half-sentence without waiting for it to finish.</p>
               </div>
               <label className="settings-switch">
                 <input

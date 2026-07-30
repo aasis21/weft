@@ -44,6 +44,8 @@ function renderOverlay(props: Partial<React.ComponentProps<typeof VoiceModeOverl
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  speechOutput.speaking = false;
+  speechOutput.pending = false;
 });
 
 describe('VoiceModeOverlay hands-free entry', () => {
@@ -110,13 +112,16 @@ describe('VoiceModeOverlay tapping the orb while busy (#179)', () => {
   });
 });
 
-describe('VoiceModeOverlay full-message speech (streaming off, default)', () => {
-  it('does not speak partial deltas while the message is still streaming', async () => {
+describe('VoiceModeOverlay speech keeps up with the agent (streaming off, default)', () => {
+  it('hands text to the speech queue as it arrives, without waiting for the message to finalize', async () => {
+    // The queue is what decides what is speakable — it splits on sentence boundaries and buffers
+    // any trailing fragment — so holding text here only ever added delay. Speaking takes real time,
+    // and a held backlog means silence while the agent races ahead.
     const { rerender } = renderOverlay({ agentBusy: true, latestAssistant: null });
     await Promise.resolve();
     rerender(
       <VoiceModeOverlay
-        latestAssistant={mkAssistant('Hello wor', false)}
+        latestAssistant={mkAssistant('Hello world. And ano', false)}
         agentBusy
         toolActive={false}
         disabled={false}
@@ -125,39 +130,35 @@ describe('VoiceModeOverlay full-message speech (streaming off, default)', () => 
         onClose={vi.fn()}
       />,
     );
-    expect(speechOutput.enqueue).not.toHaveBeenCalled();
+    expect(speechOutput.enqueue).toHaveBeenCalledWith('Hello world. And ano');
   });
 
-  it('speaks the whole message once it is finalized (assistant_message)', async () => {
-    const { rerender } = renderOverlay({ agentBusy: true, latestAssistant: null });
+  it('keeps feeding the queue while a tool runs', async () => {
+    const { rerender } = renderOverlay({ agentBusy: true, toolActive: false, latestAssistant: null });
     await Promise.resolve();
-    rerender(
-      <VoiceModeOverlay
-        latestAssistant={mkAssistant('Hello wor', false)}
-        agentBusy
-        toolActive={false}
-        disabled={false}
-        onPrompt={vi.fn()}
-        onInterrupt={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-    expect(speechOutput.enqueue).not.toHaveBeenCalled();
-    rerender(
-      <VoiceModeOverlay
-        latestAssistant={mkAssistant('Hello world.', true)}
-        agentBusy
-        toolActive={false}
-        disabled={false}
-        onPrompt={vi.fn()}
-        onInterrupt={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-    expect(speechOutput.enqueue).toHaveBeenCalledWith('Hello world.');
+    const render = (text: string, toolActive: boolean) =>
+      rerender(
+        <VoiceModeOverlay
+          latestAssistant={mkAssistant(text, false)}
+          agentBusy
+          toolActive={toolActive}
+          disabled={false}
+          onPrompt={vi.fn()}
+          onInterrupt={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+    render('First I will read the file.', false);
+    expect(speechOutput.enqueue).toHaveBeenCalledWith('First I will read the file.');
+
+    // A tool starts and more text lands while it is still running — both keep flowing.
+    render('First I will read the file. Now I will patch it.', true);
+    expect(speechOutput.enqueue).toHaveBeenCalledWith(' Now I will patch it.');
+    expect(speechOutput.enqueue).toHaveBeenCalledTimes(2);
   });
 
-  it('never speaks an empty / whitespace-only finalized message', async () => {
+  it('never speaks an empty / whitespace-only message', async () => {
     const { rerender } = renderOverlay({ agentBusy: true, latestAssistant: null });
     await Promise.resolve();
     rerender(
@@ -173,74 +174,33 @@ describe('VoiceModeOverlay full-message speech (streaming off, default)', () => 
     );
     expect(speechOutput.enqueue).not.toHaveBeenCalled();
   });
+});
 
-  it('speaks the held narration when a tool starts, before showing Working…', async () => {
-    const { rerender } = renderOverlay({ agentBusy: true, toolActive: false, latestAssistant: null });
-    await Promise.resolve();
-    // Narration streams in (not finalized) while the agent is busy — held.
-    rerender(
-      <VoiceModeOverlay
-        latestAssistant={mkAssistant('Let me read the file.', false)}
-        agentBusy
-        toolActive={false}
-        disabled={false}
-        onPrompt={vi.fn()}
-        onInterrupt={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-    expect(speechOutput.enqueue).not.toHaveBeenCalled();
-    // A tool starts — the narration so far is spoken first.
-    rerender(
-      <VoiceModeOverlay
-        latestAssistant={mkAssistant('Let me read the file.', false)}
-        agentBusy
-        toolActive
-        disabled={false}
-        onPrompt={vi.fn()}
-        onInterrupt={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
-    expect(speechOutput.enqueue).toHaveBeenCalledWith('Let me read the file.');
+describe('VoiceModeOverlay speaking over a running turn', () => {
+  it('says that the agent is still working, rather than letting the voice hide it', () => {
+    speechOutput.speaking = true;
+    const { panel } = renderOverlay({ agentBusy: true, toolActive: false });
+    expect(panel.getAttribute('data-state')).toBe('speaking');
+    expect(panel.getAttribute('data-working')).toBe('true');
+    expect(panel.textContent).toContain('Speaking — agent still working');
   });
 
-  it('speaks each stretch of text between tools while the agent runs the next one', async () => {
-    // A turn is text, tool, text, tool… Each stretch is a finished thought once the next tool
-    // starts, so it is spoken then rather than being held to the end of the whole turn — and the
-    // half-written stretch that follows stays held while that tool runs, because the release is the
-    // tool's rising edge and not "a tool is running".
-    const render = (text: string, toolActive: boolean) =>
-      rerender(
-        <VoiceModeOverlay
-          latestAssistant={mkAssistant(text, false)}
-          agentBusy
-          toolActive={toolActive}
-          disabled={false}
-          onPrompt={vi.fn()}
-          onInterrupt={vi.fn()}
-          onClose={vi.fn()}
-        />,
-      );
-    const { rerender } = renderOverlay({ agentBusy: true, toolActive: false, latestAssistant: null });
-    await Promise.resolve();
+  it('stops the speech without killing the turn behind it', () => {
+    // A tap during speech means "stop talking". It used to also interrupt, which was survivable
+    // when speech only briefly outlived the work — now that overlap is normal, it would routinely
+    // throw away a running turn.
+    speechOutput.speaking = true;
+    const { orb, onInterrupt } = renderOverlay({ agentBusy: true, toolActive: false });
+    fireEvent.click(orb);
+    expect(speechOutput.cancel).toHaveBeenCalled();
+    expect(onInterrupt).not.toHaveBeenCalled();
+  });
 
-    render('First I will read the file.', false);
-    expect(speechOutput.enqueue).not.toHaveBeenCalled();
-
-    render('First I will read the file.', true);
-    expect(speechOutput.enqueue).toHaveBeenCalledWith('First I will read the file.');
-
-    // Second stretch arrives while that same tool is still running — still a half-written thought.
-    render('First I will read the file. Now I will patch it.', true);
-    expect(speechOutput.enqueue).toHaveBeenCalledTimes(1);
-
-    // Tool ends, the next one starts: the second stretch is finished and gets spoken while the
-    // agent is already busy with the new tool call.
-    render('First I will read the file. Now I will patch it.', false);
-    render('First I will read the file. Now I will patch it.', true);
-    expect(speechOutput.enqueue).toHaveBeenCalledWith(' Now I will patch it.');
-    expect(speechOutput.enqueue).toHaveBeenCalledTimes(2);
+  it('still interrupts when the turn is already over', () => {
+    speechOutput.speaking = true;
+    const { orb, onInterrupt } = renderOverlay({ agentBusy: false, toolActive: false });
+    fireEvent.click(orb);
+    expect(onInterrupt).toHaveBeenCalledTimes(1);
   });
 });
 

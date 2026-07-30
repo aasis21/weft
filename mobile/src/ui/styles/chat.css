@@ -1919,6 +1919,14 @@
   --voice-orb-glow: color-mix(in srgb, var(--success) 42%, transparent);
 }
 
+/* Speaking on top of a turn that is still running. The orb stays the speaking colour because that
+   is what the tap acts on, but it is blended toward the working accent so the two facts read at
+   once instead of the voice hiding the work. */
+.weft-session .voice-panel[data-state='speaking'][data-working='true'] {
+  --voice-orb-color: color-mix(in srgb, var(--success) 62%, var(--accent));
+  --voice-orb-glow: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
 .weft-session .voice-orb {
   background:
     radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--voice-orb-color) 38%, var(--bg-elev)), transparent 62%),

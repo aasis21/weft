@@ -49,6 +49,7 @@ export function VoiceModeOverlay({
 }: VoiceModeOverlayProps): JSX.Element {
   const {
     state,
+    speakingWhileWorking,
     caption,
     status,
     orbGlyph,
@@ -105,7 +106,7 @@ export function VoiceModeOverlay({
 
   return (
     <div className="voice-overlay" role="dialog" aria-modal="true" aria-label="Vox voice mode" ref={overlayRef}>
-      <div className="voice-panel" data-state={state}>
+      <div className="voice-panel" data-state={state} data-working={speakingWhileWorking ? 'true' : undefined}>
         <header className="voice-head">
           <span className="voice-brandmark" aria-hidden="true">
             <span className="voice-brandmark-bar" />
