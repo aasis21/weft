@@ -195,6 +195,14 @@ const LIVENESS_PERSIST_THROTTLE_MS = 30_000;
 // a session is cooled down (Archived); after AUTO_DELETE_MS of witnessed silence it is purged.
 const AUTO_ARCHIVE_MS = 6 * 60 * 60 * 1_000; // 6 hours
 const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
+// Witnessed silence only accrues while the app is actually running, so a phone that was closed for a
+// week comes back with a session that looks freshly-seen — subscribed and beaten within moments of
+// each other — and stays Live/Offline in the list next to a twelve-day-old last message. This is the
+// second, additive archive rule: judge BOTH clocks against `now` rather than against each other, and
+// archive only when both are stale. Either one alone would be wrong. Heartbeat-alone would archive a
+// laptop closed for the weekend that the phone never got the chance to check on; subscribed-alone
+// would archive sessions the phone simply hasn't looked at yet.
+const AUTO_ARCHIVE_STALE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
 const SPAWN_TIMEOUT_MS = 30_000;
 
@@ -303,6 +311,11 @@ export class SessionRuntime {
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
+  /** Last observed pulse per session, surviving a reload. `connection.lastHeartbeat` lives only in
+   *  memory and comes back null for every restored card, so anything that reads it alone treats a
+   *  session that has never reconnected as "no pulse ever" and skips it forever. Seeded from stored
+   *  `lastHeartbeatAt` at boot and kept in step with the live beat. */
+  private readonly lastKnownHeartbeat = new Map<string, number>();
   // requestIds of approvals/elicitations whose decision send is in flight. Guards a double-tap from
   // dispatching twice (#88) and lets onMessage strip an already-answered card from a racing state
   // snapshot before the send settles (#79).
@@ -445,6 +458,7 @@ export class SessionRuntime {
     for (const s of stored) {
       const channelId = s.pairing.channelId;
       allowTranscriptWrites(channelId);
+      if (s.lastHeartbeatAt != null) this.lastKnownHeartbeat.set(channelId, s.lastHeartbeatAt);
       const timeline = restoreTimeline(persistedById.get(channelId) ?? null);
       const session = this.buildRestoredSession(
         s,
@@ -1544,6 +1558,7 @@ export class SessionRuntime {
     }
     this.store.dispatch(sessionRemoved(channelId));
     this.lastLivenessWriteAt.delete(channelId);
+    this.lastKnownHeartbeat.delete(channelId);
     if (wasActive) {
       const nextId = (this.store.getState().sessions.ids[0] as string | undefined) ?? null;
       if (nextId) {
@@ -1599,10 +1614,21 @@ export class SessionRuntime {
     }
   }
 
-  /** True when a stored session should start (or be moved) in the calm **Archived** state (#163):
-   *  its *witnessed* silence exceeds AUTO_ARCHIVE_MS (6h) but not yet AUTO_DELETE_MS (2d, at which
-   *  point {@link isDeleteEligible} purges it instead). Pinned and the spared (active/last-active)
-   *  session are never auto-archived. Sessions never witnessed with a pulse are ineligible. */
+  /** True when a stored session should start (or be moved) in the calm **Archived** state (#163).
+   *
+   *  Two independent rules, either of which is enough:
+   *
+   *  1. *Witnessed silence* — the app-observed gap between the last time we looked (`lastSubscribedAt`)
+   *     and the last real pulse (`lastHeartbeatAt`) is past AUTO_ARCHIVE_MS (6h) but not yet
+   *     AUTO_DELETE_MS (2d, at which point {@link isDeleteEligible} purges it instead).
+   *  2. *Both clocks stale* — each of the two clocks, measured against `now` rather than against each
+   *     other, is older than AUTO_ARCHIVE_STALE_MS. This is the rule that catches a phone that was
+   *     simply closed: witnessed silence can't accrue while nothing is running, so rule 1 never sees
+   *     the gap, and the session comes back looking freshly-seen no matter how long it has been.
+   *
+   *  Pinned and the spared (active/last-active) session are never auto-archived, and a session we
+   *  have never witnessed with a pulse (either clock missing) is ineligible under both rules — a
+   *  freshly-paired card is safe. */
   private isArchiveEligible(s: StoredSession, spareId: string | null): boolean {
     if (s.pinned) return false;
     if (s.pairing.channelId === spareId) return false;
@@ -1610,7 +1636,9 @@ export class SessionRuntime {
     const witnessed = s.lastSubscribedAt;
     if (beat == null || witnessed == null) return false;
     const silence = witnessed - beat;
-    return silence > AUTO_ARCHIVE_MS && silence <= AUTO_DELETE_MS;
+    if (silence > AUTO_ARCHIVE_MS && silence <= AUTO_DELETE_MS) return true;
+    const now = this.clock();
+    return now - beat > AUTO_ARCHIVE_STALE_MS && now - witnessed > AUTO_ARCHIVE_STALE_MS;
   }
 
   async reconnect(channelId: string): Promise<void> {
@@ -1954,7 +1982,10 @@ export class SessionRuntime {
     // erase the real last-beat clock from a prior run and break the witnessed-silence math. In that
     // case advance only lastSubscribedAt; the stored lastHeartbeatAt stays put.
     const patch: Parameters<typeof patchSession>[1] = { lastSubscribedAt: now };
-    if (s.connection.lastHeartbeat) patch.lastHeartbeatAt = s.connection.lastHeartbeat;
+    if (s.connection.lastHeartbeat) {
+      patch.lastHeartbeatAt = s.connection.lastHeartbeat;
+      this.lastKnownHeartbeat.set(channelId, s.connection.lastHeartbeat);
+    }
     void patchSession(channelId, patch);
   }
 
@@ -1967,6 +1998,13 @@ export class SessionRuntime {
       for (const session of selectAllSessions(this.store.getState())) {
         const ctrl = this.controllers.get(session.id);
         if (!ctrl || ctrl.ephemeral) continue;
+        // Advance the witness clock for every stored session on every pass, cold ones included.
+        // Without this the only writers are subscribe-success, coolDown and pagehide, so a session
+        // that can never subscribe never moves `lastSubscribedAt` — its witnessed silence stays
+        // pinned near zero and neither the archive nor the delete window can ever be reached. That
+        // is how a card with a twelve-day-old last message sits in Offline forever. The write is
+        // throttled internally, so a per-second tick costs nothing.
+        this.persistLiveness(session.id);
         const status = session.connection.status;
         if (status === 'connecting') {
           if (ctrl.connectingSince == null) {
@@ -1988,14 +2026,20 @@ export class SessionRuntime {
         }
         ctrl.connectingSince = null;
         const beat = session.connection.lastHeartbeat;
+        if (beat != null) this.lastKnownHeartbeat.set(session.id, beat);
+        // The pulse to judge staleness by. `connection.lastHeartbeat` is in-memory only and is null
+        // for every card restored from disk, so gating on it alone left a session that never manages
+        // to reconnect stuck: connecting → timeout → Offline, and never archived, because there was
+        // no beat to measure from. Fall back to the last pulse we ever saw, which outlives reloads.
+        const lastBeat = beat ?? this.lastKnownHeartbeat.get(session.id) ?? null;
         // Auto-archive (#163): once we've heard nothing from the laptop for AUTO_ARCHIVE_MS, drop
         // to the calm Archived state (cold, socket released, out of the warm pool) regardless of
         // whether the card is still Live/Quiet or already flipped to Offline. Runs before the
         // live/idle guard so an Offline (error) card can still cool down. Never archive the card the
         // user is viewing, a busy turn, or one already cold/ended.
         if (
-          beat != null &&
-          now - beat > AUTO_ARCHIVE_MS &&
+          lastBeat != null &&
+          now - lastBeat > AUTO_ARCHIVE_MS &&
           !session.connection.cold &&
           !session.connection.busy &&
           session.connection.status !== 'ended' &&
