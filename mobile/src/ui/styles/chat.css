@@ -141,6 +141,14 @@
   font-size: 17px;
 }
 .weft-session .icon-btn:hover { background: var(--bg-elev); color: var(--fg); }
+.weft-session .icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.weft-session .icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
 
 /* --- Focus-visible rings (a11y, WCAG 2.4.7) --- */
 .weft-session .icon-btn:focus-visible,
@@ -1612,8 +1620,7 @@
 .status-title .device-avatar,
 .status-id .device-avatar { margin-right: 2px; }
 
-/* Online/Offline grouping (device list): a small muted section label, only shown when both
-   groups are non-empty so a device list with just one kind of device stays label-free. */
+/* Online/Offline grouping (device list): a small muted section label. */
 .device-group + .device-group { margin-top: 14px; }
 .device-group-header {
   margin: 0 0 8px;
@@ -1820,6 +1827,9 @@
 }
 
 .weft-session .session-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   align-self: flex-start;
   min-height: 44px;
   padding: 8px 2px;
@@ -2307,35 +2317,91 @@
   background: var(--bg-elev);
 }
 
-/* Devices-list card (#186 "Manage devices" restyle): the whole card is tappable (opens details),
-   with a baked-in primary "Start session" button and a `⋯` overflow menu for the secondary,
-   less-common actions (default/refresh/forget) so the card face stays uncluttered. */
+/* Devices-list card (#186 "Manage devices" restyle): a large primary detail target plus
+   sibling Start/action controls, avoiding nested interactive elements. */
 .weft-session .device-tile {
   position: relative;
-  cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
 }
-.weft-session .device-tile:hover,
-.weft-session .device-tile:focus-visible {
+.weft-session .device-tile:hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--bg-rule));
   background: color-mix(in srgb, var(--accent) 4%, var(--bg-elev));
+}
+.weft-session .device-tile-main {
+  display: flex;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.weft-session .device-tile-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 12px;
 }
 .weft-session .device-tile-head {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  width: 100%;
 }
 .weft-session .device-tile-head .session-info { min-width: 0; }
 .weft-session .device-tile-head .session-sub { white-space: normal; }
-.weft-session .device-menu-btn {
+.weft-session .device-tile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.weft-session .device-tile-actions .device-start-btn {
+  flex: 1 1 auto;
+}
+.weft-session .device-menu-wrap {
+  position: relative;
   flex: 0 0 auto;
-  margin-left: auto;
+}
+.weft-session .device-menu-btn {
+  width: 40px;
+  height: 40px;
+}
+.weft-session .device-menu-btn svg,
+.weft-session .devices-refresh-btn svg,
+.weft-session .devices-add-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.weft-session .device-action-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+.weft-session .device-action-icon svg {
+  width: 16px;
+  height: 16px;
 }
 .weft-session .device-start-btn { margin-top: 2px; }
+.weft-session .device-start-btn:disabled {
+  border: 1px dashed color-mix(in srgb, var(--fg-dim) 45%, transparent);
+  background: color-mix(in srgb, var(--fg-dim) 9%, var(--bg-elev));
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.weft-session .device-action-hint {
+  margin: -2px 0 0;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
 .weft-session .device-menu {
   position: absolute;
   top: 100%;
-  right: 14px;
+  right: 0;
   z-index: 5;
   display: flex;
   flex-direction: column;
@@ -2347,7 +2413,16 @@
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
+.weft-session .device-menu-up {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 4px;
+}
 .weft-session .device-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 9px 10px;
   font: inherit;
   font-size: 13px;
@@ -2384,6 +2459,10 @@
 }
 
 .weft-session .device-start-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 38px;
   padding: 8px 14px;
   width: auto;

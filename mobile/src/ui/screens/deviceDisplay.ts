@@ -5,8 +5,8 @@ export function deviceLabel(device: ListenerDeviceState): string {
 }
 
 export function deviceStatus(device: ListenerDeviceState): { label: string; tone: 'online' | 'offline' | 'loading' } {
-  if (device.projectsLoading) return { label: 'Connecting…', tone: 'loading' };
   if (device.connected) return { label: 'Online', tone: 'online' };
+  if (device.projectsLoading) return { label: 'Connecting…', tone: 'loading' };
   return { label: 'Offline', tone: 'offline' };
 }
 

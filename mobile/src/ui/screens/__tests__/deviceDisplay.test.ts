@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatLastSeen } from '@/ui/screens/deviceDisplay';
+import { deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
+import type { ListenerDeviceState } from '@/session/model';
 
 const now = 2_000_000_000_000;
 
@@ -14,5 +15,16 @@ describe('formatLastSeen (injectable now — powers the sidebar last-seen/last-t
     expect(formatLastSeen(now - 5 * 60_000, now)).toBe('5m ago');
     expect(formatLastSeen(now - 3 * 60 * 60_000, now)).toBe('3h ago');
     expect(formatLastSeen(now - 2 * 24 * 60 * 60_000, now)).toBe('2d ago');
+  });
+});
+
+describe('deviceStatus', () => {
+  it('keeps a connected device online while projects are refreshing', () => {
+    const device = {
+      connected: true,
+      projectsLoading: true,
+    } as ListenerDeviceState;
+
+    expect(deviceStatus(device)).toEqual({ label: 'Online', tone: 'online' });
   });
 });

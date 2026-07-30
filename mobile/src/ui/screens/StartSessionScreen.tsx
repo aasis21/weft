@@ -4,8 +4,9 @@ import type { SpawnMode } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
-import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
+import { DeviceAvatar, PlusGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
+import { useNowTick } from '@/ui/hooks/useNowTick';
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
@@ -52,6 +53,7 @@ export function StartSessionScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const now = useNowTick();
 
   const sortedDevices = sortDevices(devices);
   const selected = sortedDevices.find((d) => d.channelId === selectedId) ?? sortedDevices[0] ?? null;
@@ -73,7 +75,7 @@ export function StartSessionScreen({
   }, [selected?.channelId, selected?.projects, selected?.lastProjectName]);
 
   const submit = async (): Promise<void> => {
-    if (!selected || !projectName) return;
+    if (!selected || !selected.connected || !projectName) return;
     setBusy(true);
     setError(null);
     try {
@@ -142,13 +144,15 @@ export function StartSessionScreen({
                   onClick={onScanListener}
                   aria-label="Add a new device"
                 >
-                  ＋ Add device
+                  <span className="device-action-icon" aria-hidden="true"><PlusGlyph /></span>
+                  Add device
                 </button>
               </h3>
               <div className="start-device-list" role="radiogroup" aria-label="Device">
                 {sortedDevices.map((device) => {
                   const status = deviceStatus(device);
                   const isSelected = device.channelId === selected?.channelId;
+                  const lastSeen = formatLastSeen(device.lastSeenAt, now);
                   return (
                     <button
                       key={device.channelId}
@@ -167,7 +171,8 @@ export function StartSessionScreen({
                         <span className={`start-device-status device-status-${status.tone}`}>
                           <span className="device-status-dot" aria-hidden="true" />
                           {status.label}
-                          {formatLastSeen(device.lastSeenAt) ? ` · seen ${formatLastSeen(device.lastSeenAt)}` : ''}
+                          {lastSeen ? ` · seen ${lastSeen}` : ''}
+                          {device.connected && device.projectsLoading ? ' · refreshing projects…' : ''}
                         </span>
                       </span>
                       <span className="start-device-check" aria-hidden="true">✓</span>
@@ -242,7 +247,8 @@ export function StartSessionScreen({
               <button
                 type="button"
                 className="session-primary-action"
-                disabled={busy || !selected || !projectName || selected.projectsLoading}
+                disabled={busy || !selected || !selected.connected || !projectName || selected.projectsLoading}
+                title={selected && !selected.connected ? 'Device is offline — reconnect it to start a session.' : undefined}
                 onClick={() => void submit()}
               >
                 {busy ? 'Starting…' : `Start on ${selected ? deviceLabel(selected) : 'device'}`}

@@ -3,7 +3,8 @@ import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deriveStatus, isWorking } from './sessionStatus';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
-import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
+import { DeviceAvatar, PlayGlyph } from '@/ui/screens/deviceGlyphs';
+import { useNowTick } from '@/ui/hooks/useNowTick';
 
 interface WeftDrawerProps {
   sessions: SessionView[];
@@ -98,23 +99,8 @@ export function WeftDrawer({
   // list opens focused on Active + anything that broke.
   const [collapsedOffline, setCollapsedOffline] = useState(false);
   const [collapsedArchived, setCollapsedArchived] = useState(true);
-  // Bumped on a timer / focus so relative "N ago" labels re-render even for idle rows that
-  // receive no new events (fmtRelative reads Date.now() only at render time).
-  const [, forceTick] = useState(0);
+  const now = useNowTick();
   onCloseRef.current = onClose;
-
-  useEffect(() => {
-    const tick = (): void => forceTick((n) => (n + 1) % 1_000_000);
-    const interval = window.setInterval(tick, 30_000);
-    const onVisible = (): void => {
-      if (document.visibilityState === 'visible') tick();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, []);
 
   const beginRename = (id: string, current: string): void => {
     setEditingId(id);
@@ -297,10 +283,12 @@ export function WeftDrawer({
     // Three clocks (now / last connected / last tried): show when we last SUCCEEDED (lastSeenAt),
     // and — while not Online — when we last TRIED (lastAttemptAt), so a laptop that isn't answering
     // reads "Offline · last seen 2h ago · tried 5s ago" rather than a bare, ambiguous "Offline".
-    const lastSeen = formatLastSeen(device.lastSeenAt);
-    const lastTried = !device.connected ? formatLastSeen(device.lastAttemptAt) : null;
+    const lastSeen = formatLastSeen(device.lastSeenAt, now);
+    const lastTried = !device.connected ? formatLastSeen(device.lastAttemptAt, now) : null;
     const projectsLabel = device.projectsLoading
-      ? 'Loading projects…'
+      ? device.connected
+        ? 'Refreshing projects…'
+        : 'Loading projects…'
       : device.projects.length > 0
         ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
         : 'No projects yet';
@@ -350,7 +338,7 @@ export function WeftDrawer({
           title="Start session"
           aria-label={`Start session on ${deviceLabel(device)}`}
         >
-          ▻
+          <PlayGlyph />
         </button>
       </div>
     );

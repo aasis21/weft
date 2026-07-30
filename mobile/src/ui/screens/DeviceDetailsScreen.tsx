@@ -4,12 +4,13 @@ import type { SpawnMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deviceLabel, deviceStatus, formatLastSeen } from '@/ui/screens/deviceDisplay';
-import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
+import { DeviceAvatar, PlayGlyph, RefreshGlyph } from '@/ui/screens/deviceGlyphs';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { transportIdentity } from '@aasis21/weft-shared';
+import { useNowTick } from '@/ui/hooks/useNowTick';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -76,8 +77,9 @@ export function DeviceDetailsScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [resumeMode, setResumeMode] = useState<SpawnMode>('allow-all');
+  const now = useNowTick();
   const status = deviceStatus(device);
-  const lastSeen = formatLastSeen(device.lastSeenAt);
+  const lastSeen = formatLastSeen(device.lastSeenAt, now);
   const deviceKey = device.deviceId ?? device.channelId;
   const spawnedSessions = sessions
     .filter((s) => (s.meta.spawnedFromDeviceId ?? '') === deviceKey)
@@ -149,16 +151,24 @@ export function DeviceDetailsScreen({
         <section className="session-join-fallback device-card">
           <p className="device-card-sub">
             {device.projectsLoading
-              ? 'Loading projects…'
+              ? device.connected ? 'Refreshing projects…' : 'Loading projects…'
               : device.projects.length > 0
                 ? device.projects.map((p) => p.name).join(', ')
                 : 'No projects received yet.'}
           </p>
           <div className="device-actions">
-            <button type="button" className="session-primary-action device-start-btn" onClick={() => onStartOnDevice(device.channelId)}>
+            <button
+              type="button"
+              className="session-primary-action device-start-btn"
+              disabled={!device.connected}
+              title={device.connected ? 'Start a session on this device' : 'Device is offline — reconnect it to start a session.'}
+              onClick={() => onStartOnDevice(device.channelId)}
+            >
+              <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
               Start session
             </button>
             <button type="button" className="session-link-btn" onClick={() => onRefreshProjects(device.channelId)}>
+              <span className="device-action-icon" aria-hidden="true"><RefreshGlyph /></span>
               Refresh
             </button>
             {!device.isDefault ? (
@@ -245,7 +255,7 @@ export function DeviceDetailsScreen({
               {storeSessions.map((s) => {
                 const live = liveBySessionId.get(s.sessionId);
                 const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
-                const when = formatLastSeen(s.updatedAt ?? undefined);
+                const when = formatLastSeen(s.updatedAt ?? undefined, now);
                 const label = s.title || s.cwd;
                 return (
                   <li key={s.sessionId} className="device-card device-session-row">

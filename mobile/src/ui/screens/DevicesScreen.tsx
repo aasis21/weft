@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
-import { DeviceAvatar } from '@/ui/screens/deviceGlyphs';
+import { DeviceAvatar, MoreHorizontalGlyph, PlayGlyph, PlusGlyph, RefreshGlyph, StarGlyph, TrashGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
+import { useNowTick } from '@/ui/hooks/useNowTick';
 
 interface DevicesScreenProps {
   sessions: SessionView[];
@@ -58,6 +59,10 @@ export function DevicesScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPlacement, setMenuPlacement] = useState<'down' | 'up'>('down');
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const now = useNowTick();
   const sortedDevices = sortDevices(devices);
   const onlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone !== 'offline');
   const offlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone === 'offline');
@@ -69,113 +74,181 @@ export function DevicesScreen({
           onlineCount > 0 ? ` · ${onlineCount} online` : ''
         }`;
 
+  const closeMenu = (returnFocus: boolean): void => {
+    const openId = menuOpenId;
+    setMenuOpenId(null);
+    if (returnFocus && openId) menuTriggerRefs.current.get(openId)?.focus();
+  };
+
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.device-menu-wrap')) return;
+      closeMenu(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMenu(true);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpenId]);
+
+  useEffect(() => {
+    if (!menuOpenId) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [menuOpenId]);
+
   const renderDevice = (device: ListenerDeviceState): JSX.Element => {
     const status = deviceStatus(device);
-    const lastSeen = formatLastSeen(device.lastSeenAt);
+    const lastSeen = formatLastSeen(device.lastSeenAt, now);
+    const lastTried = !device.connected ? formatLastSeen(device.lastAttemptAt, now) : null;
     const projectsLabel = device.projectsLoading
-      ? 'Loading projects…'
+      ? device.connected
+        ? 'Refreshing projects…'
+        : 'Loading projects…'
       : device.projects.length > 0
         ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
         : 'No projects yet';
     const menuOpen = menuOpenId === device.channelId;
+    const startDisabled = !device.connected;
+    const startHintId = `device-start-hint-${device.channelId}`;
+    const openMenu = (button: HTMLButtonElement): void => {
+      const rect = button.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setMenuPlacement(spaceBelow < 180 && rect.top > spaceBelow ? 'up' : 'down');
+      setMenuOpenId(device.channelId);
+    };
     return (
       <div
         key={device.channelId}
         className="device-card device-tile"
-        role="button"
-        tabIndex={0}
-        aria-label={`View details for ${deviceLabel(device)}`}
-        onClick={() => onOpenDetails(device.channelId)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') onOpenDetails(device.channelId);
-          if (e.key === ' ' || e.key === 'Spacebar') {
-            e.preventDefault();
-            onOpenDetails(device.channelId);
-          }
-        }}
       >
-        <div className="device-tile-head">
-          <DeviceAvatar tone={status.tone} />
-          <span className="session-info">
-            <span className="session-title">
-              {deviceLabel(device)}
-              {device.isDefault ? <span className="tag">default</span> : null}
-            </span>
-            <span className="session-sub">
-              <span className={`device-status device-status-${status.tone}`}>
-                <span className="device-status-dot" aria-hidden="true" />
-                {status.label}
-              </span>
-              {lastSeen ? ` · last seen ${lastSeen}` : ''}
-              {` · ${projectsLabel}`}
-            </span>
-          </span>
-          <button
-            className="icon-btn device-menu-btn"
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label="Device actions"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpenId(menuOpen ? null : device.channelId);
-            }}
-          >
-            ⋯
-          </button>
-        </div>
-
-        {device.error ? <p className="error-banner">{device.error}</p> : null}
-
         <button
           type="button"
-          className="session-primary-action device-start-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            onStartOnDevice(device.channelId);
-          }}
+          className="device-tile-main"
+          aria-label={`View details for ${deviceLabel(device)}`}
+          onClick={() => onOpenDetails(device.channelId)}
         >
-          ▻ Start session
+          <span className="device-tile-head">
+            <DeviceAvatar tone={status.tone} />
+            <span className="session-info">
+              <span className="session-title">
+                {deviceLabel(device)}
+                {device.isDefault ? <span className="tag">default</span> : null}
+              </span>
+              <span className="session-sub">
+                <span className={`device-status device-status-${status.tone}`}>
+                  <span className="device-status-dot" aria-hidden="true" />
+                  {status.label}
+                </span>
+                {lastSeen ? ` · last seen ${lastSeen}` : ''}
+                {lastTried ? ` · tried ${lastTried}` : ''}
+                {` · ${projectsLabel}`}
+              </span>
+            </span>
+          </span>
         </button>
 
-        {menuOpen ? (
-          <div className="device-menu" role="menu" onClick={(e) => e.stopPropagation()}>
-            {!device.isDefault ? (
-              <button
-                type="button"
-                role="menuitem"
-                className="device-menu-item"
-                onClick={() => {
+        {device.error ? <p className="error-banner">Connection issue: {device.error}</p> : null}
+
+        <div className="device-tile-actions">
+          <button
+            type="button"
+            className="session-primary-action device-start-btn"
+            disabled={startDisabled}
+            aria-describedby={startDisabled ? startHintId : undefined}
+            title={startDisabled ? 'Device is offline — reconnect it to start a session.' : 'Start a session on this device'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStartOnDevice(device.channelId);
+            }}
+          >
+            <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
+            Start session
+          </button>
+          <div className="device-menu-wrap" data-device-menu-root={device.channelId}>
+            <button
+              ref={(node) => {
+                if (node) menuTriggerRefs.current.set(device.channelId, node);
+                else menuTriggerRefs.current.delete(device.channelId);
+              }}
+              className="icon-btn device-menu-btn"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label={`Device actions for ${deviceLabel(device)}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (menuOpen) {
                   setMenuOpenId(null);
-                  void onSetDefault(device.channelId);
-                }}
+                } else {
+                  openMenu(e.currentTarget);
+                }
+              }}
+            >
+              <MoreHorizontalGlyph />
+            </button>
+            {menuOpen ? (
+              <div
+                ref={menuRef}
+                className={`device-menu device-menu-${menuPlacement}`}
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
               >
-                ⭐ Make default
-              </button>
+                {!device.isDefault ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="device-menu-item"
+                    onClick={() => {
+                      setMenuOpenId(null);
+                      void onSetDefault(device.channelId);
+                    }}
+                  >
+                    <span className="device-action-icon" aria-hidden="true"><StarGlyph /></span>
+                    Make default
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="device-menu-item"
+                  onClick={() => {
+                    setMenuOpenId(null);
+                    onRefreshProjects(device.channelId);
+                  }}
+                >
+                  <span className="device-action-icon" aria-hidden="true"><RefreshGlyph /></span>
+                  Refresh projects
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="device-menu-item danger"
+                  onClick={() => {
+                    setMenuOpenId(null);
+                    void onForget(device.channelId);
+                  }}
+                >
+                  <span className="device-action-icon" aria-hidden="true"><TrashGlyph /></span>
+                  Forget device
+                </button>
+              </div>
             ) : null}
-            <button
-              type="button"
-              role="menuitem"
-              className="device-menu-item"
-              onClick={() => {
-                setMenuOpenId(null);
-                onRefreshProjects(device.channelId);
-              }}
-            >
-              ↻ Refresh projects
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="device-menu-item danger"
-              onClick={() => {
-                setMenuOpenId(null);
-                void onForget(device.channelId);
-              }}
-            >
-              🗑 Forget device
-            </button>
           </div>
+        </div>
+        {startDisabled ? (
+          <p id={startHintId} className="device-action-hint">
+            Offline — reconnect this device before starting a session.
+          </p>
         ) : null}
       </div>
     );
@@ -205,13 +278,23 @@ export function DevicesScreen({
         </div>
         <span className="status-icons">
           <button
+            className="icon-btn devices-refresh-btn"
+            type="button"
+            onClick={() => sortedDevices.forEach((device) => onRefreshProjects(device.channelId))}
+            aria-label="Refresh all devices"
+            title="Refresh all devices"
+            disabled={sortedDevices.length === 0}
+          >
+            <RefreshGlyph />
+          </button>
+          <button
             className="icon-btn devices-add-btn"
             type="button"
             onClick={onScanListener}
             aria-label="Add a new device"
             title="Add a new device"
           >
-            +
+            <PlusGlyph />
           </button>
         </span>
       </header>
@@ -240,7 +323,9 @@ export function DevicesScreen({
             ) : null}
             {offlineDevices.length > 0 ? (
               <div className="device-group">
-                {onlineDevices.length > 0 ? <h3 className="device-group-header">Offline</h3> : null}
+                <h3 className="device-group-header">
+                  {onlineDevices.length > 0 ? 'Offline' : 'Offline · no devices reachable'}
+                </h3>
                 {offlineDevices.map(renderDevice)}
               </div>
             ) : null}
