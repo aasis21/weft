@@ -264,6 +264,36 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
     endRef.current?.scrollIntoView({ behavior: isNewItem || lastIsUser ? 'smooth' : 'auto', block: 'end' });
   }, [items.length, lastText, lastIsUser]);
 
+  // The scroll container getting shorter does not move scrollTop, so the newest messages simply
+  // fall below the fold and nothing puts them back — the auto-scroll above only runs when the item
+  // list changes. That is what makes opening the soft keyboard swallow the end of the conversation:
+  // the viewport meta uses interactive-widget=resizes-content, so the layout viewport really does
+  // shrink by the keyboard's height. The composer growing with a multi-line draft does the same
+  // thing on a smaller scale.
+  //
+  // Only re-pin when the reader was already at the bottom — someone scrolled up reading history
+  // must not be yanked down just because they focused the box. The pinned flag is still accurate at
+  // this point: shrinking the container leaves scrollTop alone, so no scroll event has fired to
+  // recompute it. The scroll is deliberately instant; a smooth animation racing the keyboard slide
+  // reads as a stutter.
+  useEffect(() => {
+    const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
+    if (!scroller) return undefined;
+    const repin = (): void => {
+      if (!pinnedRef.current) return;
+      endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    };
+    // window resize covers the keyboard and rotation; the observer covers the composer changing
+    // height, which resizes the thread without resizing the window.
+    window.addEventListener('resize', repin);
+    const observer = new ResizeObserver(repin);
+    observer.observe(scroller);
+    return () => {
+      window.removeEventListener('resize', repin);
+      observer.disconnect();
+    };
+  }, []);
+
   useEffect(() => {
     const signal = streaming ? 'working' : last?.kind === 'assistant' ? `assistant-${last.id}` : '';
     if (!signal || signal === lastLiveSignalRef.current) return undefined;

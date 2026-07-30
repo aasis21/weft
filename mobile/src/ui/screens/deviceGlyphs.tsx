@@ -89,3 +89,79 @@ export function PlusGlyph(): JSX.Element {
     </StrokeIcon>
   );
 }
+
+/** Back chevron for detail screens reached from a list. */
+export function BackGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M15 5l-7 7 7 7" />
+    </StrokeIcon>
+  );
+}
+
+/** Resume: an arrow curving back onto itself, distinct from {@link RefreshGlyph}'s full circle. */
+export function ResumeGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M4 12a8 8 0 1 0 2.5-5.8" />
+      <path d="M4 4v4h4" />
+    </StrokeIcon>
+  );
+}
+
+/** Disclosure chevron for collapsible groups; rotated by CSS when the group is open. */
+export function ChevronGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M6 9l6 6 6-6" />
+    </StrokeIcon>
+  );
+}
+
+/** Row affordance pointing into a detail view. */
+export function ChevronRightGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M9 5l7 7-7 7" />
+    </StrokeIcon>
+  );
+}
+
+/** Debug / event log — the same braces the icon button spells out in text elsewhere. */
+export function BracesGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M8 4c-2 0-2 3-2 4s0 4-2 4c2 0 2 3 2 4s0 4 2 4" />
+      <path d="M16 4c2 0 2 3 2 4s0 4 2 4c-2 0-2 3-2 4s0 4-2 4" />
+    </StrokeIcon>
+  );
+}
+
+/** Folder chip marker for the project list. */
+export function FolderGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M3 7a2 2 0 0 1 2-2h3.5l2 2.5H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </StrokeIcon>
+  );
+}
+
+/** Rename / edit affordance for a session row's swipe actions. */
+export function PencilGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z" />
+    </StrokeIcon>
+  );
+}
+
+/** Warning triangle for the offline explainer. */
+export function WarningGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M12 4.5 2.8 20h18.4Z" />
+      <path d="M12 10v4" />
+      <path d="M12 17.2v.1" />
+    </StrokeIcon>
+  );
+}

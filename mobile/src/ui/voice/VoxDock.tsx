@@ -212,6 +212,7 @@ export function VoxDock({
       >
         <span className="voice-orb-ring" aria-hidden="true" />
         <span className="voice-orb-core" aria-hidden="true">{orbGlyph}</span>
+        {speakingWhileWorking ? <span className="voice-orb-working" aria-hidden="true" /> : null}
       </button>
 
       {showWords ? <p className="vox-dock-status" aria-live="polite">{status}</p> : null}

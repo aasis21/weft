@@ -202,6 +202,20 @@ describe('VoiceModeOverlay speaking over a running turn', () => {
     fireEvent.click(orb);
     expect(onInterrupt).toHaveBeenCalledTimes(1);
   });
+
+  it('marks the orb itself, not just the panel colour, while it speaks over live work', () => {
+    // The dock hides its status line in exactly these two states, so colour alone was carrying the
+    // "still working" fact there. The pip gives both surfaces something non-chromatic to read.
+    speechOutput.speaking = true;
+    const { orb } = renderOverlay({ agentBusy: true, toolActive: false });
+    expect(orb.querySelector('.voice-orb-working')).toBeTruthy();
+  });
+
+  it('drops that marker once the turn actually ends', () => {
+    speechOutput.speaking = true;
+    const { orb } = renderOverlay({ agentBusy: false, toolActive: false });
+    expect(orb.querySelector('.voice-orb-working')).toBeNull();
+  });
 });
 
 describe('VoiceModeOverlay exits (#186)', () => {

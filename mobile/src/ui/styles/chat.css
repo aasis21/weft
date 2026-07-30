@@ -1386,6 +1386,8 @@
 }
 .row-swipe-btn.archive { background: var(--bg-rule); color: var(--fg-dim); }
 .row-swipe-btn.danger { background: color-mix(in srgb, var(--error) 16%, transparent); color: var(--error); }
+/* Rows whose swipe buttons use SVG glyphs rather than the drawer's emoji. */
+.row-swipe-btn svg { width: 16px; height: 16px; display: block; }
 .session-row:hover { background: var(--bg); }
 .session-row.current {
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
@@ -1711,9 +1713,14 @@
 .drawer-nav-icon { font-size: 16px; line-height: 1; }
 
 /* ---- In-app join screen --------------------------------------------------- */
+/* The shell holds no horizontal or top padding of its own, because the status bar renders inside
+   it and would otherwise sit further in and further down than the identical header on the chat
+   screen — the hamburger visibly jumped as you moved between them, and the header's bottom rule
+   stopped short of both screen edges instead of running full bleed. The inset belongs to the
+   content, so it lives on the centred inner wrapper below. */
 .weft-session.join-session {
   align-items: stretch;
-  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  padding: 0 0 max(12px, env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 
@@ -1724,6 +1731,7 @@
   gap: 14px;
   width: min(560px, 100%);
   margin: 0 auto;
+  padding: 12px 12px 0;
 }
 
 .weft-session .session-join-head {
@@ -1925,6 +1933,29 @@
 .weft-session .voice-panel[data-state='speaking'][data-working='true'] {
   --voice-orb-color: color-mix(in srgb, var(--success) 62%, var(--accent));
   --voice-orb-glow: color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+/* A second orbiting ring that only exists while the voice is talking over a live turn. The compact
+   dock hides its status line whenever it is speaking or working, so on that surface the fact was
+   carried by colour alone — which is exactly the kind of signal that disappears for anyone who
+   reads colour poorly, or who simply is not looking closely. This gives it a shape. */
+.weft-session .voice-orb-working {
+  position: absolute;
+  inset: -18px;
+  border-radius: 50%;
+  border: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .weft-session .voice-orb-working {
+    animation: voice-working-orbit 3.4s linear infinite;
+  }
+}
+
+@keyframes voice-working-orbit {
+  to { transform: rotate(360deg); }
 }
 
 .weft-session .voice-orb {
@@ -2445,6 +2476,12 @@
   width: 40px;
   height: 40px;
 }
+/* In a `.status-bar` the overflow trigger must match the other header icon buttons exactly (38px),
+   or the top row stops lining up with the chat view. */
+.weft-session .status-bar .device-menu-btn {
+  width: 38px;
+  height: 38px;
+}
 .weft-session .device-menu-btn svg,
 .weft-session .devices-refresh-btn svg,
 .weft-session .devices-add-btn svg {
@@ -2552,9 +2589,159 @@
   font-weight: 700;
 }
 
-.weft-session .device-session-row {
-  padding: 0;
+/* ---- Device details screen -------------------------------------------------------------------
+   The details page is a stack of cards: a breadcrumb back to the device list, an optional offers
+   strip, the device card (projects + the two actions you came here for), then the session list
+   split into Active and a collapsed Inactive bucket. Everything administrative lives in the
+   header's "⋯" menu instead of competing with Start/Resume for attention. */
+
+.weft-session .device-breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin: 0 0 2px -6px;
+  padding: 4px 8px 4px 6px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
+.weft-session .device-breadcrumb:hover,
+.weft-session .device-breadcrumb:focus-visible { color: var(--fg); background: var(--bg); }
+.weft-session .device-breadcrumb svg { width: 16px; height: 16px; display: block; }
+
+/* Shared heading for every card section on this screen, so "Projects", "Active" and "Offered
+   sessions" all read at the same weight rather than each card inventing its own. */
+.weft-session .device-section-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+/* Projects were a comma-joined sentence that wrapped into an unreadable paragraph on long lists.
+   Chips keep each folder a distinct, tappable-looking unit and scroll sideways instead of down. */
+.weft-session .device-project-chips {
+  display: flex;
+  gap: 6px;
+  margin: 0 -14px 12px;
+  padding: 0 14px 2px;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.weft-session .device-project-chips::-webkit-scrollbar { display: none; }
+.weft-session .device-project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 60%;
+  padding: 5px 10px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.weft-session .device-project-chip svg { width: 13px; height: 13px; flex: 0 0 auto; }
+
+/* Start and Resume are the whole point of the screen — equal-width, side by side, nothing else
+   in the row to dilute them. */
+.weft-session .device-card .device-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+.weft-session .device-card .device-actions > button { width: 100%; margin-top: 0; }
+.weft-session .device-resume-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 14px;
+}
+
+/* Offline replaces the button pair outright. The old UI disabled the buttons and explained why in
+   a `title`, which never appears on touch. */
+.weft-session .device-offline-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 30%, var(--bg-rule));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.weft-session .device-offline-note .device-action-icon { color: var(--error); margin-top: 1px; }
+.weft-session .device-offline-note code {
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.weft-session .device-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weft-session .device-session-row {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* Collapsed bucket for finished/archived sessions — present, counted, but not in the way. */
+.weft-session .device-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 6px;
+  border: none;
+  border-top: 1px solid var(--bg-rule);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.weft-session .device-group-toggle svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  transform: rotate(-90deg);
+  transition: transform 140ms ease;
+}
+.weft-session .device-group-toggle.open svg { transform: rotate(0deg); }
 
 /* Narrowing controls for the resumable-session list. Search takes the flexible share and the folder
    picker is capped, so a long absolute path can never squeeze the search box off a narrow phone. */
@@ -2594,22 +2781,65 @@
   margin: 0;
 }
 
+/* Rows are dense and single-line-per-fact: a status dot, the title, then one dim line carrying
+   status · folder · age. The old two-line stack made ten sessions an endless scroll. */
 .weft-session .device-session-open {
+  position: relative;
+  z-index: 1;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 14px;
-  background: transparent;
+  padding: 10px 12px;
+  background: var(--bg-elev);
   border: none;
-  border-radius: 16px;
+  border-radius: 12px;
   text-align: left;
   cursor: pointer;
   color: inherit;
+  transition: transform 160ms ease;
 }
 .weft-session .device-session-open:hover,
 .weft-session .device-session-open:focus-visible { background: var(--bg); }
+.weft-session .device-session-row.row-swipe-open .device-session-open {
+  transform: translateX(-88px);
+  background: var(--bg);
+}
+.weft-session .device-session-open > .status-dot { flex: 0 0 auto; width: 9px; height: 9px; }
+/* Mirror the drawer's flat row dots: tone lives on the dot itself here (there's no `.status-line`
+   wrapper), and the calmer states don't animate in a long list. */
+.weft-session .device-session-open > .status-dot.live { background: var(--success); animation: none; box-shadow: none; }
+.weft-session .device-session-open > .status-dot.idle { background: var(--warning); animation: none; box-shadow: none; }
+.weft-session .device-session-open > .status-dot.busy,
+.weft-session .device-session-open > .status-dot.connecting { background: var(--accent); box-shadow: none; animation: weft-beat 1.2s ease-in-out infinite; }
+.weft-session .device-session-open > .status-dot.listening { background: var(--warning); }
+.weft-session .device-session-open > .status-dot.speaking { background: var(--success); }
+.weft-session .device-session-open > .status-dot.error { background: var(--error); animation: none; }
+.weft-session .device-session-open > .status-dot.archived,
+.weft-session .device-session-open > .status-dot.ended,
+.weft-session .device-session-open > .status-dot.initializing { background: var(--fg-faint); animation: none; box-shadow: none; }
+
+
+.weft-session .device-session-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.weft-session .device-session-text .device-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.weft-session .device-session-meta {
+  font-size: 12px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .weft-session .device-session-status {
   display: inline-flex;

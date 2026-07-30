@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ChatThread } from '@/ui/thread/ChatThread';
 import type { TimelineItem } from '@/lib/timeline';
 
@@ -269,5 +269,43 @@ describe('ChatThread', () => {
     expect(button).toHaveTextContent('');
     expect(button.querySelector('svg')).toBeInTheDocument();
     expect(button.querySelector('span')).not.toBeInTheDocument();
+  });
+
+  describe('keeping the newest messages visible when the viewport shrinks', () => {
+    function mountInScroller(): { scroller: HTMLElement; scrollIntoView: ReturnType<typeof vi.fn> } {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView as never;
+      const { container } = render(
+        <div className="thread-scroll">
+          <ChatThread items={[{ kind: 'assistant', id: 'a1', text: 'reply', ts: now }]} />
+        </div>,
+      );
+      const scroller = container.querySelector('.thread-scroll') as HTMLElement;
+      scrollIntoView.mockClear();
+      return { scroller, scrollIntoView };
+    }
+
+    it('scrolls back to the end when the soft keyboard shrinks the viewport', () => {
+      // The keyboard shrinks the layout viewport without changing scrollTop, so the last messages
+      // drop below the fold and nothing brings them back — the item list has not changed.
+      const { scrollIntoView } = mountInScroller();
+
+      fireEvent(window, new Event('resize'));
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' });
+    });
+
+    it('leaves a reader who scrolled up alone', () => {
+      const { scroller, scrollIntoView } = mountInScroller();
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
+      fireEvent.scroll(scroller);
+      scrollIntoView.mockClear();
+
+      fireEvent(window, new Event('resize'));
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
   });
 });

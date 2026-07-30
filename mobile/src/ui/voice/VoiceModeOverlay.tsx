@@ -138,6 +138,7 @@ export function VoiceModeOverlay({
         <button type="button" className="voice-orb" onClick={handleOrb} disabled={disabled && state !== 'speaking'} aria-label={status}>
           <span className="voice-orb-ring" aria-hidden="true" />
           <span className="voice-orb-core" aria-hidden="true">{orbGlyph}</span>
+          {speakingWhileWorking ? <span className="voice-orb-working" aria-hidden="true" /> : null}
         </button>
 
         <p className="voice-status" aria-live="polite">{status}</p>

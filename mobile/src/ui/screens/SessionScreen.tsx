@@ -491,10 +491,10 @@ export function SessionScreen({
     return () => window.clearInterval(id);
   }, [timeline.approvals.length]);
 
-  // Keep the composer above the iOS/Android soft keyboard. The session surface is
-  // position:fixed, so the layout viewport doesn't shrink when the keyboard opens and
-  // the composer gets hidden behind it. Track the visual viewport and lift the surface
-  // by the keyboard's height via the --weft-kb custom property (#59).
+  // Track the soft keyboard's height in --weft-kb. The layout viewport itself shrinks correctly
+  // (the viewport meta uses interactive-widget=resizes-content), so the shell needs no lifting —
+  // this value exists for the elements pinned to the bottom of the *screen* rather than to the
+  // shell: the jump-to-latest pill, which has to clear the composer, and the debug overlay (#59).
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return undefined;
