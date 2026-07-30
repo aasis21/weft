@@ -636,6 +636,27 @@ async function ensureRelayForTransport() {
 // the new one (same channel/keys) and print a fresh QR inline — the station stays usable without
 // being restarted; the phone just re-scans.
 const RELAY_HEALTH_INTERVAL_MS = 30_000;
+// A single failed probe is NOT evidence of a wedged relay. probeRelay gives up after 1.5s, so a
+// busy machine (a test suite, a build, anything pegging the CPU) can blow that deadline while the
+// relay is perfectly fine — and the old code went straight from one timeout to "restarting it…".
+// In practice that produced a stream of unhealthy→recovered pairs ~120ms apart against a relay
+// that never actually stopped working. Demand several consecutive failures, probed a couple of
+// seconds apart so a genuine outage is still caught within one tick rather than several.
+const RELAY_HEALTH_FAILURES_BEFORE_ACTION = 3;
+const RELAY_HEALTH_RETRY_DELAY_MS = 2_000;
+
+/** Timestamp for watchdog lines. These are the one place the station prints repeatedly during an
+ * otherwise idle session, so without a clock a handful of blips over an hour is indistinguishable
+ * from a hot restart loop. */
+const stamp = () => c.dim(new Date().toLocaleTimeString());
+
+async function relayLooksWedged() {
+  for (let attempt = 0; attempt < RELAY_HEALTH_FAILURES_BEFORE_ACTION; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, RELAY_HEALTH_RETRY_DELAY_MS));
+    if (await healthyRegistryEntry()) return false;
+  }
+  return true;
+}
 
 function startRelayHealthWatchdog(relay, { log, listener, onWaiting } = {}) {
   if (!relay?.owned) return { stop() {} };
@@ -644,8 +665,8 @@ function startRelayHealthWatchdog(relay, { log, listener, onWaiting } = {}) {
     if (checking) return;
     checking = true;
     try {
-      if (await healthyRegistryEntry()) return;
-      log(`${c.yellow("!")} devtunnel relay stopped responding — restarting it…`);
+      if (!(await relayLooksWedged())) return;
+      log(`${stamp()} ${c.yellow("!")} devtunnel relay stopped responding — restarting it…`);
       appendStationLog("devtunnel.unhealthy", { previousUrl: relay.baseUrl }, { level: "warn" });
       const { baseUrl, child } = await ensureDevTunnelRelay();
       const sameUrl = baseUrl === relay.baseUrl;
@@ -653,13 +674,20 @@ function startRelayHealthWatchdog(relay, { log, listener, onWaiting } = {}) {
       relay.child = child ?? relay.child;
       relay.owned = relay.owned || Boolean(child);
       if (sameUrl) {
-        log(`${c.green("✓")} devtunnel relay restarted on the same URL — your phone reconnects on its own.`);
-        appendStationLog("devtunnel.recovered", { baseUrl, sameUrl }, { level: "info" });
+        // `child` is null when ensureDevTunnelRelay found the existing relay healthy and simply
+        // attached to it — nothing was restarted, so don't claim otherwise. Saying "restarted"
+        // for a relay that recovered on its own sent us hunting a restart loop that wasn't one.
+        log(
+          child
+            ? `${stamp()} ${c.green("✓")} devtunnel relay restarted on the same URL — your phone reconnects on its own.`
+            : `${stamp()} ${c.green("✓")} devtunnel relay is answering again — no restart needed.`,
+        );
+        appendStationLog("devtunnel.recovered", { baseUrl, sameUrl, restarted: Boolean(child) }, { level: "info" });
         return;
       }
       await repairOnNewUrl({ log, listener, onWaiting, baseUrl });
     } catch (err) {
-      log(`${c.red("✗")} devtunnel relay is down and could not be restarted: ${err?.message?.split("\n")[0] ?? err}`);
+      log(`${stamp()} ${c.red("✗")} devtunnel relay is down and could not be restarted: ${err?.message?.split("\n")[0] ?? err}`);
       appendStationLog("devtunnel.recovery_failed", { error: err?.message ?? String(err) }, { level: "error" });
     } finally {
       checking = false;
