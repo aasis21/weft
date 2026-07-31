@@ -217,6 +217,8 @@ interface SessionScreenProps {
   onPinSession?(channelId: string, pinned: boolean): void;
   onArchiveSession?(channelId: string): void;
   onReconnect(channelId: string): void;
+  /** Re-issue the spawn/resume behind a failed placeholder card. */
+  onRetrySpawn?(channelId: string): void;
   onGoHome(): void;
   onLoadEarlier(): void;
 }
@@ -245,6 +247,7 @@ export function SessionScreen({
   onPinSession,
   onArchiveSession,
   onReconnect,
+  onRetrySpawn,
   onGoHome,
   onLoadEarlier,
 }: SessionScreenProps): JSX.Element {
@@ -338,7 +341,9 @@ export function SessionScreen({
   // contradicting the header's "Quiet"/"Offline" (#127).
   const offlineLabel =
     status === 'initializing'
-      ? `Starting your session${active.spawning?.deviceName ? ` on ${active.spawning.deviceName}` : ''}…`
+      ? active.spawning?.slow
+        ? 'Still starting on the laptop — a large session store can take a minute…'
+        : `Starting your session${active.spawning?.deviceName ? ` on ${active.spawning.deviceName}` : ''}…`
       : status === 'connecting'
       ? 'Connecting to your session…'
       : cold
@@ -663,6 +668,7 @@ export function SessionScreen({
           historyHasMore={timeline.historyHasMore}
           historyLoading={timeline.historyLoading}
           initialLoading={initialLoading}
+          conversationKey={activeId}
         />
       </main>
 
@@ -686,9 +692,16 @@ export function SessionScreen({
                 ↻ Reconnect
               </button>
             ) : meta.kind === 'spawning' ? (
-              <button type="button" className="reconnect-btn" onClick={() => onRemoveSession(activeId)}>
-                Dismiss
-              </button>
+              <>
+                {onRetrySpawn ? (
+                  <button type="button" className="reconnect-btn" onClick={() => onRetrySpawn(activeId)}>
+                    ↻ Try again
+                  </button>
+                ) : null}
+                <button type="button" className="reconnect-btn ghost" onClick={() => onRemoveSession(activeId)}>
+                  Dismiss
+                </button>
+              </>
             ) : null}
           </div>
         ) : null}

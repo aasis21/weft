@@ -183,12 +183,14 @@ describe('StartSessionScreen — the device step folds away once it is answered'
 });
 
 describe('StartSessionScreen — the resumable list', () => {
-  it('pulls the list itself when the Resume tab opens, because opening it is the request', () => {
-    // It used to park behind a Load button, which made the tab arrive empty and look broken.
+  it('pulls the list itself when the Resume tab opens, scoped to the folder it opens on', () => {
+    // It used to park behind a Load button, which made the tab arrive empty and look broken. The
+    // fetch is folder-scoped because the laptop caps the reply AFTER filtering — asking for
+    // everything and narrowing here would show a truncated slice of a busy folder.
     const onRefreshSessions = vi.fn();
     renderScreen({ devices: [makeDevice({ sessions: undefined })], initialMode: 'resume', onRefreshSessions });
 
-    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1');
+    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', 'C:\\repos\\demo');
     expect(screen.getByText(/loading sessions/i)).toBeTruthy();
   });
 
@@ -224,6 +226,44 @@ describe('StartSessionScreen — the resumable list', () => {
     const onRefreshSessions = vi.fn();
     renderScreen({ devices: [makeDevice({ sessions: undefined })], onRefreshSessions });
     expect(onRefreshSessions).not.toHaveBeenCalled();
+  });
+
+  it('re-asks the laptop when the folder changes instead of narrowing the page it has', () => {
+    // The laptop applies its cap after filtering, so the page on hand is only the newest N across
+    // whatever scope it was fetched for. Narrowing locally would quietly show a slice of a busy
+    // folder and read as a stale refresh.
+    const onRefreshSessions = vi.fn();
+    renderScreen({
+      devices: [resumeDevice('C:\\CLP\\ModernOrder')],
+      initialMode: 'resume',
+      onRefreshSessions,
+    });
+    onRefreshSessions.mockClear();
+
+    fireEvent.change(folderPicker(), { target: { value: '/home/me/weft' } });
+    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', '/home/me/weft');
+  });
+
+  it('keeps every folder in the picker, and counts them, from the laptop\u2019s whole-store totals', () => {
+    // Scoped to one folder the page contains only that folder's rows; counting them would both
+    // strand the user (nothing else left to switch to) and understate a folder that outgrew the cap.
+    renderScreen({
+      devices: [
+        makeDevice({
+          projects: [],
+          sessions: [storedSession({ sessionId: 'a', title: 'Only one', cwd: '/home/me/weft' })],
+          sessionFolders: [
+            { cwd: '/home/me/weft', count: 96, updatedAt: null },
+            { cwd: 'C:\\CLP\\ModernOrder', count: 4, updatedAt: null },
+          ],
+        }),
+      ],
+      initialMode: 'resume',
+    });
+
+    const labels = [...folderPicker().options].map((o) => o.textContent ?? '');
+    expect(labels.some((l) => /weft \(96\)/.test(l))).toBe(true);
+    expect(labels.some((l) => /ModernOrder \(4\)/.test(l))).toBe(true);
   });
 
   it('narrows the list as you type and restores it when cleared', () => {

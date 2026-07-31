@@ -165,20 +165,31 @@ function dirExists(dir) {
  *  - `title` is the CLI-derived chat summary, falling back to the cwd basename when empty.
  *  - `updatedAt` is epoch ms of the session's last activity (store `updated_at`), for "2h ago".
  * Sessions whose `cwd` no longer exists on disk are filtered out (a resume needs a valid working
- * directory). `limit` is clamped to SESSION_LIST_MAX. Returns [] on any read failure (older Node
- * without node:sqlite, missing/locked DB, …) so the caller degrades to an empty list.
+ * directory). `limit` is clamped to SESSION_LIST_MAX. Pass `cwd` to restrict the query to one
+ * folder: the cap applies to the *result*, so filtering here rather than on the phone is the
+ * difference between seeing a busy folder's whole history and seeing whichever two of its sessions
+ * happened to survive a global newest-50 cut. Returns [] on any read failure (older Node without
+ * node:sqlite, missing/locked DB, …) so the caller degrades to an empty list.
  */
-export async function listSessions({ limit } = {}, dbPath = DB_PATH) {
+export async function listSessions({ limit, cwd } = {}, dbPath = DB_PATH) {
   const pageSize = clampSessionLimit(limit);
+  const folder = typeof cwd === "string" && cwd.trim() ? cwd.trim() : null;
   try {
     const db = await openDb(dbPath);
     try {
-      const rows = db
-        .prepare(
-          "SELECT id, cwd, repository, branch, summary, updated_at FROM sessions " +
-            "WHERE cwd IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
-        )
-        .all(pageSize);
+      const rows = folder
+        ? db
+            .prepare(
+              "SELECT id, cwd, repository, branch, summary, updated_at FROM sessions " +
+                "WHERE cwd = ? ORDER BY updated_at DESC LIMIT ?",
+            )
+            .all(folder, pageSize)
+        : db
+            .prepare(
+              "SELECT id, cwd, repository, branch, summary, updated_at FROM sessions " +
+                "WHERE cwd IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
+            )
+            .all(pageSize);
       const sessions = [];
       for (const r of rows) {
         if (!r || !r.id || !r.cwd || !dirExists(r.cwd)) continue;
@@ -193,6 +204,36 @@ export async function listSessions({ limit } = {}, dbPath = DB_PATH) {
         });
       }
       return sessions;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Real per-folder session counts across the WHOLE store, newest folder first. The phone's folder
+ * picker used to count whatever page it happened to be given, so a folder with a hundred sessions
+ * could advertise "(2)" simply because the newest fifty rows belonged to somewhere else. Folders
+ * whose directory no longer exists are omitted, matching listSessions.
+ */
+export async function listSessionFolders(dbPath = DB_PATH) {
+  try {
+    const db = await openDb(dbPath);
+    try {
+      const rows = db
+        .prepare(
+          "SELECT cwd, COUNT(*) AS n, MAX(updated_at) AS newest FROM sessions " +
+            "WHERE cwd IS NOT NULL GROUP BY cwd ORDER BY newest DESC",
+        )
+        .all();
+      const folders = [];
+      for (const r of rows) {
+        if (!r || !r.cwd || !dirExists(r.cwd)) continue;
+        folders.push({ cwd: r.cwd, count: Number(r.n) || 0, updatedAt: parseTs(r.newest) });
+      }
+      return folders;
     } finally {
       db.close();
     }

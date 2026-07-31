@@ -1,10 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatThread } from '@/ui/thread/ChatThread';
 import type { TimelineItem } from '@/lib/timeline';
 
 const now = Date.UTC(2026, 6, 1, 12, 0);
+
+/** A freshly-opened thread deliberately ignores scroll position while it settles at the newest
+ *  message, so anything asserting read-anywhere behaviour has to wait that window out first. */
+async function settleThread(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 320));
+  });
+}
 
 describe('ChatThread', () => {
   it('renders user and assistant bubbles on their real row sides with device chips', () => {
@@ -252,7 +260,7 @@ describe('ChatThread', () => {
     expect(screen.getByText('next prompt').closest('.row')).toHaveClass('user', 'after-tool');
   });
 
-  it('renders the jump-to-latest control as an icon-only button', () => {
+  it('renders the jump-to-latest control as an icon-only button', async () => {
     const { container } = render(
       <div className="thread-scroll">
         <ChatThread items={[{ kind: 'assistant', id: 'a1', text: 'reply', ts: now }]} />
@@ -263,6 +271,7 @@ describe('ChatThread', () => {
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
     Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
 
+    await settleThread();
     fireEvent.scroll(scroller);
 
     const button = screen.getByRole('button', { name: 'Scroll to latest' });
@@ -295,17 +304,34 @@ describe('ChatThread', () => {
       expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'end' });
     });
 
-    it('leaves a reader who scrolled up alone', () => {
+    it('leaves a reader who scrolled up alone', async () => {
       const { scroller, scrollIntoView } = mountInScroller();
       Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
       Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
       Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
+      await settleThread();
       fireEvent.scroll(scroller);
       scrollIntoView.mockClear();
 
       fireEvent(window, new Event('resize'));
 
       expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it('opens at the newest message without animating, and offers no jump-to-latest on arrival', async () => {
+      // The thread is mid-history and "unpinned" by the numbers, but it has only just opened — the
+      // reader has not gone anywhere, history simply landed above them.
+      const { scroller, scrollIntoView } = mountInScroller();
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
+
+      fireEvent.scroll(scroller);
+
+      expect(screen.queryByRole('button', { name: 'Scroll to latest' })).not.toBeInTheDocument();
+      for (const call of scrollIntoView.mock.calls) {
+        expect(call[0]).toMatchObject({ behavior: 'auto' });
+      }
     });
   });
 });

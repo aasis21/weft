@@ -577,16 +577,22 @@ export function createListener({
   // large and rewritten on every turn of every session, so we read it only when the phone explicitly
   // asks (SESSION_LIST_REQUEST). Best-effort: any read/send failure just sends (or skips) an empty
   // list; the phone can pull again.
-  async function sendSessionList(limit) {
+  async function sendSessionList(limit, cwd) {
     if (!channel || stopped) return;
     let sessions = [];
+    let folders = null;
     try {
-      sessions = (await Promise.resolve(sessionsApi.listSessions({ limit }))) ?? [];
+      sessions = (await Promise.resolve(sessionsApi.listSessions({ limit, cwd }))) ?? [];
     } catch {
       sessions = [];
     }
     try {
-      await channel.send(sessionList(sessions));
+      folders = (await Promise.resolve(sessionsApi.listSessionFolders?.())) ?? null;
+    } catch {
+      folders = null;
+    }
+    try {
+      await channel.send(sessionList(sessions, folders));
     } catch {
       // send didn't land — the phone will re-request on its next refresh.
     }
@@ -652,7 +658,7 @@ export function createListener({
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST_REQUEST) {
-      await sendSessionList(envelope.msg?.limit);
+      await sendSessionList(envelope.msg?.limit, envelope.msg?.cwd);
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {

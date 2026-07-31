@@ -1,6 +1,6 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { EVENT_TYPE, SUBTYPE } from '@aasis21/weft-shared';
-import type { EventEnvelope, HistoryMsg, StoredSession } from '@aasis21/weft-shared';
+import type { EventEnvelope, HistoryMsg, SessionFolder, StoredSession } from '@aasis21/weft-shared';
 import { EVENT_LOG_CAP } from '@/lib/eventLog';
 import type {
   ApprovalRequestMsg,
@@ -235,11 +235,15 @@ const sessionsSlice = createSlice({
     // and, like the other DEVICE-channel replies, doubles as a liveness signal.
     deviceSessionsReceived(
       state,
-      action: PayloadAction<{ channelId: string; sessions: StoredSession[] }>,
+      action: PayloadAction<{ channelId: string; sessions: StoredSession[]; folders?: SessionFolder[] }>,
     ) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) {
         device.sessions = action.payload.sessions;
+        // Whole-store folder totals, kept separately because `sessions` is only the newest page and
+        // now may be scoped to a single folder — counting it would understate every other folder.
+        // Absent from older listeners, in which case whatever we last knew stands.
+        if (action.payload.folders) device.sessionFolders = action.payload.folders;
         device.sessionsLoading = false;
         device.connected = true;
         device.lastSeenAt = Date.now();
@@ -417,6 +421,12 @@ const sessionsSlice = createSlice({
         }
       }
     },
+    /** A resume that is taking longer than a spawn would. Not a failure — the placeholder stays
+     *  `initializing`, it just stops pretending the wait is normal. */
+    spawnSlowSet(state, action: PayloadAction<{ id: string }>) {
+      const spawning = state.entities[action.payload.id]?.connection.spawning;
+      if (spawning) spawning.slow = true;
+    },
     coldSet(state, action: PayloadAction<{ id: string; on: boolean }>) {
       const session = state.entities[action.payload.id];
       if (session) session.connection.cold = action.payload.on;
@@ -545,6 +555,7 @@ export const {
   metaScannedAtSet,
   debugAppended,
   readySet,
+  spawnSlowSet,
   historyPageMerged,
 } = sessionsSlice.actions;
 

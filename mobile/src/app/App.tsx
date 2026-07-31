@@ -310,7 +310,7 @@ export default function App(): JSX.Element {
           setStartDeviceId(undefined);
           setShowLanding(false);
         }}
-        onRefreshSessions={(id) => void sessionRuntime.refreshSessions(id)}
+        onRefreshSessions={(id, cwd) => void sessionRuntime.refreshSessions(id, cwd)}
         onResume={async (id, req) => {
           await sessionRuntime.resumeSession(id, req);
           setStarting(false);
@@ -405,6 +405,7 @@ export default function App(): JSX.Element {
       onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
       onArchiveSession={(id) => sessionRuntime.archive(id)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
+      onRetrySpawn={(id) => void sessionRuntime.retrySpawn(id)}
       onGoHome={() => {
         setError(null);
         setShowLanding(true);

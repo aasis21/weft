@@ -1,4 +1,5 @@
 import type { TimelineState } from '@/lib/timeline';
+import type { SpawnMode } from '@aasis21/weft-shared';
 import type { DebugEvent, ListenerDeviceState, SessionMeta, SessionStatus } from './model';
 
 export type { SessionMeta, SessionStatus };
@@ -38,6 +39,8 @@ export interface SessionView {
     deviceId: string;
     deviceName?: string;
     projectName: string;
+    mode?: SpawnMode;
+    slow?: boolean;
   };
 }
 

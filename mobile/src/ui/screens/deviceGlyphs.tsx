@@ -99,6 +99,17 @@ export function BackGlyph(): JSX.Element {
   );
 }
 
+/** Three stacked rules — the sessions drawer, matching the chat screen's own drawer trigger. */
+export function MenuGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </StrokeIcon>
+  );
+}
+
 /** Resume: an arrow curving back onto itself, distinct from {@link RefreshGlyph}'s full circle. */
 export function ResumeGlyph(): JSX.Element {
   return (

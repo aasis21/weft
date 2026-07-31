@@ -331,10 +331,13 @@ export const projectList = (projects, deviceName, deviceId) =>
 export const spawnSession = (requestId, projectName, mode = "default", name = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_SESSION, { requestId, projectName, mode, name });
 /** Phone -> listener: request the machine's recent resumable CLI sessions (on-demand; not pushed on
- *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. */
-export const sessionListRequest = (limit = null) =>
+ *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. Optional `cwd` narrows the
+ *  query to one folder *before* the cap applies — without it a busy folder's history is invisible
+ *  behind whatever happens to be newest across the whole machine. */
+export const sessionListRequest = (limit = null, cwd = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST_REQUEST, {
     ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}),
+    ...(typeof cwd === "string" && cwd ? { cwd } : {}),
   });
 /**
  * Listener -> phone: the machine's recent resumable sessions, newest-first. Each entry is
@@ -344,7 +347,7 @@ export const sessionListRequest = (limit = null) =>
  * `updatedAt` is epoch ms of the session's last activity (for "2h ago" sorting/labels). Malformed
  * entries (missing sessionId/cwd) are dropped so a corrupt row can never wedge the phone list.
  */
-export const sessionList = (sessions) =>
+export const sessionList = (sessions, folders = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST, {
     sessions: (Array.isArray(sessions) ? sessions : [])
       .filter((s) => s && typeof s.sessionId === "string" && s.sessionId && typeof s.cwd === "string" && s.cwd)
@@ -356,6 +359,20 @@ export const sessionList = (sessions) =>
         branch: typeof s.branch === "string" && s.branch.length > 0 ? s.branch : null,
         updatedAt: Number.isFinite(s.updatedAt) ? s.updatedAt : null,
       })),
+    // Whole-store per-folder totals, independent of the capped page above, so the phone's folder
+    // picker can say how many sessions a folder really holds rather than how many of them happened
+    // to fit in this reply. Omitted entirely by listeners that predate it.
+    ...(Array.isArray(folders)
+      ? {
+          folders: folders
+            .filter((f) => f && typeof f.cwd === "string" && f.cwd)
+            .map((f) => ({
+              cwd: f.cwd,
+              count: Number.isFinite(f.count) ? f.count : 0,
+              updatedAt: Number.isFinite(f.updatedAt) ? f.updatedAt : null,
+            })),
+        }
+      : {}),
   });
 /**
  * Phone -> listener: resume an existing CLI session. `requestId` correlates the reply (reusing the

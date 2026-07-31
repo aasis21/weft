@@ -1231,6 +1231,14 @@
   font-size: 12.5px;
 }
 
+/* Secondary action beside a primary one in the same banner — Dismiss must not compete with the
+   retry that is almost always what the user actually wants. */
+.reconnect-btn.ghost {
+  background: transparent;
+  border: 1px solid var(--bg-rule);
+  color: var(--fg-dim);
+}
+
 /* ===================== multi-session drawer ===================== */
 .drawer-scrim {
   position: fixed;
@@ -2270,13 +2278,30 @@
   margin-top: 2px;
 }
 
+/* The footer floats over a scrolling list, so it needs its own ground: without a background the
+   session cards slide visibly underneath the CTA and the button appears to sit on top of text. The
+   negative margins let the backdrop run to the padded edges of the page rather than stopping at the
+   content column, and the fade above it softens the cut where rows disappear. */
 .weft-session .start-footer {
   display: flex;
   flex-direction: column;
   gap: 8px;
   position: sticky;
   bottom: max(8px, env(safe-area-inset-bottom));
-  padding-top: 4px;
+  z-index: 2;
+  margin: 0 -12px;
+  padding: 12px 12px max(8px, env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+.weft-session .start-footer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 20px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg), transparent);
 }
 
 .weft-session .start-footer-links {
@@ -2595,26 +2620,6 @@
    split into Active and a collapsed Inactive bucket. Everything administrative lives in the
    header's "⋯" menu instead of competing with Start/Resume for attention. */
 
-.weft-session .device-breadcrumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  align-self: flex-start;
-  margin: 0 0 2px -6px;
-  padding: 4px 8px 4px 6px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--fg-dim);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.weft-session .device-breadcrumb:hover,
-.weft-session .device-breadcrumb:focus-visible { color: var(--fg); background: var(--bg); }
-.weft-session .device-breadcrumb svg { width: 16px; height: 16px; display: block; }
-
 /* Shared heading for every card section on this screen, so "Projects", "Active" and "Offered
    sessions" all read at the same weight rather than each card inventing its own. */
 .weft-session .device-section-label {
@@ -2656,9 +2661,20 @@
   text-overflow: ellipsis;
 }
 .weft-session .device-project-chip svg { width: 13px; height: 13px; flex: 0 0 auto; }
+/* Nothing follows the chips inside the card any more, so their trailing gap is dead space. */
+.weft-session .device-project-chips:last-child { margin-bottom: 0; }
 
 /* Start and Resume are the whole point of the screen — equal-width, side by side, nothing else
-   in the row to dilute them. */
+   in the row to dilute them. Lifted out of the Projects card so they read as the screen's action,
+   not as a footer to the project list. */
+.weft-session .device-actions-lead {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex-wrap: nowrap;
+  margin-bottom: 4px;
+}
+.weft-session .device-actions-lead > button { width: 100%; margin-top: 0; }
 .weft-session .device-card .device-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2698,7 +2714,7 @@
   font-size: 12px;
 }
 
-.weft-session .device-sessions-list {
+.weft-session .device-details-screen .device-sessions-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2708,8 +2724,15 @@
 }
 
 .weft-session .device-session-row {
-  position: relative;
   padding: 0;
+}
+
+/* The dense row treatment (and the swipe actions it hides) belongs to the device page only. The
+   resume list on the Start screen reuses these same class names, so anything laid out for one
+   silently restyles the other unless it is scoped — that is exactly how the Start screen's stacked
+   cards once collapsed into unreadable side-by-side rows. */
+.weft-session .device-details-screen .device-session-row {
+  position: relative;
   overflow: hidden;
   border-radius: 12px;
 }
@@ -2781,45 +2804,55 @@
   margin: 0;
 }
 
-/* Rows are dense and single-line-per-fact: a status dot, the title, then one dim line carrying
-   status · folder · age. The old two-line stack made ten sessions an endless scroll. */
+/* Base row: a stacked card (title over one dim detail line). The Start screen's resume list uses
+   this form. */
 .weft-session .device-session-open {
-  position: relative;
-  z-index: 1;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   width: 100%;
-  padding: 10px 12px;
-  background: var(--bg-elev);
+  padding: 14px;
+  background: transparent;
   border: none;
-  border-radius: 12px;
+  border-radius: 16px;
   text-align: left;
   cursor: pointer;
   color: inherit;
-  transition: transform 160ms ease;
 }
 .weft-session .device-session-open:hover,
 .weft-session .device-session-open:focus-visible { background: var(--bg); }
-.weft-session .device-session-row.row-swipe-open .device-session-open {
+
+/* Device page rows are dense and single-line-per-fact: a status dot, the title, then one dim line
+   carrying status · folder · age. The stacked card above made ten sessions an endless scroll. */
+.weft-session .device-details-screen .device-session-open {
+  position: relative;
+  z-index: 1;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border-radius: 12px;
+  transition: transform 160ms ease;
+}
+.weft-session .device-details-screen .device-session-row.row-swipe-open .device-session-open {
   transform: translateX(-88px);
   background: var(--bg);
 }
-.weft-session .device-session-open > .status-dot { flex: 0 0 auto; width: 9px; height: 9px; }
+.weft-session .device-details-screen .device-session-open > .status-dot { flex: 0 0 auto; width: 9px; height: 9px; }
 /* Mirror the drawer's flat row dots: tone lives on the dot itself here (there's no `.status-line`
    wrapper), and the calmer states don't animate in a long list. */
-.weft-session .device-session-open > .status-dot.live { background: var(--success); animation: none; box-shadow: none; }
-.weft-session .device-session-open > .status-dot.idle { background: var(--warning); animation: none; box-shadow: none; }
-.weft-session .device-session-open > .status-dot.busy,
-.weft-session .device-session-open > .status-dot.connecting { background: var(--accent); box-shadow: none; animation: weft-beat 1.2s ease-in-out infinite; }
-.weft-session .device-session-open > .status-dot.listening { background: var(--warning); }
-.weft-session .device-session-open > .status-dot.speaking { background: var(--success); }
-.weft-session .device-session-open > .status-dot.error { background: var(--error); animation: none; }
-.weft-session .device-session-open > .status-dot.archived,
-.weft-session .device-session-open > .status-dot.ended,
-.weft-session .device-session-open > .status-dot.initializing { background: var(--fg-faint); animation: none; box-shadow: none; }
-
+.weft-session .device-details-screen .device-session-open > .status-dot.live { background: var(--success); animation: none; box-shadow: none; }
+.weft-session .device-details-screen .device-session-open > .status-dot.idle { background: var(--warning); animation: none; box-shadow: none; }
+.weft-session .device-details-screen .device-session-open > .status-dot.busy,
+.weft-session .device-details-screen .device-session-open > .status-dot.connecting { background: var(--accent); box-shadow: none; animation: weft-beat 1.2s ease-in-out infinite; }
+.weft-session .device-details-screen .device-session-open > .status-dot.listening { background: var(--warning); }
+.weft-session .device-details-screen .device-session-open > .status-dot.speaking { background: var(--success); }
+.weft-session .device-details-screen .device-session-open > .status-dot.error { background: var(--error); animation: none; }
+.weft-session .device-details-screen .device-session-open > .status-dot.archived,
+.weft-session .device-details-screen .device-session-open > .status-dot.ended,
+.weft-session .device-details-screen .device-session-open > .status-dot.initializing { background: var(--fg-faint); animation: none; box-shadow: none; }
 
 .weft-session .device-session-text {
   display: flex;

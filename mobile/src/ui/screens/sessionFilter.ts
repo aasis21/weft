@@ -6,8 +6,8 @@ import type { StoredSession } from '@aasis21/weft-shared';
 export interface FolderOption {
   /** Absolute cwd — the option's value, and what {@link filterStoredSessions} matches on. */
   path: string;
-  /** Last path segment, shown in the picker. Ambiguous on its own (two repos can both end in
-   *  `main`), which is why the full path is kept as the option's title attribute. */
+  /** Display name. Normally the last path segment; extended leftwards when that alone would be
+   *  ambiguous — see {@link folderOptions}. */
   label: string;
   count: number;
 }
@@ -22,6 +22,42 @@ export function basename(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** Enough of the tail of each path to tell them apart. Two different checkouts really can both end
+ *  in `axon`, and rendering both as "axon (2)" made the picker unusable — you chose one, got someone
+ *  else's sessions, and concluded the refresh was stale. A native <select> on a phone shows no title
+ *  tooltip, so the disambiguation has to be in the visible text. Only the colliding labels grow, and
+ *  only by as many segments as it takes. */
+function disambiguate(paths: string[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  const segments = new Map<string, string[]>();
+  for (const path of paths) segments.set(path, path.split(/[\\/]+/).filter(Boolean));
+  let depth = 1;
+  let remaining = paths;
+  while (remaining.length > 0 && depth <= 6) {
+    const byLabel = new Map<string, string[]>();
+    for (const path of remaining) {
+      const parts = segments.get(path) ?? [path];
+      const label = parts.slice(Math.max(0, parts.length - depth)).join('/');
+      byLabel.set(label, [...(byLabel.get(label) ?? []), path]);
+    }
+    const stillColliding: string[] = [];
+    for (const [label, group] of byLabel) {
+      const parts = segments.get(group[0] ?? '') ?? [];
+      // A path can't grow past its own root; once it is fully spelled out it is as distinct as it
+      // will ever be, collision or not.
+      if (group.length === 1 || depth >= parts.length) {
+        for (const path of group) labels.set(path, label);
+      } else {
+        stillColliding.push(...group);
+      }
+    }
+    remaining = stillColliding;
+    depth += 1;
+  }
+  for (const path of remaining) labels.set(path, path);
+  return labels;
+}
+
 /** Distinct cwds across the list, most-sessions-first then alphabetical, so the folders you actually
  *  work in surface at the top of the picker instead of being ordered by an accident of mtime.
  *
@@ -30,8 +66,16 @@ export function basename(path: string): string {
  *   demonstrably diverge (the store knows every folder a session has ever run in, including ones
  *   that were never registered and ones that no longer exist), and a picker that only listed cwds
  *   would hide the folder you are most likely to want simply because it is empty today.
+ * @param totals Whole-store per-folder counts reported by the laptop. The rows on hand are only the
+ *   most recent page, so counting them tells you how much of a folder survived the cap rather than
+ *   how much of it exists — a folder with a hundred sessions could advertise "(2)". When the laptop
+ *   supplies real totals they win; otherwise we fall back to counting what we have.
  */
-export function folderOptions(sessions: StoredSession[], registered: readonly string[] = []): FolderOption[] {
+export function folderOptions(
+  sessions: StoredSession[],
+  registered: readonly string[] = [],
+  totals?: ReadonlyMap<string, number>,
+): FolderOption[] {
   const counts = new Map<string, number>();
   for (const path of registered) {
     if (path) counts.set(path, 0);
@@ -40,9 +84,13 @@ export function folderOptions(sessions: StoredSession[], registered: readonly st
     if (!session.cwd) continue;
     counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1);
   }
+  if (totals) {
+    for (const [path, total] of totals) counts.set(path, total);
+  }
   const isRegistered = new Set(registered.filter(Boolean));
+  const labels = disambiguate([...counts.keys()]);
   return [...counts.entries()]
-    .map(([path, count]) => ({ path, label: basename(path), count }))
+    .map(([path, count]) => ({ path, label: labels.get(path) ?? basename(path), count }))
     .sort(
       (a, b) =>
         Number(isRegistered.has(b.path)) - Number(isRegistered.has(a.path)) ||

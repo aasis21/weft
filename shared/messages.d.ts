@@ -315,9 +315,21 @@ export interface StoredSession {
 export interface SessionListRequestMsg {
   /** Optional page size; clamped by the listener to SESSION_LIST_MAX. */
   limit?: number;
+  /** Optional folder to restrict the query to, applied before the page size so a busy folder's
+   *  history isn't hidden behind newer sessions from elsewhere on the machine. */
+  cwd?: string;
+}
+/** Whole-store session count for one working directory. */
+export interface SessionFolder {
+  cwd: string;
+  count: number;
+  updatedAt: number | null;
 }
 export interface SessionListMsg {
   sessions: StoredSession[];
+  /** Per-folder totals across the entire store, independent of the capped `sessions` page. Absent
+   *  from listeners that predate it. */
+  folders?: SessionFolder[];
 }
 export interface ResumeSessionMsg {
   requestId: string;
@@ -552,8 +564,8 @@ export function spawnSession(
   mode?: SpawnMode,
   name?: string | null
 ): SpawnSessionMessage;
-export function sessionListRequest(limit?: number | null): SessionListRequest;
-export function sessionList(sessions: StoredSession[]): SessionListMessage;
+export function sessionListRequest(limit?: number | null, cwd?: string | null): SessionListRequest;
+export function sessionList(sessions: StoredSession[], folders?: SessionFolder[] | null): SessionListMessage;
 export function resumeSession(
   requestId: string,
   sessionId: string,

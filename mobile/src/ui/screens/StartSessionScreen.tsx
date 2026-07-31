@@ -35,7 +35,7 @@ interface StartSessionScreenProps {
   onStart(channelId: string, opts: { projectName: string; mode: SpawnMode; name?: string }): Promise<void>;
   /** On-demand pull of the device's recent resumable CLI sessions. Never automatic: the store is
    *  large and rewritten every turn, and the reply arrives asynchronously. */
-  onRefreshSessions(channelId: string): void;
+  onRefreshSessions(channelId: string, cwd?: string | null): void;
   /** Resume a past CLI session: spawn `copilot --resume=<id>` in its cwd and pair to it. */
   onResume(channelId: string, req: ResumeRequest): Promise<void>;
   /** Route to a session the phone is already driving, instead of resuming a second copy of it. */
@@ -108,11 +108,12 @@ export function StartSessionScreen({
    *  so the default can't be a useState initialiser — and once it has been applied, a later refresh
    *  must not yank the picker back out from under a choice the user has made. */
   const folderTouchedRef = useRef(false);
-  /** Devices whose resumable list this screen has already asked for. The reply always sets an
-   *  array — an empty one when the laptop has no sessions — so without this the auto-load would
-   *  see "still nothing" and re-ask forever. Keyed by device so switching devices loads the new
-   *  one, and a manual Refresh stays available for a genuine re-pull. */
-  const autoLoadedRef = useRef<Set<string>>(new Set());
+  /** The `device|folder` pair the current `sessions` page was fetched for. The laptop now filters by
+   *  folder BEFORE applying its cap, so a folder that is busier than the cap can only be seen in
+   *  full by re-asking scoped to it — filtering the page we already have would silently show a
+   *  truncated slice. Keyed by pair so switching folders re-pulls, and so the reply landing (which
+   *  always sets an array, even an empty one) can't be mistaken for "still nothing, ask again". */
+  const fetchedScopeRef = useRef<string>('');
   const now = useNowTick();
 
   const sortedDevices = sortDevices(devices);
@@ -134,24 +135,6 @@ export function StartSessionScreen({
     setProjectName(defaultProject?.name ?? '');
   }, [selected?.channelId, selected?.projects, selected?.lastProjectName]);
 
-  // Opening the Resume tab is itself the request to see what is resumable, so pull the list rather
-  // than parking behind a Load button — the empty and loading states already cover the wait. Only
-  // while the device is connected: asking an offline laptop just produces a timeout.
-  useEffect(() => {
-    if (!resuming || !selected?.connected) return;
-    if (selected.sessions !== undefined || selected.sessionsLoading) return;
-    if (autoLoadedRef.current.has(selected.channelId)) return;
-    autoLoadedRef.current.add(selected.channelId);
-    onRefreshSessions(selected.channelId);
-  }, [
-    resuming,
-    selected?.channelId,
-    selected?.connected,
-    selected?.sessions,
-    selected?.sessionsLoading,
-    onRefreshSessions,
-  ]);
-
   // --- resume derivations -----------------------------------------------------------------------
   const storeSessions = selected?.sessions ?? [];
   // Whether the resumable list has ever been pulled this run (undefined = never asked; the reply
@@ -162,7 +145,15 @@ export function StartSessionScreen({
   const defaultFolder = selected?.projects.find((p) => p.isDefault)?.path ?? null;
   // Registered projects and store cwds are different sets, so resume offers the union — see
   // folderOptions. New sessions stay registered-only, because you can only launch into a project.
-  const folderChoices = folderOptions(storeSessions, selected?.projects.map((p) => p.path) ?? []);
+  // The laptop's whole-store totals also keep every folder in the picker while the rows on hand are
+  // scoped to one — without them, narrowing to a folder would empty the picker you narrowed with.
+  const folderTotals = new Map<string, number>();
+  for (const folder of selected?.sessionFolders ?? []) folderTotals.set(folder.cwd, folder.count);
+  const folderChoices = folderOptions(
+    storeSessions,
+    selected?.projects.map((p) => p.path) ?? [],
+    folderTotals.size > 0 ? folderTotals : undefined,
+  );
   const activeFolder = folderChoices.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
   const visibleSessions = filterStoredSessions(
     storeSessions,
@@ -184,6 +175,29 @@ export function StartSessionScreen({
     if (folderTouchedRef.current || !defaultFolder) return;
     setSessionFolder(defaultFolder);
   }, [defaultFolder]);
+
+  // Opening the Resume tab is itself the request to see what is resumable, so pull the list rather
+  // than parking behind a Load button — the empty and loading states already cover the wait. Only
+  // while the device is connected: asking an offline laptop just produces a timeout. Re-pulls on
+  // every folder change because the cap is applied by the laptop AFTER filtering.
+  useEffect(() => {
+    if (!resuming || !selected?.connected || selected.sessionsLoading) return;
+    // The device's default folder arrives asynchronously with its project list; fetching "all"
+    // first and then immediately re-fetching the default would flash a list we never meant to show.
+    if (!folderTouchedRef.current && defaultFolder && sessionFolder !== defaultFolder) return;
+    const scope = `${selected.channelId}|${sessionFolder}`;
+    if (fetchedScopeRef.current === scope) return;
+    fetchedScopeRef.current = scope;
+    onRefreshSessions(selected.channelId, sessionFolder === ALL_FOLDERS ? null : sessionFolder);
+  }, [
+    resuming,
+    selected?.channelId,
+    selected?.connected,
+    selected?.sessionsLoading,
+    sessionFolder,
+    defaultFolder,
+    onRefreshSessions,
+  ]);
 
   // A selection that scrolls out of the filtered list is no longer a thing the CTA can act on.
   useEffect(() => {
@@ -406,7 +420,13 @@ export function StartSessionScreen({
                   <button
                     type="button"
                     className="session-link-btn"
-                    onClick={() => selected && onRefreshSessions(selected.channelId)}
+                    onClick={() =>
+                      selected &&
+                      onRefreshSessions(
+                        selected.channelId,
+                        activeFolder === ALL_FOLDERS ? null : activeFolder,
+                      )
+                    }
                     disabled={!selected || selected.sessionsLoading}
                   >
                     {selected?.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}

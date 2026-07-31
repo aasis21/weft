@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createSpeechSanitizer } from '@/ui/voice/speechText';
 
 function findSentenceEnd(value: string): number {
   for (let index = 0; index < value.length; index += 1) {
@@ -61,6 +62,7 @@ export function useSpeechOutput(): {
   // onend/onerror — cancel() fires those, and the callback would race a freshly started reply.
   const generationRef = useRef(0);
   const watchdogRef = useRef<number | null>(null);
+  const sanitizerRef = useRef(createSpeechSanitizer());
 
   const outstanding = useCallback(
     (): boolean => speakingRef.current || queueRef.current.length > 0 || bufferRef.current.trim().length > 0,
@@ -133,7 +135,12 @@ export function useSpeechOutput(): {
 
   const enqueueChunk = useCallback((text: string): void => {
     if (!supported) return;
-    const clean = text.trim();
+    // Sanitise here rather than at the caller: this is the last point before the words become sound,
+    // so nothing can reach the engine with markup still in it. It runs per *sentence* (not per
+    // streaming delta) because a sentence is a whole line — the sanitiser needs complete lines to
+    // recognise a code fence, and a half-line would be rejoined with a spurious space through the
+    // middle of a word.
+    const clean = sanitizerRef.current.sanitize(text).trim();
     if (!clean) return;
     queueRef.current.push(clean);
     syncPending();
@@ -162,6 +169,9 @@ export function useSpeechOutput(): {
     stopWatchdog();
     queueRef.current = [];
     bufferRef.current = '';
+    // A cancelled reply may have been abandoned mid-code-block; without this the next reply would
+    // start out being swallowed as if it were still inside the fence.
+    sanitizerRef.current.reset();
     speakingRef.current = false;
     setSpeaking(false);
     setPending(false);

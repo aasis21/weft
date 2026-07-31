@@ -9,6 +9,7 @@ import {
   ChevronGlyph,
   DeviceAvatar,
   FolderGlyph,
+  MenuGlyph,
   MoreHorizontalGlyph,
   PencilGlyph,
   PlayGlyph,
@@ -264,14 +265,10 @@ export function DeviceDetailsScreen({
         <button
           className="icon-btn drawer-btn"
           type="button"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open sessions"
+          onClick={onOpenDevices}
+          aria-label="Back to devices"
         >
-          <span className="hamburger" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <BackGlyph />
         </button>
         <DeviceAvatar tone={status.tone} />
         <div className="status-id">
@@ -300,6 +297,18 @@ export function DeviceDetailsScreen({
             </button>
             {menuOpen ? (
               <div ref={menuRef} className="device-menu device-menu-down" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="device-menu-item"
+                  onClick={() => {
+                    closeMenu(false);
+                    setDrawerOpen(true);
+                  }}
+                >
+                  <span className="device-action-icon" aria-hidden="true"><MenuGlyph /></span>
+                  Open sessions
+                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -361,12 +370,40 @@ export function DeviceDetailsScreen({
       </header>
 
       <div className="session-join-inner">
-        <button type="button" className="device-breadcrumb" onClick={onOpenDevices}>
-          <BackGlyph />
-          Devices
-        </button>
-
         {device.error ? <p className="error-banner">{device.error}</p> : null}
+
+        {/* Start and Resume are why you came here, so they sit directly under the header rather
+            than buried at the bottom of a Projects card — the project list is context for them,
+            not a step before them. */}
+        {online ? (
+          <div className="device-actions device-actions-lead">
+            <button
+              type="button"
+              className="session-primary-action device-start-btn"
+              onClick={() => onStartOnDevice(device.channelId)}
+            >
+              <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
+              Start
+            </button>
+            <button
+              type="button"
+              className="session-secondary-action device-resume-btn"
+              onClick={() => onResumeOnDevice(device.channelId)}
+            >
+              <span className="device-action-icon" aria-hidden="true"><ResumeGlyph /></span>
+              Resume
+            </button>
+          </div>
+        ) : (
+          // Offline: the old UI disabled both buttons and explained why in a `title` tooltip,
+          // which is invisible on touch. Say it inline instead.
+          <p className="device-offline-note">
+            <span className="device-action-icon" aria-hidden="true"><WarningGlyph /></span>
+            <span>
+              Offline — run <code>weft start</code> on this laptop to start or resume sessions.
+            </span>
+          </p>
+        )}
 
         {offers.length > 0 ? (
           <section className="session-join-fallback device-offers">
@@ -411,36 +448,6 @@ export function DeviceDetailsScreen({
             </ul>
           ) : (
             <p className="device-card-sub">No projects received yet.</p>
-          )}
-
-          {online ? (
-            <div className="device-actions">
-              <button
-                type="button"
-                className="session-primary-action device-start-btn"
-                onClick={() => onStartOnDevice(device.channelId)}
-              >
-                <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
-                Start
-              </button>
-              <button
-                type="button"
-                className="session-secondary-action device-resume-btn"
-                onClick={() => onResumeOnDevice(device.channelId)}
-              >
-                <span className="device-action-icon" aria-hidden="true"><ResumeGlyph /></span>
-                Resume
-              </button>
-            </div>
-          ) : (
-            // Offline: the old UI disabled both buttons and explained why in a `title` tooltip,
-            // which is invisible on touch. Say it inline instead.
-            <p className="device-offline-note">
-              <span className="device-action-icon" aria-hidden="true"><WarningGlyph /></span>
-              <span>
-                Offline — run <code>weft start</code> on this laptop to start or resume sessions.
-              </span>
-            </p>
           )}
         </section>
 

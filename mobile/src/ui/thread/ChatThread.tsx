@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   JSX,
   KeyboardEvent as ReactKeyboardEvent,
@@ -38,6 +38,9 @@ interface ChatThreadProps {
   /** Parent-supplied, liveness-driven initial-loading flag. When provided it OVERRIDES the local
    *  historyLoading heuristic so a dead host (no history reply) can't spin the skeleton forever. */
   initialLoading?: boolean;
+  /** Identity of the conversation on screen. Changing it means the reader arrived somewhere new, so
+   *  the thread re-arms its "open at the newest message" behaviour. */
+  conversationKey?: string;
 }
 
 const COPILOT_AVATAR: ReactNode = (
@@ -113,7 +116,7 @@ interface MenuState {
   y: number;
 }
 
-export function ChatThread({ items, streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -125,6 +128,18 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
   // the bottom if they were already there (or just sent a prompt themselves).
   const pinnedRef = useRef(true);
   const [isPinned, setIsPinned] = useState(true);
+  // Opening a conversation should *present* the newest message, not travel to it. History arrives
+  // after mount and lands above what is already rendered, so every page used to count as new content
+  // and animate the viewport downwards — you watched the thread scroll itself while you were trying
+  // to read it. Worse, each page changes the scroll height mid-flight, so the "are we at the bottom"
+  // check could conclude the reader had scrolled up and stop following altogether, stranding the
+  // thread mid-history behind a jump-to-latest button on arrival.
+  //
+  // While settling, the thread pins hard: it jumps instantly rather than smoothly, refuses to
+  // unpin, and hides the jump-to-latest affordance. It settles a short beat after the history pull
+  // goes quiet, at which point normal read-anywhere behaviour resumes.
+  const settlingRef = useRef(true);
+  const [settling, setSettling] = useState(true);
   const [hasNewWhileUnpinned, setHasNewWhileUnpinned] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedToolRuns, setCollapsedToolRuns] = useState<Record<string, boolean>>({});
@@ -231,12 +246,44 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
     setHasNewWhileUnpinned(false);
   }, []);
 
+  // Re-arm on arrival at a different conversation.
+  useLayoutEffect(() => {
+    settlingRef.current = true;
+    setSettling(true);
+    pinnedRef.current = true;
+    setIsPinned(true);
+    setHasNewWhileUnpinned(false);
+  }, [conversationKey]);
+
+  // Hold the viewport at the end through every render that happens while the thread is still
+  // filling in. A layout effect runs before the browser paints, so the newest message is simply
+  // where the thread opens — there is no frame in which it is somewhere else.
+  useLayoutEffect(() => {
+    if (!settlingRef.current) return;
+    endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+  });
+
+  // Settle once the history pull has gone quiet for a beat. Keyed on the item count too, so a
+  // second page restarts the wait rather than settling between pages.
+  useEffect(() => {
+    if (!settlingRef.current) return undefined;
+    if (initialLoading || historyLoading) return undefined;
+    const timer = window.setTimeout(() => {
+      settlingRef.current = false;
+      setSettling(false);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [historyLoading, initialLoading, items.length]);
+
   // Track how far the reader is from the bottom of the scrolling ancestor.
   useEffect(() => {
     const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
     if (!scroller) return undefined;
     const update = (): void => {
       cancelLongPress();
+      // Layout churn while the thread is still filling in produces scroll events that do not mean
+      // the reader went anywhere. Believing them is what stranded the view mid-history.
+      if (settlingRef.current) return;
       const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
       const nextPinned = gap < 80;
       pinnedRef.current = nextPinned;
@@ -261,7 +308,8 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
     // into visible jitter (#106).
     const isNewItem = items.length !== prevItemsLenRef.current;
     prevItemsLenRef.current = items.length;
-    endRef.current?.scrollIntoView({ behavior: isNewItem || lastIsUser ? 'smooth' : 'auto', block: 'end' });
+    const smooth = !settlingRef.current && (isNewItem || lastIsUser);
+    endRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' });
   }, [items.length, lastText, lastIsUser]);
 
   // The scroll container getting shorter does not move scrollTop, so the newest messages simply
@@ -543,7 +591,7 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
         </div>
       ) : null}
 
-      {!isPinned ? (
+      {!isPinned && !settling ? (
         <button
           type="button"
           className="scroll-latest"

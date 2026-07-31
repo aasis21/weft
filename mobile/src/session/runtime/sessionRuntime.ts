@@ -118,6 +118,7 @@ import {
   sessionActivated,
   sessionAdded,
   sessionReconciled,
+  spawnSlowSet,
   sessionRemoved,
   settlingSet,
   statusSet,
@@ -209,6 +210,15 @@ const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const AUTO_ARCHIVE_STALE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
 const SPAWN_TIMEOUT_MS = 30_000;
+/* Resume is not spawn. `copilot --resume` has to open the session store, find the record and replay
+   it before the listener can pair the channel, and on a store holding a couple of thousand sessions
+   a cold Windows laptop routinely takes longer than a fresh spawn's half-minute. Failing at 30s was
+   declaring a session dead that was still perfectly on its way — so resume gets its own, longer
+   fuse, and says so on screen while it waits. */
+const RESUME_TIMEOUT_MS = 90_000;
+/* How long a resume may run before the placeholder admits it is taking a while. Silence past the
+   point a spawn would have finished reads as a hang. */
+const RESUME_SLOW_MS = 25_000;
 
 type ManagerSnapshot = ReturnType<typeof selectManagerSnapshot>;
 
@@ -239,6 +249,14 @@ interface PendingSpawn {
   projectName: string;
   name?: string;
   timer: ReturnType<typeof setTimeout>;
+  /** Fires partway through a resume to say it is still working, so a long wait doesn't read as a
+   *  hang. Cleared alongside `timer`. */
+  slowTimer?: ReturnType<typeof setTimeout>;
+}
+
+function clearSpawnTimers(pending: PendingSpawn): void {
+  clearTimeout(pending.timer);
+  if (pending.slowTimer) clearTimeout(pending.slowTimer);
 }
 
 function basename(path: string | null): string | null {
@@ -1180,6 +1198,7 @@ export class SessionRuntime {
       deviceId: channelId,
       deviceName: device.name,
       projectName: opts.projectName,
+      mode: opts.mode,
     };
     this.store.dispatch(sessionAdded(session));
     this.store.dispatch(sessionActivated(tempId));
@@ -1219,7 +1238,7 @@ export class SessionRuntime {
    *  bind, because the session store is large and rewritten every turn. The reply lands in
    *  onListenerMessage → deviceSessionsReceived. Best-effort: a connect/send failure just clears the
    *  loading flag (the section shows whatever was last pulled) without wedging the device. */
-  async refreshSessions(channelId: string): Promise<void> {
+  async refreshSessions(channelId: string, cwd?: string | null): Promise<void> {
     this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: true }));
     // Comms are async: the SESSION_LIST reply arrives later via onListenerMessage (or never, if the
     // laptop is wedged). Arm a failsafe so the button can't stay stuck on "Loading…" — clearing the
@@ -1238,7 +1257,7 @@ export class SessionRuntime {
         this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
         return;
       }
-      const message = sessionListRequest();
+      const message = sessionListRequest(null, cwd ?? null);
       this.recordDeviceEvent(channelId, 'out', message);
       await ctrl.client.send(message);
     } catch (err) {
@@ -1265,9 +1284,19 @@ export class SessionRuntime {
     // reconcile that follows disposes the duplicate *card* while the orphaned process runs on.
     // Prefer what we already have. (Cards are keyed by channel, so the only way to recognise the
     // same CLI session is meta.sessionId, which live sessions report via session_meta.)
+    //
+    // A `spawning` card is deliberately excluded once it has failed. It carries the sessionId but
+    // never became a real attachment and was never persisted, so matching it here made one timed-out
+    // resume poison the row for good: the next tap found the dead placeholder, tried to reconnect a
+    // channel the laptop has no record of, and was told the session was no longer saved. The only
+    // escape was Dismiss, which nothing on screen suggested. A resume still in flight is different —
+    // that one we honour, so a double tap doesn't launch two processes.
     const existing = opts.sessionId
       ? selectAllSessions(this.store.getState()).find(
-          (s) => s.meta.sessionId === opts.sessionId && s.connection.status !== 'ended',
+          (s) =>
+            s.meta.sessionId === opts.sessionId &&
+            s.connection.status !== 'ended' &&
+            (s.meta.kind !== 'spawning' || s.connection.status === 'initializing'),
         )
       : undefined;
     if (existing) {
@@ -1310,6 +1339,7 @@ export class SessionRuntime {
       deviceId: channelId,
       deviceName: device.name,
       projectName: displayName,
+      mode: opts.mode,
     };
     this.store.dispatch(sessionAdded(session));
     this.store.dispatch(sessionActivated(tempId));
@@ -1324,8 +1354,17 @@ export class SessionRuntime {
       // handleSpawnPairing keeps renamed=false and the resumed session's own CLI title wins.
       projectName: displayName,
       timer: setTimeout(() => {
-        this.failSpawn(requestId, 'Timed out waiting for the laptop to resume the session.');
-      }, SPAWN_TIMEOUT_MS),
+        this.failSpawn(
+          requestId,
+          'The laptop never finished resuming this session. It may still be starting — try again.',
+        );
+      }, RESUME_TIMEOUT_MS),
+      // Past the point a fresh spawn would have landed, say so rather than sitting mute. The card
+      // stays `initializing`, so this is a note and not a failure.
+      slowTimer: setTimeout(() => {
+        if (!this.pendingSpawns.has(requestId)) return;
+        this.store.dispatch(spawnSlowSet({ id: tempId }));
+      }, RESUME_SLOW_MS),
     };
     this.pendingSpawns.set(requestId, pending);
 
@@ -1341,6 +1380,28 @@ export class SessionRuntime {
     }
 
     return tempId;
+  }
+
+  /** Re-issue the spawn or resume behind a failed placeholder card, reusing the device and session
+   *  it was launched for, and dispose the dead card. A timed-out resume is the common case: the
+   *  laptop was simply slow to open a large session store, and the only honest answer is "try that
+   *  again" — which previously meant backing out to the Start screen and hunting for the row, because
+   *  the placeholder offered nothing but Dismiss. Returns the new placeholder's channelId. */
+  async retrySpawn(channelId: string): Promise<string | null> {
+    const session = this.session(channelId);
+    const spawning = session?.connection.spawning;
+    if (!session || !spawning || session.meta.kind !== 'spawning') return null;
+    const { sessionId, cwd, title } = session.meta;
+    const deviceId = spawning.deviceId;
+    const projectName = spawning.projectName;
+    const mode: SpawnMode = spawning.mode ?? 'default';
+    // Drop the dead card first: leaving it in place would make the new attempt look like a duplicate
+    // in the session list, and resumeSession would have to reason about which of the two it meant.
+    await this.remove(channelId);
+    if (sessionId) {
+      return this.resumeSession(deviceId, { sessionId, mode, cwd: cwd ?? undefined, title: title ?? undefined });
+    }
+    return this.spawnSession(deviceId, { projectName, mode });
   }
 
   async forgetDevice(channelId: string): Promise<void> {
@@ -1440,7 +1501,7 @@ export class SessionRuntime {
       const sessions = (msg.sessions ?? []).filter(
         (s) => s && typeof s.sessionId === 'string' && s.sessionId && typeof s.cwd === 'string' && s.cwd,
       );
-      this.store.dispatch(deviceSessionsReceived({ channelId, sessions }));
+      this.store.dispatch(deviceSessionsReceived({ channelId, sessions, folders: msg.folders }));
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
@@ -1452,7 +1513,7 @@ export class SessionRuntime {
   private async handleSpawnPairing(msg: SpawnPairingMsg): Promise<void> {
     const pending = this.pendingSpawns.get(msg.requestId);
     if (!pending) return;
-    clearTimeout(pending.timer);
+    clearSpawnTimers(pending);
     this.pendingSpawns.delete(msg.requestId);
     try {
       const payload = msg.payload as PairingPayload;
@@ -1477,7 +1538,7 @@ export class SessionRuntime {
   private failSpawn(requestId: string, error: string): void {
     const pending = this.pendingSpawns.get(requestId);
     if (!pending) return;
-    clearTimeout(pending.timer);
+    clearSpawnTimers(pending);
     this.pendingSpawns.delete(requestId);
     const session = this.session(pending.tempId);
     if (!session) return;
@@ -1576,7 +1637,7 @@ export class SessionRuntime {
     if (!session) return;
     for (const pending of [...this.pendingSpawns.values()]) {
       if (pending.tempId === channelId) {
-        clearTimeout(pending.timer);
+        clearSpawnTimers(pending);
         this.pendingSpawns.delete(pending.requestId);
       }
     }
@@ -1689,8 +1750,18 @@ export class SessionRuntime {
     try {
       const stored = (await loadSessions()).find((s) => s.pairing.channelId === channelId);
       if (!stored) {
+        // "No longer saved" is only true of a session that *was* saved. A spawn/resume placeholder
+        // is never persisted (it has no pairing until the laptop answers), so telling the user their
+        // session was deleted is both false and unactionable — it earned its own wording.
+        const placeholder = session.meta.kind === 'spawning';
         this.store.dispatch(
-          statusSet({ id: channelId, status: 'error', error: 'This session is no longer saved on this device.' }),
+          statusSet({
+            id: channelId,
+            status: 'error',
+            error: placeholder
+              ? 'This session never finished starting, so there is nothing to reconnect to. Try resuming it again.'
+              : 'This session is no longer saved on this device.',
+          }),
         );
         return;
       }
@@ -2238,7 +2309,7 @@ export class SessionRuntime {
     this.controllers.clear();
     for (const ctrl of this.listenerControllers.values()) ctrl.dispose();
     this.listenerControllers.clear();
-    for (const pending of this.pendingSpawns.values()) clearTimeout(pending.timer);
+    for (const pending of this.pendingSpawns.values()) clearSpawnTimers(pending);
     this.pendingSpawns.clear();
     this.registry.disposeAll();
   }

@@ -8,7 +8,9 @@ import type {
   PromptAttachment,
   PromptDelivery,
   SessionMode,
+  SpawnMode,
   SessionOffer,
+  SessionFolder,
   StoredSession,
   TransportDescriptor,
 } from '@aasis21/weft-shared';
@@ -128,6 +130,10 @@ export interface ListenerDeviceState extends RegisteredDevice {
    *  one spawns `copilot --resume=<id>` and pairs like the "Start session" flow. Runtime-only (not
    *  persisted) — the store is high-churn, so it's always re-pulled rather than cached across runs. */
   sessions?: StoredSession[];
+  /** Per-folder session totals across the WHOLE laptop store, sent alongside SESSION_LIST. Kept apart
+   *  from `sessions` because that is only the newest page (and may be scoped to one folder), so
+   *  counting it would understate every folder that fell off the end. Runtime-only. */
+  sessionFolders?: SessionFolder[];
   /** True while a SESSION_LIST_REQUEST is in flight, so the section can show a spinner. Runtime-only. */
   sessionsLoading?: boolean;
   /** Epoch ms of the most recent attempt to (re)connect to this laptop — stamped when a connect
@@ -163,6 +169,13 @@ export interface SessionConnection {
     deviceId: string;
     deviceName?: string;
     projectName: string;
+    /** The permission mode the attempt was made with. Recorded because it is a different axis from
+     *  `connection.mode` (interactive/plan/autopilot) and is otherwise unrecoverable — a retry that
+     *  silently dropped "allow all" would quietly re-arm approval prompts the user had opted out of. */
+    mode?: SpawnMode;
+    /** Set once a resume has run past the point a fresh spawn would have landed. Purely a note —
+     *  the session is still on its way — so the header can stop reading as a hang. */
+    slow?: boolean;
   };
 }
 
