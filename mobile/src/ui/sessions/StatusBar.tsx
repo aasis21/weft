@@ -4,6 +4,19 @@ import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
 import { deriveStatus, type ComposerActivity } from './sessionStatus';
 
+/** Viewfinder-with-QR mark: the header action opens the camera to scan a pairing code. */
+function ScanGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 8V6a2 2 0 0 1 2-2h2" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v2" />
+      <path d="M20 16v2a2 2 0 0 1-2 2h-2" />
+      <path d="M8 20H6a2 2 0 0 1-2-2v-2" />
+      <rect x="9" y="9" width="6" height="6" rx="1" />
+    </svg>
+  );
+}
+
 interface StatusBarProps {
   title: string;
   cwd: string | null;
@@ -15,9 +28,6 @@ interface StatusBarProps {
   onOpenDrawer(): void;
   onAddSession(): void;
   onStartSession?(): void;
-  /** #163: re-scan the QR / re-pair this session (opens the Join screen). Shown only when not live. */
-  onRejoin?(): void;
-  onReconnect(): void;
   /** #163: archive this session now (drop the live socket, keep the card). Shown only when live. */
   onArchive?(): void;
   /** Rename this session (shown in the "⋯" menu; opens an inline title editor in the header). */
@@ -25,7 +35,7 @@ interface StatusBarProps {
   /** Pin/unpin this session (exempt from auto-delete + eviction preference). */
   onPin?(pinned: boolean): void;
   pinned?: boolean;
-  /** #163: demo sessions can't rejoin/reconnect/archive — hide those items. */
+  /** #163: demo sessions can't archive — hide that item. */
   isDemo?: boolean;
   onRemove(): void;
   onGoHome(): void;
@@ -45,8 +55,6 @@ export function StatusBar({
   onOpenDrawer,
   onAddSession,
   onStartSession,
-  onRejoin,
-  onReconnect,
   onArchive,
   onRename,
   onPin,
@@ -183,33 +191,23 @@ export function StatusBar({
 
       <div className="status-icons">
         <button
-          className="icon-btn add-btn"
-          type="button"
-          onClick={onAddSession}
-          aria-label="New session"
-          title="Join another session"
-        >
-          ＋
-        </button>
-
-        <button
           className="icon-btn start-btn"
           type="button"
           onClick={onStartSession}
           aria-label="Start another session"
           title="Start another session"
         >
-          ▻
+          ＋
         </button>
 
         <button
-          className="icon-btn debug-btn"
+          className="icon-btn add-btn"
           type="button"
-          onClick={onOpenDebug}
-          aria-label="Debug events"
-          title="Debug events"
+          onClick={onAddSession}
+          aria-label="Scan to join a session"
+          title="Scan to join a session"
         >
-          <span className="debug-glyph" aria-hidden="true">{'{ }'}</span>
+          <ScanGlyph />
         </button>
 
         <div className="bar-menu-wrap" ref={menuRef}>
@@ -253,32 +251,6 @@ export function StatusBar({
                   📌 {pinned ? 'Unpin session' : 'Pin session'}
                 </button>
               ) : null}
-              {!derived.active && !isDemo ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="bar-menu-item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onRejoin?.();
-                  }}
-                >
-                  ⟲ Rejoin this session
-                </button>
-              ) : null}
-              {!derived.active && !isDemo ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="bar-menu-item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onReconnect();
-                  }}
-                >
-                  ↻ Reconnect this session
-                </button>
-              ) : null}
               {derived.active && !isDemo && onArchive ? (
                 <button
                   type="button"
@@ -292,6 +264,17 @@ export function StatusBar({
                   ⏸ Archive this session
                 </button>
               ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className="bar-menu-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenDebug();
+                }}
+              >
+                {'{ }'} Debug events
+              </button>
               <button
                 type="button"
                 role="menuitem"

@@ -600,8 +600,6 @@ export function SessionScreen({
         onOpenDrawer={() => setDrawerOpen(true)}
         onAddSession={onAddSession}
         onStartSession={onStartSession}
-        onRejoin={onAddSession}
-        onReconnect={() => onReconnect(activeId)}
         {...(onArchiveSession ? { onArchive: () => onArchiveSession(activeId) } : {})}
         onRename={(newTitle) => onRenameSession(activeId, newTitle)}
         {...(onPinSession ? { onPin: (nextPinned: boolean) => onPinSession(activeId, nextPinned) } : {})}
@@ -684,9 +682,9 @@ export function SessionScreen({
           </div>
         ) : null}
 
-        {active.error && !ended ? (
-          <div className="ended-banner" role="alert">
-            <span>{active.error}</span>
+        {(active.error || canReconnect) && !ended ? (
+          <div className="ended-banner" {...(active.error ? { role: 'alert' as const } : {})}>
+            <span>{active.error ?? 'Session offline — reconnect to pick it back up.'}</span>
             {canReconnect ? (
               <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
                 ↻ Reconnect

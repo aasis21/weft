@@ -9,7 +9,6 @@ import {
   ChevronGlyph,
   DeviceAvatar,
   FolderGlyph,
-  MenuGlyph,
   MoreHorizontalGlyph,
   PencilGlyph,
   PlayGlyph,
@@ -265,10 +264,14 @@ export function DeviceDetailsScreen({
         <button
           className="icon-btn drawer-btn"
           type="button"
-          onClick={onOpenDevices}
-          aria-label="Back to devices"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open sessions"
         >
-          <BackGlyph />
+          <span className="hamburger" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
         </button>
         <DeviceAvatar tone={status.tone} />
         <div className="status-id">
@@ -303,11 +306,11 @@ export function DeviceDetailsScreen({
                   className="device-menu-item"
                   onClick={() => {
                     closeMenu(false);
-                    setDrawerOpen(true);
+                    onOpenDevices();
                   }}
                 >
-                  <span className="device-action-icon" aria-hidden="true"><MenuGlyph /></span>
-                  Open sessions
+                  <span className="device-action-icon" aria-hidden="true"><BackGlyph /></span>
+                  Devices
                 </button>
                 <button
                   type="button"

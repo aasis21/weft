@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'react';
+import { sessionRuntime } from '@/session/runtime/instance';
+import { deviceLabel, deviceStatus, sortDevices } from '@/ui/screens/deviceDisplay';
+import { VoiceControls } from '@/ui/settings/VoiceControls';
 import {
   applyTheme,
   getSettings,
   setTheme,
-  setVoiceAutoRelisten,
-  setVoiceSpeakStreaming,
   type WeftSettings,
   type ThemeSetting,
 } from '@/lib/settings';
@@ -42,6 +43,17 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
   const triggerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+
+  // Read the devices straight off the runtime rather than threading a prop through all four call
+  // sites: Settings opens from a session, a device, the devices list and the drawer, and only one
+  // of those knows about a laptop at all.
+  const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
+  const deviceVersions = sortDevices(snapshot.devices).map((device) => ({
+    channelId: device.channelId,
+    name: deviceLabel(device),
+    online: deviceStatus(device).tone !== 'offline',
+    version: device.appVersion,
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -105,15 +117,6 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
     void setTheme(theme);
   };
 
-  const toggleAutoRelisten = (enabled: boolean): void => {
-    setSettingsState((current) => ({ ...current, voiceAutoRelisten: enabled }));
-    void setVoiceAutoRelisten(enabled);
-  };
-
-  const toggleSpeakStreaming = (enabled: boolean): void => {
-    setSettingsState((current) => ({ ...current, voiceSpeakStreaming: enabled }));
-    void setVoiceSpeakStreaming(enabled);
-  };
 
   return (
     <div
@@ -144,7 +147,7 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
 
         <div className="settings-groups">
           <section className="settings-group" aria-labelledby="settings-theme-title">
-            <div className="settings-row-head">
+            <div className="settings-row-head settings-group-title">
               <div>
                 <h2 id="settings-theme-title">Theme</h2>
                 <p>Choose Weft's appearance on this device.</p>
@@ -167,55 +170,37 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
           </section>
 
           <section className="settings-group" aria-labelledby="settings-voice-title">
-            <div className="settings-row-head">
-              <div>
-                <h2 id="settings-voice-title">Voice Mode</h2>
-                <p>Hands-free conversation behavior after Weft speaks.</p>
-              </div>
-              <label className="settings-switch">
-                <input
-                  type="checkbox"
-                  checked={settings.voiceAutoRelisten}
-                  onChange={(event) => toggleAutoRelisten(event.currentTarget.checked)}
-                />
-                <span aria-hidden="true" />
-              </label>
-            </div>
-            <span className="settings-row-label">Auto-relisten after the assistant speaks</span>
-
-            <div className="settings-row-head">
-              <div>
-                <h2 id="settings-voice-stream-title">Stream spoken reply</h2>
-                <p>Vox speaks each sentence as soon as it lands, and keeps talking while the agent works on. On: also speak the last half-sentence without waiting for it to finish.</p>
-              </div>
-              <label className="settings-switch">
-                <input
-                  type="checkbox"
-                  aria-labelledby="settings-voice-stream-title"
-                  checked={settings.voiceSpeakStreaming}
-                  onChange={(event) => toggleSpeakStreaming(event.currentTarget.checked)}
-                />
-                <span aria-hidden="true" />
-              </label>
-            </div>
+            <VoiceControls showHeading />
           </section>
 
           <section className="settings-group" aria-labelledby="settings-about-title">
-            <div className="settings-row-head">
+            <div className="settings-row-head settings-group-title">
               <div>
                 <h2 id="settings-about-title">About</h2>
-                <p>Which Weft build this phone and the paired laptop are running.</p>
+                <p>Which Weft build this phone and your paired laptops are running.</p>
               </div>
             </div>
             <dl className="settings-about">
               <div className="settings-about-row">
-                <dt>App version</dt>
+                <dt>This phone</dt>
                 <dd>{appVersion}</dd>
               </div>
-              <div className="settings-about-row">
-                <dt>Laptop version</dt>
-                <dd>{laptopVersion ?? 'Unknown'}</dd>
-              </div>
+              {deviceVersions.length > 0 ? (
+                deviceVersions.map((device) => (
+                  <div className="settings-about-row" key={device.channelId}>
+                    <dt>
+                      <span className={`settings-device-dot${device.online ? ' online' : ''}`} aria-hidden="true" />
+                      {device.name}
+                    </dt>
+                    <dd>{device.version ?? 'Unknown'}</dd>
+                  </div>
+                ))
+              ) : (
+                <div className="settings-about-row">
+                  <dt>Laptop</dt>
+                  <dd>{laptopVersion ?? 'Unknown'}</dd>
+                </div>
+              )}
             </dl>
           </section>
         </div>

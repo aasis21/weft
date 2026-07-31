@@ -226,7 +226,7 @@ export function Composer({
   const modeWrapRef = useRef<HTMLDivElement | null>(null);
   const modeButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingPickRef = useRef<'library' | 'camera' | null>(null);
   const speechCommittedRef = useRef('');
   const sessionIdRef = useRef(sessionId);
   const attachmentGenerationRef = useRef(0);
@@ -369,17 +369,40 @@ export function Composer({
     }
   };
 
-  const openFilePicker = (): void => {
+  /** One hidden input, retargeted per use. Two inputs were flaky on Android Chrome: the
+   *  `capture` one silently swallowed the programmatic click, so "Take photo" did nothing.
+   *  Retargeting a single, already-focusable input makes both entries take the same path. */
+  const openPicker = (source: 'library' | 'camera'): void => {
     setAttachError(null);
     setAttachMenuOpen(false);
-    fileInputRef.current?.click();
+    const input = fileInputRef.current;
+    if (!input) return;
+    input.value = ''; // re-picking the same file must still fire `change`
+    if (source === 'camera') {
+      input.setAttribute('accept', 'image/*');
+      input.setAttribute('capture', 'environment');
+      input.multiple = false;
+    } else {
+      input.setAttribute('accept', ACCEPTED_IMAGE_TYPES);
+      input.removeAttribute('capture');
+      input.multiple = true;
+    }
+    pendingPickRef.current = source;
+    input.click();
+    if (source === 'camera') {
+      // If the camera never opens, the change event never fires and the user sees nothing at
+      // all. Give it a generous window, then say so rather than failing silently.
+      window.setTimeout(() => {
+        if (pendingPickRef.current !== 'camera') return;
+        pendingPickRef.current = null;
+        setAttachError('No photo came back — if the camera didn’t open, use Photo library instead.');
+      }, 45_000);
+    }
   };
 
-  const openCameraPicker = (): void => {
-    setAttachError(null);
-    setAttachMenuOpen(false);
-    cameraInputRef.current?.click();
-  };
+  const openFilePicker = (): void => openPicker('library');
+
+  const openCameraPicker = (): void => openPicker('camera');
 
   /** Shared by the file picker, camera picker, and Ctrl+V paste — all just hand us a `File[]`. */
   const attachFiles = async (files: File[]): Promise<void> => {
@@ -420,6 +443,7 @@ export function Composer({
   };
 
   const onFilesPicked = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    pendingPickRef.current = null;
     const input = event.target;
     const files = Array.from(input.files ?? []);
     input.value = ''; // let the user re-pick the same file after removing it
@@ -693,16 +717,6 @@ export function Composer({
           tabIndex={-1}
           aria-hidden="true"
         />
-        <input
-          ref={cameraInputRef}
-          type="file"
-          className="composer-file-input"
-          accept="image/*"
-          capture="environment"
-          onChange={(event) => void onFilesPicked(event)}
-          tabIndex={-1}
-          aria-hidden="true"
-        />
 
         {attachments.length > 0 || attaching ? (
           <div className="composer-attachments" aria-label="Attached images">
@@ -785,7 +799,10 @@ export function Composer({
                 title={attachments.length >= MAX_ATTACHMENTS ? `Up to ${MAX_ATTACHMENTS} images` : 'Attach image'}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path fill="currentColor" d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2z" />
+                  <path
+                    fill="currentColor"
+                    d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5v-2.6l3.6-3.6 3 3 4.4-4.4L19 14.4V19zM8.5 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"
+                  />
                 </svg>
               </button>
               {attachMenuOpen ? (

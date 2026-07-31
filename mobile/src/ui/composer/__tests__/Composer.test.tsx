@@ -289,7 +289,7 @@ describe('Composer', () => {
     expect(screen.getByRole('img', { name: 'two.jpg' })).toBeInTheDocument();
   });
 
-  it('offers camera capture separately from choosing from the library', async () => {
+  it('retargets the one hidden input for camera capture, then back for the library', async () => {
     const user = userEvent.setup();
     const { container } = renderComposer();
 
@@ -298,15 +298,22 @@ describe('Composer', () => {
     expect(screen.getByRole('menuitem', { name: /Choose from Library/ })).toBeInTheDocument();
 
     const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="file"].composer-file-input'));
-    const libraryInput = inputs.find((input) => input.multiple);
-    const cameraInput = inputs.find((input) => input.getAttribute('capture') === 'environment');
-    expect(libraryInput).toHaveAttribute('accept');
-    expect(cameraInput).toHaveAttribute('accept', 'image/*');
-    expect(cameraInput?.multiple).toBe(false);
+    expect(inputs).toHaveLength(1);
+    const input = inputs[0]!;
 
-    fireEvent.change(cameraInput!, { target: { files: [new File(['photo'], 'photo.jpg', { type: 'image/jpeg' })] } });
+    await user.click(screen.getByRole('menuitem', { name: /Take Photo/ }));
+    expect(input.getAttribute('capture')).toBe('environment');
+    expect(input.getAttribute('accept')).toBe('image/*');
+    expect(input.multiple).toBe(false);
+
+    fireEvent.change(input, { target: { files: [new File(['photo'], 'photo.jpg', { type: 'image/jpeg' })] } });
     expect(fileToAttachment).toHaveBeenCalledWith(expect.objectContaining({ name: 'photo.jpg' }));
     expect(await screen.findByRole('img', { name: 'picked.jpg' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Attach image' }));
+    await user.click(screen.getByRole('menuitem', { name: /Choose from Library/ }));
+    expect(input.hasAttribute('capture')).toBe(false);
+    expect(input.multiple).toBe(true);
   });
 
   it('does not attach an image picked in a previous session after switching sessions', async () => {

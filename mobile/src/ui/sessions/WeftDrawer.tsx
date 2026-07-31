@@ -632,11 +632,11 @@ export function WeftDrawer({
         </div>
 
         <div className="drawer-actions">
-          <button className="drawer-add drawer-add-split" type="button" onClick={onAddSession}>
-            ＋ Join
-          </button>
           <button className="drawer-add drawer-add-split" type="button" onClick={onStartSession}>
-            ▻ Start
+            ＋ Start
+          </button>
+          <button className="drawer-add drawer-add-split" type="button" onClick={onAddSession}>
+            ⛶ Scan
           </button>
         </div>
 

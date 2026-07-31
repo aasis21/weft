@@ -25,7 +25,6 @@ function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) 
     busy: false,
     onOpenDrawer: vi.fn(),
     onAddSession: vi.fn(),
-    onReconnect: vi.fn(),
     onRemove: vi.fn(),
     onGoHome: vi.fn(),
     onOpenDebug: vi.fn(),
@@ -60,7 +59,6 @@ describe('StatusBar', () => {
         busy
         onOpenDrawer={vi.fn()}
         onAddSession={vi.fn()}
-        onReconnect={vi.fn()}
         onRemove={vi.fn()}
         onGoHome={vi.fn()}
         onOpenDebug={vi.fn()}
@@ -84,34 +82,32 @@ describe('StatusBar', () => {
     expect(statusLine).toHaveClass('error');
   });
 
-  it('opens the drawer, start session button, menu actions, reconnect, and direct leave callback', async () => {
+  it('opens the drawer, start session button, menu actions, and direct leave callback', async () => {
     const user = userEvent.setup();
     const onOpenDrawer = vi.fn();
     const onStartSession = vi.fn();
     const onAddSession = vi.fn();
-    const onReconnect = vi.fn();
     const onRemove = vi.fn();
-    // status 'ended' is not live, so Rejoin + Reconnect surface in the menu.
-    renderStatusBar({ status: 'ended', onOpenDrawer, onStartSession, onAddSession, onReconnect, onRemove });
+    // status 'ended' is not live; recovery lives on the banner above the composer, not in this menu.
+    renderStatusBar({ status: 'ended', onOpenDrawer, onStartSession, onAddSession, onRemove });
 
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
-    // Start + Join are the header's ▻ / ＋ icons — they are NOT duplicated inside the ⋯ menu
+    // Start (＋) + Scan are the header's icons — they are NOT duplicated inside the ⋯ menu
     // (which now holds only this-session actions), mirroring the sidebar row-action cleanup.
     await user.click(screen.getByRole('button', { name: 'Start another session' }));
     expect(onStartSession).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: 'New session' }));
+    await user.click(screen.getByRole('button', { name: 'Scan to join a session' }));
     expect(onAddSession).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: 'Session menu' }));
-    let menu = screen.getByRole('menu');
+    const menu = screen.getByRole('menu');
     expect(within(menu).queryByRole('menuitem', { name: /Start another session/ })).not.toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /Join another session/ })).not.toBeInTheDocument();
-    await user.click(within(menu).getByRole('menuitem', { name: '↻ Reconnect this session' }));
-    expect(onReconnect).toHaveBeenCalledTimes(1);
+    // Reconnect/Rejoin were removed: the offline banner above the composer is the single recovery path.
+    expect(within(menu).queryByRole('menuitem', { name: /Reconnect/ })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: /Rejoin/ })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Session menu' }));
-    menu = screen.getByRole('menu');
     await user.click(within(menu).getByRole('menuitem', { name: '✕ Leave this session' }));
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
@@ -143,7 +139,7 @@ describe('StatusBar', () => {
     const onAddSession = vi.fn();
     renderStatusBar({ onAddSession });
 
-    await user.click(screen.getByRole('button', { name: 'New session' }));
+    await user.click(screen.getByRole('button', { name: 'Scan to join a session' }));
     expect(onAddSession).toHaveBeenCalledTimes(1);
   });
 
@@ -174,12 +170,13 @@ describe('StatusBar', () => {
     });
   });
 
-  it('opens the debug panel from the { } header button', async () => {
+  it('opens the debug panel from the overflow menu', async () => {
     const user = userEvent.setup();
     const onOpenDebug = vi.fn();
     renderStatusBar({ onOpenDebug });
 
-    await user.click(screen.getByRole('button', { name: 'Debug events' }));
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    await user.click(screen.getByRole('menuitem', { name: /Debug events/ }));
     expect(onOpenDebug).toHaveBeenCalledTimes(1);
   });
 });

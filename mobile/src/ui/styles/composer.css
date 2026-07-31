@@ -31,8 +31,9 @@
 
 /* Attach (+) button — left-side ghost circle, twin of .mic-btn. */
 .attach-btn {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
+  margin-left: -3px;
   flex: 0 0 auto;
   border: 0;
   background: transparent;
@@ -277,7 +278,7 @@
 .settings-groups {
   display: grid;
   gap: 0.8rem;
-  padding: 0.6rem 1.1rem 1.1rem;
+  padding: 0.6rem 1.1rem calc(1.1rem + env(safe-area-inset-bottom, 0px));
 }
 
 .settings-group {
@@ -382,6 +383,44 @@
   display: grid;
   gap: 0.5rem;
   margin: 0;
+}
+
+/* Section header inside a card: quieter than a row, so the controls below read as its contents. */
+.settings-group-title {
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--bg-rule);
+}
+
+.settings-group-title h2 {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+/* Every row after the first gets a hairline, so a card of four switches stops reading as one blob. */
+.settings-group > .settings-row-head + .settings-row-head {
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--bg-rule) 60%, transparent);
+}
+
+.settings-about-row dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.settings-device-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+
+.settings-device-dot.online {
+  background: var(--ok, #3fb950);
 }
 
 .settings-about-row {

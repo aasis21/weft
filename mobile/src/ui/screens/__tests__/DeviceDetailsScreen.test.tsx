@@ -134,15 +134,14 @@ describe('DeviceDetailsScreen header keeps only navigation and defers the rest t
   it('offers an explicit way back to the device list', () => {
     const onOpenDevices = vi.fn();
     renderDetails({ onOpenDevices });
-    fireEvent.click(screen.getByRole('button', { name: /back to devices/i }));
+    fireEvent.click(screen.getByRole('button', { name: /device actions/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^devices$/i }));
     expect(onOpenDevices).toHaveBeenCalled();
   });
 
-  it('keeps the sessions drawer reachable from the overflow menu', () => {
+  it('keeps the sessions drawer on the header, where every other screen puts it', () => {
     renderDetails({});
-    expect(screen.queryByRole('menuitem', { name: /open sessions/i })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /device actions/i }));
-    expect(screen.getByRole('menuitem', { name: /open sessions/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /open sessions/i })).toBeTruthy();
   });
 });
 

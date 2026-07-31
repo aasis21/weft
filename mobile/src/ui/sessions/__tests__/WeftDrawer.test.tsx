@@ -260,7 +260,7 @@ describe('WeftDrawer', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
 
-    await user.click(screen.getByText('＋ Join'));
+    await user.click(screen.getByText('⛶ Scan'));
     expect(onAddSession).toHaveBeenCalledTimes(1);
     await user.click(screen.getByTitle('Close'));
     expect(onClose).toHaveBeenCalledTimes(1);
