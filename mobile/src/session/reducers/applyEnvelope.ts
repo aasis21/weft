@@ -177,6 +177,11 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         case SUBTYPE.STREAM.INTENT:
           noteStreamActivity(session, message.ts);
           session.connection.intent = message.msg.text || null;
+          // Stamp the local clock on the leading edge only, so an unchanged "still thinking" update
+          // can't restart a counter that is already running.
+          session.connection.thinkingSince = message.msg.thinking
+            ? (session.connection.thinkingSince ?? Date.now())
+            : null;
           return;
         case SUBTYPE.STREAM.TOOL_START:
           noteStreamActivity(session, message.ts);
@@ -193,7 +198,10 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.busyFrom = message.ts;
           // An intent only ever describes the turn in flight. Letting it outlive the turn would
           // leave a stale "reading the config" sitting under a finished answer.
-          if (!message.msg.busy) session.connection.intent = null;
+          if (!message.msg.busy) {
+            session.connection.intent = null;
+            session.connection.thinkingSince = null;
+          }
           noteBusySignal(session, message.msg.busy, message.ts);
           return;
         case SUBTYPE.STREAM.USER_MESSAGE:
@@ -728,6 +736,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
       busy: false,
       busyFrom: null,
       intent: null,
+      thinkingSince: null,
       mode: persisted.connection?.mode ?? DEFAULT_MODE,
       reconnecting: false,
       settling: false,

@@ -10,6 +10,7 @@ import {
 import type { AssistantItem } from '@/lib/timeline';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { useSpeechOutput } from '@/ui/hooks/useSpeechOutput';
+import { useAgentStatus } from '@/ui/useAgentStatus';
 
 export const SILENCE_MS = 3200;
 
@@ -49,6 +50,8 @@ export interface VoxEngineOptions {
   connected?: boolean;
   /** The agent's live one-line note about what it is doing, shown in place of "Working…". */
   intent?: string | null;
+  /** Local-clock start of the agent's current thinking block, shown as a live "Thinking… Ns". */
+  thinkingSince?: number | null;
   toolActive?: boolean;
   disabled: boolean;
   onPrompt(text: string, delivery?: PromptDelivery): Promise<void> | void;
@@ -120,6 +123,7 @@ export function useVoxEngine({
   agentBusy,
   connected = true,
   intent = null,
+  thinkingSince = null,
   toolActive = false,
   disabled,
   onPrompt,
@@ -586,6 +590,8 @@ export function useVoxEngine({
 
   useEffect(() => clearSettleTimer, [clearSettleTimer]);
 
+  const workingLabel = useAgentStatus(intent, thinkingSince, LABELS.working);
+
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
     if (!outputSupported && (state === 'speaking' || state === 'working')) return 'Speech output unavailable — showing text only.';
@@ -597,10 +603,11 @@ export function useVoxEngine({
     // now overlap as a matter of course, so the label says both rather than letting the voice hide
     // the fact that work is still running.
     if (state === 'speaking' && agentBusy) return 'Speaking — agent still working';
-    // When the agent has told us what it is doing, say that instead of the generic "Working…".
-    if (state === 'working' && intent) return intent;
+    // When the agent has told us what it is doing — or is visibly thinking — say that instead of
+    // the generic "Working…".
+    if (state === 'working') return workingLabel;
     return LABELS[state];
-  }, [agentBusy, connected, inputSupported, intent, outputSupported, paused, state]);
+  }, [agentBusy, connected, inputSupported, outputSupported, paused, state, workingLabel]);
 
   // Working deliberately has no glyph. It used to be a gear, which is the same shape as the settings
   // gear in the toolbar a few pixels above the orb — two unrelated things drawn identically on one

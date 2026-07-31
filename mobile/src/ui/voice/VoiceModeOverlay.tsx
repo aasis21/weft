@@ -11,6 +11,7 @@ interface VoiceModeOverlayProps {
   connected?: boolean;
   /** The agent's live one-line note about what it is doing. */
   intent?: string | null;
+  thinkingSince?: number | null;
   toolActive?: boolean;
   disabled: boolean;
   onPrompt(text: string, delivery?: PromptDelivery): Promise<void> | void;
@@ -41,6 +42,7 @@ export function VoiceModeOverlay({
   agentBusy,
   connected = true,
   intent = null,
+  thinkingSince = null,
   toolActive = false,
   disabled,
   onPrompt,
@@ -70,6 +72,7 @@ export function VoiceModeOverlay({
     agentBusy,
     connected,
     intent,
+    thinkingSince,
     toolActive,
     disabled,
     onPrompt,

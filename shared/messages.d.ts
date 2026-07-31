@@ -122,7 +122,11 @@ export interface AssistantDeltaMsg {
   messageId?: string;
 }
 export interface IntentMsg {
-  text: string;
+  /** The agent's own one-line note, or null when it hasn't offered one. */
+  text: string | null;
+  /** True while a reasoning block is streaming. Carries no timing: the phone stamps its own
+   *  clock on arrival, so a laptop/phone clock skew can never produce a nonsense duration. */
+  thinking: boolean;
 }
 export interface ToolStartMsg {
   toolCallId: string;
@@ -477,7 +481,7 @@ export type EventEnvelope =
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
 export function assistantDelta(content: string, messageId?: string): AssistantDelta;
-export function intent(text: string): Intent;
+export function intent(text: string | null, thinking?: boolean): Intent;
 export function toolStart(toolCallId: string, toolName: string, args?: unknown): ToolStart;
 export function toolComplete(
   toolCallId: string,

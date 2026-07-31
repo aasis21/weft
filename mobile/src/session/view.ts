@@ -28,6 +28,10 @@ export interface SessionView {
   /** The agent's live one-line "what I'm doing now", when it has offered one. Never persisted or
    *  replayed — the SDK emits these as ephemeral events, so it is absent from restored history. */
   intent?: string;
+  /** Local-clock timestamp of when the current thinking block began, if one is running. Local by
+   *  design: the laptop sends only the fact of thinking, never a time, so the two devices' clocks
+   *  never have to agree. */
+  thinkingSince?: number;
   /** User-pinned (#163): shown with a marker and exempt from auto-delete/eviction. */
   pinned?: boolean;
   /** Last observed heartbeat pulse (ms) — liveness clock; drives the drawer's live/offline dot and

@@ -9,6 +9,7 @@ import type {
 import type { HistoryItem } from '@aasis21/weft-shared';
 import type { TimelineItem } from '@/lib/timeline';
 import { attachmentSrc } from '@/lib/imageAttachments';
+import { useAgentStatus } from '@/ui/useAgentStatus';
 import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
 import '@/ui/styles/thread-extras.css';
@@ -25,6 +26,8 @@ interface ChatThreadProps {
   /** The agent's own one-line note about what it is doing, shown in place of the generic "working…".
    *  Live-only — the SDK never persists these, so it is absent from replayed history by design. */
   intent?: string | null;
+  /** Local-clock start of the agent's current thinking block, used to show a live "Thinking… Ns". */
+  thinkingSince?: number | null;
   /** Shown centered when there is nothing yet. */
   emptyHint?: string;
   onRetry?: (itemId: string) => void;
@@ -136,13 +139,14 @@ function selectionWithin(container: Node | null): string | null {
   return container.contains(range.commonAncestorContainer) ? text : null;
 }
 
-export function ChatThread({ items, streaming = false, busy = false, intent = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, streaming = false, busy = false, intent = null, thinkingSince = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const liveTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const lastLiveSignalRef = useRef<string>('');
+  const agentStatus = useAgentStatus(intent, thinkingSince, 'working…');
   // True while the viewport is parked at (or near) the bottom. When the user has
   // scrolled up to read history we must not yank them back down — we only stick to
   // the bottom if they were already there (or just sent a prompt themselves).
@@ -612,7 +616,7 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
               <span />
               <span />
             </span>
-            <span>{intent || 'working…'}</span>
+            <span>{agentStatus}</span>
           </div>
         </div>
       ) : null}

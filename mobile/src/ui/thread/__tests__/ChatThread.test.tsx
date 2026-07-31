@@ -411,4 +411,32 @@ describe('The working row says what the agent is doing', () => {
     expect(screen.getByText('reading the relay config')).toBeInTheDocument();
     expect(screen.queryByText('working…')).toBeNull();
   });
+
+  it('counts thinking seconds locally, and yields to a real note when one arrives', () => {
+    const items: TimelineItem[] = [{ kind: 'user', id: 'u1', text: 'go', ts: now, origin: 'phone' }];
+    const start = 1_700_000_000_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+    try {
+      const { rerender } = render(<ChatThread items={items} streaming busy thinkingSince={start} />);
+      expect(screen.getByText('Thinking… 0s')).toBeInTheDocument();
+
+      // The laptop sends no ticks: the phone counts on its own clock, so the label moves even
+      // though nothing at all arrived over the wire.
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(screen.getByText('Thinking… 3s')).toBeInTheDocument();
+
+      // A note the agent actually wrote beats a bare timer.
+      rerender(<ChatThread items={items} streaming busy thinkingSince={start} intent="reading the relay config" />);
+      expect(screen.getByText('reading the relay config')).toBeInTheDocument();
+
+      // Thinking ends, nothing else known: back to the generic label rather than a frozen count.
+      rerender(<ChatThread items={items} streaming busy />);
+      expect(screen.getByText('working…')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

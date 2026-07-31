@@ -354,4 +354,17 @@ test("intent rides the stream channel as its own subtype", () => {
   assert.equal(env.eventType, EVENT_TYPE.STREAM);
   assert.equal(env.eventSubtype, SUBTYPE.STREAM.INTENT);
   assert.equal(env.msg.text, "reading the relay config");
+  assert.equal(env.msg.thinking, false);
+});
+
+test("intent carries the thinking marker without carrying a time", () => {
+  const env = intent(null, true);
+  assert.equal(env.msg.text, null);
+  assert.equal(env.msg.thinking, true);
+  // Deliberately no timestamp of its own: the receiving device stamps its own clock, so a skew
+  // between laptop and phone can never turn into a nonsense "Thinking… 4000s".
+  assert.equal("since" in env.msg, false);
+  // The flag is normalised rather than passed through, so a truthy non-boolean can't reach the wire.
+  assert.equal(intent(null, "yes").msg.thinking, false);
+  assert.equal(intent(undefined).msg.text, null);
 });

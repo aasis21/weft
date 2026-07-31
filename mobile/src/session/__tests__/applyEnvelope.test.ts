@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { EnvelopeBase, EventEnvelope } from '@aasis21/weft-shared';
 import * as B from '@/test/helpers/builders';
 import { emptySession, type Session, type SessionMeta } from '../model';
@@ -185,5 +185,35 @@ describe('the agent saying what it is doing (#204)', () => {
     // The turn ends. A leftover intent under a finished answer would be a lie.
     reduceAll(session, [at(B.activity(false), 13)]);
     expect(session.connection.intent).toBeNull();
+  });
+
+  it('times thinking on the local clock and only from the leading edge', () => {
+    const session = makeSession();
+    const now = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+
+    // The envelope timestamp is deliberately absurd -- it stands in for a laptop whose clock is
+    // hours out. It must have no influence at all on when we think thinking started.
+    reduceAll(session, [at(B.activity(true), 10), at(B.intent(null, true), 999)]);
+    expect(session.connection.thinkingSince).toBe(now);
+
+    // A repeat of the same "still thinking" must not restart the counter, or the seconds would
+    // reset every time any other status update happened to be re-sent.
+    (Date.now as unknown as ReturnType<typeof vi.fn>).mockReturnValue(now + 5_000);
+    reduceAll(session, [at(B.intent('running the mobile tests', true), 11)]);
+    expect(session.connection.thinkingSince).toBe(now);
+    expect(session.connection.intent).toBe('running the mobile tests');
+
+    // Thinking stops but the turn continues: the marker clears, the note stays.
+    reduceAll(session, [at(B.intent('running the mobile tests', false), 12)]);
+    expect(session.connection.thinkingSince).toBeNull();
+    expect(session.connection.intent).toBe('running the mobile tests');
+
+    // And the end of the turn clears both.
+    reduceAll(session, [at(B.intent(null, true), 13), at(B.activity(false), 14)]);
+    expect(session.connection.thinkingSince).toBeNull();
+    expect(session.connection.intent).toBeNull();
+
+    vi.restoreAllMocks();
   });
 });

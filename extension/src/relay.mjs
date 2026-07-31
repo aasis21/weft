@@ -400,6 +400,10 @@ export async function attachRelay({
     idleReaffirmPending: false,
     activityUnknownLogged: false,
   };
+  // Live agent status for this connection. `text` is the agent's own note (assistant.intent);
+  // `thinkingId` is the reasoning block currently streaming, or null. Both are re-sent as a pair on
+  // every change so the phone never has to merge partial updates.
+  const agentStatus = { text: null, thinkingId: null };
 
   const sendSafe = async (msg) => {
     try {
@@ -465,7 +469,7 @@ export async function attachRelay({
   if (typeof session.on === "function") {
     unsubscribers.push(
       session.on((event) =>
-        void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity),
+        void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus),
       ),
     );
   }
@@ -574,9 +578,33 @@ export async function attachRelay({
   return { stop, onPermissionRequest: approvals.onPermissionRequest };
 }
 
-async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity) {
+async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus) {
   if (!event?.type) return;
   const data = event.data ?? {};
+  // Diagnostic hatch. Several SDK events are declared in the type catalog but only actually emitted
+  // by some models or some runtimes, and because the interesting ones are ephemeral they never reach
+  // the on-disk event log either — leaving no way to tell "never fires" from "we dropped it". With
+  // WEFT_DEBUG_EVENTS=1 every event type is logged so that question is answerable without a rebuild.
+  if (process.env.WEFT_DEBUG_EVENTS === "1") {
+    try {
+      console.error(`[weft] session event: ${event.type}`);
+    } catch {
+      // never let diagnostics take the relay down.
+    }
+  }
+  // Re-send the whole status pair. Idempotent by construction: the phone replaces both fields, so a
+  // dropped update self-corrects on the next one rather than leaving a half-applied state.
+  const pushStatus = async () => {
+    if (!agentStatus) return;
+    await sendSafe(intent(agentStatus.text, agentStatus.thinkingId !== null));
+  };
+  const clearStatus = async () => {
+    if (!agentStatus) return;
+    if (agentStatus.text === null && agentStatus.thinkingId === null) return;
+    agentStatus.text = null;
+    agentStatus.thinkingId = null;
+    await pushStatus();
+  };
   switch (event.type) {
     case "assistant.message_start":
       if (relayActivity) relayActivity.idleReaffirmPending = false;
@@ -586,6 +614,7 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       break;
     case "assistant.idle":
       // The agent's processing loop went idle: the turn is over, nothing left to abort.
+      await clearStatus();
       await sendSafe(activity(false));
       if (relayActivity) relayActivity.idleReaffirmPending = true;
       break;
@@ -607,6 +636,12 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       if (exitPlans) await exitPlans.complete(data);
       break;
     case "assistant.message":
+      // Text is landing, so any thinking block is over even if its completion event never arrived.
+      // Belt-and-braces: without this a missing assistant.reasoning would tick the counter forever.
+      if (agentStatus && agentStatus.thinkingId !== null) {
+        agentStatus.thinkingId = null;
+        await pushStatus();
+      }
       turnBuffer?.recordAssistant(data.content ?? "", event.ts ?? Date.now(), data.messageId ?? event.id);
       await sendSafe(assistantMessage(data.content ?? "", data.messageId ?? event.id));
       break;
@@ -631,17 +666,43 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       break;
     }
     case "assistant.intent": {
-      // A one-line "what I'm doing now" hint. It arrives ephemeral -- never written to the session
-      // log -- so it is forwarded live and never replayed. Deliberately narrow: we relay this and
-      // NOT assistant.reasoning, whose full thinking text is longer than the answer, is the least
-      // filtered thing the model produces, and would leave reconnected history disagreeing with
-      // itself the moment it could not be backfilled.
+      // A one-line "what I'm doing now" hint. Ephemeral -- never written to the session log -- so it
+      // is forwarded live and never replayed. Deliberately narrow: we relay this and the FACT that
+      // the model is thinking, but never the reasoning text itself, which runs longer than the
+      // answer, is the least filtered thing the model produces, and could not be backfilled on
+      // reconnect without leaving history disagreeing with itself.
+      if (!agentStatus) break;
       const text = typeof data.intent === "string" ? data.intent.trim() : "";
-      if (text) await sendSafe(intent(text));
+      if (!text || text === agentStatus.text) break;
+      agentStatus.text = text;
+      await pushStatus();
+      break;
+    }
+    case "assistant.reasoning_delta": {
+      // First chunk of a new reasoning block: the model started thinking. Only the transition is
+      // relayed -- one message per block, not per chunk -- and it carries no duration, because the
+      // phone times it from its own clock (see IntentMsg).
+      if (!agentStatus) break;
+      const id = data.reasoningId ?? event.id;
+      if (!id || agentStatus.thinkingId === id) break;
+      agentStatus.thinkingId = id;
+      await pushStatus();
+      break;
+    }
+    case "assistant.reasoning": {
+      // The block completed. Stop the phone's counter; the content is deliberately discarded here.
+      if (!agentStatus || agentStatus.thinkingId === null) break;
+      agentStatus.thinkingId = null;
+      await pushStatus();
       break;
     }
     case "tool.execution_start":
       if (relayActivity) relayActivity.idleReaffirmPending = false;
+      // A tool call means the thought that chose it has finished.
+      if (agentStatus && agentStatus.thinkingId !== null) {
+        agentStatus.thinkingId = null;
+        await pushStatus();
+      }
       await sendSafe(activity(true));
       await sendSafe(
         toolStart(

@@ -11,6 +11,7 @@ interface VoxDockProps {
   connected?: boolean;
   /** The agent's live one-line note about what it is doing. */
   intent?: string | null;
+  thinkingSince?: number | null;
   toolActive?: boolean;
   disabled: boolean;
   /** Something above the dock needs an answer (approval / ask_user) — hold the mic. */
@@ -44,6 +45,7 @@ export function VoxDock({
   agentBusy,
   connected = true,
   intent = null,
+  thinkingSince = null,
   toolActive = false,
   disabled,
   paused = false,
@@ -75,6 +77,7 @@ export function VoxDock({
     agentBusy,
     connected,
     intent,
+    thinkingSince,
     toolActive,
     disabled,
     paused,

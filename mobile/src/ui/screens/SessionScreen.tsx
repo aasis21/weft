@@ -641,6 +641,7 @@ export function SessionScreen({
           agentBusy={agentBusy}
           connected={responsive}
           intent={active.intent ?? null}
+          thinkingSince={active.thinkingSince ?? null}
           toolActive={toolActive}
           disabled={ended || offline}
           onPrompt={(text, delivery) => onPrompt(text, undefined, delivery)}
@@ -662,6 +663,7 @@ export function SessionScreen({
           streaming={status === 'live'}
           busy={agentBusy}
           intent={active.intent ?? null}
+          thinkingSince={active.thinkingSince ?? null}
           offline={offline}
           offlineLabel={offlineLabel}
           onRetry={onRetry}
@@ -870,6 +872,7 @@ export function SessionScreen({
             toolActive,
             connected: responsive,
             intent: active.intent ?? null,
+            thinkingSince: active.thinkingSince ?? null,
             paused: voxPaused,
             onOpen: () => setVoxOpen(true),
             onClose: () => setVoxOpen(false),

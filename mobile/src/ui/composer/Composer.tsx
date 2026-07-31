@@ -21,6 +21,7 @@ export interface ComposerVox {
   connected?: boolean;
   /** The agent's live one-line note about what it is doing. */
   intent?: string | null;
+  thinkingSince?: number | null;
   /** An approval or ask_user prompt is waiting — Vox holds the mic until it's answered. */
   paused?: boolean;
   onOpen(): void;
@@ -756,6 +757,7 @@ export function Composer({
             agentBusy={busy}
             connected={vox.connected ?? true}
             intent={vox.intent ?? null}
+            thinkingSince={vox.thinkingSince ?? null}
             toolActive={vox.toolActive ?? false}
             disabled={disabled}
             paused={vox.paused ?? false}

@@ -157,6 +157,10 @@ export interface SessionConnection {
    *  never writes them to the session log, so this can never be recovered on reconnect and must
    *  never be treated as history. */
   intent: string | null;
+  /** When the agent started its current thinking block, stamped on THIS device's clock at the moment
+   *  the message arrived, or null when it isn't thinking. Timing is deliberately local: the laptop
+   *  sends only the fact, so a clock skew between the two devices can't produce a nonsense duration. */
+  thinkingSince: number | null;
   mode: SessionMode;
   pendingMode?: SessionMode;
   reconnecting: boolean;
@@ -234,6 +238,7 @@ export function emptySession(id: string, meta: SessionMeta): Session {
       busy: false,
       busyFrom: null,
       intent: null,
+      thinkingSince: null,
       mode: DEFAULT_MODE,
       reconnecting: false,
       settling: false,

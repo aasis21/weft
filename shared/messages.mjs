@@ -39,8 +39,9 @@ export const SUBTYPE = Object.freeze({
   STREAM: Object.freeze({
     ASSISTANT_MESSAGE: "assistant_message",
     ASSISTANT_DELTA: "assistant_delta",
-    // one-line "what I'm doing right now" from the agent. Ephemeral by design: the SDK never
-    // persists it, so it is only ever a live hint and is deliberately absent from replayed history.
+    // one-line "what I'm doing right now" from the agent, plus whether it is mid-thought. Ephemeral
+    // by design: the SDK never persists either signal, so this is only ever a live hint and is
+    // deliberately absent from replayed history.
     INTENT: "intent",
     TOOL_START: "tool_start",
     TOOL_COMPLETE: "tool_complete",
@@ -137,7 +138,8 @@ export const assistantMessage = (content, messageId) =>
   envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.ASSISTANT_MESSAGE, { content, messageId });
 export const assistantDelta = (content, messageId) =>
   envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.ASSISTANT_DELTA, { content, messageId });
-export const intent = (text) => envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.INTENT, { text });
+export const intent = (text, thinking = false) =>
+  envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.INTENT, { text: text ?? null, thinking: thinking === true });
 export const toolStart = (toolCallId, toolName, args) =>
   envelope(EVENT_TYPE.STREAM, SUBTYPE.STREAM.TOOL_START, { toolCallId, toolName, args });
 export const toolComplete = (toolCallId, toolName, success, resultPreview) =>

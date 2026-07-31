@@ -71,6 +71,9 @@ export function toSessionView(session: Session): SessionView {
     ...(session.connection.settling ? { settling: true } : {}),
     ...(session.connection.cold ? { cold: true } : {}),
     ...(session.connection.intent ? { intent: session.connection.intent } : {}),
+    ...(session.connection.thinkingSince
+      ? { thinkingSince: session.connection.thinkingSince }
+      : {}),
     ...(session.pinned ? { pinned: true } : {}),
     ...(session.connection.lastHeartbeat ? { lastHeartbeatAt: session.connection.lastHeartbeat } : {}),
     events: session.debug,
