@@ -543,8 +543,12 @@ export function useVoxEngine({
     return LABELS[state];
   }, [agentBusy, inputSupported, outputSupported, paused, state]);
 
+  // Working deliberately has no glyph. It used to be a gear, which is the same shape as the settings
+  // gear in the toolbar a few pixels above the orb — two unrelated things drawn identically on one
+  // screen. The state is carried by the ring instead, which spins into a travelling arc and cannot
+  // be confused with a button.
   const orbGlyph =
-    state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '⚙' : '🎙';
+    state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '' : '🎙';
 
   /** Vox has the floor while the laptop is still on its turn. Surfaced so the dock and the overlay
    *  can keep the working indicator up underneath the speaking orb, instead of the two states

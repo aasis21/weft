@@ -4,6 +4,7 @@ import type { ListenerDeviceState } from '@/session/model';
 import { deriveStatus, isWorking } from './sessionStatus';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar, PlayGlyph } from '@/ui/screens/deviceGlyphs';
+import { WeftMark } from '@/ui/brand/WeftMark';
 import { useNowTick } from '@/ui/hooks/useNowTick';
 
 interface WeftDrawerProps {
@@ -573,6 +574,7 @@ export function WeftDrawer({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="drawer-head">
+          <WeftMark className="drawer-mark" size={22} />
           <span className="drawer-title">WEFT</span>
         </div>
         <button

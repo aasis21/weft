@@ -633,7 +633,7 @@ export function SessionScreen({
         />
       ) : null}
 
-      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} laptopVersion={meta.laptopVersion} /> : null}
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} laptopVersion={meta.laptopVersion} onOpenDrawer={() => setDrawerOpen(true)} /> : null}
 
       {voiceOpen ? (
         <VoiceModeOverlay

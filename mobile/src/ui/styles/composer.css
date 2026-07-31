@@ -239,6 +239,41 @@
   box-shadow: 0 24px 80px color-mix(in srgb, var(--fg) 22%, transparent);
 }
 
+/* On a phone, Settings is a screen, not a dialog. Floating it as a rounded card meant the last
+   group sat under the rounded corner and the home indicator, so the bottom of the list looked
+   clipped; and being centred in a padded overlay it had nowhere to put a top bar. Below the
+   tablet breakpoint it fills the viewport and the header pins to the top like every other screen.
+   The voice overlay is deliberately left as a card — it IS a focused, temporary thing. */
+@media (max-width: 700px) {
+  .settings-overlay {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  .settings-panel {
+    width: 100%;
+    max-height: none;
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg);
+  }
+
+  .settings-panel > .settings-head {
+    padding-top: max(0.9rem, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--bg-rule);
+    background: var(--bg-elev);
+  }
+
+  .settings-panel > .settings-groups {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 /* Desktop-only: the settings dialog looks cramped centered at mobile's 560px on wide
    monitors; give it a bit more room. Voice overlay is untouched — it's a focused,
    full-attention view where extra width doesn't help. */
@@ -259,6 +294,18 @@
 .voice-head div {
   display: grid;
   gap: 0.2rem;
+}
+
+/* The hamburger takes the leading slot, so the title has to stop stretching across the whole bar
+   or the close button gets pushed off the edge on a narrow phone. */
+.settings-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-menu {
+  flex: 0 0 auto;
+  font-size: 1.15rem;
 }
 
 .settings-title,
@@ -329,6 +376,24 @@
 .settings-segment.active {
   background: var(--accent);
   color: var(--bg);
+}
+
+/* Four pause choices never fit across one phone-width row: the track is a pill, so the fourth
+   option dropped onto a second line inside a shape that has no second line, and the word and the
+   seconds ran together with no gap. Two-by-two, seconds stacked under the word, square-ish corners
+   because a two-row pill is not a pill. */
+.settings-segments-pause {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-radius: 20px;
+}
+
+.settings-segments-pause .settings-segment {
+  display: grid;
+  gap: 0.15rem;
+  align-content: center;
+  min-height: 52px;
+  padding: 0.4rem 0.3rem;
+  border-radius: 16px;
 }
 
 .settings-switch {
@@ -421,6 +486,34 @@
 
 .settings-device-dot.online {
   background: var(--ok, #3fb950);
+}
+
+/* Which relay a laptop is paired over. Sits next to the name because it is a property of that
+   pairing, not of the app — two laptops can legitimately be on different transports at once. */
+.settings-about-meta {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+.settings-about-warn {
+  margin: 0.7rem 0 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--warning, #d29922) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning, #d29922) 12%, transparent);
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.settings-about-warn code {
+  overflow-wrap: anywhere;
+  font-size: 0.74rem;
 }
 
 .settings-about-row {
@@ -598,6 +691,16 @@
 .voice-panel[data-state='speaking'] .voice-orb-ring {
   animation-duration: 1s;
   border-color: var(--accent);
+}
+
+.voice-panel[data-state='working'] .voice-orb-ring {
+  border-color: transparent;
+  border-top-color: var(--accent);
+  animation: voice-orb-spin 1.1s linear infinite;
+}
+
+@keyframes voice-orb-spin {
+  to { transform: rotate(360deg); }
 }
 
 .voice-status {
@@ -791,17 +894,6 @@ button.vox-heard:hover {
 
 .vox-settings .settings-row-head h2 { font-size: 0.95rem; }
 .vox-settings .settings-row-head p { font-size: 0.78rem; }
-
-.vox-settings .settings-segments {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.vox-settings .settings-segment {
-  display: grid;
-  gap: 0.1rem;
-  min-height: 52px;
-  padding: 0.4rem 0.3rem;
-}
 
 .vox-segment-label { font-weight: 700; font-size: 0.85rem; }
 .vox-segment-value { font-size: 0.72rem; opacity: 0.7; font-variant-numeric: tabular-nums; }

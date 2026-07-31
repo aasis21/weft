@@ -547,7 +547,7 @@ export function DeviceDetailsScreen({
         />
       ) : null}
 
-      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} laptopVersion={device.appVersion} /> : null}
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} laptopVersion={device.appVersion} onOpenDrawer={() => setDrawerOpen(true)} /> : null}
     </main>
   );
 }

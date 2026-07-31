@@ -65,13 +65,15 @@ describe('VoiceModeOverlay one busy state (#183)', () => {
   it('shows "Working…" while the agent reasons (no tool running)', () => {
     const { panel, orb } = renderOverlay({ agentBusy: true, toolActive: false });
     expect(panel.getAttribute('data-state')).toBe('working');
-    expect(orb.textContent).toContain('⚙');
+    // No glyph while working — the spinning ring carries the state, so the orb core stays empty
+    // rather than borrowing the gear that the settings button already uses.
+    expect(orb.textContent).toBe('');
   });
 
   it('shows "Working…" while a tool is running', () => {
     const { panel, orb } = renderOverlay({ agentBusy: true, toolActive: true });
     expect(panel.getAttribute('data-state')).toBe('working');
-    expect(orb.textContent).toContain('⚙');
+    expect(orb.textContent).toBe('');
   });
 
   it('stays on working when a tool starts mid-turn — the label never flips', () => {

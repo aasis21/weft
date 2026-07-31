@@ -39,6 +39,9 @@
                         OFF by default — pass it explicitly when you want to update the local
                         Copilot CLI extension (which requires a `copilot` restart or an agent
                         `extensions_reload` call to hot-load the new bundle).
+.PARAMETER NoVersionBump Keep the current version instead of incrementing the patch. Use when
+                        re-shipping the same build, or when you have already set the version by
+                        hand (a feature/breaking bump).
 
 .EXAMPLE
   ./ship.ps1                      # build + refresh + deploy prod (does NOT touch this laptop)
@@ -56,7 +59,8 @@ param(
     [switch]$Push,
     [switch]$SkipBuild,
     [switch]$SkipDeploy,
-    [switch]$Install
+    [switch]$Install,
+    [switch]$NoVersionBump
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,6 +73,29 @@ function Info($m) { Write-Host "  ..  $m" -ForegroundColor DarkGray }
 function Warn($m) { Write-Host "  !!  $m" -ForegroundColor Yellow }
 
 $ProdUrl = 'https://useweft.netlify.app'
+
+# Every deploy is a distinct build, so every deploy gets a distinct version. Nothing else in the
+# repo ever bumped it, which is how the phone and the laptop both sat on 0.1.0 for months and the
+# About screen's version row became decoration. The repo-root VERSION file is the single source of
+# truth — esbuild inlines it into the extension bundle and vite.config.ts reads it for the web app —
+# and the workspace package.json files are dragged along so `npm` agrees with what shipped.
+function Step-Version([string]$Root) {
+    $versionFile = Join-Path $Root 'VERSION'
+    if (-not (Test-Path $versionFile)) { throw "no $versionFile to bump" }
+    $current = (Get-Content $versionFile -Raw).Trim()
+    if ($current -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "VERSION is '$current', which is not major.minor.patch" }
+    $next = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
+    [System.IO.File]::WriteAllText($versionFile, $next)
+    foreach ($rel in @('package.json', 'mobile\package.json', 'extension\package.json', 'shared\package.json')) {
+        $f = Join-Path $Root $rel
+        if (-not (Test-Path $f)) { continue }
+        $text = Get-Content $f -Raw
+        # Only the package's OWN version line — the first "version" key — never a dependency range.
+        $patched = [regex]::Replace($text, '("version"\s*:\s*")[^"]+(")', "`${1}$next`${2}", 1)
+        [System.IO.File]::WriteAllText($f, $patched)
+    }
+    return @{ From = $current; To = $next }
+}
 
 # Ask Netlify for the public URL of $Site so every downstream string (the installers we deploy and
 # the closing banner) points at the site we actually shipped to, not a hardcoded production URL.
@@ -99,6 +126,14 @@ try {
     }
 
     if (-not $SkipBuild) {
+        if ($NoVersionBump) {
+            Info "Version stays at $((Get-Content (Join-Path $root 'VERSION') -Raw).Trim())"
+        } else {
+            Step 'Bumping version'
+            $bump = Step-Version $root
+            Ok "$($bump.From) -> $($bump.To)  (VERSION + workspace package.json)"
+        }
+
         Step 'Building extension (esbuild)'
         npm run build -w '@aasis21/weft-extension' | Out-Null
         if (-not (Test-Path $extBundle)) { throw "extension build did not produce $extBundle" }

@@ -15,6 +15,9 @@ interface SettingsScreenProps {
   /** Version of the paired laptop's Weft extension, when the Settings screen is opened from a
    *  session or device context that knows it. Omitted from the Devices list (no single laptop). */
   laptopVersion?: string;
+  /** Opens the host screen's drawer. Settings is a full screen like any other, so it gets the same
+   *  hamburger; closing itself first keeps the drawer from opening underneath a modal. */
+  onOpenDrawer?(): void;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -30,7 +33,15 @@ const THEME_OPTIONS: Array<{ value: ThemeSetting; label: string }> = [
   { value: 'dark', label: 'Dark' },
 ];
 
-export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps): JSX.Element {
+/** How each pairing transport reads to a human. The kind strings come straight off the pairing
+ *  descriptor the laptop put in its QR (see TransportDescriptor in shared/transport.d.ts). */
+const TRANSPORT_LABELS: Record<string, string> = {
+  supabase: 'Supabase relay',
+  devtunnel: 'Dev tunnel',
+  local: 'Local',
+};
+
+export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: SettingsScreenProps): JSX.Element {
   const appVersion = import.meta.env.VITE_APP_VERSION ?? 'dev';
   const [settings, setSettingsState] = useState<WeftSettings>({
     voiceAutoRelisten: false,
@@ -53,7 +64,14 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
     name: deviceLabel(device),
     online: deviceStatus(device).tone !== 'offline',
     version: device.appVersion,
+    transport: device.transport?.kind ? (TRANSPORT_LABELS[device.transport.kind] ?? device.transport.kind) : undefined,
   }));
+
+  // Nearly every "it paired but nothing happens" report comes down to the two ends running
+  // different builds, and until now the phone had no way to say so — the versions were listed side
+  // by side and left for the reader to diff. Anything the laptop reports that isn't this build gets
+  // called out explicitly.
+  const mismatched = deviceVersions.some((device) => device.version && device.version !== appVersion);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +147,20 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
     >
       <section className="settings-panel">
         <header className="settings-head">
+          {onOpenDrawer ? (
+            <button
+              type="button"
+              className="icon-btn settings-menu"
+              onClick={() => {
+                onClose();
+                onOpenDrawer();
+              }}
+              aria-label="Open sessions"
+              title="Sessions"
+            >
+              <span aria-hidden="true">☰</span>
+            </button>
+          ) : null}
           <div className="settings-head-text">
             <span className="settings-title">Settings</span>
             <span className="settings-sub">Theme, voice, and app preferences</span>
@@ -191,6 +223,7 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
                     <dt>
                       <span className={`settings-device-dot${device.online ? ' online' : ''}`} aria-hidden="true" />
                       {device.name}
+                      {device.transport ? <span className="settings-about-meta">{device.transport}</span> : null}
                     </dt>
                     <dd>{device.version ?? 'Unknown'}</dd>
                   </div>
@@ -202,6 +235,12 @@ export function SettingsScreen({ onClose, laptopVersion }: SettingsScreenProps):
                 </div>
               )}
             </dl>
+            {mismatched ? (
+              <p className="settings-about-warn" role="status">
+                A paired laptop is on a different build than this phone. Reinstall the extension with{' '}
+                <code>irm https://useweft.netlify.app/install.ps1 | iex</code> and reload this page.
+              </p>
+            ) : null}
           </section>
         </div>
       </section>

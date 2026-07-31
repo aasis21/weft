@@ -126,7 +126,7 @@ export function VoiceControls({ autoRelisten, silenceMs, showHeading = false }: 
           <p>How long a silence means you're done talking.</p>
         </div>
       </div>
-      <div className="settings-segments" role="radiogroup" aria-labelledby="vox-pause-title">
+      <div className="settings-segments settings-segments-pause" role="radiogroup" aria-labelledby="vox-pause-title">
         {PAUSE_CHOICES.map((option) => (
           <button
             key={option.seconds}

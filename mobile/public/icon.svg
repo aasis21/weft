@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Weft">
+  <!-- Same interlace as src/ui/brand/WeftMark.tsx, scaled 24 -> 512 and inset to ~55% of the canvas
+       so it survives the circular/rounded crop Android and iOS apply to a maskable icon. -->
+  <rect width="512" height="512" rx="112" fill="#0d1117"/>
+  <g transform="translate(115.2 115.2) scale(11.8)" fill="none" stroke="#4c8dff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 8C7 8 7 16 12 16C17 16 17 8 21.5 8"/>
+    <path d="M2.5 16C5 16 5.7 14.2 6.2 13.3"/>
+    <path d="M7.9 10.6C9 9.1 10.2 8 12 8C13.8 8 15 9.1 16.1 10.6"/>
+    <path d="M17.8 13.3C18.3 14.2 19 16 21.5 16"/>
+  </g>
+</svg>

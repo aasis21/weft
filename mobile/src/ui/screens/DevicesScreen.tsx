@@ -378,7 +378,7 @@ export function DevicesScreen({
         />
       ) : null}
 
-      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} /> : null}
+      {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} onOpenDrawer={() => setDrawerOpen(true)} /> : null}
     </main>
   );
 }

@@ -1308,6 +1308,9 @@
 }
 .drawer-rail-expand:hover { color: var(--fg); background: var(--bg); }
 .drawer-head { display: flex; align-items: center; gap: 6px; padding: 4px 4px 10px; }
+/* The mark carries the accent so the wordmark can stay quiet at faint grey — together they read as
+   a lockup rather than two competing labels. */
+.drawer-mark { flex: 0 0 auto; color: var(--accent); }
 .drawer-title { flex: 1; color: var(--fg-faint); font-size: 12px; letter-spacing: 0.14em; }
 /* Floating corner close/collapse control (#199): kept out of the header row's normal flow so
    the SESSIONS title line stays uncluttered; overlaps the top-right corner of the drawer instead. */
@@ -2010,18 +2013,31 @@
   }
 }
 
+/* Working has no glyph in the middle of the orb, so the ring carries the state on its own: three
+   quarters of the border drop away and what is left travels around the circle. A partial arc is
+   unmistakably "in progress" and, unlike the gear it replaces, it is not the shape of any button. */
+.weft-session .voice-panel[data-state='working'] .voice-orb-ring {
+  border-color: transparent;
+  border-top-color: var(--voice-orb-color);
+  border-right-color: color-mix(in srgb, var(--voice-orb-color) 45%, transparent);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .weft-session .voice-panel[data-state='listening'] .voice-orb-ring {
     animation: voice-ring 1.15s ease-in-out infinite;
   }
 
   .weft-session .voice-panel[data-state='working'] .voice-orb-ring {
-    animation: voice-ring 1.3s ease-in-out infinite;
+    animation: voice-orb-spin 1.1s linear infinite;
   }
 
   .weft-session .voice-panel[data-state='speaking'] .voice-orb-ring {
     animation: voice-ring 1s ease-in-out infinite;
   }
+}
+
+@keyframes voice-orb-spin {
+  to { transform: rotate(360deg); }
 }
 
 .weft-session .start-empty {

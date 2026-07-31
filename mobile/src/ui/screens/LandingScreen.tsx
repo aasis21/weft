@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { JSX } from 'react';
 import { usePairing } from '@/ui/hooks/usePairing';
+import { WeftMark } from '@/ui/brand/WeftMark';
 import { isDesktopInput } from '@/lib/platform';
 
 interface LandingScreenProps {
@@ -220,7 +221,7 @@ export function LandingScreen({
 
       <section className="landing-hero">
         <div className="brand-mark" aria-hidden="true">
-          W
+          <WeftMark size={48} />
         </div>
         <p className="eyebrow">GitHub Copilot, off the desk</p>
         <h1>
