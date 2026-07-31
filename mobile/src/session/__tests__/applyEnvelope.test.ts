@@ -170,3 +170,20 @@ describe('session applyEnvelope', () => {
     expect(session.history).toMatchObject({ cursor: 1, hasMore: true, loading: false, latestTurnIndex: 2 });
   });
 });
+
+describe('the agent saying what it is doing (#204)', () => {
+  it('holds the latest intent and drops it the moment the turn ends', () => {
+    const session = makeSession();
+
+    reduceAll(session, [at(B.activity(true), 10), at(B.intent('reading the relay config'), 11)]);
+    expect(session.connection.intent).toBe('reading the relay config');
+
+    // A newer note simply replaces the old one -- this is a status line, not a log.
+    reduceAll(session, [at(B.intent('running the mobile tests'), 12)]);
+    expect(session.connection.intent).toBe('running the mobile tests');
+
+    // The turn ends. A leftover intent under a finished answer would be a lie.
+    reduceAll(session, [at(B.activity(false), 13)]);
+    expect(session.connection.intent).toBeNull();
+  });
+});

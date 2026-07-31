@@ -1934,6 +1934,12 @@
   --voice-orb-glow: color-mix(in srgb, var(--accent) 44%, transparent);
 }
 
+/* Off the line. Grey, not red — this is usually a lift-doors-closing blip, not a failure. */
+.weft-session .voice-panel[data-state='offline'] {
+  --voice-orb-color: var(--muted, #8b949e);
+  --voice-orb-glow: transparent;
+}
+
 .weft-session .voice-panel[data-state='speaking'] {
   --voice-orb-color: var(--success);
   --voice-orb-glow: color-mix(in srgb, var(--success) 42%, transparent);

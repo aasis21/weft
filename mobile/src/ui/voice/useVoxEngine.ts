@@ -26,7 +26,7 @@ const SETTLE_QUIET_MS = 400;
 // One busy state, deliberately. The wire only carries a single `busy` boolean — there is no
 // reasoning signal — so "thinking" was only ever an inference from "busy and no tool running".
 // Splitting the label invited a distinction the app cannot actually observe (#183).
-export type VoiceState = 'idle' | 'ready' | 'listening' | 'working' | 'speaking';
+export type VoiceState = 'idle' | 'ready' | 'listening' | 'working' | 'speaking' | 'offline';
 
 const LABELS: Record<VoiceState, string> = {
   idle: 'Tap the orb to start',
@@ -34,11 +34,21 @@ const LABELS: Record<VoiceState, string> = {
   listening: 'Listening — pause to send',
   working: 'Working…',
   speaking: 'Speaking — tap to interrupt',
+  offline: 'Reconnecting to your laptop…',
 };
 
 export interface VoxEngineOptions {
   latestAssistant: AssistantItem | null;
   agentBusy: boolean;
+  /**
+   * Whether the laptop is actually on the line. Distinct from `agentBusy`, and the distinction is
+   * the whole point: `agentBusy` is false both when the agent has finished AND when we simply
+   * cannot see it. Vox used to read the second as the first, settle, and reopen the mic over a turn
+   * that was still running — then refuse to leave `listening` when the connection came back.
+   */
+  connected?: boolean;
+  /** The agent's live one-line note about what it is doing, shown in place of "Working…". */
+  intent?: string | null;
   toolActive?: boolean;
   disabled: boolean;
   onPrompt(text: string, delivery?: PromptDelivery): Promise<void> | void;
@@ -108,6 +118,8 @@ export function appendSpeechText(committed: string, fresh: string): string {
 export function useVoxEngine({
   latestAssistant,
   agentBusy,
+  connected = true,
+  intent = null,
   toolActive = false,
   disabled,
   onPrompt,
@@ -172,6 +184,8 @@ export function useVoxEngine({
   stateRef.current = state;
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
 
   const clearSilence = useCallback((): void => {
     if (silenceTimerRef.current != null) window.clearTimeout(silenceTimerRef.current);
@@ -218,7 +232,7 @@ export function useVoxEngine({
   }, [clearSilence, sendCaptured]);
 
   const startListening = useCallback((): void => {
-    if (disabled || pausedRef.current) return;
+    if (disabled || pausedRef.current || !connectedRef.current) return;
     cancelSpeech();
     clearSilence();
     // Words carried over from the surface we just swapped away from survive exactly one start, so
@@ -243,6 +257,12 @@ export function useVoxEngine({
   }, [armSilence, cancelSpeech, clearSilence, disabled, startSpeechInput]);
 
   const handleOrb = useCallback((): void => {
+    // Off the line the orb does nothing but stop the voice. Opening the mic would collect a prompt
+    // with nowhere to go, and cutting the turn would fire a decision into a dead socket.
+    if (!connectedRef.current) {
+      if (outputSpeaking) cancelSpeech();
+      return;
+    }
     if (stateRef.current === 'speaking' || outputSpeaking) {
       cancelSpeech();
       // Only cut the turn short when there is no turn left to protect. Speech routinely outlives the
@@ -324,11 +344,41 @@ export function useVoxEngine({
   // outright (#196). Waiting for the queue to drain costs nothing; the effect re-runs when it does.
   useEffect(() => {
     if (autoStartedRef.current) return;
-    if (disabled || !inputSupported || agentBusy || paused) return;
+    if (disabled || !inputSupported || agentBusy || paused || !connected) return;
     if (hasOutstandingSpeech()) return;
     autoStartedRef.current = true;
     startListening();
-  }, [disabled, inputSupported, agentBusy, hasOutstandingSpeech, outputSpeaking, paused, speechPending, startListening]);
+  }, [disabled, inputSupported, agentBusy, connected, hasOutstandingSpeech, outputSpeaking, paused, speechPending, startListening]);
+
+  // The line to the laptop went down. Anything said now would be transcribed into a void — the
+  // prompt cannot be delivered and the reply cannot arrive — so drop the mic and say so. This is
+  // also what stops the settle path from mistaking "cannot see the agent" for "agent finished".
+  useEffect(() => {
+    if (connected) return;
+    clearSilence();
+    micWantedRef.current = false;
+    stopSpeechInput();
+    if (stateRef.current !== 'speaking') setState('offline');
+  }, [clearSilence, connected, stopSpeechInput]);
+
+  // Back on the line. Rejoin whatever is actually true over there rather than resuming from a stale
+  // idea of it: if a turn is still running we go back to watching it, otherwise we settle normally
+  // (which honours auto-relisten). This doubles as the recovery net for any path that leaves Vox
+  // listening across a drop — coming back busy always wins over a mic we opened while blind.
+  const wasConnectedRef = useRef(connected);
+  useEffect(() => {
+    const wasConnected = wasConnectedRef.current;
+    wasConnectedRef.current = connected;
+    if (!connected || wasConnected) return;
+    if (agentBusy) {
+      clearSilence();
+      micWantedRef.current = false;
+      stopSpeechInput();
+      setState('working');
+      return;
+    }
+    if (stateRef.current === 'offline') setState('ready');
+  }, [agentBusy, clearSilence, connected, stopSpeechInput]);
 
   // Something else needs the user (an approval card) — drop the mic so it doesn't transcribe them
   // reading the dialog, and don't auto-relisten behind it.
@@ -355,7 +405,6 @@ export function useVoxEngine({
       setState('working');
     }
   }, [agentBusy, state]);
-
   // The turn we were waiting for has started (or the chat went busy for any reason) — release the
   // grace period so the settle effect can do its job normally again.
   useEffect(() => {
@@ -515,7 +564,11 @@ export function useVoxEngine({
   // because a turn can go idle a beat before its last text arrives; the timer re-checks from refs
   // and is torn down by anything that starts speaking again.
   useEffect(() => {
-    const quiet = !agentBusy && !outputSpeaking && !hasOutstandingSpeech() && !awaitingTurnRef.current;
+    // `connected` is load-bearing here, not defensive: off the line, `agentBusy` reads false because
+    // we cannot see the agent, not because it stopped. Settling on that is what reopened the mic
+    // over a running turn (#198).
+    const quiet =
+      connected && !agentBusy && !outputSpeaking && !hasOutstandingSpeech() && !awaitingTurnRef.current;
     if (!quiet || state !== 'working') {
       clearSettleTimer();
       return;
@@ -524,31 +577,45 @@ export function useVoxEngine({
     settleTimerRef.current = window.setTimeout(() => {
       settleTimerRef.current = null;
       if (busyRef.current || awaitingTurnRef.current) return;
+      if (!connectedRef.current) return;
       if (hasOutstandingSpeech()) return;
       if (stateRef.current !== 'working') return;
       settleOut();
     }, SETTLE_QUIET_MS);
-  }, [agentBusy, clearSettleTimer, hasOutstandingSpeech, outputSpeaking, settleEpoch, settleOut, speechPending, state]);
+  }, [agentBusy, clearSettleTimer, connected, hasOutstandingSpeech, outputSpeaking, settleEpoch, settleOut, speechPending, state]);
 
   useEffect(() => clearSettleTimer, [clearSettleTimer]);
 
   const status = useMemo(() => {
     if (!inputSupported) return 'Speech recognition unavailable — you can still read replies here.';
     if (!outputSupported && (state === 'speaking' || state === 'working')) return 'Speech output unavailable — showing text only.';
+    // Ahead of `paused`: off the line nothing can be sent or answered, so that is the more useful
+    // thing to say even if an approval happens to be on screen.
+    if (!connected) return LABELS.offline;
     if (paused) return 'Paused — answer the request above';
     // Speaking and working are two different machines: the phone's voice and the laptop's turn. They
     // now overlap as a matter of course, so the label says both rather than letting the voice hide
     // the fact that work is still running.
     if (state === 'speaking' && agentBusy) return 'Speaking — agent still working';
+    // When the agent has told us what it is doing, say that instead of the generic "Working…".
+    if (state === 'working' && intent) return intent;
     return LABELS[state];
-  }, [agentBusy, inputSupported, outputSupported, paused, state]);
+  }, [agentBusy, connected, inputSupported, intent, outputSupported, paused, state]);
 
   // Working deliberately has no glyph. It used to be a gear, which is the same shape as the settings
   // gear in the toolbar a few pixels above the orb — two unrelated things drawn identically on one
   // screen. The state is carried by the ring instead, which spins into a travelling arc and cannot
   // be confused with a button.
   const orbGlyph =
-    state === 'listening' ? '●' : state === 'speaking' ? '■' : state === 'working' ? '' : '🎙';
+    state === 'listening'
+      ? '●'
+      : state === 'speaking'
+        ? '■'
+        : state === 'working'
+          ? ''
+          : state === 'offline'
+            ? '⚡'
+            : '🎙';
 
   /** Vox has the floor while the laptop is still on its turn. Surfaced so the dock and the overlay
    *  can keep the working indicator up underneath the speaking orb, instead of the two states

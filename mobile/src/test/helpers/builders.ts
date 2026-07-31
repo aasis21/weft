@@ -15,6 +15,7 @@ export {
   mergeHistory,
   assistantMessage,
   assistantDelta,
+  intent,
   toolStart,
   toolComplete,
   logLine,

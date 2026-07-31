@@ -25,6 +25,9 @@ export interface SessionView {
   /** True when the session was evicted from the warm pool (no live socket) — the header shows
    *  "Offline" and reconnect is offered, instead of the warm-idle "Quiet". */
   cold?: boolean;
+  /** The agent's live one-line "what I'm doing now", when it has offered one. Never persisted or
+   *  replayed — the SDK emits these as ephemeral events, so it is absent from restored history. */
+  intent?: string;
   /** User-pinned (#163): shown with a marker and exempt from auto-delete/eviction. */
   pinned?: boolean;
   /** Last observed heartbeat pulse (ms) — liveness clock; drives the drawer's live/offline dot and

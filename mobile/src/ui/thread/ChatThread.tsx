@@ -22,6 +22,9 @@ interface ChatThreadProps {
   /** Authoritative agent activity for the bound session — the working row follows this, not a
    *  heuristic on the last item, so an idle join never shows a spurious "working…". */
   busy?: boolean;
+  /** The agent's own one-line note about what it is doing, shown in place of the generic "working…".
+   *  Live-only — the SDK never persists these, so it is absent from replayed history by design. */
+  intent?: string | null;
   /** Shown centered when there is nothing yet. */
   emptyHint?: string;
   onRetry?: (itemId: string) => void;
@@ -112,11 +115,28 @@ type RenderUnit =
 interface MenuState {
   itemId: string;
   text: string;
+  /** What the user had highlighted when the menu opened, if anything. Copy prefers this. */
+  selection: string | null;
   x: number;
   y: number;
 }
 
-export function ChatThread({ items, streaming = false, busy = false, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey }: ChatThreadProps): JSX.Element {
+/**
+ * The highlighted text, but only when it actually lives inside `container`. A selection made in a
+ * different bubble (or in the composer) must not hijack this bubble's Copy, and browsers keep the
+ * last selection around long after the user has moved on.
+ */
+function selectionWithin(container: Node | null): string | null {
+  if (!container) return null;
+  const selection = window.getSelection?.();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const text = selection.toString().trim();
+  if (!text) return null;
+  const range = selection.getRangeAt(0);
+  return container.contains(range.commonAncestorContainer) ? text : null;
+}
+
+export function ChatThread({ items, streaming = false, busy = false, intent = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -190,8 +210,9 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
     }
   }, []);
 
-  const openMenu = useCallback((itemId: string, text: string, x: number, y: number): void => {
-    setMenu({ itemId, text, x, y });
+  const openMenu = useCallback((itemId: string, text: string, x: number, y: number, bubble: HTMLElement | null): void => {
+    // Snapshot the selection now: clicking a menu item later can collapse it before Copy runs.
+    setMenu({ itemId, text, selection: selectionWithin(bubble), x, y });
   }, []);
 
   const copyText = useCallback(async (text: string): Promise<void> => {
@@ -204,7 +225,8 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
 
   const copyFromMenu = useCallback((): void => {
     if (!menu) return;
-    void copyText(menu.text);
+    // Highlighting part of a message and asking to copy should give you that part, not the lot.
+    void copyText(menu.selection ?? menu.text);
     setMenu(null);
   }, [copyText, menu]);
 
@@ -212,7 +234,7 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
     (event: ReactMouseEvent<HTMLElement>, itemId: string, text: string): void => {
       event.preventDefault();
       cancelLongPress();
-      openMenu(itemId, text, event.clientX, event.clientY);
+      openMenu(itemId, text, event.clientX, event.clientY, event.currentTarget);
     },
     [cancelLongPress, openMenu],
   );
@@ -222,7 +244,7 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
       if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
       event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
-      openMenu(itemId, text, rect.left + rect.width / 2, rect.top + rect.height / 2);
+      openMenu(itemId, text, rect.left + rect.width / 2, rect.top + rect.height / 2, event.currentTarget);
     },
     [openMenu],
   );
@@ -232,8 +254,12 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
       cancelLongPress();
       const touch = event.touches[0];
       if (!touch) return;
+      const bubble = event.currentTarget;
+      // Once text is highlighted the user is mid-selection: further touches are drag handles being
+      // nudged, and popping the menu on top of them is what made partial copies impossible.
+      if (selectionWithin(bubble)) return;
       longPressTimerRef.current = window.setTimeout(() => {
-        openMenu(itemId, text, touch.clientX, touch.clientY);
+        openMenu(itemId, text, touch.clientX, touch.clientY, bubble);
       }, 500);
     },
     [cancelLongPress, openMenu],
@@ -586,7 +612,7 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
               <span />
               <span />
             </span>
-            <span>working…</span>
+            <span>{intent || 'working…'}</span>
           </div>
         </div>
       ) : null}
@@ -616,7 +642,7 @@ export function ChatThread({ items, streaming = false, busy = false, emptyHint, 
           role="menu"
         >
           <button type="button" className="msg-menu-item" role="menuitem" onClick={copyFromMenu}>
-            Copy
+            {menu.selection ? 'Copy selection' : 'Copy message'}
           </button>
         </div>
       ) : null}

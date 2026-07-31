@@ -6,6 +6,7 @@ import {
   RECENT_TURNS_DEFAULT,
   assistantMessage,
   assistantDelta,
+  intent,
   toolStart,
   toolComplete,
   logLine,
@@ -627,6 +628,16 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       const origin = promptOrigin?.classify(text) ?? "terminal";
       if (origin === "phone") break;
       await sendSafe(userMessage(text, "terminal", event.id));
+      break;
+    }
+    case "assistant.intent": {
+      // A one-line "what I'm doing now" hint. It arrives ephemeral -- never written to the session
+      // log -- so it is forwarded live and never replayed. Deliberately narrow: we relay this and
+      // NOT assistant.reasoning, whose full thinking text is longer than the answer, is the least
+      // filtered thing the model produces, and would leave reconnected history disagreeing with
+      // itself the moment it could not be backfilled.
+      const text = typeof data.intent === "string" ? data.intent.trim() : "";
+      if (text) await sendSafe(intent(text));
       break;
     }
     case "tool.execution_start":

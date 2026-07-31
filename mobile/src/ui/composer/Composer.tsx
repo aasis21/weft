@@ -17,6 +17,10 @@ export interface ComposerVox {
   open: boolean;
   latestAssistant: AssistantItem | null;
   toolActive?: boolean;
+  /** Whether the laptop is still on the line. Off it, Vox holds rather than settling into a listen. */
+  connected?: boolean;
+  /** The agent's live one-line note about what it is doing. */
+  intent?: string | null;
   /** An approval or ask_user prompt is waiting — Vox holds the mic until it's answered. */
   paused?: boolean;
   onOpen(): void;
@@ -750,6 +754,8 @@ export function Composer({
           <VoxDock
             latestAssistant={vox.latestAssistant}
             agentBusy={busy}
+            connected={vox.connected ?? true}
+            intent={vox.intent ?? null}
             toolActive={vox.toolActive ?? false}
             disabled={disabled}
             paused={vox.paused ?? false}

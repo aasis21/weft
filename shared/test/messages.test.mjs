@@ -13,6 +13,7 @@ import {
   MODES,
   assistantMessage,
   assistantDelta,
+  intent,
   toolStart,
   toolComplete,
   logLine,
@@ -346,4 +347,11 @@ test("isValidEnvelope accepts every factory and rejects malformed input", () => 
   assert.equal(isValidEnvelope({}), false);
   assert.equal(isValidEnvelope({ eventType: "stream" }), false); // no subtype/ts/msg
   assert.equal(isValidEnvelope({ eventType: "stream", eventSubtype: "x", ts: 1 }), false); // no msg
+});
+
+test("intent rides the stream channel as its own subtype", () => {
+  const env = intent("reading the relay config");
+  assert.equal(env.eventType, EVENT_TYPE.STREAM);
+  assert.equal(env.eventSubtype, SUBTYPE.STREAM.INTENT);
+  assert.equal(env.msg.text, "reading the relay config");
 });

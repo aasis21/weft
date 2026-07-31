@@ -335,3 +335,80 @@ describe('ChatThread', () => {
     });
   });
 });
+
+describe('Copying a message respects what you highlighted', () => {
+  const items: TimelineItem[] = [
+    { kind: 'assistant', id: 'a1', text: 'the quick brown fox jumps', ts: now },
+  ];
+
+  /** Highlight a slice of the bubble the way a long-press drag would. */
+  function highlight(node: Node, start: number, end: number): void {
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  function stubClipboard(): { writeText: ReturnType<typeof vi.fn> } {
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+    return clipboard;
+  }
+
+  it('copies only the highlighted part instead of the whole message', () => {
+    const clipboard = stubClipboard();
+    render(<ChatThread items={items} />);
+    const bubble = screen.getByText('the quick brown fox jumps');
+
+    highlight(bubble.firstChild as Node, 4, 15);
+    fireEvent.contextMenu(bubble);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy selection' }));
+    expect(clipboard.writeText).toHaveBeenCalledWith('quick brown');
+  });
+
+  it('falls back to the whole message when nothing is highlighted', () => {
+    const clipboard = stubClipboard();
+    render(<ChatThread items={items} />);
+    const bubble = screen.getByText('the quick brown fox jumps');
+
+    window.getSelection()?.removeAllRanges();
+    fireEvent.contextMenu(bubble);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy message' }));
+    expect(clipboard.writeText).toHaveBeenCalledWith('the quick brown fox jumps');
+  });
+
+  it('leaves an in-progress selection alone rather than popping the menu over it', () => {
+    vi.useFakeTimers();
+    try {
+      render(<ChatThread items={items} />);
+      const bubble = screen.getByText('the quick brown fox jumps');
+      highlight(bubble.firstChild as Node, 4, 15);
+
+      // A second touch here is the user nudging a selection handle, not asking for a menu.
+      fireEvent.touchStart(bubble, { touches: [{ clientX: 10, clientY: 10 }] });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(screen.queryByRole('menu')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('The working row says what the agent is doing', () => {
+  it('shows the agent note in place of the generic label, and falls back without one', () => {
+    const items: TimelineItem[] = [{ kind: 'user', id: 'u1', text: 'go', ts: now, origin: 'phone' }];
+    const { rerender } = render(<ChatThread items={items} streaming busy />);
+    expect(screen.getByText('working…')).toBeInTheDocument();
+
+    rerender(<ChatThread items={items} streaming busy intent="reading the relay config" />);
+    expect(screen.getByText('reading the relay config')).toBeInTheDocument();
+    expect(screen.queryByText('working…')).toBeNull();
+  });
+});

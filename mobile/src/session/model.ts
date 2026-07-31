@@ -152,6 +152,11 @@ export interface SessionConnection {
   status: SessionStatus;
   busy: boolean;
   busyFrom: number | null;
+  /** The agent's own one-line description of what it is doing right now, or null when it hasn't
+   *  said or the turn has ended. Live-only by construction: the SDK marks these events ephemeral and
+   *  never writes them to the session log, so this can never be recovered on reconnect and must
+   *  never be treated as history. */
+  intent: string | null;
   mode: SessionMode;
   pendingMode?: SessionMode;
   reconnecting: boolean;
@@ -228,6 +233,7 @@ export function emptySession(id: string, meta: SessionMeta): Session {
       status: 'idle',
       busy: false,
       busyFrom: null,
+      intent: null,
       mode: DEFAULT_MODE,
       reconnecting: false,
       settling: false,

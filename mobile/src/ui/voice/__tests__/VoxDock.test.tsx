@@ -453,3 +453,67 @@ describe('VoxDock does not barge into a busy chat (#188)', () => {  function doc
     expect(speechInput.start).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Vox holds still when the laptop drops off (#203)', () => {
+  // A dropped connection makes the agent LOOK idle: the phone stops receiving events, so the
+  // busy flag goes false even though the turn is still running upstairs. Vox used to read that
+  // as "the turn finished", settle, and open the mic over work it could no longer see -- and on
+  // reconnect it stayed stuck in listening while the text composer showed working.
+  function reconnectHarness(initial: Partial<React.ComponentProps<typeof VoxDock>>) {
+    const props: React.ComponentProps<typeof VoxDock> = {
+      latestAssistant: null,
+      agentBusy: false,
+      connected: true,
+      toolActive: false,
+      disabled: false,
+      onPrompt: vi.fn(),
+      onInterrupt: vi.fn(),
+      onExpand: vi.fn(),
+      onKeyboard: vi.fn(),
+      onEditTranscript: vi.fn(),
+      ...initial,
+    };
+    const utils = render(<VoxDock {...props} />);
+    const panel = utils.container.querySelector('.vox-dock') as HTMLDivElement;
+    const set = (next: Partial<React.ComponentProps<typeof VoxDock>>): void => {
+      Object.assign(props, next);
+      utils.rerender(<VoxDock {...props} />);
+    };
+    return { ...utils, panel, set };
+  }
+
+  it('goes offline rather than settling into a listen when the connection drops mid-turn', () => {
+    vi.useFakeTimers();
+    const { panel, set } = reconnectHarness({ agentBusy: true });
+    expect(panel.getAttribute('data-state')).toBe('working');
+
+    // The socket dies. Both facts arrive together: nothing looks busy, and nothing is connected.
+    act(() => set({ agentBusy: false, connected: false }));
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+
+    expect(panel.getAttribute('data-state')).toBe('offline');
+    expect(speechInput.start).not.toHaveBeenCalled();
+  });
+
+  it('returns to working, not listening, when the connection comes back mid-turn', () => {
+    vi.useFakeTimers();
+    const { panel, set } = reconnectHarness({ agentBusy: true });
+
+    act(() => set({ agentBusy: false, connected: false }));
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(panel.getAttribute('data-state')).toBe('offline');
+
+    // Reconnect. The turn was never finished -- the phone just could not see it.
+    act(() => set({ agentBusy: true, connected: true }));
+    expect(panel.getAttribute('data-state')).toBe('working');
+  });
+
+  it('says it is reconnecting instead of leaving the orb looking ready', () => {
+    const { getByRole } = reconnectHarness({ connected: false });
+    expect(getByRole('button', { name: /reconnecting/i })).toBeTruthy();
+  });
+});

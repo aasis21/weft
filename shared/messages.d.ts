@@ -37,6 +37,7 @@ export const SUBTYPE: {
   readonly STREAM: {
     readonly ASSISTANT_MESSAGE: "assistant_message";
     readonly ASSISTANT_DELTA: "assistant_delta";
+    readonly INTENT: "intent";
     readonly TOOL_START: "tool_start";
     readonly TOOL_COMPLETE: "tool_complete";
     readonly LOG: "log";
@@ -119,6 +120,9 @@ export interface AssistantMessageMsg {
 export interface AssistantDeltaMsg {
   content: string;
   messageId?: string;
+}
+export interface IntentMsg {
+  text: string;
 }
 export interface ToolStartMsg {
   toolCallId: string;
@@ -389,6 +393,7 @@ export interface SessionClaimedMsg {
 // ---- concrete envelope types (eventType + eventSubtype + typed msg) --------
 export type AssistantMessage = Envelope<"stream", "assistant_message", AssistantMessageMsg>;
 export type AssistantDelta = Envelope<"stream", "assistant_delta", AssistantDeltaMsg>;
+export type Intent = Envelope<"stream", "intent", IntentMsg>;
 export type ToolStart = Envelope<"stream", "tool_start", ToolStartMsg>;
 export type ToolComplete = Envelope<"stream", "tool_complete", ToolCompleteMsg>;
 export type LogLine = Envelope<"stream", "log", LogLineMsg>;
@@ -434,6 +439,7 @@ export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
 export type EventEnvelope =
   | AssistantMessage
   | AssistantDelta
+  | Intent
   | ToolStart
   | ToolComplete
   | LogLine
@@ -471,6 +477,7 @@ export type EventEnvelope =
 
 export function assistantMessage(content: string, messageId?: string): AssistantMessage;
 export function assistantDelta(content: string, messageId?: string): AssistantDelta;
+export function intent(text: string): Intent;
 export function toolStart(toolCallId: string, toolName: string, args?: unknown): ToolStart;
 export function toolComplete(
   toolCallId: string,

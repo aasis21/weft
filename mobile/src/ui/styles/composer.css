@@ -703,6 +703,20 @@
   to { transform: rotate(360deg); }
 }
 
+/* Off the line. Deliberately the quietest state on screen — nothing is happening and nothing the
+   user does will make it happen, so the orb stops pulsing and goes grey rather than inviting a tap. */
+.voice-panel[data-state='offline'] .voice-orb-ring {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--muted, #8b949e) 60%, transparent);
+  animation: none;
+  opacity: 0.55;
+}
+
+.voice-panel[data-state='offline'] .voice-orb {
+  opacity: 0.6;
+  filter: saturate(0.35);
+}
+
 .voice-status {
   margin: 0;
   font-weight: 800;

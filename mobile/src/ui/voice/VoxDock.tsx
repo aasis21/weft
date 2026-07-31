@@ -7,6 +7,10 @@ import { VoxSettings } from '@/ui/voice/VoxSettings';
 interface VoxDockProps {
   latestAssistant: AssistantItem | null;
   agentBusy: boolean;
+  /** Whether the laptop is on the line. Off the line Vox holds instead of settling. */
+  connected?: boolean;
+  /** The agent's live one-line note about what it is doing. */
+  intent?: string | null;
   toolActive?: boolean;
   disabled: boolean;
   /** Something above the dock needs an answer (approval / ask_user) — hold the mic. */
@@ -38,6 +42,8 @@ interface VoxDockProps {
 export function VoxDock({
   latestAssistant,
   agentBusy,
+  connected = true,
+  intent = null,
   toolActive = false,
   disabled,
   paused = false,
@@ -67,6 +73,8 @@ export function VoxDock({
   } = useVoxEngine({
     latestAssistant,
     agentBusy,
+    connected,
+    intent,
     toolActive,
     disabled,
     paused,

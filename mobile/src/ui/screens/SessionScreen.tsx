@@ -639,6 +639,8 @@ export function SessionScreen({
         <VoiceModeOverlay
           latestAssistant={latestAssistant}
           agentBusy={agentBusy}
+          connected={responsive}
+          intent={active.intent ?? null}
           toolActive={toolActive}
           disabled={ended || offline}
           onPrompt={(text, delivery) => onPrompt(text, undefined, delivery)}
@@ -659,6 +661,7 @@ export function SessionScreen({
           history={timeline.history}
           streaming={status === 'live'}
           busy={agentBusy}
+          intent={active.intent ?? null}
           offline={offline}
           offlineLabel={offlineLabel}
           onRetry={onRetry}
@@ -865,6 +868,8 @@ export function SessionScreen({
             open: voxOpen,
             latestAssistant,
             toolActive,
+            connected: responsive,
+            intent: active.intent ?? null,
             paused: voxPaused,
             onOpen: () => setVoxOpen(true),
             onClose: () => setVoxOpen(false),

@@ -7,6 +7,10 @@ import { VoxSettings } from '@/ui/voice/VoxSettings';
 interface VoiceModeOverlayProps {
   latestAssistant: AssistantItem | null;
   agentBusy: boolean;
+  /** Whether the laptop is on the line. Off the line Vox holds instead of settling. */
+  connected?: boolean;
+  /** The agent's live one-line note about what it is doing. */
+  intent?: string | null;
   toolActive?: boolean;
   disabled: boolean;
   onPrompt(text: string, delivery?: PromptDelivery): Promise<void> | void;
@@ -35,6 +39,8 @@ interface VoiceModeOverlayProps {
 export function VoiceModeOverlay({
   latestAssistant,
   agentBusy,
+  connected = true,
+  intent = null,
   toolActive = false,
   disabled,
   onPrompt,
@@ -62,6 +68,8 @@ export function VoiceModeOverlay({
   } = useVoxEngine({
     latestAssistant,
     agentBusy,
+    connected,
+    intent,
     toolActive,
     disabled,
     onPrompt,

@@ -174,6 +174,10 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           noteStreamActivity(session, message.ts);
           appendDelta(session, message);
           return;
+        case SUBTYPE.STREAM.INTENT:
+          noteStreamActivity(session, message.ts);
+          session.connection.intent = message.msg.text || null;
+          return;
         case SUBTYPE.STREAM.TOOL_START:
           noteStreamActivity(session, message.ts);
           startTool(session, message);
@@ -187,6 +191,9 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         case SUBTYPE.STREAM.ACTIVITY:
           session.connection.busy = message.msg.busy;
           session.connection.busyFrom = message.ts;
+          // An intent only ever describes the turn in flight. Letting it outlive the turn would
+          // leave a stale "reading the config" sitting under a finished answer.
+          if (!message.msg.busy) session.connection.intent = null;
           noteBusySignal(session, message.msg.busy, message.ts);
           return;
         case SUBTYPE.STREAM.USER_MESSAGE:
@@ -720,6 +727,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
       status: 'idle',
       busy: false,
       busyFrom: null,
+      intent: null,
       mode: persisted.connection?.mode ?? DEFAULT_MODE,
       reconnecting: false,
       settling: false,

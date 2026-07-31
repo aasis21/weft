@@ -151,3 +151,10 @@ status`/`stop` exist as independent commands, separate from any single Copilot s
   confirm, and check `~/.weft/weft.config.json` exists.
 - **`weft` command not found after install** → open a **new** terminal (PATH is updated
   per-user but existing shells don't pick it up).
+- **`/weft` seems to hang while the agent is working** → it isn't hung, it's queued. Unlike
+  built-in TUI commands such as `/tasks` or `/session`, `/weft` is an *extension* command:
+  the runtime round-trips it to the extension subprocess and serializes that dispatch behind
+  the turn in flight, so the QR only appears once the agent goes idle. There is no bypass
+  flag in the SDK. If you need to pair right now, don't wait — run `weft start` in a second
+  terminal. The standalone Device Station pairs the same phone over the same transport
+  without touching the busy session, and the phone can adopt the Copilot session afterwards.
