@@ -3,11 +3,13 @@ import {
   applyTheme,
   getSettings,
   getVoiceContinuous,
+  getVoiceLanguage,
   getVoiceSpeakStreaming,
   initTheme,
   setTheme,
   setVoiceAutoRelisten,
   setVoiceContinuous,
+  setVoiceLanguage,
   setVoiceSpeakStreaming,
 } from '@/lib/settings';
 import { memoryPreferences } from '@/test/helpers/mockPreferences';
@@ -18,12 +20,12 @@ describe('settings persistence', () => {
   });
 
   it('persists settings to Preferences and localStorage and applies theme attributes', async () => {
-    expect(await getSettings()).toEqual({ voiceAutoRelisten: false, voiceSpeakStreaming: false, voiceContinuous: false, voiceSilenceSeconds: 3.2, theme: 'system' });
+    expect(await getSettings()).toEqual({ voiceAutoRelisten: false, voiceSpeakStreaming: false, voiceContinuous: false, voiceSilenceSeconds: 3.2, voiceLanguage: '', theme: 'system' });
 
     await setVoiceAutoRelisten(true);
     await setTheme('dark');
 
-    expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, voiceContinuous: false, voiceSilenceSeconds: 3.2, theme: 'dark' });
+    expect(await getSettings()).toEqual({ voiceAutoRelisten: true, voiceSpeakStreaming: false, voiceContinuous: false, voiceSilenceSeconds: 3.2, voiceLanguage: '', theme: 'dark' });
     expect(document.documentElement.dataset.theme).toBe('dark');
     expect(localStorage.getItem('weft.settings.v1')).toContain('voiceAutoRelisten');
     expect((await memoryPreferences.get({ key: 'weft.settings.v1' })).value).toContain('dark');
@@ -53,5 +55,14 @@ describe('settings persistence', () => {
     expect((await getSettings()).voiceContinuous).toBe(true);
     await setVoiceContinuous(false);
     expect(await getVoiceContinuous()).toBe(false);
+  });
+
+  it('persists the speech language and defaults to following the phone', async () => {
+    expect(await getVoiceLanguage()).toBe('');
+    await setVoiceLanguage('en-IN');
+    expect(await getVoiceLanguage()).toBe('en-IN');
+    expect((await getSettings()).voiceLanguage).toBe('en-IN');
+    await setVoiceLanguage('');
+    expect(await getVoiceLanguage()).toBe('');
   });
 });

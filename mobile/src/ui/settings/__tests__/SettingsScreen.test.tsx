@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 
@@ -51,6 +51,15 @@ describe('SettingsScreen', () => {
     expect(screen.getByText('Hold the mic open')).toBeInTheDocument();
     expect(screen.getByText('Pause before sending')).toBeInTheDocument();
     expect(screen.getByText('Speak as it writes')).toBeInTheDocument();
+  });
+
+  it('offers the speech language here, where a set-once choice belongs', () => {
+    render(<SettingsScreen onClose={vi.fn()} />);
+
+    expect(screen.getByText('Speech language')).toBeInTheDocument();
+    const group = screen.getByRole('radiogroup', { name: 'Speech language' });
+    expect(within(group).getByText('English (India)')).toBeInTheDocument();
+    expect(within(group).getByText('हिंदी')).toBeInTheDocument();
   });
 
   it('names the transport each laptop is paired over', () => {

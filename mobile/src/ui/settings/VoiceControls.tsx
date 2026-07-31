@@ -1,8 +1,10 @@
 import { useEffect, useState, type JSX } from 'react';
 import {
+  VOICE_LANGUAGES,
   getSettings,
   setVoiceAutoRelisten,
   setVoiceContinuous,
+  setVoiceLanguage,
   setVoiceSilenceSeconds,
   setVoiceSpeakStreaming,
   subscribeSettings,
@@ -18,6 +20,9 @@ interface VoiceControlsProps {
   silenceMs?: number;
   /** `false` inside the Vox panel, where the heading is the panel itself. */
   showHeading?: boolean;
+  /** Settings only. The recognition language is set once and forgotten, so it would only be clutter
+   *  in the panel you open mid-conversation. */
+  showLanguage?: boolean;
 }
 
 const PAUSE_CHOICES = [
@@ -27,12 +32,18 @@ const PAUSE_CHOICES = [
   { seconds: 8, label: 'Thinking' },
 ];
 
-export function VoiceControls({ autoRelisten, silenceMs, showHeading = false }: VoiceControlsProps): JSX.Element {
+export function VoiceControls({
+  autoRelisten,
+  silenceMs,
+  showHeading = false,
+  showLanguage = false,
+}: VoiceControlsProps): JSX.Element {
   const [stored, setStored] = useState({
     voiceAutoRelisten: false,
     voiceContinuous: false,
     voiceSpeakStreaming: false,
     voiceSilenceSeconds: 3.2,
+    voiceLanguage: '',
   });
 
   useEffect(() => {
@@ -42,6 +53,7 @@ export function VoiceControls({ autoRelisten, silenceMs, showHeading = false }: 
         voiceContinuous: s.voiceContinuous,
         voiceSpeakStreaming: s.voiceSpeakStreaming,
         voiceSilenceSeconds: s.voiceSilenceSeconds,
+        voiceLanguage: s.voiceLanguage,
       }),
     );
     return subscribeSettings((s) =>
@@ -50,6 +62,7 @@ export function VoiceControls({ autoRelisten, silenceMs, showHeading = false }: 
         voiceContinuous: s.voiceContinuous,
         voiceSpeakStreaming: s.voiceSpeakStreaming,
         voiceSilenceSeconds: s.voiceSilenceSeconds,
+        voiceLanguage: s.voiceLanguage,
       }),
     );
   }, []);
@@ -69,6 +82,38 @@ export function VoiceControls({ autoRelisten, silenceMs, showHeading = false }: 
             <p>How Vox listens and speaks on this phone.</p>
           </div>
         </div>
+      ) : null}
+
+      {showLanguage ? (
+        <>
+          <div className="settings-row-head">
+            <div>
+              <h2 id="vox-language-title">Speech language</h2>
+              <p>Which accent and vocabulary the recogniser listens for. English (India) hears Indian
+                English far better than the US model. Hindi writes in Devanagari and won't mix English
+                words in, so pick it only when you'll speak Hindi throughout.</p>
+            </div>
+          </div>
+          <div
+            className="settings-segments settings-segments-pause"
+            role="radiogroup"
+            aria-labelledby="vox-language-title"
+          >
+            {VOICE_LANGUAGES.map((option) => (
+              <button
+                key={option.value || 'auto'}
+                type="button"
+                role="radio"
+                aria-checked={option.value === stored.voiceLanguage}
+                className={`settings-segment${option.value === stored.voiceLanguage ? ' active' : ''}`}
+                onClick={() => void setVoiceLanguage(option.value)}
+              >
+                <span className="vox-segment-label">{option.label}</span>
+                <span className="vox-segment-value">{option.value || navigator.language}</span>
+              </button>
+            ))}
+          </div>
+        </>
       ) : null}
 
       <div className="settings-row-head">

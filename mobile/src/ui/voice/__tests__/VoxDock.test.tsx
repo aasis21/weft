@@ -313,6 +313,8 @@ describe('VoxDock quick settings and countdown (#186)', () => {
     const panel = container.querySelector('.vox-settings');
     expect(panel).not.toBeNull();
     expect(panel?.textContent).toContain('Keep listening');
+    // The language belongs in Settings — it is chosen once, not reached for mid-conversation.
+    expect(panel?.textContent).not.toContain('Speech language');
     // Segments, not a slider — this gets used at arm's length.
     expect(panel?.querySelectorAll('.settings-segment').length).toBe(4);
   });

@@ -46,7 +46,9 @@ export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: Setting
   const [settings, setSettingsState] = useState<WeftSettings>({
     voiceAutoRelisten: false,
     voiceSpeakStreaming: false,
+    voiceContinuous: false,
     voiceSilenceSeconds: 3.2,
+    voiceLanguage: '',
     theme: 'system',
   });
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -202,7 +204,7 @@ export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: Setting
           </section>
 
           <section className="settings-group" aria-labelledby="settings-voice-title">
-            <VoiceControls showHeading />
+            <VoiceControls showHeading showLanguage />
           </section>
 
           <section className="settings-group" aria-labelledby="settings-about-title">

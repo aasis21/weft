@@ -13,8 +13,25 @@ export interface WeftSettings {
   voiceContinuous: boolean;
   /** Seconds of silence before Vox auto-sends what it heard. */
   voiceSilenceSeconds: number;
+  /**
+   * BCP-47 tag handed to the browser's speech recogniser, or '' for "whatever the phone's locale
+   * says". Until this existed the recogniser silently took `navigator.language`, so a phone set to
+   * US English transcribed Indian-accented English (never mind Hindi) against the wrong model and
+   * there was no way to tell it otherwise. Set-once, so it lives in Settings rather than the
+   * in-session Vox panel.
+   */
+  voiceLanguage: string;
   theme: ThemeSetting;
 }
+
+/** The languages offered in Settings. '' means "follow the phone", which stays the default so
+ *  nobody who never opens this list sees a behaviour change. */
+export const VOICE_LANGUAGES: Array<{ value: string; label: string }> = [
+  { value: '', label: 'Phone default' },
+  { value: 'en-US', label: 'English (US)' },
+  { value: 'en-IN', label: 'English (India)' },
+  { value: 'hi-IN', label: 'हिंदी' },
+];
 
 /** Bounds for {@link WeftSettings.voiceSilenceSeconds} — below 1s a breath sends; above 10s feels stuck. */
 export const VOICE_SILENCE_MIN = 1;
@@ -26,6 +43,7 @@ const DEFAULT_SETTINGS: WeftSettings = {
   voiceSpeakStreaming: false,
   voiceContinuous: false,
   voiceSilenceSeconds: 3.2,
+  voiceLanguage: '',
   theme: 'system',
 };
 const SETTINGS_EVENT = 'weft-settings-change';
@@ -43,6 +61,7 @@ function parseSettings(raw: string | null | undefined): Partial<WeftSettings> {
     if (typeof record.voiceSilenceSeconds === 'number' && Number.isFinite(record.voiceSilenceSeconds)) {
       out.voiceSilenceSeconds = record.voiceSilenceSeconds;
     }
+    if (typeof record.voiceLanguage === 'string') out.voiceLanguage = record.voiceLanguage;
     if (record.theme === 'light' || record.theme === 'dark' || record.theme === 'system') out.theme = record.theme;
     return out;
   } catch {
@@ -61,6 +80,7 @@ function normalize(settings: Partial<WeftSettings>): WeftSettings {
     voiceSpeakStreaming: settings.voiceSpeakStreaming ?? DEFAULT_SETTINGS.voiceSpeakStreaming,
     voiceContinuous: settings.voiceContinuous ?? DEFAULT_SETTINGS.voiceContinuous,
     voiceSilenceSeconds: clampSilence(settings.voiceSilenceSeconds ?? DEFAULT_SETTINGS.voiceSilenceSeconds),
+    voiceLanguage: settings.voiceLanguage ?? DEFAULT_SETTINGS.voiceLanguage,
     theme: settings.theme ?? DEFAULT_SETTINGS.theme,
   };
 }
@@ -135,6 +155,15 @@ export async function getVoiceSilenceSeconds(): Promise<number> {  return (await
 export async function setVoiceSilenceSeconds(seconds: number): Promise<void> {
   const current = await getSettings();
   await writeSettings({ ...current, voiceSilenceSeconds: clampSilence(seconds) });
+}
+
+export async function getVoiceLanguage(): Promise<string> {
+  return (await getSettings()).voiceLanguage;
+}
+
+export async function setVoiceLanguage(language: string): Promise<void> {
+  const current = await getSettings();
+  await writeSettings({ ...current, voiceLanguage: language });
 }
 
 export async function getTheme(): Promise<ThemeSetting> {

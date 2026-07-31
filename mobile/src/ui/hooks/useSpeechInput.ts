@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getSettings, subscribeSettings } from '../../lib/settings';
 
 interface SpeechRecognitionAlternative {
   transcript: string;
@@ -107,6 +108,24 @@ export function useSpeechInput(): {
   const explicitStopRef = useRef(true);
   const fatalErrorRef = useRef(false);
   const runTranscriptRef = useRef('');
+  // Read the preference here rather than making both callers (Vox and the composer mic) remember to
+  // pass it — a missed call site would silently fall back to the phone locale, which is the exact
+  // bug this setting exists to fix. Kept in a ref so changing it never re-creates `start`.
+  const languageRef = useRef('');
+
+  useEffect(() => {
+    let active = true;
+    void getSettings().then((settings) => {
+      if (active) languageRef.current = settings.voiceLanguage;
+    });
+    const unsubscribe = subscribeSettings((settings) => {
+      languageRef.current = settings.voiceLanguage;
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const start = useCallback(
     (onText: (text: string, isFinal: boolean) => void, options?: { continuous?: boolean }): void => {
@@ -128,7 +147,7 @@ export function useSpeechInput(): {
       if (recognitionGenerationRef.current !== generation || explicitStopRef.current || fatalErrorRef.current) return;
       const recognition = new Ctor();
       let sessionFinal = '';
-      recognition.lang = navigator.language;
+      recognition.lang = languageRef.current || navigator.language;
       recognition.interimResults = true;
       // Stay open across pauses when asked. In single-utterance mode the engine ends itself the
       // moment you stop for breath and we immediately open another — which costs an OS close/open

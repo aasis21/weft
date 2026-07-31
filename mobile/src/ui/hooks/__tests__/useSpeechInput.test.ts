@@ -86,6 +86,31 @@ describe('useSpeechInput', () => {
     expect(MockSpeechRecognition.instances[0].interimResults).toBe(true);
   });
 
+  it('listens in the phone language by default and switches when Settings picks one', async () => {
+    const { setVoiceLanguage } = await import('@/lib/settings');
+    const { result } = renderHook(() => useSpeechInput());
+
+    act(() => {
+      result.current.start(() => {});
+    });
+    expect(MockSpeechRecognition.instances[0].lang).toBe('en-US');
+    act(() => {
+      result.current.stop();
+    });
+
+    await act(async () => {
+      await setVoiceLanguage('hi-IN');
+    });
+    act(() => {
+      result.current.start(() => {});
+    });
+    expect(MockSpeechRecognition.instances.at(-1)?.lang).toBe('hi-IN');
+
+    await act(async () => {
+      await setVoiceLanguage('');
+    });
+  });
+
   it('restarts after engine end and keeps reporting the whole run until explicitly stopped', async () => {
     const heard: Array<{ text: string; isFinal: boolean }> = [];
     const { result } = renderHook(() => useSpeechInput());
