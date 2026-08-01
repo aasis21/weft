@@ -215,6 +215,8 @@ interface SessionScreenProps {
   onRemoveSession(channelId: string): void;
   onRenameSession(channelId: string, title: string): void;
   onPinSession?(channelId: string, pinned: boolean): void;
+  /** Ask the laptop for recent turns again from the thread menu. */
+  onReloadHistory?(channelId: string): void;
   onArchiveSession?(channelId: string): void;
   onReconnect(channelId: string): void;
   /** Re-issue the spawn/resume behind a failed placeholder card. */
@@ -245,6 +247,7 @@ export function SessionScreen({
   onRemoveSession,
   onRenameSession,
   onPinSession,
+  onReloadHistory,
   onArchiveSession,
   onReconnect,
   onRetrySpawn,
@@ -603,6 +606,7 @@ export function SessionScreen({
         {...(onArchiveSession ? { onArchive: () => onArchiveSession(activeId) } : {})}
         onRename={(newTitle) => onRenameSession(activeId, newTitle)}
         {...(onPinSession ? { onPin: (nextPinned: boolean) => onPinSession(activeId, nextPinned) } : {})}
+        {...(onReloadHistory ? { onReloadHistory: () => onReloadHistory(activeId) } : {})}
         pinned={active.pinned ?? false}
         isDemo={meta.kind === 'demo'}
         onRemove={() => requestRemove(activeId)}
@@ -976,3 +980,4 @@ export function SessionScreen({
     </div>
   );
 }
+

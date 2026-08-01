@@ -826,6 +826,15 @@ export class SessionRuntime {
     if (isControl && sub === SUBTYPE.CONTROL.CHANNEL_UP) {
       const sid = message.sessionId;
       if (sid && sid !== 'unknown-session') this.reconcileBySessionId(channelId, sid);
+      // The first recent-turns request goes out the moment the socket attaches, which can be
+      // hundreds of milliseconds before the laptop announces the channel is actually up. Anything
+      // sent in that window is dropped on the floor, and nothing retries it — the thread just sits
+      // on the empty state until a full reconnect. Asking again once the channel is provably up
+      // costs nothing, and only when we still have nothing to show, so a thread that did receive
+      // its history is never asked twice.
+      const cur = this.session(channelId);
+      const empty = !cur || (cur.history.items.length === 0 && cur.transcript.items.length === 0);
+      if (empty && ctrl.client && !ctrl.ephemeral) this.syncHistory(channelId, ctrl.client);
     }
 
     // Persist any changed durable metadata as ONE coalesced patch. Separate un-awaited patchSession
@@ -1591,6 +1600,15 @@ export class SessionRuntime {
   }
 
   // --- session controls ----------------------------------------------------------------------------
+  /** Ask the laptop for recent turns again, on purpose. The automatic request can be lost to a
+   *  race on connect, and while `channel_up` now retries it there is no way to recover from a
+   *  laptop that was simply busy — so the thread menu gets an explicit escape hatch. */
+  reloadHistory(channelId: string): void {
+    const ctrl = this.controllers.get(channelId);
+    if (!ctrl || !ctrl.client || ctrl.ephemeral) return;
+    this.syncHistory(channelId, ctrl.client);
+  }
+
   /** Rename a session to a user-chosen title (#37). Persists both the title and a `renamed` flag so
    *  the CLI-reported title never overrides it after a reload/resume. A blank name clears the rename
    *  and reverts to the CLI/cwd/creative-name default on the next update. */

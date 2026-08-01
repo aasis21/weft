@@ -124,6 +124,24 @@ interface MenuState {
   y: number;
 }
 
+/** How close to the bottom still counts as "following along". */
+const PIN_SLACK_PX = 80;
+
+/**
+ * Distance in pixels from the bottom of the scroller, measured live off the DOM.
+ *
+ * Deliberately not cached. The cached flag is written by a passive scroll listener, and the browser
+ * dispatches those asynchronously — so during streaming, where a token re-renders the thread every
+ * few frames, the render can ask "is the reader at the bottom?" before their finger's scroll event
+ * has been delivered. It then scrolls to the bottom on stale information, and the scroll event that
+ * finally arrives measures a gap of zero and confirms the wrong answer. Reading the DOM at the
+ * moment of the decision cannot be stale.
+ */
+function bottomGap(scroller: HTMLElement | null): number {
+  if (!scroller) return 0;
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+}
+
 /**
  * The highlighted text, but only when it actually lives inside `container`. A selection made in a
  * different bubble (or in the composer) must not hijack this bubble's Copy, and browsers keep the
@@ -152,6 +170,10 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   // the bottom if they were already there (or just sent a prompt themselves).
   const pinnedRef = useRef(true);
   const [isPinned, setIsPinned] = useState(true);
+  // True from the moment a finger lands on the thread until it leaves. Nothing may move the
+  // viewport under an active gesture: the reader is steering, and any correction we apply is
+  // fighting their thumb.
+  const touchingRef = useRef(false);
   // Opening a conversation should *present* the newest message, not travel to it. History arrives
   // after mount and lands above what is already rendered, so every page used to count as new content
   // and animate the viewport downwards — you watched the thread scroll itself while you were trying
@@ -314,22 +336,54 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       // Layout churn while the thread is still filling in produces scroll events that do not mean
       // the reader went anywhere. Believing them is what stranded the view mid-history.
       if (settlingRef.current) return;
-      const gap = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-      const nextPinned = gap < 80;
+      const nextPinned = bottomGap(scroller) < PIN_SLACK_PX;
       pinnedRef.current = nextPinned;
       setIsPinned(nextPinned);
       if (nextPinned) setHasNewWhileUnpinned(false);
     };
+    // Gesture bookends. These fire synchronously with the touch, unlike scroll, which is why they
+    // are the only signal fast enough to protect the very start of a drag.
+    const hold = (): void => {
+      touchingRef.current = true;
+    };
+    const release = (): void => {
+      touchingRef.current = false;
+      update();
+    };
     update();
     scroller.addEventListener('scroll', update, { passive: true });
-    return () => scroller.removeEventListener('scroll', update);
+    scroller.addEventListener('touchstart', hold, { passive: true });
+    scroller.addEventListener('touchend', release, { passive: true });
+    scroller.addEventListener('touchcancel', release, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', update);
+      scroller.removeEventListener('touchstart', hold);
+      scroller.removeEventListener('touchend', release);
+      scroller.removeEventListener('touchcancel', release);
+    };
   }, [cancelLongPress]);
 
   // Auto-scroll only when genuinely new content arrives (never on a Live/Quiet
   // heartbeat flip), and only if the reader is pinned to the bottom or just sent.
   useEffect(() => {
-    if (!pinnedRef.current && !lastIsUser) {
-      setHasNewWhileUnpinned(true);
+    // Measured now, off the DOM, rather than read from the cached flag: during streaming this
+    // effect runs faster than passive scroll events are delivered, so the flag can still say
+    // "at the bottom" while the reader is already scrolling away. Believing it snapped them back
+    // on every token, which made reading history impossible for as long as the agent was working.
+    // While settling the thread is pinning hard on purpose, so the live gap does not get a vote.
+    const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
+    const following = settlingRef.current || bottomGap(scroller) < PIN_SLACK_PX;
+    // A finger on the glass outranks everything. Even a correct "they are at the bottom" reading
+    // must not move the viewport mid-gesture, or the first pixel of an upward drag gets undone
+    // before it becomes a scroll.
+    const held = touchingRef.current;
+
+    if ((!following || held) && !lastIsUser) {
+      if (!following) {
+        pinnedRef.current = false;
+        setIsPinned(false);
+        setHasNewWhileUnpinned(true);
+      }
       prevItemsLenRef.current = items.length;
       return;
     }

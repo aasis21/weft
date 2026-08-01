@@ -403,6 +403,7 @@ export default function App(): JSX.Element {
       onRemoveSession={(id) => void sessionRuntime.remove(id)}
       onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
       onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
+      onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
       onArchiveSession={(id) => sessionRuntime.archive(id)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
       onRetrySpawn={(id) => void sessionRuntime.retrySpawn(id)}

@@ -21,8 +21,10 @@ describe('scenario: recent turns backfill', () => {
     client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
     await h!.flush();
 
-    // Connect-time sync asks for the in-memory snapshot and shows the skeleton until it lands.
-    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(1);
+    // Connect-time sync asks for the in-memory snapshot and shows the skeleton until it lands. The
+    // second is the retry that fires once the laptop confirms the channel is up — the first went
+    // out before that and was dropped on the floor.
+    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(2);
     expect(h!.active()?.timeline.historyLoading).toBe(true);
 
     client.emit(
@@ -125,6 +127,27 @@ describe('scenario: recent turns backfill', () => {
     const t = texts(h!.active()?.timeline.items);
     expect(t).toContain(promptA);
     expect(t).toContain(promptB);
+  });
+
+  it('asks again once the channel is provably up, because the connect-time request was lost', async () => {
+    const { client } = await h!.pair('c1');
+    await h!.flush();
+
+    // Attach fires the request immediately. On a real pairing the laptop has not attached yet, so
+    // this one goes nowhere — and nothing used to retry it, leaving the thread on its empty state.
+    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(1);
+
+    client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
+    await h!.flush();
+    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(2);
+
+    client.emit(B.recentTurnsSnapshot([B.recentTurnItem('user', 'earlier question', 100, 'u1')]));
+    await h!.flush();
+
+    // And a thread that already has something to show is never asked twice over.
+    client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
+    await h!.flush();
+    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(2);
   });
 
   it('clears the loading skeleton via the fail-safe when the snapshot reply never lands', async () => {

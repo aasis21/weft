@@ -38,7 +38,8 @@ describe('scenario: join', () => {
     // DB history page. DB history_request is now reserved for "Load earlier" scrollback.
     expect(client.sentOfKind('control.history_request')).toHaveLength(0);
     const requests = client.sentOfKind('control.recent_turns_request');
-    expect(requests).toHaveLength(1);
+    // The connect-time ask plus the retry that fires once channel_up confirms anyone is listening.
+    expect(requests).toHaveLength(2);
     expect(requests[0].limit).toBe(50);
   });
 });

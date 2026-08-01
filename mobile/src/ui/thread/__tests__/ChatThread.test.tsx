@@ -401,6 +401,90 @@ describe('Copying a message respects what you highlighted', () => {
   });
 });
 
+describe('letting the reader scroll away while the agent is still writing', () => {
+  function mountStreaming(): {
+    scroller: HTMLElement;
+    scrollIntoView: ReturnType<typeof vi.fn>;
+    rerender: (items: TimelineItem[]) => void;
+  } {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as never;
+    const first: TimelineItem[] = [{ kind: 'assistant', id: 'a1', text: 'one', ts: now }];
+    const { container, rerender: raw } = render(
+      <div className="thread-scroll">
+        <ChatThread items={first} streaming busy />
+      </div>,
+    );
+    const scroller = container.querySelector('.thread-scroll') as HTMLElement;
+    return {
+      scroller,
+      scrollIntoView,
+      rerender: (items) =>
+        raw(
+          <div className="thread-scroll">
+            <ChatThread items={items} streaming busy />
+          </div>,
+        ),
+    };
+  }
+
+  /** Place the reader well above the bottom without dispatching a scroll event, which is exactly
+   *  the state a real drag is in for the first few frames. */
+  function scrollUp(scroller: HTMLElement): void {
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 4000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
+  }
+
+  it('does not drag the viewport back down while streaming deltas arrive', async () => {
+    const { scroller, scrollIntoView, rerender } = mountStreaming();
+    await settleThread();
+    scrollUp(scroller);
+    scrollIntoView.mockClear();
+
+    // Token-by-token growth of the assistant message, with no scroll event in between — the
+    // cached pin flag still says "at the bottom" here, so only a live measurement saves us.
+    rerender([{ kind: 'assistant', id: 'a1', text: 'one two', ts: now }]);
+    rerender([{ kind: 'assistant', id: 'a1', text: 'one two three', ts: now }]);
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
+  });
+
+  it('holds still while a finger is on the glass, even sitting at the bottom', async () => {
+    const { scroller, scrollIntoView, rerender } = mountStreaming();
+    await settleThread();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 0 });
+    fireEvent.touchStart(scroller);
+    scrollIntoView.mockClear();
+
+    rerender([{ kind: 'assistant', id: 'a1', text: 'one two', ts: now }]);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // Letting go hands control back: the next delta follows along again.
+    fireEvent.touchEnd(scroller);
+    rerender([{ kind: 'assistant', id: 'a1', text: 'one two three', ts: now }]);
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('still jumps to the end when the reader sends something themselves', async () => {
+    const { scroller, scrollIntoView, rerender } = mountStreaming();
+    await settleThread();
+    scrollUp(scroller);
+    fireEvent.touchStart(scroller);
+    scrollIntoView.mockClear();
+
+    rerender([
+      { kind: 'assistant', id: 'a1', text: 'one', ts: now },
+      { kind: 'user', id: 'u1', text: 'stop', ts: now + 1, origin: 'phone' },
+    ]);
+
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+});
+
 describe('The working row says what the agent is doing', () => {
   it('shows the agent note in place of the generic label, and falls back without one', () => {
     const items: TimelineItem[] = [{ kind: 'user', id: 'u1', text: 'go', ts: now, origin: 'phone' }];
@@ -440,3 +524,4 @@ describe('The working row says what the agent is doing', () => {
     }
   });
 });
+

@@ -216,4 +216,36 @@ describe('the agent saying what it is doing (#204)', () => {
 
     vi.restoreAllMocks();
   });
+
+  it('clears the agent status marker on every route out of busy, not just the tidy one', () => {
+    const now = 1_700_000_000_000;
+
+    // A turn the provider kills never reaches assistant.idle, so no activity(false) ever arrives —
+    // the heartbeat's own busy flag is the only thing that notices it died.
+    const killed = makeSession();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    reduceAll(killed, [at(B.activity(true), 10), at(B.intent('running the tests', true), 11)]);
+    expect(killed.connection.thinkingSince).toBe(now);
+
+    reduceAll(killed, [at(B.heartbeat(1, false), 12)]);
+    expect(killed.connection.busy).toBe(false);
+    expect(killed.connection.thinkingSince).toBeNull();
+    expect(killed.connection.intent).toBeNull();
+
+    // Same story when the laptop cannot even say whether it is busy and the stuck-busy rescue is
+    // what finally lets go. That path exists precisely for turns that died silently.
+    const stuck = makeSession();
+    reduceAll(stuck, [at(B.activity(true), 10), at(B.intent('running the tests', true), 11)]);
+    reduceAll(stuck, [
+      at(B.heartbeat(1, null), 20),
+      at(B.heartbeat(1, null), 30),
+      at(B.heartbeat(1, null), 40),
+      at(B.heartbeat(1, null), 50),
+    ]);
+    expect(stuck.connection.busy).toBe(false);
+    expect(stuck.connection.thinkingSince).toBeNull();
+    expect(stuck.connection.intent).toBeNull();
+
+    vi.restoreAllMocks();
+  });
 });

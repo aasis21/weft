@@ -179,4 +179,17 @@ describe('StatusBar', () => {
     await user.click(screen.getByRole('menuitem', { name: /Debug events/ }));
     expect(onOpenDebug).toHaveBeenCalledTimes(1);
   });
+
+  it('offers a manual recent-turns reload, and only when the caller can serve one', async () => {
+    const user = userEvent.setup();
+    renderStatusBar();
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    expect(screen.queryByRole('menuitem', { name: /Load recent turns/ })).toBeNull();
+
+    const onReloadHistory = vi.fn();
+    renderStatusBar({ onReloadHistory });
+    await user.click(screen.getAllByRole('button', { name: 'Session menu' })[1] as HTMLElement);
+    await user.click(screen.getByRole('menuitem', { name: /Load recent turns/ }));
+    expect(onReloadHistory).toHaveBeenCalledTimes(1);
+  });
 });

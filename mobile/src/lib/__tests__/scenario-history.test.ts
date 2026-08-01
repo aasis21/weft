@@ -21,7 +21,8 @@ describe('scenario: deprecated paginated history', () => {
     client.emit(B.channelUp('c1', 'sess-1', '/repo/app', 'Refactor auth'));
     await h!.flush();
 
-    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(1);
+    // Two: the connect-time request, then the retry once channel_up proves the laptop is listening.
+    expect(client.sentOfKind('control.recent_turns_request')).toHaveLength(2);
     expect(client.sentOfKind('control.history_request')).toHaveLength(0);
 
     client.emit(

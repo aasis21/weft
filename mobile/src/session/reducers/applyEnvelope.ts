@@ -151,6 +151,15 @@ export function markInterrupted(session: Session, ts: number): void {
   }
 }
 
+/** An agent-status marker only ever describes the turn in flight. Every path that takes the session
+ *  out of "busy" has to clear it, not just the tidy one: a turn killed by a provider error never
+ *  reaches `assistant.idle`, so the heartbeat is the only thing that notices it died — and leaving
+ *  the marker behind means the next busy flip renders a count measured from the wrong turn. */
+function clearAgentStatus(session: Session): void {
+  session.connection.intent = null;
+  session.connection.thinkingSince = null;
+}
+
 export function applyEnvelope(session: Session, message: EventEnvelope): void {
   // Liveness clock: phone-local receipt time (set at the runtime edge) so heartbeat freshness is
   // measured against the SAME clock the watchdog uses (`this.clock()`). Never `message.ts` here —
@@ -198,10 +207,7 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.busyFrom = message.ts;
           // An intent only ever describes the turn in flight. Letting it outlive the turn would
           // leave a stale "reading the config" sitting under a finished answer.
-          if (!message.msg.busy) {
-            session.connection.intent = null;
-            session.connection.thinkingSince = null;
-          }
+          if (!message.msg.busy) clearAgentStatus(session);
           noteBusySignal(session, message.msg.busy, message.ts);
           return;
         case SUBTYPE.STREAM.USER_MESSAGE:
@@ -272,10 +278,12 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           if (typeof beat.busy === 'boolean' && !isStaleBusyHeartbeat(session, message.ts)) {
             session.connection.busy = beat.busy;
             session.connection.busyFrom = message.ts;
+            if (!beat.busy) clearAgentStatus(session);
             noteBusySignal(session, beat.busy, message.ts);
           } else if (beat.busy == null && shouldClearStuckBusy(session, message.ts)) {
             session.connection.busy = false;
             session.connection.busyFrom = message.ts;
+            clearAgentStatus(session);
           }
           session.connection.lastHeartbeat = beatTs;
           session.connection.ended = false;

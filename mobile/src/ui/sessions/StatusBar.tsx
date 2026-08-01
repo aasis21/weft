@@ -34,6 +34,8 @@ interface StatusBarProps {
   onRename?(title: string): void;
   /** Pin/unpin this session (exempt from auto-delete + eviction preference). */
   onPin?(pinned: boolean): void;
+  /** Ask the laptop for recent turns again, for when the automatic request never landed. */
+  onReloadHistory?(): void;
   pinned?: boolean;
   /** #163: demo sessions can't archive — hide that item. */
   isDemo?: boolean;
@@ -58,6 +60,7 @@ export function StatusBar({
   onArchive,
   onRename,
   onPin,
+  onReloadHistory,
   pinned = false,
   isDemo = false,
   onRemove,
@@ -249,6 +252,19 @@ export function StatusBar({
                   }}
                 >
                   📌 {pinned ? 'Unpin session' : 'Pin session'}
+                </button>
+              ) : null}
+              {onReloadHistory ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReloadHistory();
+                  }}
+                >
+                  ⟳ Load recent turns
                 </button>
               ) : null}
               {derived.active && !isDemo && onArchive ? (

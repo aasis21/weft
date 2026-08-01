@@ -23,6 +23,10 @@ interface VoiceControlsProps {
   /** Settings only. The recognition language is set once and forgotten, so it would only be clutter
    *  in the panel you open mid-conversation. */
   showLanguage?: boolean;
+  /** Hands-free. In the Vox panel you are mid-conversation, often not looking at the screen, and
+   *  the descriptions push the orb off the bottom of the sheet. The headings alone are enough to
+   *  find a switch you already know; the full explanations stay one tap away in Settings. */
+  compact?: boolean;
 }
 
 const PAUSE_CHOICES = [
@@ -37,6 +41,7 @@ export function VoiceControls({
   silenceMs,
   showHeading = false,
   showLanguage = false,
+  compact = false,
 }: VoiceControlsProps): JSX.Element {
   const [stored, setStored] = useState({
     voiceAutoRelisten: false,
@@ -119,7 +124,7 @@ export function VoiceControls({
       <div className="settings-row-head">
         <div>
           <h2 id="vox-relisten-title">Keep listening</h2>
-          <p>Reopen the mic on its own once Weft finishes speaking.</p>
+          {compact ? null : <p>Reopen the mic on its own once Weft finishes speaking.</p>}
         </div>
         <label className="settings-switch">
           <input
@@ -135,8 +140,10 @@ export function VoiceControls({
       <div className="settings-row-head">
         <div>
           <h2 id="vox-continuous-title">Hold the mic open</h2>
-          <p>One long listen instead of reopening at every pause. Quieter, but some phones garble
-            long dictation — turn it off if words repeat themselves.</p>
+          {compact ? null : (
+            <p>One long listen instead of reopening at every pause. Quieter, but some phones garble
+              long dictation — turn it off if words repeat themselves.</p>
+          )}
         </div>
         <label className="settings-switch">
           <input
@@ -152,7 +159,7 @@ export function VoiceControls({
       <div className="settings-row-head">
         <div>
           <h2 id="vox-stream-title">Speak as it writes</h2>
-          <p>Start reading a sentence before the agent has finished it.</p>
+          {compact ? null : <p>Start reading a sentence before the agent has finished it.</p>}
         </div>
         <label className="settings-switch">
           <input
@@ -168,7 +175,7 @@ export function VoiceControls({
       <div className="settings-row-head">
         <div>
           <h2 id="vox-pause-title">Pause before sending</h2>
-          <p>How long a silence means you're done talking.</p>
+          {compact ? null : <p>How long a silence means you're done talking.</p>}
         </div>
       </div>
       <div className="settings-segments settings-segments-pause" role="radiogroup" aria-labelledby="vox-pause-title">
@@ -189,3 +196,4 @@ export function VoiceControls({
     </>
   );
 }
+

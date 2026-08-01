@@ -15,7 +15,7 @@ interface VoxSettingsProps {
 export function VoxSettings({ autoRelisten, silenceMs }: VoxSettingsProps): JSX.Element {
   return (
     <section className="vox-settings settings-group" aria-label="Vox settings">
-      <VoiceControls autoRelisten={autoRelisten} silenceMs={silenceMs} />
+      <VoiceControls autoRelisten={autoRelisten} silenceMs={silenceMs} compact />
     </section>
   );
 }
