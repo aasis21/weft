@@ -1,6 +1,6 @@
 {
   "name": "weft",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Weft — your Copilot command center. Mobile app that binds to live Copilot CLI sessions via a session-bound CLI extension + Supabase Realtime relay.",
   "type": "module",

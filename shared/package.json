@@ -1,6 +1,6 @@
 {
   "name": "@aasis21/weft-shared",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Weft shared contracts: message schema, E2E crypto, and pluggable transport. Zero runtime dependencies so both the Node extension and the browser app can import it directly.",
   "license": "Apache-2.0",
