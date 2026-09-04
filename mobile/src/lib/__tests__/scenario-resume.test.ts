@@ -121,6 +121,33 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(h!.active()?.status).toBe('error');
     expect(h!.active()?.error).toBe('That session no longer exists.');
   });
+
+  it('retries a slow resume with the same operation id instead of starting a second writer', async () => {
+    await h!.manager.addByQr(listenerQr('listener-retry'));
+    await h!.flush();
+    const listener = registry.get('listener-retry')!;
+
+    const tempId = await h!.manager.resumeSession('listener-retry', {
+      sessionId: 'sid-slow',
+      mode: 'default',
+      title: 'Slow session',
+      cwd: 'C:\\repo\\weft',
+    });
+    await h!.flush();
+    const first = listener.sentOfKind('control.resume_session')[0]!;
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    await h!.flush();
+    expect(h!.active()?.status).toBe('error');
+
+    await h!.manager.retrySpawn(tempId);
+    await h!.flush();
+
+    const requests = listener.sentOfKind('control.resume_session');
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.requestId).toBe(first.requestId);
+    expect(requests[1]!.sessionId).toBe('sid-slow');
+  });
 });
 
 describe('scenario: resuming a session the phone is already driving', () => {

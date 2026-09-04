@@ -178,6 +178,9 @@ export interface SessionConnection {
     deviceId: string;
     deviceName?: string;
     projectName: string;
+    operation: 'new' | 'resume';
+    stage: 'not-delivered' | 'delivered' | 'launched' | 'ready' | 'pairing' | 'pairing-failed';
+    createdAt: number;
     /** The permission mode the attempt was made with. Recorded because it is a different axis from
      *  `connection.mode` (interactive/plan/autopilot) and is otherwise unrecoverable — a retry that
      *  silently dropped "allow all" would quietly re-arm approval prompts the user had opted out of. */

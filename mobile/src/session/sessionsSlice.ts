@@ -427,6 +427,16 @@ const sessionsSlice = createSlice({
       const spawning = state.entities[action.payload.id]?.connection.spawning;
       if (spawning) spawning.slow = true;
     },
+    spawnStateSet(
+      state,
+      action: PayloadAction<{
+        id: string;
+        patch: Partial<NonNullable<Session['connection']['spawning']>>;
+      }>,
+    ) {
+      const spawning = state.entities[action.payload.id]?.connection.spawning;
+      if (spawning) Object.assign(spawning, action.payload.patch);
+    },
     coldSet(state, action: PayloadAction<{ id: string; on: boolean }>) {
       const session = state.entities[action.payload.id];
       if (session) session.connection.cold = action.payload.on;
@@ -556,10 +566,10 @@ export const {
   debugAppended,
   readySet,
   spawnSlowSet,
+  spawnStateSet,
   historyPageMerged,
 } = sessionsSlice.actions;
 
 export const sessionsSelectors = sessionsAdapter.getSelectors();
 export const sessionsReducer = sessionsSlice.reducer;
 export default sessionsReducer;
-

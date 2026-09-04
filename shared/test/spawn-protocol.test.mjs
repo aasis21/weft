@@ -23,6 +23,8 @@ import {
   resumeSession,
   spawnPairing,
   spawnResult,
+  launchStatus,
+  LAUNCH_STATES,
   forgetDevice,
   sessionOffers,
   sessionClaimed,
@@ -78,6 +80,7 @@ test("spawn/project/forget factories build valid CONTROL envelopes", () => {
     [spawnSession("r1", "web", "allow-all", "brave-otter"), SUBTYPE.CONTROL.SPAWN_SESSION],
     [spawnPairing("r1", { v: 1, channelId: "c", pub: "p" }, "brave-otter", "web"), SUBTYPE.CONTROL.SPAWN_PAIRING],
     [spawnResult("r1", false, "no such project"), SUBTYPE.CONTROL.SPAWN_RESULT],
+    [launchStatus("r1", "accepted", { operation: "new" }), SUBTYPE.CONTROL.LAUNCH_STATUS],
     [forgetDevice(), SUBTYPE.CONTROL.FORGET_DEVICE],
   ];
   for (const [env, subtype] of cases) {
@@ -119,12 +122,44 @@ test("sessionOffers filters to well-formed offers and normalizes fields", () => 
 });
 
 test("sessionClaimed carries the offered channelId as a string", () => {
-  const env = sessionClaimed("off-1");
+  const env = sessionClaimed("off-1", "req-1");
   assert.equal(env.eventType, EVENT_TYPE.CONTROL);
   assert.equal(env.eventSubtype, SUBTYPE.CONTROL.SESSION_CLAIMED);
   assert.equal(env.msg.channelId, "off-1");
+  assert.equal(env.msg.requestId, "req-1");
   assert.ok(isValidEnvelope(env));
   assert.equal(sessionClaimed(undefined).msg.channelId, "", "coerces a missing id to empty string");
+});
+
+test("launchStatus carries only the public durable launch shape", () => {
+  assert.deepEqual(LAUNCH_STATES, ["accepted", "launched", "ready", "failed", "claimed", "abandoned", "superseded"]);
+  const payload = { v: 1, channelId: "c1", pub: "PUB", transport: { kind: "local" } };
+  const env = launchStatus("req-1", "ready", {
+    operation: "resume",
+    sessionId: "sid-1",
+    name: "restored",
+    payload,
+    createdAt: 10,
+    launchedAt: 20,
+    readyAt: 30,
+    pid: 123,
+    privateKeyJwk: { d: "must-not-leak" },
+    identityFile: "secret.json",
+  });
+  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.LAUNCH_STATUS);
+  assert.deepEqual(env.msg, {
+    requestId: "req-1",
+    state: "ready",
+    payload,
+    operation: "resume",
+    sessionId: "sid-1",
+    name: "restored",
+    createdAt: 10,
+    launchedAt: 20,
+    readyAt: 30,
+    pid: 123,
+  });
+  assert.ok(isValidEnvelope(env));
 });
 
 test("sessionListRequest carries an optional clamped limit", () => {

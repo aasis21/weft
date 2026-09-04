@@ -17,13 +17,27 @@ export function detectTerminal(env = process.env, platform = process.platform) {
   return null;
 }
 
-export function spawnCopilotSession({ project, name, mode = "default", identity, resumeSessionId = null, spawnFn = childSpawn, platform = process.platform } = {}) {
+export async function spawnCopilotSession({
+  project,
+  name,
+  mode = "default",
+  identity,
+  resumeSessionId = null,
+  operationId = null,
+  operationOwnerToken = null,
+  baseDir = undefined,
+  spawnFn = childSpawn,
+  platform = process.platform,
+} = {}) {
   const cwd = project?.path;
   if (!cwd) return { ok: false, error: "Project path is required" };
   const sessionName = name || "weft-session";
   const cleanup = [];
   try {
-    const identityFile = writeIdentityFile(identity);
+    const identityFile = writeIdentityFile(
+      { ...identity, operationId, operationOwnerToken },
+      { baseDir },
+    );
     cleanup.push(identityFile);
     // Resume an existing session by id (keeps its stored name/history) vs. name a fresh one.
     // `--resume=<id>` uses the attached-value form so the CLI never treats the id as a positional
@@ -48,8 +62,13 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
       stdio: "ignore",
       shell: false,
     });
+    await waitForSpawn(child);
     child?.unref?.();
-    return { ok: true };
+    return {
+      ok: true,
+      identityFile,
+      pid: terminal === null && Number.isInteger(child?.pid) && child.pid > 0 ? child.pid : null,
+    };
   } catch (err) {
     for (const file of cleanup) {
       try {
@@ -60,6 +79,24 @@ export function spawnCopilotSession({ project, name, mode = "default", identity,
     }
     return { ok: false, error: err?.message ?? String(err) };
   }
+}
+
+function waitForSpawn(child) {
+  if (!child || typeof child.once !== "function") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      child.removeListener?.("spawn", onSpawn);
+      child.removeListener?.("error", onError);
+      fn(value);
+    };
+    const onSpawn = () => finish(resolve);
+    const onError = (err) => finish(reject, err);
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
 }
 
 // A cmd.exe batch value inside `set "VAR=..."` needs no escaping except a literal double-quote,

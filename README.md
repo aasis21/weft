@@ -44,6 +44,8 @@ Everything you'd do at the terminal — now from your phone:
   `/clear`, `/autopilot`, …) that run on the laptop, or **Stop** a turn mid-run.
 - **Run a fleet** — one Device Station drives many projects and sessions; start a fresh chat or tap
   into a running one, across multiple laptops with a default device.
+- **Recover slow launches safely** — New and Resume requests survive phone reloads and temporary
+  Devbox outages; **Try again** reconnects to the same launch instead of silently opening duplicates.
 - **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,
   and juggle several at once.
 

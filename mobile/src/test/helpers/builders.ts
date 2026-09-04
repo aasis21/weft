@@ -43,6 +43,7 @@ export {
   spawnSession,
   spawnPairing,
   spawnResult,
+  launchStatus,
   sessionListRequest,
   sessionList,
   resumeSession,

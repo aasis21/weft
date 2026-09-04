@@ -7,6 +7,7 @@ import {
   createSupabaseTransport,
   createRelayTransport,
   generateKeyPair,
+  importKeyPair,
   isValidEnvelope,
   parsePairingPayload,
   sayHello,
@@ -47,6 +48,12 @@ export interface WeftClient {
   close(): Promise<void>;
 }
 
+export interface PhonePairingIdentity {
+  publicKeyB64: string;
+  privateKeyJwk: JsonWebKey;
+  deviceId: string;
+}
+
 const ALL_EVENTS: EventType[] = [
   EVENT_TYPE.STREAM,
   EVENT_TYPE.PROMPT,
@@ -63,7 +70,7 @@ const ALL_EVENTS: EventType[] = [
  */
 export async function pairSession(
   raw: string | PairingPayload,
-  opts?: { transport?: Transport },
+  opts?: { transport?: Transport; identity?: PhonePairingIdentity; timeoutMs?: number },
 ): Promise<{ client: WeftClient; pairing: StoredPairing }> {
   const { channelId, publicKeyB64, transport: transportDescriptor, appVersion } = parsePairingPayload(raw);
   return pairWithPublicKey({
@@ -72,7 +79,18 @@ export async function pairSession(
     transportDescriptor,
     appVersion,
     transport: opts?.transport,
+    identity: opts?.identity,
+    timeoutMs: opts?.timeoutMs,
   });
+}
+
+export async function createPhonePairingIdentity(): Promise<PhonePairingIdentity> {
+  const phoneKeys = await generateKeyPair();
+  return {
+    publicKeyB64: phoneKeys.publicKeyB64,
+    privateKeyJwk: await crypto.subtle.exportKey('jwk', phoneKeys.privateKey),
+    deviceId: getStableDeviceId(),
+  };
 }
 
 export async function pairWithPublicKey(opts: {
@@ -83,21 +101,31 @@ export async function pairWithPublicKey(opts: {
   /** The laptop's Weft version from the pairing payload, persisted on StoredPairing for display. */
   appVersion?: string;
   transport?: Transport;
+  identity?: PhonePairingIdentity;
+  timeoutMs?: number;
 }): Promise<{ client: WeftClient; pairing: StoredPairing }> {
   const { channelId, publicKeyB64, transportDescriptor, appVersion } = opts;
-  const phoneKeys = await generateKeyPair();
-  const deviceId = getStableDeviceId();
+  const phoneKeys = opts.identity
+    ? await importKeyPair({ privateKeyJwk: opts.identity.privateKeyJwk })
+    : await generateKeyPair();
+  const deviceId = opts.identity?.deviceId ?? getStableDeviceId();
   const transport = opts.transport ?? createTransportFromDescriptor(transportDescriptor, channelId);
-  const { key } = await sayHello({
-    transport,
-    keyPair: phoneKeys,
-    peerPublicKeyB64: publicKeyB64,
-    deviceId,
-    senderName: getSenderName(),
-    channelId,
-    waitForAck: true,
-    timeoutMs: 20_000,
-  });
+  let key: CryptoKey;
+  try {
+    ({ key } = await sayHello({
+      transport,
+      keyPair: phoneKeys,
+      peerPublicKeyB64: publicKeyB64,
+      deviceId,
+      senderName: getSenderName(),
+      channelId,
+      waitForAck: true,
+      timeoutMs: opts.timeoutMs ?? 20_000,
+    }));
+  } catch (err) {
+    void transport.close().catch(() => {});
+    throw err;
+  }
   const privateKeyJwk = await crypto.subtle.exportKey('jwk', phoneKeys.privateKey);
   const pairing: StoredPairing = {
     channelId,

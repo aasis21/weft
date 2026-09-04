@@ -22,6 +22,7 @@ import {
 } from '@aasis21/weft-shared';
 import type {
   EventEnvelope,
+  LaunchStatusMsg,
   PairingPayload,
   ProjectListMsg,
   PromptAttachment,
@@ -34,8 +35,14 @@ import type {
   SpawnResultMsg,
   StateSnapshotMsg,
 } from '@aasis21/weft-shared';
-import { connectDevice as connectDeviceSession, connectSession, pairSession, getSenderName } from '@/lib/weftClient';
-import type { WeftClient } from '@/lib/weftClient';
+import {
+  connectDevice as connectDeviceSession,
+  connectSession,
+  createPhonePairingIdentity,
+  pairSession,
+  getSenderName,
+} from '@/lib/weftClient';
+import type { PhonePairingIdentity, WeftClient } from '@/lib/weftClient';
 import {
   loadLastActiveSessionId,
   loadSessions,
@@ -56,6 +63,13 @@ import {
 import { creativeName } from '@/lib/sessionNames';
 import type { StoredSession } from '@/lib/sessions';
 import type { StoredPairing } from '@/lib/storage';
+import {
+  loadPendingOperations,
+  removePendingOperation,
+  upsertPendingOperation,
+  type PendingOperation,
+  type PendingOperationStage,
+} from '@/lib/pendingOperations';
 import {
   allowTranscriptWrites,
   clearTranscript,
@@ -119,6 +133,7 @@ import {
   sessionAdded,
   sessionReconciled,
   spawnSlowSet,
+  spawnStateSet,
   sessionRemoved,
   settlingSet,
   statusSet,
@@ -209,7 +224,9 @@ const AUTO_DELETE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 // would archive sessions the phone simply hasn't looked at yet.
 const AUTO_ARCHIVE_STALE_MS = 2 * 24 * 60 * 60 * 1_000; // 2 days
 const HISTORY_REQUEST_TIMEOUT_MS = 8_000;
-const SPAWN_TIMEOUT_MS = 30_000;
+const SPAWN_DELIVERY_TIMEOUT_MS = 30_000;
+const PAIRING_ATTEMPT_TIMEOUT_MS = 20_000;
+const STALE_LAUNCH_MS = 5 * 60_000;
 /* Resume is not spawn. `copilot --resume` has to open the session store, find the record and replay
    it before the listener can pair the channel, and on a store holding a couple of thousand sessions
    a cold Windows laptop routinely takes longer than a fresh spawn's half-minute. Failing at 30s was
@@ -240,23 +257,22 @@ interface ResumeRequestOptions {
   force?: boolean;
 }
 
-interface PendingSpawn {
-  requestId: string;
-  tempId: string;
-  deviceId: string;
-  spawnedFromDeviceId: string;
-  spawnedFromDeviceName?: string;
-  projectName: string;
-  name?: string;
-  timer: ReturnType<typeof setTimeout>;
+interface PendingSpawn extends PendingOperation {
+  timer?: ReturnType<typeof setTimeout>;
+  pairingInFlight?: boolean;
   /** Fires partway through a resume to say it is still working, so a long wait doesn't read as a
    *  hang. Cleared alongside `timer`. */
   slowTimer?: ReturnType<typeof setTimeout>;
 }
 
 function clearSpawnTimers(pending: PendingSpawn): void {
-  clearTimeout(pending.timer);
+  if (pending.timer) clearTimeout(pending.timer);
   if (pending.slowTimer) clearTimeout(pending.slowTimer);
+}
+
+function persistedPending(pending: PendingSpawn): PendingOperation {
+  const { timer: _timer, slowTimer: _slowTimer, pairingInFlight: _pairingInFlight, ...operation } = pending;
+  return operation;
 }
 
 function basename(path: string | null): string | null {
@@ -401,12 +417,19 @@ export class SessionRuntime {
 
     let stored: StoredSession[] = [];
     let devices: RegisteredDevice[] = [];
+    let pendingOperations: PendingOperation[] = [];
     let lastActiveId: string | null = null;
     try {
-      [stored, lastActiveId, devices] = await Promise.all([loadSessions(), loadLastActiveSessionId(), loadDevices()]);
+      [stored, lastActiveId, devices, pendingOperations] = await Promise.all([
+        loadSessions(),
+        loadLastActiveSessionId(),
+        loadDevices(),
+        loadPendingOperations(),
+      ]);
     } catch {
       stored = [];
       devices = [];
+      pendingOperations = [];
       lastActiveId = null;
     }
 
@@ -495,6 +518,39 @@ export class SessionRuntime {
       this.store.dispatch(sessionAdded(session));
       this.controllers.set(channelId, new ChannelController(channelId));
     }
+    for (const operation of pendingOperations) {
+      const session = emptySession(operation.tempId, {
+        channelId: operation.tempId,
+        sessionId: operation.sessionId,
+        title: operation.title || operation.name || operation.projectName,
+        cwd: operation.cwd ?? null,
+        kind: 'spawning',
+        addedAt: operation.createdAt,
+        spawnedFromDeviceId: operation.spawnedFromDeviceId,
+        spawnedFromDeviceName: operation.spawnedFromDeviceName,
+      });
+      session.connection.status = operation.stage === 'pairing-failed' ? 'error' : 'initializing';
+      session.connection.error =
+        operation.stage === 'pairing-failed'
+          ? 'The session started, but the phone could not connect yet. Try again to reconnect to it.'
+          : undefined;
+      session.connection.spawning = {
+        requestId: operation.requestId,
+        deviceId: operation.deviceId,
+        deviceName: operation.spawnedFromDeviceName,
+        projectName: operation.projectName,
+        operation: operation.kind,
+        stage: operation.stage,
+        createdAt: operation.createdAt,
+        mode: operation.mode,
+        slow: this.clock() - operation.createdAt >= RESUME_SLOW_MS,
+      };
+      this.pendingSpawns.set(operation.requestId, { ...operation });
+      this.store.dispatch(sessionAdded(session));
+    }
+    if (!activeId && pendingOperations.length > 0) {
+      activeId = [...pendingOperations].sort((a, b) => b.createdAt - a.createdAt)[0]?.tempId ?? null;
+    }
     if (activeId) this.store.dispatch(sessionActivated(activeId));
     this.store.dispatch(readySet(true));
 
@@ -532,6 +588,14 @@ export class SessionRuntime {
     // MAX_DEVICES=10 cap (see registerListenerFromQr) already bounds how many live listener
     // sockets this can ever open, so there's no need for a warm-pool LRU here.
     await Promise.all(devices.map((d) => this.connectDevice(d.channelId)));
+
+    // Pairing material proves the Device Station accepted and launched this operation. Recover it
+    // automatically after an app restart without sending another spawn request. Operations that
+    // were never acknowledged stay manual so an offline laptop cannot open a surprise terminal
+    // hours later merely because it reconnected.
+    for (const pending of this.pendingSpawns.values()) {
+      if (pending.pairingPayload) void this.attemptPendingPair(pending.requestId);
+    }
   }
 
   /** Rebuild a store `Session` from a restored transcript + stored metadata (mirrors restoreTimeline:
@@ -1185,18 +1249,122 @@ export class SessionRuntime {
     this.projectListInflight.delete(channelId);
   }
 
+  private async setPendingStage(
+    pending: PendingSpawn,
+    stage: PendingOperationStage,
+    error?: string,
+  ): Promise<void> {
+    pending.stage = stage;
+    this.store.dispatch(
+      spawnStateSet({
+        id: pending.tempId,
+        patch: { stage, slow: this.clock() - pending.createdAt >= RESUME_SLOW_MS },
+      }),
+    );
+    this.store.dispatch(
+      statusSet({
+        id: pending.tempId,
+        status: error ? 'error' : 'initializing',
+        error,
+      }),
+    );
+    await upsertPendingOperation(persistedPending(pending));
+  }
+
+  private armLaunchResponseTimer(pending: PendingSpawn): void {
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      pending.timer = undefined;
+      void this.setPendingStage(
+        pending,
+        pending.stage,
+        `Devbox has not answered yet. Try again when it is online; Weft will reuse this launch request.`,
+      );
+    }, pending.kind === 'resume' ? RESUME_TIMEOUT_MS : SPAWN_DELIVERY_TIMEOUT_MS);
+  }
+
+  private async sendPendingRequest(pending: PendingSpawn): Promise<void> {
+    await this.connectDevice(pending.deviceId);
+    const ctrl = this.listenerController(pending.deviceId);
+    if (!ctrl?.client) throw new Error('Listener device is not connected.');
+    const message =
+      pending.kind === 'resume'
+        ? resumeSessionMessage(
+            pending.requestId,
+            pending.sessionId ?? '',
+            pending.mode,
+            pending.force === true,
+          )
+        : spawnSessionMessage(
+            pending.requestId,
+            pending.projectName,
+            pending.mode,
+            pending.name ?? null,
+          );
+    this.recordDeviceEvent(pending.deviceId, 'out', message);
+    await ctrl.client.send(message);
+    await this.setPendingStage(pending, 'delivered');
+    this.armLaunchResponseTimer(pending);
+  }
+
+  private async attemptPendingPair(requestId: string): Promise<void> {
+    const pending = this.pendingSpawns.get(requestId);
+    if (!pending?.pairingPayload || pending.pairingInFlight) return;
+    pending.pairingInFlight = true;
+    clearSpawnTimers(pending);
+    try {
+      pending.phoneIdentity ??= await createPhonePairingIdentity();
+      await this.setPendingStage(pending, 'pairing');
+      const { client, pairing } = await pairSession(pending.pairingPayload, {
+        identity: pending.phoneIdentity as PhonePairingIdentity,
+        timeoutMs: PAIRING_ATTEMPT_TIMEOUT_MS,
+      });
+      const title = pending.name || pending.title || pending.projectName;
+      const oldActive = this.activeId();
+      await this.openPairedSession(client, pairing, {
+        title,
+        activate: true,
+        renamed: Boolean(pending.name),
+        spawnedFromDeviceId: pending.spawnedFromDeviceId,
+        spawnedFromDeviceName: pending.spawnedFromDeviceName,
+      });
+      const listener = this.listenerController(pending.deviceId)?.client;
+      if (listener) {
+        const claimed = sessionClaimedMessage(pairing.channelId, pending.requestId);
+        this.recordDeviceEvent(pending.deviceId, 'out', claimed);
+        await listener.send(claimed).catch(() => {});
+      }
+      this.pendingSpawns.delete(requestId);
+      await removePendingOperation(requestId);
+      this.store.dispatch(sessionRemoved(pending.tempId));
+      if (oldActive === pending.tempId) this.store.dispatch(sessionActivated(pairing.channelId));
+    } catch (err) {
+      await this.setPendingStage(
+        pending,
+        'pairing-failed',
+        errMessage(
+          err,
+          'The session started, but the phone could not connect yet. Try again to reconnect to it.',
+        ),
+      );
+    } finally {
+      pending.pairingInFlight = false;
+    }
+  }
+
   async spawnSession(channelId: string, opts: SpawnRequestOptions): Promise<string> {
     const device = this.device(channelId);
     if (!device) throw new Error('Choose a registered listener device first.');
-    const requestId = `spawn-${this.clock()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `spawn-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.name?.trim() || opts.projectName;
+    const createdAt = this.clock();
     const meta: SessionMeta = {
       channelId: tempId,
       title: displayName,
       cwd: null,
       kind: 'spawning',
-      addedAt: this.clock(),
+      addedAt: createdAt,
       spawnedFromDeviceId: device.deviceId ?? channelId,
       spawnedFromDeviceName: device.name,
     };
@@ -1207,6 +1375,9 @@ export class SessionRuntime {
       deviceId: channelId,
       deviceName: device.name,
       projectName: opts.projectName,
+      operation: 'new',
+      stage: 'not-delivered',
+      createdAt,
       mode: opts.mode,
     };
     this.store.dispatch(sessionAdded(session));
@@ -1218,25 +1389,30 @@ export class SessionRuntime {
       deviceId: channelId,
       spawnedFromDeviceId: device.deviceId ?? channelId,
       spawnedFromDeviceName: device.name,
+      kind: 'new',
       projectName: opts.projectName,
       name: opts.name?.trim() || undefined,
-      timer: setTimeout(() => {
-        this.failSpawn(requestId, 'Timed out waiting for the laptop to start the session.');
-      }, SPAWN_TIMEOUT_MS),
+      mode: opts.mode,
+      createdAt,
+      stage: 'not-delivered',
     };
+    pending.slowTimer = setTimeout(() => {
+      if (!this.pendingSpawns.has(requestId)) return;
+      this.store.dispatch(spawnSlowSet({ id: tempId }));
+    }, RESUME_SLOW_MS);
     this.pendingSpawns.set(requestId, pending);
+    await upsertPendingOperation(persistedPending(pending));
 
     try {
-      await this.connectDevice(channelId);
-      const ctrl = this.listenerController(channelId);
-      if (!ctrl?.client) throw new Error('Listener device is not connected.');
-      const message = spawnSessionMessage(requestId, opts.projectName, opts.mode, opts.name?.trim() || null);
-      this.recordDeviceEvent(channelId, 'out', message);
-      await ctrl.client.send(message);
+      await this.sendPendingRequest(pending);
       this.store.dispatch(deviceLastProjectSet({ channelId, projectName: opts.projectName }));
       void patchDevice(channelId, { lastProjectName: opts.projectName });
     } catch (err) {
-      this.failSpawn(requestId, errMessage(err, 'Could not start the session.'));
+      await this.setPendingStage(
+        pending,
+        'not-delivered',
+        errMessage(err, 'Could not reach Devbox. Try again when it is online.'),
+      );
     }
 
     return tempId;
@@ -1328,16 +1504,17 @@ export class SessionRuntime {
       if (await this.reconnectAndConfirm(existingId)) return existingId;
     }
 
-    const requestId = `resume-${this.clock()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `resume-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.title?.trim() || basename(opts.cwd) || 'Resuming session';
+    const createdAt = this.clock();
     const meta: SessionMeta = {
       channelId: tempId,
       sessionId: opts.sessionId,
       title: displayName,
       cwd: opts.cwd ?? null,
       kind: 'spawning',
-      addedAt: this.clock(),
+      addedAt: createdAt,
       spawnedFromDeviceId: device.deviceId ?? channelId,
       spawnedFromDeviceName: device.name,
     };
@@ -1348,6 +1525,9 @@ export class SessionRuntime {
       deviceId: channelId,
       deviceName: device.name,
       projectName: displayName,
+      operation: 'resume',
+      stage: 'not-delivered',
+      createdAt,
       mode: opts.mode,
     };
     this.store.dispatch(sessionAdded(session));
@@ -1359,15 +1539,17 @@ export class SessionRuntime {
       deviceId: channelId,
       spawnedFromDeviceId: device.deviceId ?? channelId,
       spawnedFromDeviceName: device.name,
+      kind: 'resume',
       // Used only as the Initializing placeholder title fallback; `name` is left undefined so
       // handleSpawnPairing keeps renamed=false and the resumed session's own CLI title wins.
       projectName: displayName,
-      timer: setTimeout(() => {
-        this.failSpawn(
-          requestId,
-          'The laptop never finished resuming this session. It may still be starting — try again.',
-        );
-      }, RESUME_TIMEOUT_MS),
+      mode: opts.mode,
+      sessionId: opts.sessionId,
+      cwd: opts.cwd ?? undefined,
+      title: displayName,
+      force: opts.force === true,
+      createdAt,
+      stage: 'not-delivered',
       // Past the point a fresh spawn would have landed, say so rather than sitting mute. The card
       // stays `initializing`, so this is a note and not a failure.
       slowTimer: setTimeout(() => {
@@ -1376,41 +1558,60 @@ export class SessionRuntime {
       }, RESUME_SLOW_MS),
     };
     this.pendingSpawns.set(requestId, pending);
+    await upsertPendingOperation(persistedPending(pending));
 
     try {
-      await this.connectDevice(channelId);
-      const ctrl = this.listenerController(channelId);
-      if (!ctrl?.client) throw new Error('Listener device is not connected.');
-      const message = resumeSessionMessage(requestId, opts.sessionId, opts.mode, opts.force === true);
-      this.recordDeviceEvent(channelId, 'out', message);
-      await ctrl.client.send(message);
+      await this.sendPendingRequest(pending);
     } catch (err) {
-      this.failSpawn(requestId, errMessage(err, 'Could not resume the session.'));
+      await this.setPendingStage(
+        pending,
+        'not-delivered',
+        errMessage(err, 'Could not reach Devbox. Try again when it is online.'),
+      );
     }
 
     return tempId;
   }
 
-  /** Re-issue the spawn or resume behind a failed placeholder card, reusing the device and session
-   *  it was launched for, and dispose the dead card. A timed-out resume is the common case: the
-   *  laptop was simply slow to open a large session store, and the only honest answer is "try that
-   *  again" — which previously meant backing out to the Start screen and hunting for the row, because
-   *  the placeholder offered nothing but Dismiss. Returns the new placeholder's channelId. */
+  /** Recover the operation behind a failed placeholder. Pairing retries reuse the original channel
+   *  and phone key; delivery retries reuse the original requestId so a capable Device Station can
+   *  replay the launch instead of opening another terminal. Only a stale New operation may fall back
+   *  to a replacement; Resume never duplicates a session-store writer. */
   async retrySpawn(channelId: string): Promise<string | null> {
     const session = this.session(channelId);
     const spawning = session?.connection.spawning;
     if (!session || !spawning || session.meta.kind !== 'spawning') return null;
-    const { sessionId, cwd, title } = session.meta;
-    const deviceId = spawning.deviceId;
-    const projectName = spawning.projectName;
-    const mode: SpawnMode = spawning.mode ?? 'default';
-    // Drop the dead card first: leaving it in place would make the new attempt look like a duplicate
-    // in the session list, and resumeSession would have to reason about which of the two it meant.
-    await this.remove(channelId);
-    if (sessionId) {
-      return this.resumeSession(deviceId, { sessionId, mode, cwd: cwd ?? undefined, title: title ?? undefined });
+    const pending = this.pendingSpawns.get(spawning.requestId);
+    if (!pending) return null;
+    this.store.dispatch(statusSet({ id: pending.tempId, status: 'initializing', error: undefined }));
+    if (pending.pairingPayload) {
+      await this.attemptPendingPair(pending.requestId);
+      if (
+        pending.kind === 'new' &&
+        pending.stage === 'pairing-failed' &&
+        this.clock() - pending.createdAt >= STALE_LAUNCH_MS
+      ) {
+        const replacement = {
+          deviceId: pending.deviceId,
+          projectName: pending.projectName,
+          mode: pending.mode,
+          name: pending.name,
+        };
+        await this.remove(channelId);
+        return this.spawnSession(replacement.deviceId, replacement);
+      }
+      return pending.tempId;
     }
-    return this.spawnSession(deviceId, { projectName, mode });
+    try {
+      await this.sendPendingRequest(pending);
+    } catch (err) {
+      await this.setPendingStage(
+        pending,
+        'not-delivered',
+        errMessage(err, 'Could not reach Devbox. Try again when it is online.'),
+      );
+    }
+    return pending.tempId;
   }
 
   async forgetDevice(channelId: string): Promise<void> {
@@ -1499,6 +1700,10 @@ export class SessionRuntime {
       void this.handleSpawnPairing(message.msg as SpawnPairingMsg);
       return;
     }
+    if (message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS) {
+      void this.handleLaunchStatus(message.msg as LaunchStatusMsg);
+      return;
+    }
     if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS) {
       const msg = message.msg as SessionOffersMsg;
       const offers = (msg.offers ?? []).filter((o) => o && typeof o.channelId === 'string' && o.payload);
@@ -1515,7 +1720,60 @@ export class SessionRuntime {
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
       const msg = message.msg as SpawnResultMsg;
-      if (!msg.ok) this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
+      const pending = this.pendingSpawns.get(msg.requestId);
+      if (!pending) return;
+      if (msg.ok) {
+        clearSpawnTimers(pending);
+        pending.timer = undefined;
+        void this.setPendingStage(pending, 'launched');
+      } else {
+        void this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
+      }
+    }
+  }
+
+  private async handleLaunchStatus(msg: LaunchStatusMsg): Promise<void> {
+    const pending = this.pendingSpawns.get(msg.requestId);
+    if (!pending) return;
+    if (msg.name) pending.name = msg.name;
+
+    switch (msg.state) {
+      case 'accepted':
+        await this.setPendingStage(pending, 'delivered');
+        return;
+      case 'launched':
+        clearSpawnTimers(pending);
+        pending.timer = undefined;
+        await this.setPendingStage(pending, 'launched');
+        return;
+      case 'ready':
+        clearSpawnTimers(pending);
+        pending.timer = undefined;
+        pending.slowTimer = undefined;
+        if (msg.payload) pending.pairingPayload = msg.payload;
+        await this.setPendingStage(pending, msg.payload ? 'ready' : 'launched');
+        if (pending.pairingPayload) await this.attemptPendingPair(msg.requestId);
+        return;
+      case 'failed':
+        await this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
+        return;
+      case 'claimed': {
+        clearSpawnTimers(pending);
+        this.pendingSpawns.delete(msg.requestId);
+        await removePendingOperation(msg.requestId);
+        this.store.dispatch(sessionRemoved(pending.tempId));
+        const claimedChannelId = msg.payload?.channelId;
+        if (claimedChannelId && this.session(claimedChannelId)) {
+          this.store.dispatch(sessionActivated(claimedChannelId));
+        }
+        return;
+      }
+      case 'abandoned':
+      case 'superseded':
+        await this.failSpawn(
+          msg.requestId,
+          msg.error || `This ${pending.kind === 'resume' ? 'resume' : 'launch'} was ${msg.state}.`,
+        );
     }
   }
 
@@ -1523,35 +1781,22 @@ export class SessionRuntime {
     const pending = this.pendingSpawns.get(msg.requestId);
     if (!pending) return;
     clearSpawnTimers(pending);
-    this.pendingSpawns.delete(msg.requestId);
-    try {
-      const payload = msg.payload as PairingPayload;
-      const { client, pairing } = await pairSession(payload);
-      const title = msg.name || pending.name || msg.projectName || pending.projectName;
-      const oldActive = this.activeId();
-      await this.openPairedSession(client, pairing, {
-        title,
-        activate: true,
-        renamed: Boolean(msg.name || pending.name),
-        spawnedFromDeviceId: pending.spawnedFromDeviceId,
-        spawnedFromDeviceName: pending.spawnedFromDeviceName,
-      });
-      this.store.dispatch(sessionRemoved(pending.tempId));
-      if (oldActive === pending.tempId) this.store.dispatch(sessionActivated(pairing.channelId));
-    } catch (err) {
-      this.pendingSpawns.set(msg.requestId, { ...pending, timer: setTimeout(() => this.failSpawn(msg.requestId, 'Timed out waiting for the laptop to start the session.'), SPAWN_TIMEOUT_MS) });
-      this.failSpawn(msg.requestId, errMessage(err, 'Received the new session, but could not pair to it.'));
-    }
+    pending.timer = undefined;
+    pending.slowTimer = undefined;
+    pending.pairingPayload = msg.payload as PairingPayload;
+    if (msg.name) pending.name = msg.name;
+    await this.setPendingStage(pending, 'launched');
+    await this.attemptPendingPair(msg.requestId);
   }
 
-  private failSpawn(requestId: string, error: string): void {
+  private async failSpawn(requestId: string, error: string): Promise<void> {
     const pending = this.pendingSpawns.get(requestId);
     if (!pending) return;
     clearSpawnTimers(pending);
     this.pendingSpawns.delete(requestId);
     const session = this.session(pending.tempId);
-    if (!session) return;
-    this.store.dispatch(statusSet({ id: pending.tempId, status: 'error', error }));
+    if (session) this.store.dispatch(statusSet({ id: pending.tempId, status: 'error', error }));
+    await removePendingOperation(requestId);
   }
 
   /** Adopt an in-session `/weft` offer relayed by a Device Station (the mirror of a spawned session):
@@ -1657,6 +1902,7 @@ export class SessionRuntime {
       if (pending.tempId === channelId) {
         clearSpawnTimers(pending);
         this.pendingSpawns.delete(pending.requestId);
+        await removePendingOperation(pending.requestId);
       }
     }
     const ctrl = this.controllers.get(channelId);

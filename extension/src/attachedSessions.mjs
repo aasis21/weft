@@ -16,22 +16,19 @@
 //   - The station is a reader. It prunes dead-pid entries on every read and never writes.
 // A session that crashes without cleanup self-heals: prune() drops it from every read.
 //
-// Liveness is deliberately NOT "is the pid alive". A pid says the copilot process exists, not that
-// weft inside it is still talking to anyone — and if weft is wedged, resume is the user's ONLY way
-// back. A pid-only guard would refuse to spawn, hand back a pairing nobody is listening on, and
-// leave them with no route at all. So an entry has to keep proving itself: `lastHealthyAt` is
-// stamped by the session's own heartbeat, and an entry that has stopped stamping is treated as
-// unattached no matter what its pid says.
+// Health remains separate from process liveness so the UI can distinguish an attached session from
+// a wedged one. Both still represent a live writer, however: recovery must explicitly terminate and
+// confirm that exact registry-owned pid before another `copilot --resume` is allowed.
 import { readRegistry, writeRegistryAtomic, isPidAlive } from "./registryFile.mjs";
 
 const ATTACHED_FILE = "attached-sessions.json";
 
-/** How long an entry may go without a heartbeat stamp before the station stops believing it.
+/** How long an entry may go without a heartbeat stamp before the station reports it unhealthy.
  *  Deliberately several missed beats rather than one: a single late stamp is normal (the laptop
  *  slept a moment, the event loop was busy), and treating that as "wedged" would let a stray
  *  double-tap fork a second process onto a perfectly healthy session. Against relay.mjs's 15s
- *  heartbeat this is eight consecutive misses — long enough to ride out a hiccup, short enough that
- *  a genuinely wedged session doesn't block recovery for more than a couple of minutes. */
+ *  heartbeat this is eight consecutive misses — long enough to ride out a hiccup while still
+ *  letting the UI offer an explicit, ownership-checked force takeover for a genuinely wedged one. */
 export const HEALTHY_WINDOW_MS = 2 * 60 * 1_000;
 
 function prune(map) {
@@ -61,8 +58,9 @@ export function listAttachedSessions({ baseDir } = {}) {
  * What the station needs to decide whether to spawn a resume. Returns null when the session is not
  * attached at all, otherwise the entry plus a `healthy` flag.
  *
- * `healthy: false` means "a process holds this session but weft in it has gone quiet" — the case
- * where resuming is the recovery, so the caller should spawn rather than hand back a dead pairing.
+ * `healthy: false` means "a process holds this session but weft in it has gone quiet". The caller
+ * may offer force takeover, but must not start a second writer until terminateAttachedSession()
+ * confirms this exact owner has exited.
  */
 export function findAttachedSession(sessionId, { baseDir, now = Date.now() } = {}) {
   if (!sessionId) return null;
@@ -104,6 +102,45 @@ export function clearAttachedSession(sessionId, { baseDir } = {}) {
     delete map[sessionId];
     writeRegistryAtomic(ATTACHED_FILE, map, { baseDir });
   }
+}
+
+/**
+ * Terminate the exact process that owns an attached-session entry and wait until the OS confirms
+ * it is gone. Refuses when the registry no longer proves the expected pid/channel ownership.
+ */
+export async function terminateAttachedSession(
+  sessionId,
+  {
+    baseDir,
+    expectedPid,
+    expectedChannelId = null,
+    requireHealthy = true,
+    timeoutMs = 5_000,
+    pollMs = 50,
+    killFn = process.kill.bind(process),
+    isPidAliveFn = isPidAlive,
+  } = {},
+) {
+  const current = findAttachedSession(sessionId, { baseDir });
+  if (
+    !current ||
+    current.pid !== expectedPid ||
+    (expectedChannelId && current.channelId !== expectedChannelId) ||
+    (requireHealthy && !current.healthy)
+  ) {
+    return { ok: false, error: "Could not prove ownership of the running Copilot session." };
+  }
+  try {
+    killFn(current.pid, "SIGTERM");
+  } catch (err) {
+    return { ok: false, error: `Could not close the running Copilot session: ${err?.message ?? err}` };
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAliveFn(current.pid)) return { ok: true };
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return { ok: false, error: "The running Copilot session did not stop; resume was cancelled for safety." };
 }
 
 /** Exposed so tests and any future watcher don't hard-code the filename. */

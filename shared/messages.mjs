@@ -95,6 +95,9 @@ export const SUBTYPE = Object.freeze({
     SPAWN_PAIRING: "spawn_pairing",
     // listener -> phone: terminal result of a spawn request (ok / failure reason).
     SPAWN_RESULT: "spawn_result",
+    // listener -> phone: durable lifecycle state for a launch request. Additive to the legacy
+    // SPAWN_PAIRING / SPAWN_RESULT replies so older phones continue to work unchanged.
+    LAUNCH_STATUS: "launch_status",
     // phone -> listener: forget this device (the listener stops / drops the binding).
     FORGET_DEVICE: "forget_device",
     // listener -> phone: proactive liveness beat for the DEVICE (not a session) channel, sent on an
@@ -124,6 +127,15 @@ export const SUBTYPE = Object.freeze({
 
 /** Session modes the phone can request. (Applied best-effort by the extension; see spike.) */
 export const MODES = Object.freeze(["interactive", "plan", "autopilot"]);
+export const LAUNCH_STATES = Object.freeze([
+  "accepted",
+  "launched",
+  "ready",
+  "failed",
+  "claimed",
+  "abandoned",
+  "superseded",
+]);
 
 const now = () => Date.now();
 
@@ -409,6 +421,24 @@ export const spawnPairing = (requestId, payload, name, projectName) =>
 /** Listener -> phone: terminal result of a spawn request. `ok=false` carries a human `error`. */
 export const spawnResult = (requestId, ok, error = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_RESULT, { requestId, ok: Boolean(ok), error });
+/** Listener -> phone: durable launch lifecycle. Private handoff key material is never included. */
+export const launchStatus = (requestId, state, details = {}) => {
+  const safe = details && typeof details === "object" ? details : {};
+  return envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.LAUNCH_STATUS, {
+    requestId: typeof requestId === "string" ? requestId : "",
+    state: LAUNCH_STATES.includes(state) ? state : "failed",
+    ...(safe.payload ? { payload: safe.payload } : {}),
+    ...(safe.operation === "new" || safe.operation === "resume" ? { operation: safe.operation } : {}),
+    ...(typeof safe.projectName === "string" ? { projectName: safe.projectName } : {}),
+    ...(typeof safe.sessionId === "string" ? { sessionId: safe.sessionId } : {}),
+    ...(typeof safe.name === "string" ? { name: safe.name } : {}),
+    ...(typeof safe.error === "string" ? { error: safe.error } : {}),
+    ...(Number.isFinite(safe.createdAt) ? { createdAt: safe.createdAt } : {}),
+    ...(Number.isFinite(safe.launchedAt) ? { launchedAt: safe.launchedAt } : {}),
+    ...(Number.isFinite(safe.readyAt) ? { readyAt: safe.readyAt } : {}),
+    ...(Number.isInteger(safe.pid) && safe.pid > 0 ? { pid: safe.pid } : {}),
+  });
+};
 /** Phone -> listener: forget this device; the listener stops (or drops its phone binding). */
 export const forgetDevice = () =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.FORGET_DEVICE, {});
@@ -465,9 +495,10 @@ export const sessionOffers = (offers) =>
  * from its advertised set and stops re-offering it. Idempotent — a claim for an unknown/already-
  * removed channelId is a no-op on the station. `channelId` is the offered session's channel.
  */
-export const sessionClaimed = (channelId) =>
+export const sessionClaimed = (channelId, requestId = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_CLAIMED, {
     channelId: typeof channelId === "string" ? channelId : "",
+    ...(typeof requestId === "string" && requestId ? { requestId } : {}),
   });
 
 /** Minimal structural validation of a decrypted envelope (kept dependency-free). */

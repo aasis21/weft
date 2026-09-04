@@ -426,8 +426,8 @@ export async function attachRelay({
   await sendSafe(channelUp(cwd, lastTitle));
   // This session is now attached to a phone. Publish that, so a RESUME_SESSION arriving at the
   // station for this same CLI session can be answered with "it's already running" instead of
-  // forking a second `copilot --resume` onto it. Refreshed on every beat below: the station trusts
-  // the stamp, not the pid, so that a wedged weft can still be recovered by resuming.
+  // forking a second `copilot --resume` onto it. Refreshed on every beat below so the station can
+  // distinguish a healthy attachment from a wedged writer that requires explicit force takeover.
   const markAttached = () => {
     try {
       recordAttachedSession({ sessionId, channelId, cwd });

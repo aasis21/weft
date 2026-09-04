@@ -70,6 +70,7 @@ export const SUBTYPE: {
     readonly RESUME_SESSION: "resume_session";
     readonly SPAWN_PAIRING: "spawn_pairing";
     readonly SPAWN_RESULT: "spawn_result";
+    readonly LAUNCH_STATUS: "launch_status";
     readonly FORGET_DEVICE: "forget_device";
     readonly DEVICE_HEARTBEAT: "device_heartbeat";
     readonly VOICE_MODE: "voice_mode";
@@ -359,6 +360,29 @@ export interface SpawnResultMsg {
   ok: boolean;
   error: string | null;
 }
+export type LaunchState =
+  | "accepted"
+  | "launched"
+  | "ready"
+  | "failed"
+  | "claimed"
+  | "abandoned"
+  | "superseded";
+export const LAUNCH_STATES: readonly LaunchState[];
+export interface LaunchStatusMsg {
+  requestId: string;
+  state: LaunchState;
+  payload?: PairingPayload;
+  operation?: "new" | "resume";
+  projectName?: string;
+  sessionId?: string;
+  name?: string;
+  error?: string;
+  createdAt?: number;
+  launchedAt?: number;
+  readyAt?: number;
+  pid?: number;
+}
 export type ForgetDeviceMsg = Record<string, never>;
 /** Liveness beat for the DEVICE channel; deviceId mirrors ProjectListMsg.deviceId. */
 export interface DeviceHeartbeatMsg {
@@ -392,6 +416,8 @@ export interface SessionOffersMsg {
 /** Phone -> listener: the phone adopted an offered session; the station drops it from pending. */
 export interface SessionClaimedMsg {
   channelId: string;
+  /** Present when claiming a phone-launched New/Resume operation. */
+  requestId?: string;
 }
 
 // ---- concrete envelope types (eventType + eventSubtype + typed msg) --------
@@ -430,6 +456,7 @@ export type SessionListMessage = Envelope<"control", "session_list", SessionList
 export type ResumeSessionMessage = Envelope<"control", "resume_session", ResumeSessionMsg>;
 export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
 export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
+export type LaunchStatusMessage = Envelope<"control", "launch_status", LaunchStatusMsg>;
 export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
 export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHeartbeatMsg>;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
@@ -472,6 +499,7 @@ export type EventEnvelope =
   | SpawnSessionMessage
   | SpawnPairing
   | SpawnResult
+  | LaunchStatusMessage
   | ForgetDevice
   | DeviceHeartbeat
   | VoiceModeMessage
@@ -594,9 +622,14 @@ export function spawnResult(
   ok: boolean,
   error?: string | null
 ): SpawnResult;
+export function launchStatus(
+  requestId: string,
+  state: LaunchState,
+  details?: Omit<LaunchStatusMsg, "requestId" | "state">
+): LaunchStatusMessage;
 export function forgetDevice(): ForgetDevice;
 export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
 export function voiceMode(active: boolean): VoiceModeMessage;
 export function invokeCommand(name: string, input?: string): InvokeCommandMessage;
 export function sessionOffers(offers: SessionOffer[]): SessionOffersMessage;
-export function sessionClaimed(channelId: string): SessionClaimedMessage;
+export function sessionClaimed(channelId: string, requestId?: string | null): SessionClaimedMessage;

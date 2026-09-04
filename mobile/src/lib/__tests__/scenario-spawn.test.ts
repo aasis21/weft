@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from '@capacitor/app';
 import { makeManager } from '@/test/helpers/makeManager';
-import { registry } from '@/test/helpers/fakeWeftClient';
+import { failNextPairing, pairingIdentities, registry } from '@/test/helpers/fakeWeftClient';
+import { loadPendingOperations } from '@/lib/pendingOperations';
 import * as B from '@/test/helpers/builders';
 
 function listenerQr(channelId: string): string {
@@ -18,6 +20,7 @@ describe('scenario: phone-launched sessions', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.mocked(App.addListener).mockResolvedValue({ remove: vi.fn() });
     h = makeManager();
   });
 
@@ -107,19 +110,104 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.snapshot().devices).toHaveLength(0);
   });
 
-  it('fails an initializing card if the listener never returns pairing material', async () => {
+  it('keeps a slow launch recoverable, retries the same operation, and accepts late pairing', async () => {
     await h!.manager.addByQr(listenerQr('listener-timeout'));
     await h!.flush();
+    const listener = registry.get('listener-timeout')!;
     const tempId = await h!.manager.spawnSession('listener-timeout', {
       projectName: 'weft',
       mode: 'default',
     });
+    await h!.flush();
+    const first = listener.sentOfKind('control.spawn_session')[0]!;
 
     await vi.advanceTimersByTimeAsync(30_000);
     await h!.flush();
 
     expect(h!.snapshot().activeId).toBe(tempId);
     expect(h!.active()?.status).toBe('error');
-    expect(h!.active()?.error).toContain('Timed out');
+    expect(h!.active()?.error).toContain('has not answered yet');
+    expect(await loadPendingOperations()).toHaveLength(1);
+
+    await h!.manager.retrySpawn(tempId);
+    await h!.flush();
+    const requests = listener.sentOfKind('control.spawn_session');
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.requestId).toBe(first.requestId);
+
+    listener.emit(B.spawnPairing(first.requestId as string, {
+      v: 1,
+      channelId: 'late-session',
+      pub: 'late-pub',
+      kind: 'session',
+      transport: { kind: 'local' },
+    }, null, 'weft'));
+    await vi.advanceTimersByTimeAsync(0);
+    await h!.flush();
+
+    expect(h!.snapshot().activeId).toBe('late-session');
+    expect(h!.byChannel(tempId)).toBeUndefined();
+    expect(pairingIdentities).toHaveLength(1);
+    expect(await loadPendingOperations()).toHaveLength(0);
+  });
+
+  it('restores an unresolved launch after restart without redelivering it automatically', async () => {
+    await h!.manager.addByQr(listenerQr('listener-restart'));
+    await h!.flush();
+    const firstListener = registry.get('listener-restart')!;
+    const tempId = await h!.manager.spawnSession('listener-restart', {
+      projectName: 'weft',
+      mode: 'default',
+    });
+    await h!.flush();
+    const requestId = firstListener.sentOfKind('control.spawn_session')[0]!.requestId;
+
+    h!.dispose();
+    h = makeManager();
+    await h!.init();
+    await h!.flush();
+
+    expect(h!.byChannel(tempId)?.status).toBe('initializing');
+    const reconnectedListener = registry.get('listener-restart')!;
+    expect(reconnectedListener.sentOfKind('control.spawn_session')).toHaveLength(0);
+
+    await h!.manager.retrySpawn(tempId);
+    await h!.flush();
+    expect(reconnectedListener.sentOfKind('control.spawn_session')[0]!.requestId).toBe(requestId);
+  });
+
+  it('reuses the same phone identity when a ready session needs another pairing attempt', async () => {
+    await h!.manager.addByQr(listenerQr('listener-pair-retry'));
+    await h!.flush();
+    const listener = registry.get('listener-pair-retry')!;
+    const tempId = await h!.manager.spawnSession('listener-pair-retry', {
+      projectName: 'weft',
+      mode: 'default',
+    });
+    await h!.flush();
+    const request = listener.sentOfKind('control.spawn_session')[0]!;
+    const payload = {
+      v: 1 as const,
+      channelId: 'pair-retry-session',
+      pub: 'pair-retry-pub',
+      kind: 'session' as const,
+      transport: { kind: 'local' as const },
+    };
+
+    failNextPairing();
+    listener.emit(B.launchStatus(request.requestId as string, 'ready', { payload, operation: 'new' }));
+    await vi.advanceTimersByTimeAsync(0);
+    await h!.flush();
+
+    expect(h!.byChannel(tempId)?.status).toBe('error');
+    expect(pairingIdentities).toHaveLength(1);
+    const firstIdentity = pairingIdentities[0];
+
+    await h!.manager.retrySpawn(tempId);
+    await h!.flush();
+
+    expect(h!.snapshot().activeId).toBe('pair-retry-session');
+    expect(pairingIdentities).toHaveLength(2);
+    expect(pairingIdentities[1]).toEqual(firstIdentity);
   });
 });

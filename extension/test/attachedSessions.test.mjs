@@ -11,6 +11,7 @@ import {
   findAttachedSession,
   listAttachedSessions,
   recordAttachedSession,
+  terminateAttachedSession,
 } from "../src/attachedSessions.mjs";
 import { readRegistry, writeRegistryAtomic } from "../src/registryFile.mjs";
 
@@ -37,16 +38,82 @@ test("an attachment round-trips and is reported healthy while it keeps stamping"
   assert.equal(found.healthy, true);
 });
 
-test("an attachment that stops stamping goes unhealthy even though its pid is still alive", () => {
-  // The whole reason this registry exists rather than a pid check: a live process whose weft has
-  // wedged must still be resumable, otherwise the guard permanently blocks the only recovery path.
+test("an attachment that stops stamping is unhealthy but still identifies a live writer", () => {
   const baseDir = home();
   const stale = Date.now() - HEALTHY_WINDOW_MS - 1;
   recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir, now: stale });
 
   const found = findAttachedSession("sid-1", { baseDir });
   assert.equal(found.pid, process.pid, "the process is alive — a pid guard would say 'attached'");
-  assert.equal(found.healthy, false, "but it has stopped proving itself, so it is resumable");
+  assert.equal(found.healthy, false, "it has stopped proving its phone connection");
+});
+
+test("takeover requires exact registry ownership and confirmed process exit", async () => {
+  const baseDir = home();
+  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
+  const killed = [];
+  let alive = true;
+  const result = await terminateAttachedSession("sid-1", {
+    baseDir,
+    expectedPid: process.pid,
+    expectedChannelId: "chan-1",
+    timeoutMs: 100,
+    pollMs: 1,
+    killFn: (pid, signal) => {
+      killed.push([pid, signal]);
+      alive = false;
+    },
+    isPidAliveFn: () => alive,
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(killed, [[process.pid, "SIGTERM"]]);
+
+  const refused = await terminateAttachedSession("sid-1", {
+    baseDir,
+    expectedPid: process.pid,
+    expectedChannelId: "wrong-channel",
+    killFn: () => assert.fail("must not signal an unproven owner"),
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /prove ownership/);
+});
+
+test("takeover refuses a stale attachment because its live pid may have been reused", async () => {
+  const baseDir = home();
+  recordAttachedSession(
+    { sessionId: "sid-stale", channelId: "chan-stale" },
+    { baseDir, now: Date.now() - HEALTHY_WINDOW_MS - 1 },
+  );
+  const result = await terminateAttachedSession("sid-stale", {
+    baseDir,
+    expectedPid: process.pid,
+    expectedChannelId: "chan-stale",
+    killFn: () => assert.fail("must not signal an unproven stale pid"),
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /prove ownership/);
+});
+
+test("explicit takeover may terminate an unhealthy attachment after exact ownership checks", async () => {
+  const baseDir = home();
+  recordAttachedSession(
+    { sessionId: "sid-wedged", channelId: "chan-wedged" },
+    { baseDir, now: Date.now() - HEALTHY_WINDOW_MS - 1 },
+  );
+  let alive = true;
+  const result = await terminateAttachedSession("sid-wedged", {
+    baseDir,
+    expectedPid: process.pid,
+    expectedChannelId: "chan-wedged",
+    requireHealthy: false,
+    timeoutMs: 100,
+    pollMs: 1,
+    killFn: () => {
+      alive = false;
+    },
+    isPidAliveFn: () => alive,
+  });
+  assert.deepEqual(result, { ok: true });
 });
 
 test("re-recording refreshes the heartbeat stamp without moving boundAt", () => {

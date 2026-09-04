@@ -340,13 +340,33 @@ export function SessionScreen({
   // (#126). Offer it only for cold-idle (evicted, no socket), error, or ended.
   const canReconnect = meta.kind === 'live' && (status === 'ended' || status === 'error' || (status === 'idle' && cold));
   const offline = status === 'initializing' || status === 'connecting' || status === 'idle';
+  const spawnLabel = (() => {
+    const spawn = active.spawning;
+    if (!spawn) return `Starting your session…`;
+    const laptop = spawn.deviceName ? ` on ${spawn.deviceName}` : ' on the laptop';
+    switch (spawn.stage) {
+      case 'not-delivered':
+        return `Waiting to reach the laptop${spawn.deviceName ? ` (${spawn.deviceName})` : ''}…`;
+      case 'delivered':
+        return spawn.slow
+          ? `The request reached the laptop. It is still starting${laptop}…`
+          : `Request received. Starting${laptop}…`;
+      case 'launched':
+        return `The terminal started${laptop}. Waiting for Weft to become ready…`;
+      case 'ready':
+      case 'pairing':
+        return `The laptop is ready. Connecting your phone…`;
+      case 'pairing-failed':
+        return `The session started${laptop}, but the phone is not connected yet.`;
+      default:
+        return `Starting your session${laptop}…`;
+    }
+  })();
   // Cold-idle (no socket) and warm-idle (socket alive) must read differently so the banner stops
   // contradicting the header's "Quiet"/"Offline" (#127).
   const offlineLabel =
     status === 'initializing'
-      ? active.spawning?.slow
-        ? 'Still starting on the laptop — a large session store can take a minute…'
-        : `Starting your session${active.spawning?.deviceName ? ` on ${active.spawning.deviceName}` : ''}…`
+      ? spawnLabel
       : status === 'connecting'
       ? 'Connecting to your session…'
       : cold
@@ -980,4 +1000,3 @@ export function SessionScreen({
     </div>
   );
 }
-

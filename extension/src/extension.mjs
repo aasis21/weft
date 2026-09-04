@@ -18,6 +18,7 @@ import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
 import { resolveVersion } from "./version.mjs";
 import { isStationRunning, registerPendingSession, removePendingSession } from "./pendingSessions.mjs";
 import { readIdentityFile } from "./handoffIdentity.mjs";
+import { updateLaunchOperation } from "./launchOperations.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
 // "devtunnel" path (see switchTransport below). Kept separate from transportFactory's own
@@ -42,6 +43,9 @@ const identityFileEnv = process.env.WEFT_IDENTITY_FILE || "";
 const channelIdEnv = process.env.WEFT_CHANNEL_ID || "";
 const handedOffIdentity = await loadIdentityFromFile(identityFileEnv);
 const identityFileWasPresent = Boolean(handedOffIdentity);
+const launchOperationId = handedOffIdentity?.operationId ?? null;
+const launchOperationOwnerToken = handedOffIdentity?.operationOwnerToken ?? null;
+const durableLaunchHandoff = Boolean(launchOperationId && launchOperationOwnerToken);
 // A spawn-from-phone hand-off is signalled purely by the env vars spawn.mjs sets on the child
 // (WEFT_IDENTITY_FILE / WEFT_CHANNEL_ID). If EITHER is present but the identity file failed to
 // load, the hand-off broke on the way in — most commonly because the terminal launcher
@@ -304,11 +308,26 @@ else
 // `/weft` can re-kick this if all attempts gave up.
 async function connectRelayWithRetry({ reconnect = false } = {}) {
   if (connecting || pairingStop || shuttingDown) return false;
-  if (!transportDescriptor) return false; // boot-time transport setup failed; see /weft to retry.
+  if (!transportDescriptor && !identityFileWasPresent) return false;
   connecting = true;
   try {
     const maxAttempts = positiveIntFromEnv("WEFT_CONNECT_MAX_ATTEMPTS", 6);
     for (let attempt = 1; !shuttingDown; attempt++) {
+      // A phone-launched process must keep trying until it is actually reachable: the station has
+      // already accepted the durable operation and retries must not create another process. Manual
+      // `/weft` sessions retain the finite retry behavior above.
+      if (!transportDescriptor) {
+        try {
+          transportDescriptor = await resolveTransport();
+          transportSetupError = null;
+          pairingPayload = buildCurrentPairingPayload();
+        } catch (err) {
+          transportSetupError = err;
+          if (!identityFileWasPresent) return false;
+          await sleep(Math.min(1500 * 2 ** (attempt - 1), 15_000));
+          continue;
+        }
+      }
       const transport = createTransportFromDescriptor(transportDescriptor, { channelId });
       try {
         const listener = await listenForPeers({
@@ -334,6 +353,13 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
           if (status === "disconnected") requestReconnect(detail);
         }) ?? null;
         appendSessionLog(reconnect ? "pairing.reconnected" : "pairing.ready", { channel: channelId?.slice(0, 8) });
+        if (durableLaunchHandoff) {
+          await updateLaunchOperation(
+            launchOperationId,
+            { state: "ready", sessionId: session.sessionId || null },
+            { ownerToken: launchOperationOwnerToken },
+          );
+        }
         session.log?.(
           reconnect
             ? "Weft: reconnected."
@@ -343,7 +369,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
       } catch (err) {
         await closeQuietly(transport);
         if (shuttingDown) return false;
-        if (attempt >= maxAttempts) {
+        if (!identityFileWasPresent && attempt >= maxAttempts) {
           appendSessionLog("pairing.subscribe_failed", { attempts: attempt, error: err?.message ?? String(err) }, { level: "error" });
           process.stderr.write(
             `Weft: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
@@ -472,6 +498,13 @@ async function attachForPeer(transport, { key, peer }) {
   // station registry (and the station drops it from its advertised set on its own SESSION_CLAIMED
   // handling too; both are idempotent).
   withdrawSessionOffer();
+  if (durableLaunchHandoff) {
+    await updateLaunchOperation(
+      launchOperationId,
+      { state: "claimed", sessionId: session.sessionId || null },
+      { ownerToken: launchOperationOwnerToken },
+    );
+  }
   consumeHandoffFile();
   appendSessionLog("device.paired", { phone: peer.senderName ?? peer.deviceId ?? "unknown" });
   session.log?.(
@@ -484,6 +517,13 @@ async function attachForPeer(transport, { key, peer }) {
 async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (durableLaunchHandoff && !currentPeerPub) {
+    await updateLaunchOperation(
+      launchOperationId,
+      { state: "abandoned", error: `Spawned session ended before pairing (${reason ?? "session_end"}).` },
+      { ownerToken: launchOperationOwnerToken },
+    );
+  }
   appendSessionLog("session.shutdown", { reason: reason ?? "session_end" });
   withdrawSessionOffer();
   activeStatusStop?.();

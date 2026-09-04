@@ -9,6 +9,7 @@
 // test can grab the client the manager just created and `emit()` messages into it.
 import type { EventEnvelope, PairingPayload, SecureChannel } from '@aasis21/weft-shared';
 import type { StoredPairing } from '@/lib/storage';
+import type { PhonePairingIdentity } from '@/lib/weftClient';
 
 type MessageHandler = (message: EventEnvelope, event: string) => void;
 type StatusHandler = (status: 'connected' | 'disconnected') => void;
@@ -117,10 +118,20 @@ class FakeClientRegistry {
   reset(): void {
     this.byChannel.clear();
     this.all = [];
+    pairingIdentities.length = 0;
+    nextIdentity = 1;
+    pairingFailuresRemaining = 0;
   }
 }
 
 export const registry = new FakeClientRegistry();
+export const pairingIdentities: PhonePairingIdentity[] = [];
+let nextIdentity = 1;
+let pairingFailuresRemaining = 0;
+
+export function failNextPairing(): void {
+  pairingFailuresRemaining += 1;
+}
 
 /** Build a synthetic StoredPairing for a channel (no real ECDH; the fake needs none). */
 export function fakePairing(channelId: string): StoredPairing {
@@ -149,7 +160,23 @@ function channelIdFromRaw(raw: string | PairingPayload): string {
 
 // --- the module mock installed for `@/lib/weftClient` in setup.ts ---------------------------------
 export const weftClientMock = {
-  async pairSession(raw: string | PairingPayload): Promise<{ client: FakeWeftClient; pairing: StoredPairing }> {
+  async createPhonePairingIdentity(): Promise<PhonePairingIdentity> {
+    const id = nextIdentity++;
+    return {
+      publicKeyB64: `phone-pub-${id}`,
+      privateKeyJwk: { kty: 'EC', crv: 'P-256', x: `x-${id}`, y: `y-${id}`, d: `d-${id}` },
+      deviceId: `phone-${id}`,
+    };
+  },
+  async pairSession(
+    raw: string | PairingPayload,
+    options?: { identity?: PhonePairingIdentity },
+  ): Promise<{ client: FakeWeftClient; pairing: StoredPairing }> {
+    if (options?.identity) pairingIdentities.push(options.identity);
+    if (pairingFailuresRemaining > 0) {
+      pairingFailuresRemaining -= 1;
+      throw new Error('Pairing acknowledgement timed out.');
+    }
     const channelId = channelIdFromRaw(raw);
     const client = registry.create(channelId);
     return { client, pairing: fakePairing(channelId) };

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
 import { spawnCopilotSession, writeIdentityFile } from "../src/spawn.mjs";
 import { readIdentityFile } from "../src/handoffIdentity.mjs";
@@ -61,7 +62,7 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   const calls = [];
-  const result = spawnCopilotSession({
+  const result = await spawnCopilotSession({
     project: { name: "app", path: projectDir },
     name: "brave-otter",
     mode: "allow-all",
@@ -76,7 +77,9 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   process.env.TERM_PROGRAM = oldTerm;
   process.env.GNOME_TERMINAL_SCREEN = oldGnome;
 
-  assert.deepEqual(result, { ok: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.pid, null);
+  assert.ok(result.identityFile);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, "copilot");
   assert.deepEqual(calls[0].args, ["-n", "brave-otter", "--allow-all"]);
@@ -93,7 +96,7 @@ test("spawnCopilotSession bakes identity into a launcher script for windows-term
   const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   const calls = [];
-  const result = spawnCopilotSession({
+  const result = await spawnCopilotSession({
     project: { name: "app", path: projectDir },
     name: "brave otter", // deliberate space to exercise arg quoting
     mode: "allow-all",
@@ -107,7 +110,7 @@ test("spawnCopilotSession bakes identity into a launcher script for windows-term
   });
   process.env.WT_SESSION = oldWt;
 
-  assert.deepEqual(result, { ok: true });
+  assert.equal(result.ok, true);
   assert.equal(calls[0].command, "wt.exe");
   // Last argv element is the launcher script routed through cmd.exe /k.
   const launcherPath = calls[0].args.at(-1);
@@ -133,7 +136,7 @@ test("spawnCopilotSession resumes an existing session by id in its cwd (no -n na
   const sessionCwd = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
   cleanupDirs.push(sessionCwd);
   const calls = [];
-  const result = spawnCopilotSession({
+  const result = await spawnCopilotSession({
     project: { name: "resume", path: sessionCwd },
     mode: "allow-all",
     identity: await identity("chan-resume"),
@@ -148,7 +151,7 @@ test("spawnCopilotSession resumes an existing session by id in its cwd (no -n na
   process.env.TERM_PROGRAM = oldTerm;
   process.env.GNOME_TERMINAL_SCREEN = oldGnome;
 
-  assert.deepEqual(result, { ok: true });
+  assert.equal(result.ok, true);
   assert.equal(calls[0].command, "copilot");
   assert.deepEqual(calls[0].args, ["--resume=sid-123", "--allow-all"]);
   assert.equal(calls[0].options.cwd, sessionCwd);
@@ -158,7 +161,7 @@ test("spawnCopilotSession resumes an existing session by id in its cwd (no -n na
 test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   let identityPath;
-  const result = spawnCopilotSession({
+  const result = await spawnCopilotSession({
     project: { name: "app", path: projectDir },
     name: "plain",
     identity: await identity("chan-fail"),
@@ -170,4 +173,52 @@ test("spawnCopilotSession reports spawn errors and cleans up identity file", asy
   assert.equal(result.ok, false);
   assert.match(result.error, /boom/);
   assert.throws(() => statSync(identityPath), /ENOENT/);
+});
+
+test("spawnCopilotSession surfaces an asynchronous child error before spawn", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
+  cleanupDirs.push(projectDir);
+  let identityPath;
+  const result = await spawnCopilotSession({
+    project: { name: "app", path: projectDir },
+    identity: await identity("chan-async-fail"),
+    spawnFn(_command, _args, options) {
+      identityPath = options.env.WEFT_IDENTITY_FILE;
+      const child = new EventEmitter();
+      child.unref = () => {};
+      queueMicrotask(() => child.emit("error", new Error("async boom")));
+      return child;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /async boom/);
+  assert.throws(() => statSync(identityPath), /ENOENT/);
+});
+
+test("spawnCopilotSession returns a reliable direct child pid and persists operation handoff", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
+  const weftHome = mkdtempSync(join(tmpdir(), "weft-launch-home-"));
+  cleanupDirs.push(projectDir, weftHome);
+  const result = await spawnCopilotSession({
+    project: { name: "app", path: projectDir },
+    identity: await identity("chan-operation"),
+    operationId: "req-operation",
+    operationOwnerToken: "owner-secret",
+    baseDir: weftHome,
+    spawnFn() {
+      return { pid: 4321, unref() {} };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.pid, 4321);
+  const parsed = JSON.parse(readFileSync(result.identityFile, "utf8"));
+  assert.equal(parsed.operationId, "req-operation");
+  assert.equal(parsed.operationOwnerToken, "owner-secret");
+  assert.ok(parsed.privateKeyJwk);
+  const restored = await readIdentityFile(result.identityFile);
+  assert.equal(restored.operationId, "req-operation");
+  assert.equal(restored.operationOwnerToken, "owner-secret");
 });

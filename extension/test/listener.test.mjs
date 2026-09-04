@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 import {
   EVENT_TYPE,
   SUBTYPE,
@@ -23,6 +24,7 @@ import { createListener } from "../src/listener.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
 import { registerPendingSession } from "../src/pendingSessions.mjs";
 import { HEALTHY_WINDOW_MS } from "../src/attachedSessions.mjs";
+import { readLaunchOperation, updateLaunchOperation } from "../src/launchOperations.mjs";
 
 let dirs = [];
 let identityFiles = [];
@@ -51,7 +53,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -59,8 +61,8 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
   const projectsApi = { listProjects: () => projects ?? [] };
   // Isolate the connections.json registry per test so these tests never touch a real user's
   // ~/.weft — see registryFile.mjs / the CONNECTIONS_REGISTRY_FILE comment in listener.mjs.
-  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-connections-"));
-  connectionsHomes.push(connectionsHome);
+  const connectionsHome = suppliedConnectionsHome ?? mkdtempSync(join(tmpdir(), "weft-connections-"));
+  if (!suppliedConnectionsHome) connectionsHomes.push(connectionsHome);
   const listener = createListener({
     transport: listenerTransport,
     keyPair: listenerKeys,
@@ -183,6 +185,221 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
   await listener.stop();
 });
 
+test("duplicate SPAWN_SESSION replays pairing/result/status without spawning again", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
+  dirs.push(projectDir);
+  let spawnCount = 0;
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn(_command, _args, options) {
+      spawnCount += 1;
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { pid: 1234, unref() {} };
+    },
+  });
+  const request = spawnSession("req-idempotent", "app", "default", "same");
+  await phoneChannel.send(request);
+  await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-idempotent"),
+    "first spawn result",
+  );
+  const before = messages.length;
+  await phoneChannel.send(request);
+  await waitFor(
+    () =>
+      messages
+        .slice(before)
+        .find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING && m.msg.requestId === "req-idempotent"),
+    "replayed spawn pairing",
+  );
+  assert.equal(spawnCount, 1);
+  assert.ok(
+    messages
+      .slice(before)
+      .some((m) => m.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS && m.msg.state === "launched"),
+  );
+  await listener.stop();
+});
+
+test("same requestId with different fields fails deterministically without another spawn", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
+  dirs.push(projectDir);
+  let spawnCount = 0;
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn(_command, _args, options) {
+      spawnCount += 1;
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  await phoneChannel.send(spawnSession("req-conflict", "app", "default", "one"));
+  await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-conflict"),
+    "first result",
+  );
+  const before = messages.length;
+  await phoneChannel.send(spawnSession("req-conflict", "app", "default", "two"));
+  const conflict = await waitFor(
+    () =>
+      messages
+        .slice(before)
+        .find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-conflict"),
+    "conflict result",
+  );
+  assert.equal(conflict.msg.ok, false);
+  assert.match(conflict.msg.error, /different launch fields/);
+  assert.equal(spawnCount, 1);
+  await listener.stop();
+});
+
+test("a restarted station replays a durable launch and never respawns it", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-launch-restart-"));
+  dirs.push(projectDir);
+  connectionsHomes.push(connectionsHome);
+  let spawnCount = 0;
+  const first = await pairedHarness({
+    connectionsHome,
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn(_command, _args, options) {
+      spawnCount += 1;
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  await first.phoneChannel.send(spawnSession("req-restart", "app", "default", "durable"));
+  await waitFor(
+    () => first.messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-restart"),
+    "initial result",
+  );
+  await first.listener.stop();
+
+  const second = await pairedHarness({
+    connectionsHome,
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn() {
+      spawnCount += 1;
+      throw new Error("must not respawn");
+    },
+  });
+  await waitFor(
+    () => second.messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING && m.msg.requestId === "req-restart"),
+    "replay after restart",
+  );
+  await second.phoneChannel.send(spawnSession("req-restart", "app", "default", "durable"));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(spawnCount, 1);
+  await second.listener.stop();
+});
+
+test("late extension readiness is relayed as LAUNCH_STATUS", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
+  dirs.push(projectDir);
+  const { listener, phoneChannel, messages, connectionsHome } = await pairedHarness({
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn(_command, _args, options) {
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  await phoneChannel.send(spawnSession("req-ready", "app", "default", "ready"));
+  await waitFor(() => readLaunchOperation("req-ready", { baseDir: connectionsHome })?.state === "launched", "launched ledger");
+  const record = readLaunchOperation("req-ready", { baseDir: connectionsHome });
+  await updateLaunchOperation(
+    "req-ready",
+    { state: "ready", sessionId: "sid-ready" },
+    { baseDir: connectionsHome, ownerToken: record.ownerToken },
+  );
+  const ready = await waitFor(
+    () =>
+      messages.find(
+        (m) =>
+          m.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS &&
+          m.msg.requestId === "req-ready" &&
+          m.msg.state === "ready",
+      ),
+    "ready status",
+  );
+  assert.equal(ready.msg.sessionId, "sid-ready");
+  await listener.stop();
+});
+
+test("an asynchronous spawn error is persisted and returned", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
+  dirs.push(projectDir);
+  const { listener, phoneChannel, messages, connectionsHome } = await pairedHarness({
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn(_command, _args, options) {
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      const child = new EventEmitter();
+      child.unref = () => {};
+      queueMicrotask(() => child.emit("error", new Error("spawn async failed")));
+      return child;
+    },
+  });
+  await phoneChannel.send(spawnSession("req-async-fail", "app"));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-async-fail"),
+    "async failure",
+  );
+  assert.equal(result.msg.ok, false);
+  assert.match(result.msg.error, /spawn async failed/);
+  assert.equal(readLaunchOperation("req-async-fail", { baseDir: connectionsHome }).state, "failed");
+  await listener.stop();
+});
+
+test("SESSION_CLAIMED with requestId marks the durable launch claimed", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
+  dirs.push(projectDir);
+  const { listener, phoneChannel, messages, connectionsHome } = await pairedHarness({
+    projects: [{ name: "app", path: projectDir, default: true }],
+    spawnFn(_command, _args, options) {
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  await phoneChannel.send(spawnSession("req-claimed", "app"));
+  const pairing = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING && m.msg.requestId === "req-claimed"),
+    "spawn pairing",
+  );
+  await phoneChannel.send(sessionClaimed(pairing.msg.payload.channelId, "req-claimed"));
+  await waitFor(
+    () => readLaunchOperation("req-claimed", { baseDir: connectionsHome })?.state === "claimed",
+    "claimed ledger",
+  );
+  await waitFor(
+    () =>
+      messages.find(
+      (m) =>
+        m.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS &&
+        m.msg.requestId === "req-claimed" &&
+        m.msg.state === "claimed",
+      ),
+    "claimed status",
+  );
+  await listener.stop();
+});
+
 test("unknown project emits SPAWN_RESULT ok:false", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));
   dirs.push(projectDir);
@@ -274,6 +491,38 @@ test("RESUME_SESSION spawns `copilot --resume=<id>` in the session's cwd and pai
   await listener.stop();
 });
 
+test("a second requestId cannot resume the same unresolved session", async () => {
+  delete process.env.WT_SESSION;
+  delete process.env.TERM_PROGRAM;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
+  dirs.push(sessionCwd);
+  let spawnCount = 0;
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    sessionsApi: { listSessions: () => [], readSessionCwd: () => sessionCwd },
+    spawnFn(_command, _args, options) {
+      spawnCount += 1;
+      identityFiles.push(options.env.WEFT_IDENTITY_FILE);
+      return { unref() {} };
+    },
+  });
+  await phoneChannel.send(resumeSession("resume-owner", "sid-reserved"));
+  await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "resume-owner"),
+    "first resume",
+  );
+  await phoneChannel.send(resumeSession("resume-contender", "sid-reserved"));
+  const refused = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "resume-contender"),
+    "reserved resume refusal",
+  );
+  assert.equal(refused.msg.ok, false);
+  assert.match(refused.msg.error, /already reserved/);
+  assert.equal(spawnCount, 1);
+  await listener.stop();
+});
+
 test("RESUME_SESSION for an unknown / vanished session emits SPAWN_RESULT ok:false", async () => {
   const sessionsApi = { listSessions: () => [], readSessionCwd: () => null };
   const { listener, phoneChannel, messages } = await pairedHarness({
@@ -297,7 +546,7 @@ test("RESUME_SESSION for an unknown / vanished session emits SPAWN_RESULT ok:fal
 // blind to a session paired to a DIFFERENT phone, so the station has to answer for itself.
 
 /** A resume harness whose store always resolves `sid-live`, with a scripted attachment registry. */
-async function resumeGuardHarness(attached, { kills } = {}) {
+async function resumeGuardHarness(attached, { terminateResult = { ok: true } } = {}) {
   // Same terminal-detection scrubbing as the plain resume test: with a terminal in the environment
   // the station launches through it rather than spawning directly, which changes the argv shape.
   delete process.env.WT_SESSION;
@@ -309,14 +558,20 @@ async function resumeGuardHarness(attached, { kills } = {}) {
   const h = await pairedHarness({
     projects: [],
     sessionsApi: { listSessions: () => [], readSessionCwd: (id) => (id === "sid-live" ? sessionCwd : null) },
-    attachedApi: { findAttachedSession: () => attached },
+    attachedApi: {
+      findAttachedSession: () => attached,
+      terminateAttachedSession: async (...args) => {
+        resumeGuardHarness.lastTerminateArgs = args;
+        return terminateResult;
+      },
+    },
     spawnFn(command, args, options) {
       spawnCalls.push({ command, args, options });
       identityFiles.push(options.env.WEFT_IDENTITY_FILE);
       return { unref() {} };
     },
   });
-  return { ...h, spawnCalls, sessionCwd, kills };
+  return { ...h, spawnCalls, sessionCwd };
 }
 
 test("RESUME_SESSION refuses to fork a second CLI onto a session that is already attached and healthy", async () => {
@@ -336,9 +591,7 @@ test("RESUME_SESSION refuses to fork a second CLI onto a session that is already
   await listener.stop();
 });
 
-test("RESUME_SESSION still spawns when the attachment has stopped heartbeating — resume is the only way back from a wedged weft", async () => {
-  // The important one. A pid-only guard would refuse here and leave the user with no route at all:
-  // the process is alive, so it would be told "already running", but nothing inside it is listening.
+test("RESUME_SESSION refuses an unconfirmed second writer even when the prior attachment is unhealthy", async () => {
   const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness({
     sessionId: "sid-live", channelId: "chan-wedged", pid: process.pid,
     lastHealthyAt: Date.now() - HEALTHY_WINDOW_MS - 1_000, healthy: false,
@@ -350,12 +603,9 @@ test("RESUME_SESSION still spawns when the attachment has stopped heartbeating �
     "recovery resume result",
   );
 
-  assert.equal(spawnCalls.length, 1, "the wedged session is resumable");
-  assert.ok(
-    JSON.stringify(spawnCalls[0].args).includes("--resume=sid-live"),
-    "and it is resumed, not started fresh",
-  );
-  assert.equal(result.msg.ok, true);
+  assert.equal(spawnCalls.length, 0, "an alive writer is never duplicated");
+  assert.equal(result.msg.ok, false);
+  assert.match(result.msg.error, /running Copilot writer/);
   await listener.stop();
 });
 
@@ -372,27 +622,41 @@ test("RESUME_SESSION spawns normally when nothing is attached to the session", a
   await listener.stop();
 });
 
-test("RESUME_SESSION with force closes the attached session first, rather than leaving two running", async () => {
+test("RESUME_SESSION with force closes a wedged attachment first, rather than leaving two running", async () => {
   const attached = {
-    sessionId: "sid-live", channelId: "chan-other", pid: 999_999, lastHealthyAt: Date.now(), healthy: true,
+    sessionId: "sid-live", channelId: "chan-other", pid: 999_999,
+    lastHealthyAt: Date.now() - HEALTHY_WINDOW_MS - 1_000, healthy: false,
   };
   const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness(attached);
 
-  const realKill = process.kill;
-  const killed = [];
-  process.kill = (pid, signal) => { killed.push(pid); return true; };
-  try {
-    await phoneChannel.send(resumeSession("req-force", "sid-live", "default", true));
-    const result = await waitFor(
-      () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-force"),
-      "forced resume result",
-    );
-    assert.deepEqual(killed, [999_999], "the old process is closed, not left running alongside");
-    assert.equal(spawnCalls.length, 1);
-    assert.equal(result.msg.ok, true);
-  } finally {
-    process.kill = realKill;
-  }
+  await phoneChannel.send(resumeSession("req-force", "sid-live", "default", true));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-force"),
+    "forced resume result",
+  );
+  assert.equal(resumeGuardHarness.lastTerminateArgs[0], "sid-live");
+  assert.equal(resumeGuardHarness.lastTerminateArgs[1].expectedPid, 999_999);
+  assert.equal(resumeGuardHarness.lastTerminateArgs[1].requireHealthy, false);
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(result.msg.ok, true);
+  await listener.stop();
+});
+
+test("RESUME_SESSION force fails safely when prior process termination cannot be confirmed", async () => {
+  const attached = {
+    sessionId: "sid-live", channelId: "chan-other", pid: 999_999, lastHealthyAt: Date.now(), healthy: true,
+  };
+  const { listener, phoneChannel, messages, spawnCalls } = await resumeGuardHarness(attached, {
+    terminateResult: { ok: false, error: "still running" },
+  });
+  await phoneChannel.send(resumeSession("req-force-fail", "sid-live", "default", true));
+  const result = await waitFor(
+    () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-force-fail"),
+    "failed forced resume result",
+  );
+  assert.equal(result.msg.ok, false);
+  assert.match(result.msg.error, /still running/);
+  assert.equal(spawnCalls.length, 0);
   await listener.stop();
 });
 
