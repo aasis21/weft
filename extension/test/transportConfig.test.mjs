@@ -12,6 +12,8 @@ import {
   loadSupabaseCredentials,
   clearSupabaseCredentials,
   supabaseCredentialsPath,
+  isPersistentPairingEnabled,
+  savePairingMode,
   loadDeviceName,
   saveDeviceName,
 } from "../src/transportConfig.mjs";
@@ -78,6 +80,17 @@ test("clearTransportConfig removes only the transport key, keeping other config"
   const raw = JSON.parse(readFileSync(join(weftHome, "weft.config.json"), "utf8"));
   assert.deepEqual(raw, { someOtherSetting: 42 });
   assert.equal(loadTransportConfig({ baseDir: weftHome }), null);
+});
+
+test("persistent pairing is enabled by default", () => {
+  assert.equal(isPersistentPairingEnabled({ baseDir: weftHome }), true);
+});
+
+test("savePairingMode can explicitly opt out of and back into persistent pairing", () => {
+  savePairingMode("ephemeral", { baseDir: weftHome });
+  assert.equal(isPersistentPairingEnabled({ baseDir: weftHome }), false);
+  savePairingMode("persistent", { baseDir: weftHome });
+  assert.equal(isPersistentPairingEnabled({ baseDir: weftHome }), true);
 });
 
 test("loadDeviceName returns null when nothing is configured", () => {

@@ -122,8 +122,8 @@ channel and key that die with the session):
 
 | Mode | Behaviour | Set it |
 |---|---|---|
-| **ephemeral** (default) | A fresh channel + key on every `weft start`; re-scan the QR each time. | `weft set-pairing ephemeral` |
-| **persistent** | The same channel + key are reused across restarts, so an already-paired phone reconnects with no rescan. | `weft set-pairing persistent` |
+| **persistent** (default) | The same channel + key are reused across restarts, so an already-paired phone reconnects with no rescan. | `weft set-pairing persistent` |
+| **ephemeral** | A fresh channel + key on every `weft start`; re-scan the QR each time. | `weft set-pairing ephemeral` |
 
 Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidates the old QR — e.g. after losing a phone).
 
@@ -140,7 +140,7 @@ Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidate
 | `weft list-projects` | List registered projects and which one is default. |
 | `weft set-default <name>` | Choose the project a bare pairing launches into. |
 | `weft set-transport <supabase\|devtunnel\|clear>` | Choose (or clear) the pairing transport. |
-| `weft set-pairing <persistent\|ephemeral>` | *(Device Station)* Reuse one channel/key across restarts (persistent) or mint a fresh one each start (ephemeral, the default). |
+| `weft set-pairing <persistent\|ephemeral>` | *(Device Station)* Reuse one channel/key across restarts (persistent, the default) or mint a fresh one each start (ephemeral). |
 | `weft rotate-pairing` | *(Device Station)* Force a brand-new persistent channel/key, invalidating the old QR. |
 | `weft show-transport` | Print the transport currently in effect and where it came from. |
 | `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |

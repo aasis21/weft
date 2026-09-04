@@ -165,17 +165,17 @@ async function setPairing([mode]) {
     // Mint (or reuse) the persisted identity right away so `weft show-pairing`/`weft start`
     // has something concrete to report immediately, rather than waiting for the next start.
     await getOrCreatePersistedIdentity();
-    console.log("Pairing set to persistent: the same channel + key are reused across every 'weft start' and /weft session.");
+    console.log("Pairing set to persistent: the same channel + key are reused across every 'weft start'.");
     console.log("An already-paired phone will reconnect without rescanning. Run 'weft rotate-pairing' to force a fresh code.");
   } else {
     clearPersistedIdentity();
-    console.log("Pairing set to ephemeral: a fresh channel + key are minted every run (forward-secret default).");
+    console.log("Pairing set to ephemeral: a fresh channel + key are minted every run.");
   }
 }
 
 async function rotatePairing() {
   await rotatePersistedIdentity();
-  console.log("Persisted pairing identity rotated — the next 'weft start' or /weft will show a new QR to (re)scan.");
+  console.log("Persisted pairing identity rotated — the next 'weft start' will show a new QR to (re)scan.");
 }
 
 // Standalone entry point for the shared devtunnel relay — usable independently of any paired
@@ -1268,11 +1268,10 @@ Your device's display name (shown to phones in the DEVICES list) defaults to you
 until you set your own with \`weft set-name <name>\` — the installer offers this as an
 interactive prompt (default: your hostname) the first time you install.
 
-By default every \`weft start\` / /weft mints a brand-new channel + key (forward-secret, but
-means rescanning the QR every time). Run \`weft set-pairing persistent\` to reuse the same
-channel + key across every run instead — an already-paired phone then reconnects with no
-rescan. \`weft rotate-pairing\` forces a fresh one on demand; \`weft set-pairing ephemeral\`
-reverts to a new identity every run.
+By default, \`weft start\` reuses the same channel + key so an already-paired phone reconnects
+without rescanning. Run \`weft rotate-pairing\` to force a fresh persistent identity, or
+\`weft set-pairing ephemeral\` to mint a new identity on every station start. The in-session
+\`/weft\` command remains per-session and always uses a fresh channel + key.
 
 \`weft start\` brings up whatever the configured transport needs on its own: on the devtunnel
 transport it auto-provisions the shared relay (signing in to dev tunnels for you if needed),

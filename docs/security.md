@@ -16,7 +16,9 @@ two paired devices.
 ## Cryptography
 
 - **Key agreement:** ECDH on **P-256** (universal Web Crypto support in Node ≥18 and
-  browsers/WebViews). Each device generates an ephemeral keypair per session.
+  browsers/WebViews). `/weft` generates a fresh keypair per session. The standalone
+  Device Station persists its pairing identity by default so paired phones reconnect;
+  `weft set-pairing ephemeral` restores a fresh identity on every station start.
 - **Key derivation:** ECDH shared secret → **HKDF-SHA256** (salt `"weft-v1"`, info
   `"weft-session-key"`) → a 256-bit AES key.
 - **Payload encryption:** **AES-256-GCM** with a fresh **random 96-bit IV per
@@ -50,15 +52,16 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 | **QR shoulder-surf / screenshot** | QR shown briefly; contains only a public key + channelId | **anyone who reads the QR can pair** — accepted in v1 |
 | **Pairing race / impersonation** | `waitForPeer` resolves on the first `pair.hello` | an attacker who saw the QR could pair first — accepted in v1 |
 | Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
-| Lost/stolen phone | session key is ephemeral and dies with the session | a live, unlocked paired phone can drive the session |
+| Lost/stolen phone | `/weft` keys die with the session; Device Station identities can be invalidated with `weft rotate-pairing` | a phone paired to a persistent Device Station can reconnect until its identity is rotated |
 
 ### The QR is a bearer credential
 
 The QR encodes `{ channelId, laptopPublicKey }`. Both are non-secret individually,
 but together they are sufficient to **join the channel and complete the handshake**.
-Therefore, in v1, treat the QR like a glance-only password: don't screenshot it, don't
-share it, and re-pair (new `channelId` + keypair) if it may have been seen. This is the
-same trust level as someone watching your terminal.
+Therefore, in v1, treat the QR like a glance-only password: don't screenshot it or share
+it. Run `weft rotate-pairing` if a persistent Device Station QR may have been exposed;
+restart `/weft` for a new per-session identity. This is the same trust level as someone
+watching your terminal.
 
 ### Replay / ordering
 
@@ -69,9 +72,10 @@ per-message counter inside the encrypted payload is a tracked hardening item.
 
 ## What is NOT stored
 
-v1 keeps **no history**: no database rows, no logs of prompts/responses, no key
-escrow. Closing the `copilot` terminal ends the session, the extension process
-dies, the relay channel vanishes, and the phone shows "Session Ended".
+v1 keeps **no conversation history** in the relay: no database rows, prompt/response
+logs, or key escrow. A persistent Device Station identity is stored only on the laptop
+and phone to support reconnection. Closing a `copilot` terminal ends that session, the
+extension process dies, the relay channel vanishes, and the phone shows "Session Ended".
 
 ## v2 evolution (forward-looking)
 

@@ -38,12 +38,12 @@ export async function main() {
     return;
   }
 
-  // PERSISTENT TUNNEL: when the user opted into persistent pairing (`weft set-pairing persistent`),
-  // a prior run left its tunnel identity behind in devtunnel.json (see teardown below) instead of
-  // deleting it. Reusing that same tunnelId + local relayPort reproduces the exact same public URL
+  // PERSISTENT TUNNEL: in the default persistent pairing mode, a prior run leaves its tunnel
+  // identity behind in devtunnel.json (see teardown below) instead of deleting it. Reusing that
+  // same tunnelId + local relayPort reproduces the exact same public URL
   // (wss://<host>-<port>.<cluster>.devtunnels.ms) so an already-paired phone reconnects with no
-  // re-scan. In ephemeral mode `prior` stays null and everything below is byte-for-byte as before:
-  // a brand-new tunnel each run, deleted on teardown.
+  // re-scan. In explicitly selected ephemeral mode, `prior` stays null: a brand-new tunnel is
+  // created each run and deleted on teardown.
   const persistent = isPersistentPairingEnabled({ baseDir });
   const prior = persistent ? readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir }) : null;
   let reuseTunnelId = prior?.tunnelId ?? null;

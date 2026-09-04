@@ -58,9 +58,10 @@ weft help
   (the installer seeds the hosted defaults there on install); `weft set-transport supabase
   --url <url> --anon-key <key>` overwrites `supabase.json` and then flips the pointer.
 - **`weft set-pairing persistent`** — reuse the same channel + key across every
-  `weft start` / `/weft`, so an already-paired phone reconnects without rescanning the
-  QR. Default is `ephemeral` (a fresh channel + key every run, forward-secret).
-  `weft rotate-pairing` forces a new identity on demand.
+  `weft start`, so an already-paired phone reconnects without rescanning the QR. This is
+  the default. Use `weft set-pairing ephemeral` for a fresh channel + key on every station
+  run. `weft rotate-pairing` forces a new persistent identity on demand. The in-session
+  `/weft` command always uses a fresh per-session identity.
 - **`weft set-name` / `show-name`** — set (or check) the display name this machine
   shows to the phone in its DEVICES list. Defaults to the OS hostname until you set one;
   the installer (install.ps1/install.sh) also prompts for this interactively at install

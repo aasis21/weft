@@ -666,6 +666,7 @@ test("forceStopDevTunnel tears down a running relay and clears the registry", as
     const bin = makeFakeCli(dir);
     process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: false } }));
     const { ensureDevTunnelRelay, forceStopDevTunnel, healthyRegistryEntry } = await freshModule();
 
     await ensureDevTunnelRelay({ baseDir: homeDir });
@@ -704,7 +705,7 @@ test("persistent pairing: stop preserves the cloud tunnel + durable record inste
     process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
     process.env.FAKE_DEVTUNNEL_DELETE_LOG = deleteLog;
-    // Opt this home dir into persistent pairing — the switch the whole feature gates on.
+    // Keep the mode explicit so this test documents the persistent teardown contract.
     writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
     const { ensureDevTunnelRelay, forceStopDevTunnel, healthyRegistryEntry } = await freshModule();
 

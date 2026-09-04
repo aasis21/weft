@@ -188,12 +188,11 @@ export function clearTransportConfig({ baseDir } = {}) {
   writeConfig(config, { baseDir });
 }
 
-/** True if the user opted into persistent pairing (`weft set-pairing persistent`) — i.e. `weft
- * start` and the `/weft` extension should reuse the same channelId + keypair from
- * pairingIdentity.mjs across every run instead of minting a fresh one. Defaults to false (the
- * original forward-secret-by-default behavior) until explicitly enabled. */
+/** True unless the user explicitly opted into ephemeral pairing (`weft set-pairing ephemeral`).
+ * Persistent pairing is the default for `weft start`: it reuses the same channelId + keypair from
+ * pairingIdentity.mjs so an already-paired phone reconnects without rescanning. */
 export function isPersistentPairingEnabled({ baseDir } = {}) {
-  return loadConfig({ baseDir })?.pairing?.persistent === true;
+  return loadConfig({ baseDir })?.pairing?.persistent !== false;
 }
 
 /** Persist the pairing mode (`persistent` or `ephemeral`) as this device's default going forward.

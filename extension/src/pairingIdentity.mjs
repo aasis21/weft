@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// OPT-IN persisted pairing identity: ~/.weft/pairing-identity.json.
+// Persisted pairing identity: ~/.weft/pairing-identity.json.
 //
-// By default (see deviceIdentity.mjs's header comment) `weft start` / the `/weft` extension mint a
-// FRESH channelId + ECDH keypair every run, so a relayed session's encryption key never survives a
-// restart (forward secrecy). That also means the phone has to rescan the QR (or re-paste the code)
-// every single time, because the channel it last connected to no longer exists.
-//
-// A user can explicitly trade that per-run forward secrecy for convenience via
-// `weft set-pairing persistent` (see pairingConfig.mjs for the on/off flag). When enabled, this
-// module hands back the SAME channelId + keypair across every run until the user turns it back off
-// (`weft set-pairing ephemeral`) or rotates it (`weft rotate-pairing`) — so the QR/pairing code
-// never changes and an already-paired phone just reconnects with zero re-scan.
+// By default, `weft start` reuses the SAME channelId + keypair across runs so an already-paired
+// phone reconnects without rescanning. A user can explicitly trade that convenience for per-run
+// forward secrecy with `weft set-pairing ephemeral`, or rotate the persistent identity on demand
+// with `weft rotate-pairing`. The in-session `/weft` extension remains per-session and does not
+// use this identity.
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";

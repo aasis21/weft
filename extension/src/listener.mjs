@@ -172,10 +172,10 @@ export function createListener({
     // when persistent pairing is on AND a phone has bound here before.
     let optimisticPeerPublicKeyB64 = null;
     if (!listenerKeyPair || !listenerChannelId) {
-      // `weft set-pairing persistent` opts a device into reusing the same channelId + keypair
-      // across every `weft start` run (see pairingIdentity.mjs) — the QR/pairing code stays
-      // identical, so an already-paired phone reconnects without ever rescanning. Default
-      // (unset) stays forward-secret: a brand-new identity is minted every run.
+      // Persistent pairing reuses the same channelId + keypair across every `weft start` run
+      // (see pairingIdentity.mjs) — the QR/pairing code stays identical, so an already-paired
+      // phone reconnects without rescanning. Users can explicitly opt into ephemeral mode to
+      // mint a brand-new identity every run.
       if (isPersistentPairingEnabled()) {
         const persisted = await getOrCreatePersistedIdentity();
         listenerKeyPair ??= persisted.keyPair;
