@@ -3,14 +3,8 @@ import AxeBuilder from '@axe-core/playwright';
 import type { Result } from 'axe-core';
 
 const KNOWN_VIOLATIONS = {
-  'Landing surface': new Set([
-    'color-contrast::#install-tab-windows',
-    'meta-viewport::meta[name="viewport"]',
-  ]),
-  'Active-session surface': new Set([
-    'color-contrast::.cwd-chip',
-    'meta-viewport::meta[name="viewport"]',
-  ]),
+  'Landing surface': new Set<string>(),
+  'Active-session surface': new Set<string>(),
 } as const;
 
 type Surface = keyof typeof KNOWN_VIOLATIONS;
@@ -74,21 +68,25 @@ async function expectNoAccessibilityViolations(
 }
 
 test.describe('Journey: accessibility', () => {
-  test('the landing surface has no new automated WCAG A or AA violations', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.locator('.landing-shell')).toBeVisible();
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`the landing surface has no automated WCAG A or AA violations in ${colorScheme} mode`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme });
+      await page.goto('/');
+      await expect(page.locator('.landing-shell')).toBeVisible();
 
-    await expectNoAccessibilityViolations(page, 'Landing surface');
-  });
+      await expectNoAccessibilityViolations(page, 'Landing surface');
+    });
 
-  test('the active-session surface has no new automated WCAG A or AA violations', async ({ page }) => {
-    await page.goto('/');
-    await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
-    await expect(page.locator('.weft-session')).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Message your Copilot session' })).toBeVisible();
+    test(`the active-session surface has no automated WCAG A or AA violations in ${colorScheme} mode`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme });
+      await page.goto('/');
+      await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
+      await expect(page.locator('.weft-session')).toBeVisible();
+      await expect(page.getByRole('textbox', { name: 'Message your Copilot session' })).toBeVisible();
 
-    await expectNoAccessibilityViolations(page, 'Active-session surface');
-  });
+      await expectNoAccessibilityViolations(page, 'Active-session surface');
+    });
+  }
 
   test('the landing and connect screens expose named controls and landmarks', async ({ page }) => {
     await page.goto('/');

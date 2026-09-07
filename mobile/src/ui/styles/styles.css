@@ -1121,8 +1121,8 @@ pre {
 }
 
 .install-tab.active {
-  color: #06122b;
-  background: var(--accent);
+  color: #fff;
+  background: var(--accent-deep);
 }
 
 .install-row {
