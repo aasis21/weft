@@ -5,10 +5,11 @@ import { randomInt } from "node:crypto";
 import {
   EVENT_TYPE,
   PAIR_KIND,
+  PAIRING_TTL_MS,
   SUBTYPE,
   SecureChannel,
   buildPairingPayload,
-  deriveSessionKey,
+  createPairingGate,
   deviceHeartbeat,
   exportKeyPair,
   generateKeyPair,
@@ -103,11 +104,8 @@ export function createListener({
   onDeviceConnected = null,
   onDeviceDisconnected = null,
   onHeartbeat = null,
-  // Persistent-pairing-only: fired the moment optimisticBind() opens the channel + starts
-  // heartbeating from a REMEMBERED peer key, before this run's phone has said hello at all — see
-  // optimisticBind's comment. Lets a host UI (weft start) show "connected"/heartbeat status
-  // immediately instead of a "waiting/reconnecting" spinner, since we're not actually waiting on
-  // anything from the phone in this case.
+  // Retained as a host compatibility hook. Secure pairing now waits for a fresh authenticated
+  // hello on every process start, so this hook is intentionally no longer invoked.
   onOptimisticBind = null,
   onSpawnRequest = null,
   onSpawnResult = null,
@@ -115,6 +113,8 @@ export function createListener({
   // a phone claims one (SESSION_CLAIMED, channelId arg) — host-log hooks, best-effort.
   onSessionOffers = null,
   onSessionClaimed = null,
+  onPairingPayloadChanged = null,
+  pairingTtlMs = PAIRING_TTL_MS,
   // Fired at the top of handleControl for every decrypted control message a bound phone sends
   // (PROJECT_LIST_REQUEST, SPAWN_SESSION, SESSION_CLAIMED, FORGET_DEVICE) — lets a host (e.g. the
   // station log) record incoming phone traffic without this module knowing anything about logging.
@@ -137,6 +137,7 @@ export function createListener({
   // after) over the raw OS hostname, which is what this fell back to unconditionally before.
   const listenerDeviceName = loadDeviceName() ?? hostname();
   let pairingPayload = null;
+  let pairingGate = null;
   let pairingStop = null;
   let controlUnsub = null;
   let boundPeerPub = null;
@@ -144,14 +145,12 @@ export function createListener({
   // from its hello. A rescan mints a FRESH keypair, so the public key alone cannot tell "the same
   // phone re-paired" apart from "a different phone showed up" — this can.
   let boundPeerDeviceId = null;
-  // True while `boundPeerPub`/`channel` were set OPTIMISTICALLY (see optimisticBind) — i.e. from a
-  // remembered peer key, before this run's phone has actually said hello. Flips to false the
-  // moment a genuine hello confirms (or contradicts) the guess. Never true in ephemeral mode.
-  let boundOptimistically = false;
+  let boundHandshakeNonce = null;
   let channel = null;
   let stopped = false;
   let started = false;
   let heartbeatTimer = null;
+  let pairingGrantTimer = null;
   // Pending `/weft` session offers relayed to the phone (see pendingSessions.mjs). `claimedOffers`
   // suppresses re-advertising a session the phone already adopted (until its file entry is gone);
   // `lastOffersJson` dedupes redundant SESSION_OFFERS sends; `pendingWatcher`/`offersDebounce` drive
@@ -174,20 +173,20 @@ export function createListener({
     if (started) return api;
     started = true;
     stopped = false;
-    // Remembered peer key from a previous persistent run (see optimisticBind below) — set only
-    // when persistent pairing is on AND a phone has bound here before.
-    let optimisticPeerPublicKeyB64 = null;
+    // A remembered peer key authorizes only that already-paired phone to reconnect. A different
+    // phone requires an explicit identity rotation and fresh QR.
+    let trustedPeerPublicKeyB64 = null;
     if (!listenerKeyPair || !listenerChannelId) {
       // Persistent pairing reuses the same channelId + keypair across every `weft start` run
-      // (see pairingIdentity.mjs) — the QR/pairing code stays identical, so an already-paired
-      // phone reconnects without rescanning. Users can explicitly opt into ephemeral mode to
-      // mint a brand-new identity every run.
+      // (see pairingIdentity.mjs). The channel and ECDH identity stay stable so an already-paired
+      // phone reconnects without rescanning; each displayed QR still gets a fresh expiring grant.
+      // Users can explicitly opt into ephemeral mode to mint a brand-new identity every run.
       if (isPersistentPairingEnabled()) {
         const persisted = await getOrCreatePersistedIdentity();
         listenerKeyPair ??= persisted.keyPair;
         listenerChannelId ??= persisted.channelId;
         listenerEverConnectedBeforeThisRun = persisted.everConnected;
-        optimisticPeerPublicKeyB64 = persisted.peerPublicKeyB64;
+        trustedPeerPublicKeyB64 = persisted.peerPublicKeyB64;
       } else {
         listenerKeyPair ??= await generateKeyPair();
         listenerChannelId ??= randomChannelId();
@@ -205,24 +204,15 @@ export function createListener({
       transport: listenerTransportDescriptor,
       kind: PAIR_KIND.LISTENER,
       appVersion: resolveVersion(),
+      expiresAt: Date.now() + pairingTtlMs,
     });
-    // Persistent mode + a known-returning phone: derive the shared key from the REMEMBERED peer
-    // public key and open the encrypted channel + start heartbeating right away, instead of
-    // sitting idle until this run's fresh hello arrives. The phone's own reconnect path
-    // (mobile weftClient.ts's reconnectFromMaterial) fire-and-forgets a hello using that SAME
-    // stored keypair, so the guess is correct the vast majority of the time; bindPeer() below
-    // reconciles it either way once that hello actually shows up.
-    if (optimisticPeerPublicKeyB64) await optimisticBind(optimisticPeerPublicKeyB64);
-    const handle = await listenForPeers({
-      transport: listenerTransport,
-      keyPair: listenerKeyPair,
-      connect: true,
-      channelId: listenerChannelId,
-      senderId: "weft-listener",
-      senderName: listenerDeviceName,
-      onPeer: bindPeer,
+    pairingGate = createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+      trustedPeerPublicKeyB64,
     });
-    pairingStop = handle.stop;
+    await installPairingListener({ connect: true });
+    schedulePairingGrantRefresh();
     startPendingWatch();
     try {
       await Promise.resolve(launchApi.pruneLaunchOperations?.({ baseDir: connectionsHome }));
@@ -233,9 +223,61 @@ export function createListener({
     return api;
   };
 
+  async function installPairingListener({ connect = false } = {}) {
+    const handle = await listenForPeers({
+      transport: listenerTransport,
+      keyPair: listenerKeyPair,
+      connect,
+      channelId: listenerChannelId,
+      senderId: "weft-listener",
+      senderName: listenerDeviceName,
+      pairingGate,
+      onPeer: bindPeer,
+    });
+    pairingStop = handle.stop;
+  }
+
+  function schedulePairingGrantRefresh() {
+    if (pairingGrantTimer) clearTimeout(pairingGrantTimer);
+    pairingGrantTimer = null;
+    if (stopped || boundPeerPub || !pairingPayload?.expiresAt) return;
+    pairingGrantTimer = setTimeout(() => {
+      pairingGrantTimer = null;
+      void refreshPairingGrant();
+    }, Math.max(0, pairingPayload.expiresAt - Date.now() + 50));
+    pairingGrantTimer.unref?.();
+  }
+
+  async function refreshPairingGrant() {
+    if (stopped || boundPeerPub) return;
+    pairingPayload = buildPairingPayload({
+      channelId: listenerChannelId,
+      publicKeyB64: listenerKeyPair.publicKeyB64,
+      transport: listenerTransportDescriptor,
+      kind: PAIR_KIND.LISTENER,
+      appVersion: resolveVersion(),
+      expiresAt: Date.now() + pairingTtlMs,
+    });
+    pairingGate = createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+      trustedPeerPublicKeyB64: pairingGate?.claimedPeerPublicKeyB64 ?? null,
+    });
+    pairingStop?.();
+    await installPairingListener({ connect: false });
+    try {
+      onPairingPayloadChanged?.(pairingPayload);
+    } catch {
+      // best-effort host notification
+    }
+    schedulePairingGrantRefresh();
+  }
+
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    if (pairingGrantTimer) clearTimeout(pairingGrantTimer);
+    pairingGrantTimer = null;
     stopHeartbeat();
     stopPendingWatch();
     stopLaunchWatch();
@@ -251,10 +293,10 @@ export function createListener({
       // best-effort
     }
     pairingStop = null;
-    const hadPeer = boundPeerPub !== null && !boundOptimistically;
+    const hadPeer = boundPeerPub !== null;
     boundPeerPub = null;
     boundPeerDeviceId = null;
-    boundOptimistically = false;
+    boundHandshakeNonce = null;
     channel = null;
     if (hadPeer) removeConnection(listenerChannelId, connectionsHome);
     try {
@@ -291,7 +333,7 @@ export function createListener({
       return { changed: false, descriptor: listenerTransportDescriptor, pairingPayload };
     }
 
-    const hadPeer = boundPeerPub !== null && !boundOptimistically;
+    const hadPeer = boundPeerPub !== null;
     stopHeartbeat();
     try {
       controlUnsub?.();
@@ -308,7 +350,7 @@ export function createListener({
     channel = null;
     boundPeerPub = null;
     boundPeerDeviceId = null;
-    boundOptimistically = false;
+    boundHandshakeNonce = null;
     // Re-advertise offers to whoever binds next: lastOffersJson is a dedupe of what went out over
     // the OLD channel, which the next phone has never seen.
     lastOffersJson = null;
@@ -326,17 +368,15 @@ export function createListener({
       transport: listenerTransportDescriptor,
       kind: PAIR_KIND.LISTENER,
       appVersion: resolveVersion(),
+      expiresAt: Date.now() + pairingTtlMs,
     });
-    const handle = await listenForPeers({
-      transport: listenerTransport,
-      keyPair: listenerKeyPair,
-      connect: true,
-      channelId: listenerChannelId,
-      senderId: "weft-listener",
-      senderName: listenerDeviceName,
-      onPeer: bindPeer,
+    pairingGate = createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+      trustedPeerPublicKeyB64: pairingGate?.claimedPeerPublicKeyB64 ?? null,
     });
-    pairingStop = handle.stop;
+    await installPairingListener({ connect: true });
+    schedulePairingGrantRefresh();
     if (hadPeer) {
       try {
         onDeviceDisconnected?.();
@@ -385,52 +425,22 @@ export function createListener({
     heartbeatTimer.unref?.();
   }
 
-  // Persistent mode only: open the encrypted channel + start heartbeating using the LAST phone
-  // public key we saw on this channel, before this run's phone has said hello at all. ECDH is
-  // deterministic (same two keypairs always derive the same shared key — see
-  // shared/crypto.mjs's deriveSessionKey), and the phone's own reconnect path reuses its stored
-  // keypair too, so this is usually the correct key. It's provisional: bindPeer() below either
-  // confirms it (matching hello arrives → just promote to a real connection) or corrects it (a
-  // hello with a DIFFERENT key arrives → tear this down and bind for real), so a wrong guess
-  // self-heals within one hello round-trip instead of wedging the listener.
-  async function optimisticBind(peerPublicKeyB64) {
-    try {
-      const key = await deriveSessionKey(listenerKeyPair.privateKey, peerPublicKeyB64);
-      if (stopped) return;
-      boundPeerPub = peerPublicKeyB64;
-      boundOptimistically = true;
-      channel = new SecureChannel({
-        transport: listenerTransport,
-        key,
-        identity: {
-          channelId: listenerChannelId,
-          senderId: "weft-listener",
-          senderName: listenerDeviceName,
-        },
-      });
-      controlUnsub = channel.onEvent(EVENT_TYPE.CONTROL, (envelope) => {
-        void handleControl(envelope);
-      });
-      startHeartbeat();
-      try {
-        onOptimisticBind?.();
-      } catch {
-        // best-effort UI hook
-      }
-    } catch {
-      // Couldn't derive the key from the remembered peer (shouldn't happen — corrupt/legacy
-      // record) — fall back to the normal wait-for-hello path below.
-      boundPeerPub = null;
-      boundOptimistically = false;
-    }
-  }
-
   async function bindPeer({ key, peer }) {
     if (stopped) return;
-    if (boundOptimistically && peer.publicKeyB64 !== boundPeerPub) {
-      // Our optimistic guess didn't match this hello (e.g. the phone re-paired with a fresh
-      // identity) — nothing genuine was ever exchanged over that provisional channel, so tear it
-      // down quietly and fall through to a normal fresh bind using the real key below.
+    if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
+      log?.warn?.(`Weft Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
+      return;
+    }
+    if (pairingGrantTimer) clearTimeout(pairingGrantTimer);
+    pairingGrantTimer = null;
+    if (
+      boundPeerPub === peer.publicKeyB64 &&
+      boundHandshakeNonce === peer.handshakeNonce &&
+      channel
+    ) {
+      return;
+    }
+    if (channel) {
       stopHeartbeat();
       try {
         controlUnsub?.();
@@ -439,70 +449,10 @@ export function createListener({
       }
       controlUnsub = null;
       channel = null;
-      boundPeerPub = null;
-      boundOptimistically = false;
-    } else if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
-      // A different key is NOT automatically a different phone. Re-scanning the QR generates a new
-      // keypair on the phone, so the same handset coming back looks exactly like an impostor here
-      // — and the old code refused it, leaving the user unable to re-pair the very phone that was
-      // already paired. The phone's stable device id is what actually identifies it, so accept the
-      // rebind when that matches and only refuse a genuinely different device.
-      if (peer.deviceId && peer.deviceId === boundPeerDeviceId) {
-        stopHeartbeat();
-        try {
-          controlUnsub?.();
-        } catch {
-          // best-effort
-        }
-        controlUnsub = null;
-        channel = null;
-        boundPeerPub = null;
-        boundOptimistically = false;
-      } else {
-        log?.warn?.(`Weft Device Station: ignoring pairing from a different phone (${peer.senderName ?? peer.deviceId ?? "unknown"})`);
-        return;
-      }
-    } else if (boundPeerPub === peer.publicKeyB64) {
-      if (boundOptimistically) {
-        // A genuine hello confirms our optimistic guess — the encrypted channel + heartbeat are
-        // already live, so we don't need to rebuild them. But this hello is still the PHONE's
-        // first real contact THIS run (its own process just (re)started too), so it still needs
-        // a fresh PROJECT_LIST — only skip the channel/heartbeat rebuild, not the reply.
-        boundOptimistically = false;
-        if (isPersistentPairingEnabled()) markPersistedIdentityConnected(listenerChannelId, peer.publicKeyB64);
-        await sendProjectList();
-        await sendSessionOffers({ force: true });
-        await sendLaunchReplays({ force: true });
-        upsertConnection(
-          listenerChannelId,
-          {
-            pid: process.pid,
-            deviceId: listenerDeviceId,
-            peerPublicKeyB64: peer.publicKeyB64,
-            peerDeviceId: peer.deviceId ?? null,
-            peerSenderName: peer.senderName ?? null,
-            transportKind: listenerTransportDescriptor?.kind ?? null,
-            boundAt: new Date().toISOString(),
-          },
-          connectionsHome,
-        );
-        try {
-          onDeviceConnected?.(peer);
-        } catch {
-          // best-effort UI hook
-        }
-        return;
-      }
-      // The phone re-broadcasts HELLO on a short retry loop until it sees our ACK (see
-      // listenForPeers in shared/pairing.mjs), so a retry can reach us again before the phone
-      // gives up — even though we already ACKed and bound it. Since each run's keypair is
-      // ephemeral, the same publicKeyB64 arriving again while already truly bound/connected means
-      // "duplicate hello", never a fresh pairing — skip the rebind so we don't resend
-      // PROJECT_LIST / reset the heartbeat timer for no reason.
-      if (channel) return;
     }
     boundPeerPub = peer.publicKeyB64;
     boundPeerDeviceId = peer.deviceId ?? boundPeerDeviceId;
+    boundHandshakeNonce = peer.handshakeNonce ?? null;
     if (isPersistentPairingEnabled()) markPersistedIdentityConnected(listenerChannelId, peer.publicKeyB64);
     try {
       controlUnsub?.();
@@ -832,7 +782,13 @@ export function createListener({
         project,
         name: sessionName,
         mode,
-        identity: { channelId: newChannelId, publicKeyB64, privateKeyJwk },
+        identity: {
+          channelId: newChannelId,
+          publicKeyB64,
+          privateKeyJwk,
+          pairingToken: payload.token,
+          pairingExpiresAt: payload.expiresAt,
+        },
         operationId: id,
         operationOwnerToken: operation.ownerToken,
         baseDir: connectionsHome,
@@ -1000,7 +956,13 @@ export function createListener({
       const result = await spawnCopilotSession({
         project: { name: "resume", path: cwd },
         mode,
-        identity: { channelId: newChannelId, publicKeyB64, privateKeyJwk },
+        identity: {
+          channelId: newChannelId,
+          publicKeyB64,
+          privateKeyJwk,
+          pairingToken: payload.token,
+          pairingExpiresAt: payload.expiresAt,
+        },
         resumeSessionId: cleanSessionId,
         operationId: id,
         operationOwnerToken: operation.ownerToken,
@@ -1084,12 +1046,9 @@ export function createListener({
     get everConnectedBeforeThisRun() {
       return listenerEverConnectedBeforeThisRun;
     },
-    // True right after start() if optimisticBind() succeeded — i.e. the channel is open and
-    // heartbeating from a remembered peer key, before this run's phone has said anything. Lets a
-    // host UI (weft start) print accurate "already sending heartbeats" copy instead of
-    // "waiting"/"reconnecting" wording implying we're blocked on the phone.
+    // Kept for older hosts that inspect this property.
     get optimisticallyBound() {
-      return boundOptimistically;
+      return false;
     },
   };
   return api;

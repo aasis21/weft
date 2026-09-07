@@ -4,6 +4,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSyn
 import { hostname, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { stdin as input, stdout as output } from "node:process";
 import readline from "node:readline/promises";
 import QRCode from "qrcode";
@@ -142,7 +143,7 @@ async function main() {
     } else if (command === "devtunnel") {
       await devtunnelCommand(args);
     } else if (command === "update") {
-      await update();
+      await update(args);
     } else if (command === "install") {
       await install(args);
     } else if (command === "clean-install") {
@@ -165,7 +166,7 @@ async function setPairing([mode]) {
     // Mint (or reuse) the persisted identity right away so `weft show-pairing`/`weft start`
     // has something concrete to report immediately, rather than waiting for the next start.
     await getOrCreatePersistedIdentity();
-    console.log("Pairing set to persistent: the same channel + key are reused across every 'weft start'.");
+    console.log("Pairing set to persistent: the same channel + device identity are reused across every 'weft start'.");
     console.log("An already-paired phone will reconnect without rescanning. Run 'weft rotate-pairing' to force a fresh code.");
   } else {
     clearPersistedIdentity();
@@ -425,6 +426,12 @@ async function start() {
       status.pulse();
       appendStationLog("heartbeat", {});
     },
+    onPairingPayloadChanged: (payload) => {
+      void renderPairingQr(payload).then((qr) => {
+        status.log(`${c.yellow("Pairing QR refreshed after 10 minutes.")}\n${qr}`);
+        appendStationLog("pairing.refreshed", { channel: payload.channelId?.slice(0, 8) });
+      });
+    },
     // Persistent mode + a known-returning phone: the listener is ALREADY sending heartbeats to
     // the last-known channel before this run's phone has said anything — show that as
     // "connected" right away instead of a "waiting/reconnecting" spinner, since we're genuinely
@@ -513,8 +520,8 @@ async function start() {
       c.dim(
         persistent
           ? everConnected
-            ? " — same channel/key as before; this phone should reconnect automatically, no rescan needed."
-            : " — same channel/key will be reused every start once a phone first scans it below."
+            ? " — same pairing identity as before; this phone should reconnect automatically, no rescan needed."
+            : " — this pairing identity will be reused every start once a phone first scans it below."
           : " — a fresh channel/key every start; re-scan the QR each time (run `weft set-pairing persistent` to change).",
       ),
   );
@@ -647,7 +654,7 @@ async function ensureRelayForTransport() {
 // phone to connect". We re-provision once; if the tunnel comes back on the SAME URL (persistent
 // pairing reuses the tunnel identity) the paired phone reconnects on its own. If it comes back on
 // a NEW URL, the QR already on screen points at a dead endpoint, so we rebind the listener onto
-// the new one (same channel/keys) and print a fresh QR inline — the station stays usable without
+// the new one (same channel/identity) and print a fresh QR inline — the station stays usable without
 // being restarted; the phone just re-scans.
 const RELAY_HEALTH_INTERVAL_MS = 30_000;
 // A single failed probe is NOT evidence of a wedged relay. probeRelay gives up after 1.5s, so a
@@ -1079,13 +1086,43 @@ function printVersion() {
 
 // Download one file from the cloud release into `dest`, atomically (tmp + rename) so a partial
 // or interrupted download can never leave a half-written bundle that Node would then try to run.
-async function downloadTo(url, dest) {
+async function downloadTo(url, dest, { expectedSha256 } = {}) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Download failed (HTTP ${res.status}) for ${url}`);
   const buf = Buffer.from(await res.arrayBuffer());
+  if (expectedSha256) {
+    const actual = createHash("sha256").update(buf).digest("hex");
+    if (actual !== expectedSha256.toLowerCase()) {
+      throw new Error(`Integrity check failed for ${url}: expected ${expectedSha256}, received ${actual}`);
+    }
+  }
   const tmp = `${dest}.${process.pid}.download.tmp`;
   writeFileSync(tmp, buf);
   renameSync(tmp, dest);
+}
+
+let releaseManifestPromise;
+async function loadReleaseManifest() {
+  if (releaseManifestPromise) return releaseManifestPromise;
+  const url = `${INSTALL_BASE}/release-manifest.json`;
+  releaseManifestPromise = (async () => {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Could not download the Weft release manifest (HTTP ${res.status}) from ${url}`);
+    const manifest = await res.json();
+    if (manifest?.schemaVersion !== 1 || typeof manifest?.version !== "string" || !manifest?.files) {
+      throw new Error(`Invalid Weft release manifest from ${url}`);
+    }
+    return manifest;
+  })();
+  return releaseManifestPromise;
+}
+
+function expectedHash(manifest, name) {
+  const sha256 = manifest?.files?.[name]?.sha256;
+  if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(sha256)) {
+    throw new Error(`Release manifest has no valid SHA-256 entry for ${name}`);
+  }
+  return sha256;
 }
 
 // On Windows, (re)create the `weft.cmd` PATH shim if it's missing so `weft` resolves to the just
@@ -1112,16 +1149,53 @@ function ensureWindowsShim(dir) {
 async function placeBundles({ fromDir } = {}) {
   const dir = extensionInstallDir();
   mkdirSync(dir, { recursive: true });
-  for (const name of BUNDLE_NAMES) {
-    const dest = join(dir, name);
-    if (fromDir) {
-      const src = join(fromDir, name);
-      if (!existsSync(src)) throw new Error(`Missing bundle: ${src} (did you run \`npm run build\`?)`);
-      copyFileSync(src, dest);
-    } else {
-      await downloadTo(`${INSTALL_BASE}/${name}`, dest);
+  const manifest = fromDir ? null : await loadReleaseManifest();
+  const transactionId = `${process.pid}.${Date.now()}`;
+  const staged = BUNDLE_NAMES.map((name) => ({
+    name,
+    dest: join(dir, name),
+    stage: join(dir, `.${name}.${transactionId}.stage`),
+    backup: join(dir, `.${name}.${transactionId}.backup`),
+  }));
+  const replaced = [];
+  try {
+    // Verify the complete release before touching any currently installed bundle.
+    for (const file of staged) {
+      if (fromDir) {
+        const src = join(fromDir, file.name);
+        if (!existsSync(src)) throw new Error(`Missing bundle: ${src} (did you run \`npm run build\`?)`);
+        copyFileSync(src, file.stage);
+      } else {
+        await downloadTo(`${INSTALL_BASE}/${file.name}`, file.stage, {
+          expectedSha256: expectedHash(manifest, file.name),
+        });
+      }
     }
-    console.log(`${c.green("✓")} ${name}`);
+    for (const file of staged) {
+      if (existsSync(file.dest)) renameSync(file.dest, file.backup);
+      try {
+        renameSync(file.stage, file.dest);
+        replaced.push(file);
+      } catch (error) {
+        if (existsSync(file.backup)) renameSync(file.backup, file.dest);
+        throw error;
+      }
+    }
+    for (const file of staged) {
+      rmSync(file.backup, { force: true });
+      console.log(`${c.green("✓")} ${file.name}`);
+    }
+  } catch (error) {
+    for (const file of [...replaced].reverse()) {
+      rmSync(file.dest, { force: true });
+      if (existsSync(file.backup)) renameSync(file.backup, file.dest);
+    }
+    throw error;
+  } finally {
+    for (const file of staged) {
+      rmSync(file.stage, { force: true });
+      rmSync(file.backup, { force: true });
+    }
   }
   return dir;
 }
@@ -1137,7 +1211,10 @@ async function installSkill({ fromFile } = {}) {
     if (!existsSync(fromFile)) throw new Error(`Missing skill file: ${fromFile}`);
     copyFileSync(fromFile, dest);
   } else {
-    await downloadTo(`${INSTALL_BASE}/weft-skill.md`, dest);
+    const manifest = await loadReleaseManifest();
+    await downloadTo(`${INSTALL_BASE}/weft-skill.md`, dest, {
+      expectedSha256: expectedHash(manifest, "weft-skill.md"),
+    });
   }
   console.log(`${c.green("✓")} SKILL.md`);
 }
@@ -1163,17 +1240,42 @@ async function install(cmdArgs) {
   console.log(`\n${c.green("Installed code.")} ${c.dim("(PATH + transport config are handled by the installer script.)")}`);
 }
 
+function compareVersions(left, right) {
+  const parse = (value) => value.split("-", 1)[0].split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return Math.sign(difference);
+  }
+  return left === right ? 0 : left.includes("-") ? -1 : 1;
+}
+
 // `weft update`: refresh ONLY the code bundles and the how-to-use skill from the cloud, overwriting
 // them in place. It never touches ~/.weft, so your transport/device-name/identity/pairings all
 // survive. Thin wrapper over the shared placement core with the cloud source.
-async function update() {
+async function update(cmdArgs = []) {
   printHeader("WEFT UPDATE");
   console.log(c.dim(`Source: ${INSTALL_BASE}`));
   console.log(c.dim(`Target: ${extensionInstallDir()}\n`));
+  const manifest = await loadReleaseManifest();
+  const current = resolveVersion();
+  if (cmdArgs.includes("--check")) {
+    const order = compareVersions(current, manifest.version);
+    if (order === 0) {
+      console.log(`${c.green("Up to date.")} Weft ${current} is the current hosted release.`);
+    } else if (order < 0) {
+      console.log(`${c.yellow("Update available:")} ${current} → ${manifest.version}`);
+      console.log("Run `weft update`, then restart Copilot CLI / the Device Station.");
+    } else {
+      console.log(`${c.yellow("Development build:")} local Weft ${current} is newer than hosted ${manifest.version}.`);
+    }
+    return;
+  }
   await placeBundles();
   await installSkill();
   ensureWindowsShim(extensionInstallDir());
-  console.log(`\n${c.green("Updated.")} ${c.dim("Your ~/.weft config was left untouched.")}`);
+  console.log(`\n${c.green(`Updated to Weft ${manifest.version}.`)} ${c.dim("Your ~/.weft config was left untouched.")}`);
 }
 
 // `weft clean-install`: nuke BOTH the code dir (~/.copilot/extensions/weft) and ALL user data
@@ -1253,7 +1355,7 @@ function usage() {
   weft rotate-pairing
   weft devtunnel <start|status|stop>
   weft version
-  weft update
+  weft update [--check]
   weft install [--from <dir>] [--skill <file>]
   weft clean-install [--yes]
   weft help
@@ -1268,7 +1370,7 @@ Your device's display name (shown to phones in the DEVICES list) defaults to you
 until you set your own with \`weft set-name <name>\` — the installer offers this as an
 interactive prompt (default: your hostname) the first time you install.
 
-By default, \`weft start\` reuses the same channel + key so an already-paired phone reconnects
+By default, \`weft start\` reuses the same channel + device identity so an already-paired phone reconnects
 without rescanning. Run \`weft rotate-pairing\` to force a fresh persistent identity, or
 \`weft set-pairing ephemeral\` to mint a new identity on every station start. The in-session
 \`/weft\` command remains per-session and always uses a fresh channel + key.

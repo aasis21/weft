@@ -1,4 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
+import { Capacitor } from '@capacitor/core';
+import { vi } from 'vitest';
 import { reduceTimeline, toPersisted, type PersistedTimeline } from '@/lib/timeline';
 import {
   allowTranscriptWrites,
@@ -45,6 +47,16 @@ describe('transcript storage', () => {
     const raw = localStorage.getItem('weft.transcript.v1.ch1');
     expect(raw).toBeTruthy();
     expect(JSON.parse(raw as string)).toMatchObject({ v: 1, data });
+  });
+
+  it('does not mirror transcripts into localStorage on native Capacitor', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    const data = persisted();
+
+    await saveTranscript('native', data);
+
+    expect(localStorage.getItem('weft.transcript.v1.native')).toBeNull();
+    await expect(loadTranscript('native')).resolves.toEqual(data);
   });
 
   it('clear removes a transcript', async () => {

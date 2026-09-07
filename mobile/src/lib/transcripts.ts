@@ -1,10 +1,10 @@
-import { Preferences } from '@capacitor/preferences';
 import type { PersistedTimeline } from './timeline';
+import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 
 // Local-first transcript store. The phone PERSISTS every transcript it renders and
 // RESTORES it on refresh, so a reload shows the conversation instantly from the device
-// without re-pulling from the laptop. Mirrors sessions.ts: Preferences is the source of
-// truth, with a localStorage mirror so a browser refresh (web build) restores too.
+// without re-pulling from the laptop. Native builds keep this in Capacitor Preferences only;
+// web builds retain a localStorage-backed copy so browser refreshes restore it.
 const PREFIX = 'weft.transcript.v1.';
 const VERSION = 1 as const;
 const discarded = new Set<string>();
@@ -29,12 +29,7 @@ export function discardTranscriptWrites(channelId: string): void {
 
 async function removeStored(key: string): Promise<void> {
   try {
-    globalThis.localStorage?.removeItem(key);
-  } catch {
-    /* ignore */
-  }
-  try {
-    await Preferences.remove({ key });
+    await preferencesStorage.removeItem(key);
   } catch {
     /* ignore */
   }
@@ -45,8 +40,7 @@ export async function loadTranscript(channelId: string): Promise<PersistedTimeli
   if (!channelId) return null;
   const key = keyFor(channelId);
   try {
-    const { value } = await Preferences.get({ key });
-    const raw = value ?? globalThis.localStorage?.getItem(key) ?? null;
+    const raw = await preferencesStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Envelope;
     if (!parsed || parsed.v !== VERSION || !parsed.data) return null;
@@ -56,25 +50,16 @@ export async function loadTranscript(channelId: string): Promise<PersistedTimeli
   }
 }
 
-/** Persist a channel's transcript (Preferences + localStorage mirror). Best-effort. */
+/** Persist a channel's transcript. Best-effort. */
 export async function saveTranscript(channelId: string, data: PersistedTimeline): Promise<void> {
   if (!channelId) return;
   if (discarded.has(channelId)) return;
   const key = keyFor(channelId);
   const value = JSON.stringify({ v: VERSION, savedAt: Date.now(), data } satisfies Envelope);
   try {
-    globalThis.localStorage?.setItem(key, value);
+    await preferencesStorage.setItem(key, value);
   } catch {
-    /* quota / unavailable — ignore the mirror */
-  }
-  if (discarded.has(channelId)) {
-    await removeStored(key);
-    return;
-  }
-  try {
-    await Preferences.set({ key, value });
-  } catch {
-    /* ignore: the localStorage mirror still covers a web refresh */
+    /* best-effort */
   }
   if (discarded.has(channelId)) await removeStored(key);
 }
@@ -100,7 +85,7 @@ export async function compactTranscript(
 
   let beforeRaw: string | null = null;
   try {
-    beforeRaw = globalThis.localStorage?.getItem(key) ?? null;
+    beforeRaw = await preferencesStorage.getItem(key);
   } catch {
     beforeRaw = null;
   }
@@ -141,18 +126,9 @@ export async function compactTranscript(
   const value = JSON.stringify({ v: VERSION, savedAt: envelope.savedAt ?? Date.now(), data: trimmed } satisfies Envelope);
   const freed = (beforeRaw?.length ?? 0) - value.length;
   try {
-    // Replacing an existing key with a strictly smaller value; remove-then-set so a store that
-    // rejects the in-place write while at the cap still lands the smaller payload.
-    globalThis.localStorage?.removeItem(key);
-    globalThis.localStorage?.setItem(key, value);
+    await preferencesStorage.setItem(key, value);
   } catch {
-    /* couldn't rewrite the smaller value — leave it for the caller to fully evict instead */
     return 0;
-  }
-  try {
-    await Preferences.set({ key, value });
-  } catch {
-    /* ignore: the localStorage mirror still covers a web refresh */
   }
   return Math.max(0, freed);
 }

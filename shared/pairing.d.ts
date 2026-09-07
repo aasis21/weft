@@ -1,6 +1,7 @@
 import type { Transport, TransportDescriptor } from "./transport";
 
-export declare const PAIR_VERSION: 1;
+export declare const PAIR_VERSION: 2;
+export declare const PAIRING_TTL_MS: number;
 
 /** Pairing payload kinds: a normal mirrored session vs an ephemeral `weft` listener. */
 export type PairKind = "session" | "listener";
@@ -10,7 +11,7 @@ export declare const PAIR_KIND: {
 };
 
 export interface PairingPayload {
-  v: 1;
+  v: 1 | 2;
   channelId: string;
   pub: string;
   /** Which transport + endpoint the phone should connect with. Laptop-resolved, non-secret. */
@@ -20,6 +21,10 @@ export interface PairingPayload {
   /** The laptop's Weft version at pairing time, surfaced on the phone's Settings page. Optional —
    *  older laptops (or QRs minted before this field) omit it. */
   appVersion?: string;
+  /** Single-use bearer grant authorizing the first phone enrollment. */
+  token?: string;
+  /** Epoch milliseconds after which an unclaimed token is rejected. */
+  expiresAt?: number;
 }
 
 /** Info about a paired peer, as seen by the laptop after a hello. */
@@ -27,6 +32,7 @@ export interface PairedPeer {
   publicKeyB64: string;
   deviceId?: string;
   senderName?: string;
+  handshakeNonce?: string;
 }
 
 export declare function buildPairingPayload(opts: {
@@ -35,11 +41,34 @@ export declare function buildPairingPayload(opts: {
   transport: TransportDescriptor;
   kind?: PairKind;
   appVersion?: string;
+  pairingToken?: string;
+  expiresAt?: number;
 }): PairingPayload;
 
 export declare function parsePairingPayload(
   input: string | PairingPayload,
-): { channelId: string; publicKeyB64: string; kind: PairKind; transport: TransportDescriptor; appVersion?: string };
+): {
+  pairVersion: 1 | 2;
+  channelId: string;
+  publicKeyB64: string;
+  kind: PairKind;
+  transport: TransportDescriptor;
+  appVersion?: string;
+  pairingToken?: string;
+  expiresAt?: number;
+};
+
+export interface PairingGate {
+  authorize(input: { publicKeyB64: string; token?: string }): boolean;
+  readonly claimedPeerPublicKeyB64: string | null;
+}
+
+export declare function createPairingGate(opts?: {
+  pairingToken?: string;
+  expiresAt?: number;
+  trustedPeerPublicKeyB64?: string | null;
+  now?: () => number;
+}): PairingGate;
 
 export declare function listenForPeers(opts: {
   transport: Transport;
@@ -49,6 +78,7 @@ export declare function listenForPeers(opts: {
   channelId?: string;
   senderId?: string;
   senderName?: string;
+  pairingGate?: PairingGate | null;
 }): Promise<{ stop: () => void }>;
 
 export declare function waitForPeer(opts: {
@@ -59,6 +89,7 @@ export declare function waitForPeer(opts: {
   channelId?: string;
   senderId?: string;
   senderName?: string;
+  pairingGate?: PairingGate | null;
 }): Promise<{ key: CryptoKey; peer: PairedPeer }>;
 
 export declare function sayHello(opts: {
@@ -71,4 +102,6 @@ export declare function sayHello(opts: {
   waitForAck?: boolean;
   timeoutMs?: number;
   retryMs?: number;
-}): Promise<{ key: CryptoKey }>;
+  pairingToken?: string;
+  pairVersion?: 1 | 2;
+}): Promise<{ key: CryptoKey; protocolVersion: 1 | 2 }>;

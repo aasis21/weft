@@ -52,6 +52,20 @@ test("handoff identity can be read by replacement extension processes", async ()
   assert.equal(JSON.parse(readFileSync(file, "utf8")).channelId, material.channelId);
 });
 
+test("handoff identity preserves the one-time pairing grant for the spawned extension", async () => {
+  const material = {
+    ...(await identity("chan-pairing-grant")),
+    pairingToken: "t".repeat(43),
+    pairingExpiresAt: Date.now() + 60_000,
+  };
+  const file = writeIdentityFile(material);
+  cleanupFiles.push(file);
+
+  const restored = await readIdentityFile(file);
+  assert.equal(restored.pairingToken, material.pairingToken);
+  assert.equal(restored.pairingExpiresAt, material.pairingExpiresAt);
+});
+
 test("spawnCopilotSession builds argv/env for headless spawn without shell", async () => {
   const oldWt = process.env.WT_SESSION;
   const oldTerm = process.env.TERM_PROGRAM;

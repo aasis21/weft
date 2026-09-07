@@ -1,12 +1,16 @@
 name: Deploy Netlify Test
 
-# Runs automatically on every push to `main` (a live deploy, so useweft-test always mirrors main),
-# and can be dispatched from ANY branch: pick the branch in the Actions UI, or
+# Runs automatically after CI succeeds on `main` (a live deploy, so useweft-test mirrors the last
+# validated main commit), and can be dispatched from ANY branch: pick the branch in the Actions UI, or
 #   gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=preview
 # The `test` environment has no deployment-branch policy, so feature branches are allowed.
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
   workflow_dispatch:
@@ -31,19 +35,22 @@ permissions:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: test
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --workspaces --include-workspace-root
 
       - name: Install Netlify CLI
         run: npm install --global netlify-cli@26.2.0

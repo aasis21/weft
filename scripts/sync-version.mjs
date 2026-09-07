@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Single source of truth for Weft's version is the repo-root `VERSION` file. This script stamps
-// that value into every workspace package.json (root + shared + extension + mobile) so `npm`,
+// that value into every workspace package.json and package-lock entry so `npm`,
 // the Vite build (mobile — reads its own package.json), and the esbuild bundles stay in lockstep.
 //
 //   node scripts/sync-version.mjs          # write VERSION into all package.json files
@@ -29,6 +29,8 @@ const manifests = [
   "extension/package.json",
   "mobile/package.json",
 ];
+const lockPath = join(repoRoot, "package-lock.json");
+const lockPackageKeys = ["", "extension", "mobile", "shared"];
 
 const check = process.argv.includes("--check");
 let drift = false;
@@ -52,8 +54,27 @@ for (const rel of manifests) {
   console.log(`sync-version: ${rel} -> ${version}`);
 }
 
+const lockRaw = readFileSync(lockPath, "utf8");
+const lock = JSON.parse(lockRaw);
+const staleLockEntries = lockPackageKeys.filter((key) => lock.packages?.[key]?.version !== version);
+if (lock.version !== version) staleLockEntries.unshift("<root>");
+if (staleLockEntries.length > 0) {
+  if (check) {
+    console.error(`sync-version: package-lock.json has stale version entries: ${staleLockEntries.join(", ")}`);
+    drift = true;
+  } else {
+    lock.version = version;
+    for (const key of lockPackageKeys) {
+      if (!lock.packages?.[key]) throw new Error(`sync-version: package-lock.json is missing packages["${key}"]`);
+      lock.packages[key].version = version;
+    }
+    writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+    console.log(`sync-version: package-lock.json -> ${version}`);
+  }
+}
+
 if (check && drift) {
-  console.error("sync-version: run `node scripts/sync-version.mjs` to fix.");
+  console.error("sync-version: run `npm run sync-version` to fix.");
   process.exit(1);
 }
 if (check) console.log(`sync-version: all manifests at ${version}`);

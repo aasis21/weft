@@ -19,10 +19,37 @@
   to = "/index.html"
   status = 200
 
-# Camera QR scanning needs HTTPS (Netlify default) + an explicit camera permission policy.
+# Browser security policy for the hosted app. Supabase needs both HTTPS and WSS on its configured
+# project host. User-operated Supabase and dev-tunnel relays may use custom secure origins, so
+# connect-src permits HTTPS/WSS while scripts remain restricted to this origin. The Vite SPA still
+# sets a small number of dynamic React style attributes, so that narrowly scoped allowance remains.
 [[headers]]
   for = "/*"
   [headers.values]
-    Permissions-Policy = "camera=(self)"
-    Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https: wss:; media-src 'self' data: blob:; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    Permissions-Policy = "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()"
+    Referrer-Policy = "no-referrer"
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
     X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+
+# app.html externalizes both CSS and JavaScript, so it can enforce a no-inline policy. This policy
+# is additive with the global security headers above.
+[[headers]]
+  for = "/app.html"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; frame-src 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; font-src 'self'; img-src 'self' data:; connect-src 'self'; media-src 'none'; manifest-src 'self'; worker-src 'none'; upgrade-insecure-requests"
+
+[[headers]]
+  for = "/app-download.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Content-Type = "text/javascript; charset=utf-8"
+
+[[headers]]
+  for = "/release-manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Content-Type = "application/json; charset=utf-8"

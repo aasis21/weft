@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 
 const devices = [
@@ -24,7 +24,8 @@ const devices = [
   },
 ];
 
-const snapshot = { ready: true, activeId: null, sessions: [], devices };
+const defaultSnapshot = { ready: true, activeId: null, sessions: [], devices };
+let snapshot = defaultSnapshot;
 
 vi.mock('@/session/runtime/instance', () => ({
   sessionRuntime: {
@@ -34,6 +35,10 @@ vi.mock('@/session/runtime/instance', () => ({
 }));
 
 describe('SettingsScreen', () => {
+  beforeEach(() => {
+    snapshot = defaultSnapshot;
+  });
+
   it('lists every paired device with its build, not just the laptop that opened Settings', () => {
     render(<SettingsScreen onClose={vi.fn()} laptopVersion="0.9.1" />);
 
@@ -75,6 +80,27 @@ describe('SettingsScreen', () => {
     // The phone is on the dev/test build, the laptop claims 0.9.1 — the mismatch is the single most
     // common cause of "paired but nothing happens", so it is stated rather than left to be diffed.
     expect(screen.getByRole('status')).toHaveTextContent(/different build/i);
+    expect(within(screen.getByRole('status')).getByRole('link', { name: 'Update guide' })).toHaveAttribute(
+      'href',
+      'https://github.com/aasis21/weft/blob/main/docs/releases.md',
+    );
+  });
+
+  it('uses the current session laptop version when no device list is available', () => {
+    snapshot = { ...defaultSnapshot, devices: [] };
+    render(<SettingsScreen onClose={vi.fn()} laptopVersion="0.9.1" />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(/different build/i);
+  });
+
+  it('exposes privacy, security, support, and update guidance', () => {
+    render(<SettingsScreen onClose={vi.fn()} />);
+
+    const links = screen.getByRole('navigation', { name: 'Weft help and policies' });
+    expect(within(links).getByRole('link', { name: 'Privacy' })).toBeInTheDocument();
+    expect(within(links).getByRole('link', { name: 'Security' })).toBeInTheDocument();
+    expect(within(links).getByRole('link', { name: 'Support & diagnostics' })).toBeInTheDocument();
+    expect(within(links).getByRole('link', { name: 'Update guide' })).toBeInTheDocument();
   });
 
   it('only offers the sessions hamburger when the host screen can open a drawer', () => {

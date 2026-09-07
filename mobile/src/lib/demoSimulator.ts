@@ -7,6 +7,7 @@ import {
   approvalRequest,
   assistantMessage,
   buildPairingPayload,
+  createPairingGate,
   createLocalTransport,
   elicitationComplete,
   elicitationRequest,
@@ -39,16 +40,25 @@ export async function startDemoSession(): Promise<DemoSession> {
   const channelId = randomChannelId();
   const laptopKeys = await generateKeyPair();
   const laptopTransport = createLocalTransport({ channelId });
-  const laptopPeer = waitForPeer({
-    transport: laptopTransport,
-    keyPair: laptopKeys,
-    timeoutMs: 10_000,
-  });
   const pairingPayload = buildPairingPayload({
     channelId,
     publicKeyB64: laptopKeys.publicKeyB64,
     transport: { kind: 'local' },
   });
+  const laptopPeer = waitForPeer({
+    transport: laptopTransport,
+    keyPair: laptopKeys,
+    timeoutMs: 10_000,
+    connect: false,
+    channelId,
+    pairingGate: createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+    }),
+  });
+  // waitForPeer registers the hello handler synchronously. Connect it explicitly before the phone
+  // starts so the demo never races an authenticated hello against laptop transport readiness.
+  await laptopTransport.connect();
   // The Demo/Simulator runs entirely in-process: force the phone side onto the same
   // in-memory LocalTransport bus as the simulated laptop, regardless of what a real pairing
   // QR would specify.

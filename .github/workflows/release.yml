@@ -1,0 +1,85 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # The launch gate exercises the optional node:sqlite integration.
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Verify tag and manifests
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          test "${GITHUB_REF_NAME}" = "v${version}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match VERSION v${version}" >&2
+            exit 1
+          }
+          npm run check-version
+
+      - name: Install browser test runtimes
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run launch gate
+        run: |
+          npm test
+          npm run test:e2e -w @aasis21/weft-mobile
+          npm audit --omit=dev --audit-level=high
+
+      - name: Build release payloads
+        shell: bash
+        run: |
+          npm run build -w @aasis21/weft-extension
+          mkdir -p release
+          cp extension/dist/extension.mjs release/
+          cp extension/dist/relayServerProcess.mjs release/
+          cp extension/dist/devtunnelHostWatchdog.mjs release/
+          cp extension/dist/weft.mjs release/
+          cp skill/weft-how-to-use/SKILL.md release/weft-skill.md
+          cp mobile/public/install.ps1 release/
+          cp mobile/public/install.sh release/
+          node scripts/generate-release-manifest.mjs release
+          version="$(tr -d '\r\n' < VERSION)"
+          tar -C release -czf "weft-${version}.tar.gz" .
+          (cd release && zip -q -r "../weft-${version}.zip" .)
+
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            weft-*.tar.gz
+            weft-*.zip
+            release/release-manifest.json
+
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          gh release create "${GITHUB_REF_NAME}" \
+            "weft-${version}.tar.gz" \
+            "weft-${version}.zip" \
+            release/release-manifest.json \
+            --generate-notes \
+            --verify-tag \
+            --title "Weft ${version}"

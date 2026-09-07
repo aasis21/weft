@@ -22,6 +22,7 @@ mobile/public/relayServerProcess.mjs
 mobile/public/devtunnelHostWatchdog.mjs
 mobile/public/weft.mjs
 mobile/public/weft-skill.md
+mobile/public/release-manifest.json
 
 # env & secrets
 .env
@@ -32,6 +33,7 @@ mobile/public/weft-skill.md
 mobile/android/
 mobile/ios/
 *.keystore
+mobile/release/*.apk
 
 # logs & os
 *.log

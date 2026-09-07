@@ -1,8 +1,11 @@
-# Hosting & self-hosting
+# Advanced: hosting & self-hosting
 
 Weft's relay is a Supabase Realtime Broadcast channel. The **code** is open source
 (Apache-2.0); operating a **relay** is a separate concern. This page covers both the
 public instance and self-hosting.
+
+Most users do not need this guide. Install Weft, run `weft start`, and scan the QR to
+use the configured hosted relay. Continue here only to operate or select a relay.
 
 ## Two separate things
 
@@ -19,8 +22,11 @@ requires *their* permission. Open code ≠ a seat on someone's infrastructure bi
 
 If a public Weft relay is advertised, the mobile app ships pointing at it. There is no
 account — pairing is by QR. The operator may rate-limit or revoke abusive clients. The
-relay only ever carries ciphertext (see [`security.md`](./security.md)); the operator
-cannot read your session. Use is subject to [`../TERMS.md`](../TERMS.md).
+relay only ever carries ciphertext and stores no session content (see
+[`security.md`](./security.md)); the operator does not hold the endpoint keys needed to
+decrypt your session. The infrastructure provider may process ordinary connection
+metadata and operational logs. Use is subject to [`../TERMS.md`](../TERMS.md) and
+[`../PRIVACY.md`](../PRIVACY.md).
 
 ## Option B — self-host (recommended for privacy / control)
 
@@ -38,7 +44,9 @@ You only need a free Supabase project.
    - or edit `~/.weft/supabase.json` (`{"url": "...", "anonKey": "..."}`) and run `weft set-transport supabase`
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is
-untrusted infrastructure: it routes ciphertext and learns only timing and channel ids.
+untrusted infrastructure: it routes ciphertext and stores no session content. Depending
+on the provider and your configuration, operational logs may include timing, IP
+addresses, and channel identifiers.
 
 ## Configuring the extension's transport
 

@@ -22,6 +22,7 @@ const td = new TextDecoder();
 const EC_PARAMS = { name: "ECDH", namedCurve: "P-256" };
 const HKDF_SALT = te.encode("weft-v1");
 const HKDF_INFO = te.encode("weft-session-key");
+const MAX_KDF_CONTEXT_BYTES = 256;
 const P256_RAW_PUBLIC_KEY_BYTES = 65;
 const AES_GCM_IV_BYTES = 12;
 const AES_GCM_TAG_BYTES = 16;
@@ -234,14 +235,25 @@ export async function importPeerPublicKey(b64) {
  * @param {string} peerPublicKeyB64 - the peer's public key (base64)
  * @returns {Promise<CryptoKey>} an AES-GCM key usable with encryptJSON/decryptJSON
  */
-export async function deriveSessionKey(privateKey, peerPublicKeyB64) {
+export async function deriveSessionKey(privateKey, peerPublicKeyB64, context = "") {
   assertCryptoKey(privateKey, "privateKey", { name: "ECDH", type: "private", namedCurve: "P-256" });
+  if (typeof context !== "string") {
+    throw cryptoError("session key context must be a string.");
+  }
+  const contextBytes = te.encode(context);
+  if (contextBytes.length > MAX_KDF_CONTEXT_BYTES) {
+    throw cryptoError("session key context is too large.");
+  }
   const peerPublic = await importPeerPublicKey(peerPublicKeyB64);
   try {
     const sharedBits = await subtle.deriveBits({ name: "ECDH", public: peerPublic }, privateKey, 256);
     const hkdfKey = await subtle.importKey("raw", sharedBits, "HKDF", false, ["deriveKey"]);
+    const info =
+      contextBytes.length === 0
+        ? HKDF_INFO
+        : new Uint8Array([...HKDF_INFO, 0, ...contextBytes]);
     return await subtle.deriveKey(
-      { name: "HKDF", hash: "SHA-256", salt: HKDF_SALT, info: HKDF_INFO },
+      { name: "HKDF", hash: "SHA-256", salt: HKDF_SALT, info },
       hkdfKey,
       { name: "AES-GCM", length: 256 },
       false,
@@ -282,6 +294,12 @@ export async function decryptJSON(key, payload) {
 export function randomChannelId() {
   const b = cryptoObj.getRandomValues(new Uint8Array(16));
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** Unguessable 256-bit base64url bearer token used to authorize one pairing enrollment. */
+export function randomPairingToken() {
+  const b = cryptoObj.getRandomValues(new Uint8Array(32));
+  return bytesToB64(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/u, "");
 }
 
 export const _internal = { bytesToB64, b64ToBytes };

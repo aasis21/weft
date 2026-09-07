@@ -78,7 +78,12 @@ export const SUBTYPE: {
     readonly SESSION_OFFERS: "session_offers";
     readonly SESSION_CLAIMED: "session_claimed";
   };
-  readonly PAIR: { readonly HELLO: "hello"; readonly ACK: "ack" };
+  readonly PAIR: {
+    readonly HELLO: "hello";
+    readonly CHALLENGE: "challenge";
+    readonly PROOF: "proof";
+    readonly ACK: "ack";
+  };
 };
 
 export const MODES: readonly SessionMode[];
@@ -273,14 +278,20 @@ export interface StateSnapshotMsg {
   /** Pending ask_user / elicitation prompt payloads to (re)render. */
   elicitations: ElicitationRequestMsg[];
 }
-/** The pre-key pairing handshake payloads (plaintext; only ever carry PUBLIC keys). */
+/** The pre-key pairing hello carries public metadata plus an ECDH-sealed bearer proof. */
 export interface PairHelloMsg {
   v: number;
   pub: string;
+  nonce?: string;
+  auth?: {
+    iv: string;
+    ciphertext: string;
+  };
 }
 export interface PairAckMsg {
   v: number;
   ok: boolean;
+  nonce?: string;
 }
 
 // ---- payload shapes: phone-launched sessions (#156) ------------------------
@@ -478,6 +489,7 @@ export type EventEnvelope =
   | UserMessageEcho
   | PromptMessage
   | ApprovalRequest
+  | ApprovalComplete
   | ApprovalDecision
   | ElicitationRequest
   | ElicitationResponse
@@ -497,6 +509,9 @@ export type EventEnvelope =
   | ProjectListRequest
   | ProjectListMessage
   | SpawnSessionMessage
+  | SessionListRequest
+  | SessionListMessage
+  | ResumeSessionMessage
   | SpawnPairing
   | SpawnResult
   | LaunchStatusMessage

@@ -1,5 +1,5 @@
-import { Preferences } from '@capacitor/preferences';
 import type { PairingPayload, SpawnMode } from '@aasis21/weft-shared';
+import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 
 const PENDING_OPERATIONS_KEY = 'weft.pendingOperations.v1';
 let mutationQueue: Promise<void> = Promise.resolve();
@@ -58,8 +58,7 @@ function isPendingOperation(value: unknown): value is PendingOperation {
 
 async function read(): Promise<PendingOperation[]> {
   try {
-    const { value } = await Preferences.get({ key: PENDING_OPERATIONS_KEY });
-    const raw = globalThis.localStorage?.getItem(PENDING_OPERATIONS_KEY) ?? value;
+    const raw = await preferencesStorage.getItem(PENDING_OPERATIONS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as { operations?: unknown };
     return Array.isArray(parsed?.operations) ? parsed.operations.filter(isPendingOperation) : [];
@@ -70,16 +69,7 @@ async function read(): Promise<PendingOperation[]> {
 
 async function write(operations: PendingOperation[]): Promise<void> {
   const value = JSON.stringify({ operations });
-  try {
-    globalThis.localStorage?.setItem(PENDING_OPERATIONS_KEY, value);
-  } catch {
-    // Preferences remains the primary native store.
-  }
-  try {
-    await Preferences.set({ key: PENDING_OPERATIONS_KEY, value });
-  } catch {
-    // The localStorage mirror still covers the hosted app.
-  }
+  await preferencesStorage.setItem(PENDING_OPERATIONS_KEY, value);
 }
 
 export async function loadPendingOperations(): Promise<PendingOperation[]> {

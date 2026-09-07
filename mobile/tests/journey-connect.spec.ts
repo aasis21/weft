@@ -3,16 +3,18 @@ import { test, expect } from '@playwright/test';
 // JOURNEY — Connect / navigation (real browser, phone viewport 412×915).
 //
 // Proves the multi-screen navigation a first-run user actually walks: the web
-// onboarding Landing, its hand-off to the scanner-first Join screen, the manual
-// pairing-code fallback UI, and finally landing inside a real Session surface via
-// the in-app demo. This is the "does the app route/render between screens for a
+// onboarding Landing, its hand-off to the scanner-first Join screen, the
+// touch-first controls, and finally landing inside a real Session surface via
+// the demo. This is the "does the app route/render between screens for a
 // real user" question that only a real browser can answer — protocol breadth
 // lives in the Vitest scenario suite, not here.
 test.describe('Journey: connect & navigate', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     // First run (no stored sessions): the web build shows the onboarding Landing.
-    await expect(page.locator('.landing-shell')).toBeVisible();
+    // Parallel browser workers can make Capacitor's first storage-plugin load exceed
+    // Playwright's five-second assertion default even though boot is progressing normally.
+    await expect(page.locator('.landing-shell')).toBeVisible({ timeout: 15_000 });
   });
 
   test('Landing renders the hero, pairing CTA, and install command', async ({ page }) => {
@@ -26,35 +28,26 @@ test.describe('Journey: connect & navigate', () => {
     await expect(page.locator('.install-code')).toBeVisible();
   });
 
-  test('"Scan QR to pair" opens the scanner-first Join screen with a manual fallback', async ({ page }) => {
+  test('"Scan QR to pair" opens the touch-first scanner screen', async ({ page }) => {
     await page.locator('.landing-hero').getByRole('button', { name: 'Scan QR to pair' }).click();
 
     // Navigated Landing → Join.
     await expect(page.locator('.join-shell')).toBeVisible();
-    await expect(page.locator('.join-head h2')).toContainText('Point your camera at the laptop QR');
-
-    // The manual fallback is collapsed by default; opening it reveals the paste box.
-    const manualToggle = page.getByRole('button', { name: 'Enter code manually' });
-    await expect(manualToggle).toBeVisible();
-    await manualToggle.click();
-    await expect(page.getByLabel('Manual pairing JSON')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Pair from pasted code' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Scan to connect' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Scan pairing QR' })).toBeVisible();
+    await expect(page.getByLabel('Manual pairing JSON')).toHaveCount(0);
   });
 
-  test('"Paste a code" jumps straight to Join with the manual box already open', async ({ page }) => {
-    await page.locator('.landing-hero').getByRole('button', { name: 'Paste a code' }).click();
-    await expect(page.locator('.join-shell')).toBeVisible();
-    // initialManual → the paste box is open on arrival, no toggle needed.
-    await expect(page.getByLabel('Manual pairing JSON')).toBeVisible();
+  test('touch devices omit the desktop-only paste shortcut', async ({ page }) => {
+    await expect(page.locator('.landing-hero').getByRole('button', { name: 'Paste a code' })).toHaveCount(0);
   });
 
-  test('Landing → Join → Session: the demo lands the user in a live session surface', async ({ page }) => {
-    // Walk the real navigation path a user takes when they have no laptop QR handy:
-    // open Join, then use the in-app Demo/Simulator to reach a Session.
+  test('Landing → Join → Back → Demo reaches a live session surface', async ({ page }) => {
     await page.locator('.landing-hero').getByRole('button', { name: 'Scan QR to pair' }).click();
     await expect(page.locator('.join-shell')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Demo / Simulator' }).click();
+    await page.getByRole('button', { name: 'Back' }).click();
+    await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
 
     // Now inside the chat surface: header + status render, composer is present.
     await expect(page.locator('.weft-session')).toBeVisible();

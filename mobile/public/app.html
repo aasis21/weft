@@ -3,119 +3,49 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Weft — Download for Android</title>
-  <meta name="description" content="Install the Weft Android app to pair with your Copilot CLI sessions from your phone." />
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0d1117;
-      --bg-elev: #161b22;
-      --bg-rule: #30363d;
-      --fg: #e6edf3;
-      --fg-dim: #8b949e;
-      --accent: #2f81f7;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 22px;
-      padding: 32px 20px 48px;
-      background: var(--bg);
-      color: var(--fg);
-      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      text-align: center;
-    }
-    .mark {
-      width: 64px;
-      height: 64px;
-      display: grid;
-      place-items: center;
-      border-radius: 20px;
-      background: var(--accent);
-      color: #fff;
-      font: 700 30px/1 Georgia, "Times New Roman", serif;
-    }
-    h1 { margin: 0; font-size: 1.5rem; }
-    p.tag { margin: 0; color: var(--fg-dim); max-width: 320px; }
-    .card {
-      width: 100%;
-      max-width: 380px;
-      border: 1px solid var(--bg-rule);
-      background: var(--bg-elev);
-      border-radius: 20px;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .download-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      width: 100%;
-      padding: 14px 18px;
-      border-radius: 14px;
-      background: var(--accent);
-      color: #fff;
-      font-weight: 600;
-      font-size: 1rem;
-      text-decoration: none;
-      border: 0;
-      cursor: pointer;
-      transition: filter 140ms ease, transform 140ms ease;
-    }
-    .download-btn:active { transform: scale(0.98); }
-    .download-btn:hover { filter: brightness(1.08); }
-    .download-btn svg { width: 20px; height: 20px; flex: 0 0 auto; }
-    .meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.8rem;
-      color: var(--fg-dim);
-      padding: 0 2px;
-    }
-    .steps {
-      text-align: left;
-      margin: 0;
-      padding-left: 1.1rem;
-      color: var(--fg-dim);
-      font-size: 0.85rem;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    a.plain { color: var(--accent); }
-  </style>
+  <title>Weft — Install on your phone</title>
+  <meta name="description" content="Install the Weft web app on your phone or download a verified Android release." />
+  <meta name="theme-color" content="#0d1117" />
+  <link rel="icon" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
   <div class="mark">W</div>
-  <h1>Get Weft for Android</h1>
-  <p class="tag">Pair with your Copilot CLI sessions and drive them from your phone.</p>
+  <h1>Get Weft on your phone</h1>
+  <p class="tag">The installable web app is the supported release: no store account, no sideloading, and updates arrive automatically.</p>
 
   <div class="card">
-    <a class="download-btn" href="/weft-debug.apk" download="weft.apk">
+    <a class="download-btn" href="/">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" />
       </svg>
-      Download APK
+      Open the Weft web app
     </a>
     <div class="meta">
-      <span>dev.aasis21.weft · v1.0</span>
-      <span>Android 6+</span>
+      <span id="web-version">Current release</span>
+      <span>Android · iPhone · Desktop</span>
     </div>
     <ol class="steps">
-      <li>Tap "Download APK" above on your phone's browser.</li>
-      <li>Open the downloaded file from your notifications or Downloads app.</li>
-      <li>Allow "install from unknown sources" if prompted, then install.</li>
+      <li>Open Weft in Chrome or Safari.</li>
+      <li>Use <strong>Add to Home Screen</strong> or <strong>Install app</strong> from the browser menu.</li>
+      <li>Launch it from your home screen, then scan the QR from <code>weft start</code>.</li>
     </ol>
   </div>
 
-  <p class="tag">CLI extension instead? Run <code>irm https://useweft.netlify.app/install.ps1 | iex</code> — see the <a class="plain" href="/">web app</a>.</p>
+  <div class="card" id="native-card" hidden>
+    <a class="download-btn" id="apk-link" href="#">
+      Download verified Android APK
+    </a>
+    <div class="meta">
+      <span id="apk-version">Android release</span>
+      <span id="apk-size"></span>
+    </div>
+    <p class="tag">SHA-256: <code id="apk-sha"></code></p>
+  </div>
+
+  <p class="tag">Laptop extension: <code>irm https://useweft.netlify.app/install.ps1 | iex</code>. Downloads are checked against the published SHA-256 manifest before execution.</p>
+  <p class="tag"><a class="plain" href="https://github.com/aasis21/weft/releases">Release notes</a> · <a class="plain" href="/release-manifest.json">Checksums</a></p>
+  <script src="/app-download.js" defer></script>
 </body>
 </html>

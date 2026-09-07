@@ -1,16 +1,35 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { JSX } from 'react';
 import type { PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
-import { StartSessionScreen, type StartMode } from '@/ui/screens/StartSessionScreen';
-import { DevicesScreen } from '@/ui/screens/DevicesScreen';
-import { DeviceDetailsScreen } from '@/ui/screens/DeviceDetailsScreen';
-import { SessionScreen } from '@/ui/screens/SessionScreen';
+import type { StartMode } from '@/ui/screens/StartSessionScreen';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { sessionRuntime } from '@/session/runtime/instance';
 
+const StartSessionScreen = lazy(() =>
+  import('@/ui/screens/StartSessionScreen').then((module) => ({ default: module.StartSessionScreen })),
+);
+const DevicesScreen = lazy(() =>
+  import('@/ui/screens/DevicesScreen').then((module) => ({ default: module.DevicesScreen })),
+);
+const DeviceDetailsScreen = lazy(() =>
+  import('@/ui/screens/DeviceDetailsScreen').then((module) => ({ default: module.DeviceDetailsScreen })),
+);
+const SessionScreen = lazy(() =>
+  import('@/ui/screens/SessionScreen').then((module) => ({ default: module.SessionScreen })),
+);
+
 type ModalHistoryState = { weftView: 'devices' } | { weftView: 'device-details'; channelId: string } | null;
+
+function loadingScreen(label: string): JSX.Element {
+  return (
+    <main className="boot" role="status" aria-live="polite">
+      <div className="boot-mark" aria-hidden="true">W</div>
+      <p>{label}</p>
+    </main>
+  );
+}
 
 export default function App(): JSX.Element {
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
@@ -213,64 +232,17 @@ export default function App(): JSX.Element {
   // (mirroring an existing session by QR).
   if (devicesOpen) {
     return (
-      <DevicesScreen
-        sessions={snapshot.sessions}
-        activeId={activeId}
-        devices={snapshot.devices}
-        onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
-        onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
-        onForget={(id) => sessionRuntime.forgetDevice(id)}
-        onStartOnDevice={(id) => openStart(id)}
-        onOpenDetails={(id) => openDeviceDetails(id)}
-        onScanListener={() => openJoin(false)}
-        onSelectSession={(id) => {
-          closeDeviceScreens();
-          sessionRuntime.setActive(id);
-        }}
-        onAddSession={() => openJoin(false)}
-        onStartSession={() => openStart()}
-        onOpenDevices={openDevices}
-        onRemoveSession={(id) => void sessionRuntime.remove(id)}
-        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
-        onGoHome={() => {
-          closeDeviceScreens();
-          setError(null);
-          setShowLanding(true);
-        }}
-      />
-    );
-  }
-
-  // Single-device drill-down: live status, event log, and every session ever spawned from this
-  // device (matched by its stable deviceId, so it survives weft restarts).
-  if (deviceDetailsChannelId) {
-    const device = snapshot.devices.find((d) => d.channelId === deviceDetailsChannelId);
-    if (device) {
-      return (
-        <DeviceDetailsScreen
-          device={device}
-          activeId={activeId}
+      <Suspense fallback={loadingScreen('Opening your devices…')}>
+        <DevicesScreen
           sessions={snapshot.sessions}
+          activeId={activeId}
           devices={snapshot.devices}
           onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
-          onResumeOnDevice={(id) => openStart(id, 'resume')}
           onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
-          onForget={async (id) => {
-            await sessionRuntime.forgetDevice(id);
-            closeDeviceScreens();
-          }}
+          onForget={(id) => sessionRuntime.forgetDevice(id)}
           onStartOnDevice={(id) => openStart(id)}
-          onOpenDeviceDetails={(id) => openDeviceDetails(id)}
-          onJoinOffer={(deviceId, offerChannelId) => {
-            closeDeviceScreens();
-            void sessionRuntime.joinOfferedSession(deviceId, offerChannelId).catch((err) => {
-              setError(err instanceof Error ? err.message : 'Could not join the offered session.');
-            });
-          }}
-          onOpenSession={(id) => {
-            closeDeviceScreens();
-            sessionRuntime.setActive(id);
-          }}
+          onOpenDetails={(id) => openDeviceDetails(id)}
+          onScanListener={() => openJoin(false)}
           onSelectSession={(id) => {
             closeDeviceScreens();
             sessionRuntime.setActive(id);
@@ -286,6 +258,57 @@ export default function App(): JSX.Element {
             setShowLanding(true);
           }}
         />
+      </Suspense>
+    );
+  }
+
+  // Single-device drill-down: live status, event log, and every session ever spawned from this
+  // device (matched by its stable deviceId, so it survives weft restarts).
+  if (deviceDetailsChannelId) {
+    const device = snapshot.devices.find((d) => d.channelId === deviceDetailsChannelId);
+    if (device) {
+      return (
+        <Suspense fallback={loadingScreen('Opening device details…')}>
+          <DeviceDetailsScreen
+            device={device}
+            activeId={activeId}
+            sessions={snapshot.sessions}
+            devices={snapshot.devices}
+            onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
+            onResumeOnDevice={(id) => openStart(id, 'resume')}
+            onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
+            onForget={async (id) => {
+              await sessionRuntime.forgetDevice(id);
+              closeDeviceScreens();
+            }}
+            onStartOnDevice={(id) => openStart(id)}
+            onOpenDeviceDetails={(id) => openDeviceDetails(id)}
+            onJoinOffer={(deviceId, offerChannelId) => {
+              closeDeviceScreens();
+              void sessionRuntime.joinOfferedSession(deviceId, offerChannelId).catch((err) => {
+                setError(err instanceof Error ? err.message : 'Could not join the offered session.');
+              });
+            }}
+            onOpenSession={(id) => {
+              closeDeviceScreens();
+              sessionRuntime.setActive(id);
+            }}
+            onSelectSession={(id) => {
+              closeDeviceScreens();
+              sessionRuntime.setActive(id);
+            }}
+            onAddSession={() => openJoin(false)}
+            onStartSession={() => openStart()}
+            onOpenDevices={openDevices}
+            onRemoveSession={(id) => void sessionRuntime.remove(id)}
+            onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+            onGoHome={() => {
+              closeDeviceScreens();
+              setError(null);
+              setShowLanding(true);
+            }}
+          />
+        </Suspense>
       );
     }
     // Device vanished (forgotten elsewhere) — fall through to the normal screen below.
@@ -298,54 +321,56 @@ export default function App(): JSX.Element {
 
   if (starting || hasDevicesOnly) {
     return (
-      <StartSessionScreen
-        hasSessions={hasSessions}
-        devices={snapshot.devices}
-        initialChannelId={startDeviceId}
-        initialMode={startMode}
-        onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
-        onStart={async (id, opts) => {
-          await sessionRuntime.spawnSession(id, opts);
-          setStarting(false);
-          setStartDeviceId(undefined);
-          setShowLanding(false);
-        }}
-        onRefreshSessions={(id, cwd) => void sessionRuntime.refreshSessions(id, cwd)}
-        onResume={async (id, req) => {
-          await sessionRuntime.resumeSession(id, req);
-          setStarting(false);
-          setStartDeviceId(undefined);
-          setShowLanding(false);
-        }}
-        onOpenSession={(id) => {
-          setStarting(false);
-          setStartDeviceId(undefined);
-          setShowLanding(false);
-          sessionRuntime.setActive(id);
-        }}
-        onScanListener={() => openJoin(false)}
-        onManageDevices={openDevices}
-        onCancel={() => {
-          setStarting(false);
-          setStartDeviceId(undefined);
-          setError(null);
-        }}
-        sessions={snapshot.sessions}
-        activeId={activeId}
-        onSelectSession={(id) => {
-          setStarting(false);
-          setStartDeviceId(undefined);
-          sessionRuntime.setActive(id);
-        }}
-        onRemoveSession={(id) => void sessionRuntime.remove(id)}
-        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
-        onGoHome={() => {
-          setStarting(false);
-          setStartDeviceId(undefined);
-          setError(null);
-          setShowLanding(true);
-        }}
-      />
+      <Suspense fallback={loadingScreen('Loading session controls…')}>
+        <StartSessionScreen
+          hasSessions={hasSessions}
+          devices={snapshot.devices}
+          initialChannelId={startDeviceId}
+          initialMode={startMode}
+          onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
+          onStart={async (id, opts) => {
+            await sessionRuntime.spawnSession(id, opts);
+            setStarting(false);
+            setStartDeviceId(undefined);
+            setShowLanding(false);
+          }}
+          onRefreshSessions={(id, cwd) => void sessionRuntime.refreshSessions(id, cwd)}
+          onResume={async (id, req) => {
+            await sessionRuntime.resumeSession(id, req);
+            setStarting(false);
+            setStartDeviceId(undefined);
+            setShowLanding(false);
+          }}
+          onOpenSession={(id) => {
+            setStarting(false);
+            setStartDeviceId(undefined);
+            setShowLanding(false);
+            sessionRuntime.setActive(id);
+          }}
+          onScanListener={() => openJoin(false)}
+          onManageDevices={openDevices}
+          onCancel={() => {
+            setStarting(false);
+            setStartDeviceId(undefined);
+            setError(null);
+          }}
+          sessions={snapshot.sessions}
+          activeId={activeId}
+          onSelectSession={(id) => {
+            setStarting(false);
+            setStartDeviceId(undefined);
+            sessionRuntime.setActive(id);
+          }}
+          onRemoveSession={(id) => void sessionRuntime.remove(id)}
+          onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+          onGoHome={() => {
+            setStarting(false);
+            setStartDeviceId(undefined);
+            setError(null);
+            setShowLanding(true);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -374,44 +399,46 @@ export default function App(): JSX.Element {
   }
 
   return (
-    <SessionScreen
-      active={active}
-      sessions={snapshot.sessions}
-      activeId={active.meta.channelId}
-      onPrompt={(text, attachments, delivery?: PromptDelivery) =>
-        void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments, delivery)
-      }
-      onApprove={(requestId, optionId) => void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)}
-      onElicitationRespond={(requestId, action, content) =>
-        void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
-      }
-      onInterrupt={() => void sessionRuntime.sendInterrupt(active.meta.channelId)}
-      onModeChange={(mode: SessionMode) => void sessionRuntime.sendMode(active.meta.channelId, mode)}
-      onCommand={(name, input) => void sessionRuntime.sendCommand(active.meta.channelId, name, input)}
-      onRetry={(itemId) => void sessionRuntime.retryPrompt(active.meta.channelId, itemId)}
-      onSelectSession={(id) => sessionRuntime.setActive(id)}
-      onAddSession={() => {
-        setAddManual(false);
-        setAdding(true);
-      }}
-      onStartSession={() => openStart()}
-      onOpenDevices={openDevices}
-      devices={snapshot.devices}
-      onStartOnDevice={(id) => openStart(id)}
-      onOpenDeviceDetails={(id) => openDeviceDetails(id)}
-      onVoiceModeChange={handleVoiceModeChange}
-      onRemoveSession={(id) => void sessionRuntime.remove(id)}
-      onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
-      onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
-      onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
-      onArchiveSession={(id) => sessionRuntime.archive(id)}
-      onReconnect={(id) => void sessionRuntime.reconnect(id)}
-      onRetrySpawn={(id) => void sessionRuntime.retrySpawn(id)}
-      onGoHome={() => {
-        setError(null);
-        setShowLanding(true);
-      }}
-      onLoadEarlier={() => {}}
-    />
+    <Suspense fallback={loadingScreen('Opening your session…')}>
+      <SessionScreen
+        active={active}
+        sessions={snapshot.sessions}
+        activeId={active.meta.channelId}
+        onPrompt={(text, attachments, delivery?: PromptDelivery) =>
+          void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments, delivery)
+        }
+        onApprove={(requestId, optionId) => void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)}
+        onElicitationRespond={(requestId, action, content) =>
+          void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
+        }
+        onInterrupt={() => void sessionRuntime.sendInterrupt(active.meta.channelId)}
+        onModeChange={(mode: SessionMode) => void sessionRuntime.sendMode(active.meta.channelId, mode)}
+        onCommand={(name, input) => void sessionRuntime.sendCommand(active.meta.channelId, name, input)}
+        onRetry={(itemId) => void sessionRuntime.retryPrompt(active.meta.channelId, itemId)}
+        onSelectSession={(id) => sessionRuntime.setActive(id)}
+        onAddSession={() => {
+          setAddManual(false);
+          setAdding(true);
+        }}
+        onStartSession={() => openStart()}
+        onOpenDevices={openDevices}
+        devices={snapshot.devices}
+        onStartOnDevice={(id) => openStart(id)}
+        onOpenDeviceDetails={(id) => openDeviceDetails(id)}
+        onVoiceModeChange={handleVoiceModeChange}
+        onRemoveSession={(id) => void sessionRuntime.remove(id)}
+        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+        onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
+        onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
+        onArchiveSession={(id) => sessionRuntime.archive(id)}
+        onReconnect={(id) => void sessionRuntime.reconnect(id)}
+        onRetrySpawn={(id) => void sessionRuntime.retrySpawn(id)}
+        onGoHome={() => {
+          setError(null);
+          setShowLanding(true);
+        }}
+        onLoadEarlier={() => {}}
+      />
+    </Suspense>
   );
 }

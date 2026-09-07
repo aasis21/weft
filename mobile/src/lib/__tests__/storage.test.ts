@@ -1,4 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
+import { Capacitor } from '@capacitor/core';
+import { vi } from 'vitest';
 import { clearStoredPairing, loadStoredPairing, saveStoredPairing, type StoredPairing } from '@/lib/storage';
 
 const pairing: StoredPairing = {
@@ -21,6 +23,16 @@ describe('pairing storage', () => {
 
     await expect(loadStoredPairing()).resolves.toEqual(pairing);
     expect(localStorage.getItem('weft.pairing.v1')).toBe(JSON.stringify(pairing));
+  });
+
+  it('keeps private pairing material out of localStorage on native Capacitor', async () => {
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    localStorage.setItem('weft.pairing.v1', JSON.stringify(pairing));
+
+    await saveStoredPairing(pairing);
+
+    expect(localStorage.getItem('weft.pairing.v1')).toBeNull();
+    expect((await Preferences.get({ key: 'weft.pairing.v1' })).value).toBe(JSON.stringify(pairing));
   });
 
   it('clear removes the pairing', async () => {

@@ -86,14 +86,8 @@ function Step-Version([string]$Root) {
     if ($current -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "VERSION is '$current', which is not major.minor.patch" }
     $next = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
     [System.IO.File]::WriteAllText($versionFile, $next)
-    foreach ($rel in @('package.json', 'mobile\package.json', 'extension\package.json', 'shared\package.json')) {
-        $f = Join-Path $Root $rel
-        if (-not (Test-Path $f)) { continue }
-        $text = Get-Content $f -Raw
-        # Only the package's OWN version line — the first "version" key — never a dependency range.
-        $patched = [regex]::Replace($text, '("version"\s*:\s*")[^"]+(")', "`${1}$next`${2}", 1)
-        [System.IO.File]::WriteAllText($f, $patched)
-    }
+    node (Join-Path $Root 'scripts\sync-version.mjs') | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "version synchronization failed ($LASTEXITCODE)" }
     return @{ From = $current; To = $next }
 }
 
@@ -121,7 +115,7 @@ try {
 
     if (-not (Test-Path (Join-Path $root 'node_modules'))) {
         Step 'Installing workspace dependencies (npm install)'
-        npm install | Out-Null
+        npm install --workspaces --include-workspace-root | Out-Null
         Ok 'dependencies ready'
     }
 
@@ -163,23 +157,31 @@ try {
             Copy-Item $skillSource $publicSkillBundle -Force
             Ok 'mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft-how-to-use/SKILL.md)'
         } else {
-            Warn "no $skillSource - the how-to-use skill won't be (re)published"
+            throw "no $skillSource - cannot publish a verifiable release without the how-to-use skill"
         }
+
+        Step 'Generating release integrity manifest'
+        node scripts/generate-release-manifest.mjs mobile/public | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "release manifest generation failed ($LASTEXITCODE)" }
+        Ok 'mobile/public/release-manifest.json  (SHA-256 for every installer payload)'
 
         Step 'Building mobile web app (Vite)'
         npm run build -w '@aasis21/weft-mobile' | Out-Null
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "mobile build did not produce $distDir" }
         Ok 'mobile/dist'
 
-        # The Android APK lives in mobile/release/ (NOT mobile/public/) so `cap sync` never bundles
-        # it into the native app's own assets. It's only stitched into the web dist here, so the
-        # hosted /app download page (mobile/public/app.html) has something to link to.
-        $apkSource = Join-Path $PSScriptRoot 'mobile\release\weft-debug.apk'
+        # Only publish a release APK. Debug packages are intentionally never exposed from the public
+        # site: they are debuggable and are not a trustworthy distribution artifact.
+        $version = (Get-Content (Join-Path $root 'VERSION') -Raw).Trim()
+        $apkSource = Join-Path $PSScriptRoot 'mobile\release\weft-release.apk'
         if (Test-Path $apkSource) {
-            Copy-Item $apkSource (Join-Path $distDir 'weft-debug.apk') -Force
-            Ok 'mobile/dist/weft-debug.apk  (served as /weft-debug.apk for the /app download page)'
+            $apkName = "weft-$version.apk"
+            Copy-Item $apkSource (Join-Path $distDir $apkName) -Force
+            node scripts/generate-release-manifest.mjs mobile/dist | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "release manifest generation failed after adding $apkName" }
+            Ok "mobile/dist/$apkName  (versioned release APK with published SHA-256)"
         } else {
-            Info 'No mobile/release/weft-debug.apk yet - /app download page will 404 until one is built'
+            Info 'No mobile/release/weft-release.apk - the public download page will recommend the PWA'
         }
     } else {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'

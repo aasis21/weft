@@ -356,8 +356,9 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
   <div class="nav-links">
     <a href="#what">what</a>
     <a href="#action">see it</a>
-    <a href="#transports">transports</a>
     <a href="#install">install</a>
+    <a href="#advanced">advanced</a>
+    <a href="https://useweft.netlify.app/" target="_blank" rel="noopener">open app ↗</a>
     <a class="nav-cta" href="https://github.com/aasis21/weft" target="_blank" rel="noopener">github ↗</a>
     <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme">
       <svg class="ic-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
@@ -389,8 +390,12 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
           <button class="install-tab" data-shell="bash">Bash</button>
         </div>
       </div>
-      <pre class="hero-install-cmd" data-shell="pwsh"><span class="prompt">PS&gt;</span><span class="highlight">irm https://useweft.netlify.app/install.ps1 | iex</span></pre>
-      <pre class="hero-install-cmd" data-shell="bash" hidden><span class="prompt">$</span><span class="highlight">curl -fsSL https://useweft.netlify.app/install.sh | bash</span></pre>
+      <pre class="hero-install-cmd" data-shell="pwsh"><span class="prompt">PS&gt;</span><span class="highlight">irm https://useweft.netlify.app/install.ps1 | iex</span>
+<span class="prompt">PS&gt;</span><span class="highlight">weft start</span>
+<span class="ok">✓ now scan the QR with your phone</span></pre>
+      <pre class="hero-install-cmd" data-shell="bash" hidden><span class="prompt">$</span><span class="highlight">curl -fsSL https://useweft.netlify.app/install.sh | bash</span>
+<span class="prompt">$</span><span class="highlight">weft start</span>
+<span class="ok">✓ now scan the QR with your phone</span></pre>
     </div>
 
     <div class="hero-phone" role="img" aria-label="A live Weft session mirrored on a phone: messages stream in, a test run finishes, and an approval card slides up to allow a git commit.">
@@ -428,7 +433,7 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
       <span class="badge"><b>Apache-2.0</b> licensed</span>
       <span class="badge">Windows · macOS · Linux</span>
       <span class="badge">End-to-end <b>encrypted</b></span>
-      <span class="badge">One command to install</span>
+      <span class="badge">PWA-first · install from your browser</span>
     </div>
   </div>
 
@@ -473,13 +478,43 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
     </div>
   </section>
 
-  <section id="transports">
+  <section id="install">
+    <header class="section-head reveal">
+      <span class="kicker">03 · Install details</span>
+      <h2>Install. Start. <em>Scan.</em></h2>
+      <p class="section-lede">Run the laptop installer, then <code>weft start</code>. Open the
+        hosted PWA on your phone and scan the QR. The PWA is the supported primary phone
+        distribution and works in the browser or installed to your home screen.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="https://useweft.netlify.app/" target="_blank" rel="noopener">Open the PWA ↗</a>
+        <a class="btn btn-ghost" href="https://useweft.netlify.app/app.html" target="_blank" rel="noopener">Install the PWA ↗</a>
+      </div>
+    </header>
+    <div class="hero-install" style="margin-inline:0">
+      <div class="hero-install-head">
+        <span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span>
+        <div class="install-tabs">
+          <button class="install-tab" data-shell="pwsh">PowerShell</button>
+          <button class="install-tab" data-shell="bash">Bash</button>
+        </div>
+      </div>
+      <pre class="hero-install-cmd" data-shell="pwsh"><span class="comment"># install</span>
+<span class="prompt">PS&gt;</span><span class="highlight">irm https://useweft.netlify.app/install.ps1 | iex</span>
+<span class="prompt">PS&gt;</span><span class="highlight">weft start</span>
+<span class="ok">✓ scan the QR with your phone</span></pre>
+      <pre class="hero-install-cmd" data-shell="bash" hidden><span class="comment"># install</span>
+<span class="prompt">$</span><span class="highlight">curl -fsSL https://useweft.netlify.app/install.sh | bash</span>
+<span class="prompt">$</span><span class="highlight">weft start</span>
+<span class="ok">✓ scan the QR with your phone</span></pre>
+    </div>
+  </section>
+
+  <section id="advanced">
     <header class="section-head center reveal">
-      <span class="kicker">03 · Transports</span>
+      <span class="kicker">04 · Advanced · optional</span>
       <h2>Your relay, <em>your</em> call.</h2>
-      <p class="section-lede">Weft pairs over one of two relays — both carry nothing but
-        end-to-end-encrypted envelopes. Start on the hosted one in seconds, or run your own with
-        no third party anywhere in the path.</p>
+      <p class="section-lede">The default hosted relay needs no setup. These options are for
+        people who want to choose or operate the relay infrastructure.</p>
     </header>
     <div class="tcards">
       <div class="tcard reveal">
@@ -497,13 +532,13 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
 <span class="p">$</span>weft set-transport supabase</div>
       </div>
       <div class="tcard reveal">
-        <span class="tcard-tag">Self-hosted · no third party</span>
+        <span class="tcard-tag">Bring your own · your account</span>
         <h3>Your own dev tunnel</h3>
         <p>Run the relay yourself on a Visual Studio Dev Tunnel — a private channel under your own
-          account, with no shared infrastructure between your desk and your phone. You bring it up;
-          pairing simply attaches to it.</p>
+          account instead of Weft's shared hosted relay. You bring it up; pairing simply attaches
+          to it.</p>
         <ul>
-          <li>Nothing in the path but your two devices and a tunnel you own</li>
+          <li>Managed under your Microsoft dev tunnel account</li>
           <li><code>weft devtunnel start</code> owns login + lifecycle; pairing just attaches</li>
           <li>Changed your mind? <code>weft set-transport supabase</code> flips back — no keys, ever</li>
         </ul>
@@ -513,32 +548,10 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
       </div>
     </div>
     <p class="tnote">Either way, pairing and every message are <b>AES-256-GCM encrypted</b> — the
-      relay is untrusted infrastructure that learns only timing and channel ids. The installer
+      relay stores no session content and cannot decrypt it. Infrastructure providers may still
+      process connection metadata such as IP addresses, timing, and channel ids. The installer
       seeds the hosted Supabase creds whichever transport you pick, so <code>weft set-transport</code>
       flips between the two anytime — no URL, no key.</p>
-  </section>
-
-  <section id="install">
-    <header class="section-head reveal">
-      <span class="kicker">04 · Install</span>
-      <h2>Up and running in <em>one</em> command.</h2>
-      <p class="section-lede">The installer registers the <code>weft</code> command and the Copilot CLI extension. Tabs default to your shell and remember your choice.</p>
-    </header>
-    <div class="hero-install" style="margin-inline:0">
-      <div class="hero-install-head">
-        <span class="t-dot"></span><span class="t-dot"></span><span class="t-dot"></span>
-        <div class="install-tabs">
-          <button class="install-tab" data-shell="pwsh">PowerShell</button>
-          <button class="install-tab" data-shell="bash">Bash</button>
-        </div>
-      </div>
-      <pre class="hero-install-cmd" data-shell="pwsh"><span class="comment"># install</span>
-<span class="prompt">PS&gt;</span><span class="highlight">irm https://useweft.netlify.app/install.ps1 | iex</span>
-<span class="ok">✓ installed — run `weft start` from anywhere</span></pre>
-      <pre class="hero-install-cmd" data-shell="bash" hidden><span class="comment"># install</span>
-<span class="prompt">$</span><span class="highlight">curl -fsSL https://useweft.netlify.app/install.sh | bash</span>
-<span class="ok">✓ installed — run `weft start` from anywhere</span></pre>
-    </div>
   </section>
 
   <section id="architecture">
@@ -554,7 +567,7 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
       </div>
       <div class="arch-link"><span class="arch-link-label">encrypted envelopes only</span></div>
       <div class="arch-node arch-relay">
-        <span class="arch-role">dumb middle · sees nothing</span>
+        <span class="arch-role">untrusted middle · no session-content storage</span>
         <span class="arch-name"><b>Relay</b> <span class="sep">·</span> Supabase realtime <span class="sep">/</span> dev tunnel</span>
       </div>
       <div class="arch-link"><span class="arch-link-label">encrypted envelopes only</span></div>
@@ -567,13 +580,14 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
 
   <section id="commands">
     <header class="section-head reveal">
-      <span class="kicker">06 · Commands</span>
-      <h2>Everything you can <em>say</em>.</h2>
-      <p class="section-lede"><b><code>/weft</code></b>, inside a live Copilot session, mirrors
+      <span class="kicker">06 · Advanced commands</span>
+      <h2>More control when you <em>need</em> it.</h2>
+      <p class="section-lede">The primary path needs only <code>weft start</code>.
+        <b><code>/weft</code></b>, inside a live Copilot session, mirrors
         <em>that</em> session to your phone. <b><code>weft start</code></b> runs a standalone
         Device Station your phone drives to spawn fresh sessions in your registered projects.
-        Station pairings can be <b>ephemeral</b> (a new QR each start — the default) or
-        <b>persistent</b> (reconnect with no rescan); a <code>/weft</code> pairing is always
+        Station pairings are <b>persistent</b> by default (reconnect with no rescan) or can be
+        <b>ephemeral</b> (a new QR each start); a <code>/weft</code> pairing is always
         per-session.</p>
     </header>
     <table class="cmds reveal">
@@ -585,16 +599,19 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
         <tr><td>weft list-projects</td><td>List registered projects and which one is default.</td></tr>
         <tr class="hide-mobile"><td>weft set-default &lt;name&gt;</td><td>Choose the project a bare pairing launches into.</td></tr>
         <tr><td>weft set-transport &lt;supabase|devtunnel|clear&gt;</td><td>Choose (or clear) the pairing transport.</td></tr>
-        <tr><td>weft set-pairing &lt;persistent|ephemeral&gt;</td><td>Device Station: reuse one channel/key across restarts (persistent) or mint a fresh one each start (ephemeral, the default).</td></tr>
+        <tr><td>weft set-pairing &lt;persistent|ephemeral&gt;</td><td>Device Station: reuse one channel/device identity across restarts (persistent, the default) or mint a fresh identity each start (ephemeral). Each handshake still derives a fresh encrypted session key.</td></tr>
         <tr class="hide-mobile"><td>weft rotate-pairing</td><td>Device Station: force a brand-new persistent channel/key, invalidating the old QR.</td></tr>
         <tr class="hide-mobile"><td>weft show-transport</td><td>Print the transport currently in effect and where it came from.</td></tr>
         <tr class="hide-mobile"><td>weft set-name &lt;name&gt;</td><td>Set the display name this device shows to your phone. Defaults to your OS hostname.</td></tr>
         <tr class="hide-mobile"><td>weft show-name</td><td>Print the device name currently in effect and where it came from.</td></tr>
         <tr><td>weft devtunnel &lt;start|status|stop&gt;</td><td>Bring up, check, or tear down the shared dev tunnel relay (used when the transport is <code>devtunnel</code>).</td></tr>
+        <tr><td>weft update --check</td><td>Check the published release manifest for a newer laptop build without changing files.</td></tr>
+        <tr><td>weft update</td><td>Verify release hashes and update installed code while preserving local configuration and pairings.</td></tr>
         <tr><td>weft help</td><td>Show usage.</td></tr>
       </tbody>
     </table>
-    <p class="cmds-more mobile-only">Project, naming &amp; introspection commands (<code>set-default</code>, <code>rotate-pairing</code>, <code>show-transport</code>, <code>set-name</code>…) are on the desktop table and in the <a href="https://github.com/aasis21/weft#commands" target="_blank" rel="noopener">README</a>.</p>
+    <p class="cmds-more mobile-only">Project, naming &amp; introspection commands are in the <a href="https://github.com/aasis21/weft/blob/main/docs/advanced.md" target="_blank" rel="noopener">advanced guide</a>.</p>
+    <p class="tnote">See the <a href="https://github.com/aasis21/weft/blob/main/docs/advanced.md" target="_blank" rel="noopener">advanced guide</a> for `/weft`, pairing modes, and transport commands, or the <a href="https://github.com/aasis21/weft/blob/main/docs/hosting.md" target="_blank" rel="noopener">self-hosting guide</a> for your own relay.</p>
   </section>
 
   <section class="closing reveal">
@@ -610,6 +627,11 @@ footer { border-top: 1px solid var(--border); max-width: 1120px; margin: 0 auto;
   <div class="foot-brand"><span class="brand-mark" aria-hidden="true"></span><span>weft</span></div>
   <div class="foot-links">
     <a href="https://github.com/aasis21/weft" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/aasis21/weft/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a>
+    <a href="https://github.com/aasis21/weft/blob/main/SECURITY.md" target="_blank" rel="noopener">Security</a>
+    <a href="https://github.com/aasis21/weft/blob/main/SUPPORT.md" target="_blank" rel="noopener">Support</a>
+    <a href="https://github.com/aasis21/weft/blob/main/TERMS.md" target="_blank" rel="noopener">Terms</a>
+    <a href="https://github.com/aasis21/weft/releases" target="_blank" rel="noopener">Releases</a>
     <a href="https://aasis21.github.io/engram/" target="_blank" rel="noopener">Engram ↗</a>
     <a href="https://aasis21.github.io/Anya/" target="_blank" rel="noopener">Anya ↗</a>
     <a href="https://aasis21.github.io/vox/" target="_blank" rel="noopener">vox ↗</a>

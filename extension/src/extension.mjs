@@ -9,6 +9,7 @@ import {
   importKeyPair,
   randomChannelId,
   buildPairingPayload,
+  createPairingGate,
   listenForPeers,
 } from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
@@ -93,14 +94,30 @@ try {
 } catch (err) {
   transportSetupError = err;
 }
+let pendingHandoffGrant =
+  handedOffIdentity?.pairingToken && handedOffIdentity?.pairingExpiresAt
+    ? {
+        pairingToken: handedOffIdentity.pairingToken,
+        expiresAt: handedOffIdentity.pairingExpiresAt,
+      }
+    : null;
 let pairingPayload = transportDescriptor ? buildCurrentPairingPayload() : null;
+let pairingGate = pairingPayload
+  ? createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+    })
+  : null;
 
 function buildCurrentPairingPayload() {
+  const grant = pendingHandoffGrant;
+  pendingHandoffGrant = null;
   return buildPairingPayload({
     channelId,
     publicKeyB64: laptopKeys.publicKeyB64,
     transport: transportDescriptor,
     appVersion: resolveVersion(),
+    ...(grant ?? {}),
   });
 }
 
@@ -109,18 +126,48 @@ let permissionRelay = null;
 let shuttingDown = false;
 let connecting = false;
 let reconnecting = false;
-// Persistent pairing state. `listenForPeers` keeps the laptop answering phone hellos for the whole
-// session (not just the first pair), so re-scans/reloads always re-pair. We dedupe by peer public
-// key so a phone re-broadcasting its hello only re-attaches the relay once.
+// Persistent pairing state. `listenForPeers` keeps the laptop answering the claimed phone's hellos
+// for the whole session while the gate prevents the short-lived QR grant from enrolling another
+// key. We dedupe identical handshake attempts so retries only attach the relay once.
 let pairingStop = null;
 let activeTransport = null;
 let activeStatusStop = null;
 let currentPeerPub = null;
+let currentHandshakeNonce = null;
 let pairChain = Promise.resolve();
+let pairingGrantRefreshTimer = null;
+
+function schedulePairingGrantRefresh() {
+  if (!durableLaunchHandoff || !pairingPayload?.expiresAt || currentPeerPub || shuttingDown) return;
+  if (pairingGrantRefreshTimer) clearTimeout(pairingGrantRefreshTimer);
+  const delay = Math.max(0, pairingPayload.expiresAt - Date.now() + 50);
+  pairingGrantRefreshTimer = setTimeout(() => {
+    pairingGrantRefreshTimer = null;
+    void refreshDurablePairingGrant();
+  }, delay);
+  pairingGrantRefreshTimer.unref?.();
+}
+
+async function refreshDurablePairingGrant() {
+  if (!durableLaunchHandoff || currentPeerPub || shuttingDown) return;
+  pairingPayload = buildCurrentPairingPayload();
+  pairingGate = createPairingGate({
+    pairingToken: pairingPayload.token,
+    expiresAt: pairingPayload.expiresAt,
+  });
+  await updateLaunchOperation(
+    launchOperationId,
+    { pairingPayload },
+    { ownerToken: launchOperationOwnerToken },
+  );
+  await teardownRelay("pairing-grant-refresh");
+  await connectRelayWithRetry({ reconnect: true });
+  schedulePairingGrantRefresh();
+}
 
 // Show the full pairing walk-through (instructions + QR + status) and re-kick the relay listener
-// if it isn't currently live (initial connect gave up, or it was torn down). A live listener
-// already answers re-scans, so we never stack a second transport. Bound to the `/weft` command.
+// if it isn't currently live. Once a grant is claimed or expires, an explicit `/weft` invocation
+// rotates the bearer credential and listener rather than redisplaying an unusable QR.
 // `context.args` (the text after `/weft`, e.g. "supabase") optionally overrides the transport for
 // just this session — see switchTransport. No args (or blank) keeps this device's default.
 const showPairing = async (context) => {
@@ -133,6 +180,15 @@ const showPairing = async (context) => {
       { level: "warning", ephemeral: false },
     );
     return;
+  }
+  const grantExpired = pairingPayload?.expiresAt && Date.now() >= pairingPayload.expiresAt;
+  if (pairingGate?.claimedPeerPublicKeyB64 || grantExpired) {
+    pairingPayload = buildCurrentPairingPayload();
+    pairingGate = createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+    });
+    await teardownRelay("pairing-refresh");
   }
   await logPairing(session, JSON.stringify(pairingPayload), { full: true });
   appendSessionLog("pairing.shown", { transport: transportDescriptor.kind, channel: channelId?.slice(0, 8) });
@@ -198,6 +254,10 @@ async function switchTransport(name) {
   transportDescriptor = descriptor;
   transportSetupError = null;
   pairingPayload = buildCurrentPairingPayload();
+  pairingGate = createPairingGate({
+    pairingToken: pairingPayload.token,
+    expiresAt: pairingPayload.expiresAt,
+  });
   await teardownRelay("transport-switch");
   appendSessionLog("transport.switched", { transport: descriptor.kind });
   session.log?.(
@@ -293,7 +353,10 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
   });
 }
 
-if (identityFileWasPresent) void connectRelayWithRetry();
+if (identityFileWasPresent) {
+  schedulePairingGrantRefresh();
+  void connectRelayWithRetry();
+}
 else
   appendSessionLog("autolisten.skipped", {
     reason: spawnHandoffExpected ? "handoff_lost" : "no_handoff",
@@ -304,7 +367,8 @@ else
 // transient Supabase subscribe failure (CHANNEL_ERROR) must not permanently kill pairing for a
 // walk-away tool, so retry the subscribe with capped exponential backoff using a FRESH transport
 // each attempt (a realtime channel is single-use after an error). Once subscribed, `listenForPeers`
-// answers every hello — the first scan AND any later re-scan/reload — so pairing self-heals.
+// answers authorized hellos — the first scan and reconnects from its claimed key — so pairing
+// self-heals without making the QR reusable by a second key.
 // `/weft` can re-kick this if all attempts gave up.
 async function connectRelayWithRetry({ reconnect = false } = {}) {
   if (connecting || pairingStop || shuttingDown) return false;
@@ -321,6 +385,10 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
           transportDescriptor = await resolveTransport();
           transportSetupError = null;
           pairingPayload = buildCurrentPairingPayload();
+          pairingGate = createPairingGate({
+            pairingToken: pairingPayload.token,
+            expiresAt: pairingPayload.expiresAt,
+          });
         } catch (err) {
           transportSetupError = err;
           if (!identityFileWasPresent) return false;
@@ -335,6 +403,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
           keyPair: laptopKeys,
           connect: true,
           channelId,
+          pairingGate,
           onAck: ({ ok, error, peer }) => {
             process.stderr.write(
               `Weft: pairing ack ${ok ? "sent" : "failed"} pid=${process.pid} channel=${channelId.slice(0, 8)} peer=${peer.senderName ?? peer.deviceId ?? "unknown"}${error ? ` error=${error.message ?? error}` : ""}\n`,
@@ -423,6 +492,7 @@ async function teardownRelay(reason) {
   relayHandle = null;
   permissionRelay = null;
   currentPeerPub = null;
+  currentHandshakeNonce = null;
   try {
     previousStop?.();
   } catch {
@@ -454,7 +524,13 @@ function onPeerPaired(transport, info) {
 
 async function attachForPeer(transport, { key, peer }) {
   if (shuttingDown || transport !== activeTransport) return;
-  if (peer.publicKeyB64 === currentPeerPub && relayHandle) return; // same phone re-saying hello
+  if (
+    peer.publicKeyB64 === currentPeerPub &&
+    peer.handshakeNonce === currentHandshakeNonce &&
+    relayHandle
+  ) {
+    return;
+  }
 
   const previous = relayHandle;
   relayHandle = null;
@@ -494,6 +570,7 @@ async function attachForPeer(transport, { key, peer }) {
   });
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
+  currentHandshakeNonce = peer.handshakeNonce ?? null;
   // The phone has adopted this session — it's no longer a "pending" offer, so withdraw it from the
   // station registry (and the station drops it from its advertised set on its own SESSION_CLAIMED
   // handling too; both are idempotent).
@@ -517,6 +594,8 @@ async function attachForPeer(transport, { key, peer }) {
 async function shutdown(reason) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (pairingGrantRefreshTimer) clearTimeout(pairingGrantRefreshTimer);
+  pairingGrantRefreshTimer = null;
   if (durableLaunchHandoff && !currentPeerPub) {
     await updateLaunchOperation(
       launchOperationId,

@@ -1,0 +1,118 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --bg-elev: #161b22;
+  --bg-rule: #30363d;
+  --fg: #e6edf3;
+  --fg-dim: #8b949e;
+  --accent: #2f81f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 32px 20px 48px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  text-align: center;
+}
+
+.mark {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  background: var(--accent);
+  color: #fff;
+  font: 700 30px/1 Georgia, "Times New Roman", serif;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+p.tag {
+  margin: 0;
+  color: var(--fg-dim);
+  max-width: 320px;
+}
+
+.card {
+  width: 100%;
+  max-width: 380px;
+  border: 1px solid var(--bg-rule);
+  background: var(--bg-elev);
+  border-radius: 20px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  border: 0;
+  cursor: pointer;
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+.download-btn:active {
+  transform: scale(0.98);
+}
+
+.download-btn:hover {
+  filter: brightness(1.08);
+}
+
+.download-btn svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  padding: 0 2px;
+}
+
+.steps {
+  text-align: left;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--fg-dim);
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+a.plain {
+  color: var(--accent);
+}
