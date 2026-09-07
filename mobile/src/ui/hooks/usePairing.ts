@@ -15,7 +15,10 @@ const SCAN_TIMEOUT_MS = 60_000;
 const SCAN_TIMEOUT_MESSAGE = 'QR scan timed out. Try again.';
 const INVALID_PAIRING_CODE_MESSAGE =
   "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.";
-const NO_ACK_MESSAGE = "Couldn't reach your laptop — make sure the terminal shows the QR and try again.";
+const NO_ACK_MESSAGE =
+  "Couldn't reach your laptop. Keep `weft start` running and scan again. " +
+  "If this phone was refreshed, reinstalled, or is replacing another phone, run " +
+  "`weft start --new-device` on the laptop and scan its new QR.";
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;

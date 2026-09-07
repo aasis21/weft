@@ -26,6 +26,7 @@ import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
 import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
 import { resolveVersion } from "../src/version.mjs";
+import { parseStartOptions } from "../src/startOptions.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -110,7 +111,9 @@ async function main() {
     } else if (command === "version" || command === "--version" || command === "-v") {
       printVersion();
     } else if (command === "start") {
-      await start();
+      const options = parseStartOptions(args);
+      if (options.help) printStartHelp();
+      else await start(options);
     } else if (command === "add-project") {
       const [name, path, ...rest] = args;
       if (!name || !path) throw new Error("Usage: weft add-project <name> <path> [--default]");
@@ -153,6 +156,12 @@ async function main() {
     }
   } catch (err) {
     console.error(err?.message ?? String(err));
+    if (command === "start") {
+      console.error(
+        "Pairing help: run `weft start --help`. For a different or refreshed phone, use " +
+          "`weft start --new-device`.",
+      );
+    }
     process.exitCode = 1;
   }
 }
@@ -397,7 +406,7 @@ function createProvisionStatusLine() {
   };
 }
 
-async function start() {
+async function start({ newDevice = false } = {}) {
   const lock = acquireLock();
   let released = false;
   const release = () => {
@@ -411,6 +420,16 @@ async function start() {
   // instead — so the shared transport/socket code that calls appendStationLog stays silent there.
   enableStationLog();
   appendStationLog("station.start", { pid: process.pid, device: loadDeviceName() ?? hostname() });
+
+  if (newDevice) {
+    if (isPersistentPairingEnabled()) {
+      await rotatePersistedIdentity();
+      console.log(`${c.green("✓")} Pairing reset for a new or refreshed phone. Scan the new QR below.`);
+      appendStationLog("pairing.rotated_for_new_device", {});
+    } else {
+      console.log(c.dim("Ephemeral pairing is already enabled, so this start uses a fresh identity."));
+    }
+  }
 
   const status = createStatusLine();
   const listener = createListener({
@@ -548,6 +567,21 @@ async function start() {
           : "Waiting for your phone to connect"
     }…`,
   );
+  if (persistent && everConnected) {
+    console.log(
+      c.dim(
+        "   Using a different phone, or did the phone lose/refresh its saved identity? " +
+          "Stop with Ctrl+C, then run `weft start --new-device` and scan the new QR.",
+      ),
+    );
+  } else {
+    console.log(
+      c.dim(
+        "   If scanning says the laptop could not be reached, confirm `weft show-transport`, " +
+          "then retry with `weft start --new-device`.",
+      ),
+    );
+  }
   status.setIdleLabel(idleLabel);
   status.start();
 
@@ -1342,7 +1376,7 @@ function runBootstrapInstaller() {
 
 function usage() {
   console.log(`Usage:
-  weft start
+  weft start [--new-device]
   weft add-project <name> <path> [--default]
   weft remove-project <name>
   weft list-projects
@@ -1371,7 +1405,8 @@ until you set your own with \`weft set-name <name>\` — the installer offers th
 interactive prompt (default: your hostname) the first time you install.
 
 By default, \`weft start\` reuses the same channel + device identity so an already-paired phone reconnects
-without rescanning. Run \`weft rotate-pairing\` to force a fresh persistent identity, or
+without rescanning. Run \`weft start --new-device\` to reset the saved phone trust and immediately
+start with a fresh QR. Run \`weft rotate-pairing\` to rotate without starting, or
 \`weft set-pairing ephemeral\` to mint a new identity on every station start. The in-session
 \`/weft\` command remains per-session and always uses a fresh channel + key.
 
@@ -1391,6 +1426,28 @@ how-to-use skill from the cloud, in place — it never touches ~/.weft, so all y
 survives. \`weft clean-install\` is the nuclear option: it DELETES both ~/.weft and the
 extension code dir, then re-runs the bootstrap installer for a fresh from-basics setup
 (pass --yes to skip the confirmation).`);
+}
+
+function printStartHelp() {
+  console.log(`Usage:
+  weft start
+  weft start --new-device
+
+Options:
+  --new-device       Forget the previously trusted phone, create a fresh persistent
+                     pairing identity, and start the Device Station with a new QR.
+  --rotate-pairing   Alias for --new-device.
+  -h, --help         Show this help without starting the station.
+
+Use plain \`weft start\` when the same phone still has its saved Weft identity; it reconnects
+automatically. Use \`weft start --new-device\` for a different phone, after clearing browser/app
+storage, after reinstalling the phone app, or when a valid QR repeatedly reports no laptop ACK.
+
+If pairing still fails:
+  1. Run \`weft show-transport\` and confirm the QR and phone use that transport.
+  2. Keep this terminal open while scanning the newly printed QR.
+  3. Run \`weft update --check\` to confirm the laptop is current.
+  4. For devtunnel, run \`weft devtunnel status\`; Supabase needs no local relay.`);
 }
 
 

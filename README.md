@@ -80,6 +80,14 @@ weft start
 Leave that terminal open. The Device Station prints a pairing QR and lets the phone start
 or resume Copilot sessions on this laptop.
 
+To connect a different phone, or after the phone browser/app storage was reset, use:
+
+```sh
+weft start --new-device
+```
+
+This replaces the previously trusted phone identity and prints a fresh QR.
+
 ### 3. Scan from your phone
 
 Open **<https://useweft.netlify.app>**, choose **Scan QR to pair**, and scan the code in
