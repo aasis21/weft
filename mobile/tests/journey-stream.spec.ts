@@ -5,8 +5,8 @@ import type { Page } from '@playwright/test';
 //
 // Runs one full demo turn end-to-end and proves it *renders live* in a real
 // browser: assistant text appears, a tool card renders collapsed then expands,
-// the header flips busy → idle, backfilled history sits under an "Earlier"
-// divider, terminal- vs phone-origin prompts get the right device chip, and a
+// the header flips busy → live, legacy backfill stays out of the current
+// transcript, terminal- vs phone-origin prompts get the right device chip, and a
 // phone prompt sent from the composer shows up as a right-aligned bubble.
 //
 // The exhaustive protocol matrix (delta coalescing, ordering, tool inline/collapse,
@@ -42,19 +42,18 @@ test.describe('Journey: live streaming turn', () => {
   test('the header flips from Working to a settled status as the turn ends', async ({ page }) => {
     // Early in the demo the agent is busy: the composer shows Stop and the status
     // line carries the working state.
-    await expect(page.locator('.stop-btn')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Stop generating' })).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.status-line.busy')).toBeVisible();
 
-    // Once the turn goes idle the Stop button is replaced by Send.
-    await expect(page.locator('.send-btn')).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('.stop-btn')).toHaveCount(0);
+    // Once the turn goes idle the stop action disappears and the live status settles.
+    await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.locator('.status-line.live')).toHaveText('Live');
   });
 
-  test('backfilled history renders above an "Earlier in this session" divider', async ({ page }) => {
-    const divider = page.locator('.history-divider');
-    await expect(divider).toBeVisible({ timeout: 15_000 });
-    await expect(divider).toContainText('Earlier in this session');
-    await expect(page.locator('.row.history').first()).toContainText('what is Weft again?');
+  test('legacy backfill is not mixed into the current live transcript', async ({ page }) => {
+    await expect(page.getByText('Let me check the mobile build')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('Earlier: what is Weft again?')).toHaveCount(0);
+    await expect(page.locator('.history-divider')).toHaveCount(0);
   });
 
   test('a terminal-typed prompt is tagged with a "Laptop" device chip', async ({ page }) => {
@@ -70,14 +69,13 @@ test.describe('Journey: live streaming turn', () => {
     // The composer only sends when the session is idle (Send replaces Stop), which
     // matches the real UX: you answer once the agent stops churning. Wait for Send,
     // then type and submit via the button (plain Enter inserts a newline by design).
-    const send = page.locator('.send-btn');
-    await expect(send).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0, { timeout: 15_000 });
 
     await page.locator('.composer textarea').fill('Run the tests next?');
-    await send.click();
+    await page.getByRole('button', { name: 'Send' }).click();
 
-    // Live (non-history) user row, right-hand side of the thread.
-    const userRow = page.locator('.row.user:not(.history)', { hasText: 'Run the tests next?' });
+    // Live user row, right-hand side of the thread.
+    const userRow = page.locator('.row.user', { hasText: 'Run the tests next?' });
     await expect(userRow).toBeVisible();
     await expect(userRow.locator('.device-chip.phone')).toContainText('This phone');
   });

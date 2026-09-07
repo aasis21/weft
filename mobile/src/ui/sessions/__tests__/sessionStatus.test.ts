@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import { deriveStatus, isWorking } from '../sessionStatus';
+import type { ToolItem } from '@/session/model';
 
 type View = Parameters<typeof deriveStatus>[0];
 
 const view = (over: Partial<View>): View => ({ status: 'idle', cold: false, error: undefined, ...over });
 
-const tool = (status: 'running' | 'success' | 'error') => ({ kind: 'tool' as const, id: 't', name: 'x', status });
+const tool = (status: ToolItem['status']): ToolItem => ({
+  kind: 'tool',
+  id: 't',
+  name: 'x',
+  status,
+  startedAt: 1,
+  ts: 1,
+});
 
 describe('isWorking (shared main-screen/sidebar busy derivation)', () => {
   it('is true when timeline.busy is set', () => {

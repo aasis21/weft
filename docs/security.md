@@ -1,8 +1,8 @@
 # Weft security model
 
-Weft's promise: **the relay never sees your session.** Supabase (or any relay) only
-ever transports opaque ciphertext. Confidentiality and integrity live entirely on the
-two paired devices.
+Weft's promise: **relay infrastructure stores no session content and cannot decrypt
+session traffic.** Supabase or a dev tunnel transports opaque ciphertext.
+Confidentiality and integrity live on the paired endpoints.
 
 ## Trust boundaries
 
@@ -15,15 +15,20 @@ two paired devices.
 
 ## Cryptography
 
-- **Key agreement:** ECDH on **P-256** (universal Web Crypto support in Node ≥18 and
+- **Key agreement:** ECDH on **P-256** (universal Web Crypto support in Node 20 and
   browsers/WebViews). `/weft` generates a fresh keypair per session. The standalone
   Device Station persists its pairing identity by default so paired phones reconnect;
   `weft set-pairing ephemeral` restores a fresh identity on every station start.
 - **Key derivation:** ECDH shared secret → **HKDF-SHA256** (salt `"weft-v1"`, info
-  `"weft-session-key"`) → a 256-bit AES key.
+  `"weft-session-key"` plus the fresh phone nonce and laptop challenge) → a 256-bit AES key.
+  Reconnecting peers therefore derive a new session key even when they reuse persistent
+  ECDH identities.
 - **Payload encryption:** **AES-256-GCM** with a fresh **random 96-bit IV per
   message**. GCM provides confidentiality *and* integrity (tampered ciphertext is
   rejected on decrypt — see `shared/test/crypto.test.mjs`).
+- **Replay and ordering:** each encrypted application payload contains an authenticated
+  random stream id and monotonically increasing sequence number. Duplicate, stale-stream,
+  and non-monotonic envelopes are dropped.
 - **Channel id:** 128 bits of CSPRNG entropy, hex. Namespaces the relay channel as
   `private:weft:<channelId>`.
 
@@ -34,7 +39,9 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 
 - Use **Realtime Broadcast** with **zero database persistence** in v1.
 - Enable **Realtime Authorization** and add **RLS** policies on `realtime.messages`
-  so only authorized clients may join `private:weft:*` channels.
+  that limit anonymous/authenticated broadcast traffic to the `private:weft:*`
+  namespace. The current policy is namespace-level, not per-user or per-channel
+  authorization; channel secrecy relies on the random id, pairing grant, and E2E key.
 - Channel config uses `broadcast: { self: false, ack: true }`.
 - The **anon key is shippable**: it grants only the ability to attempt a join.
   Confidentiality does **not** depend on it — it rests on (a) the unguessable
@@ -48,34 +55,36 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 | Relay/operator reads sessions | E2E AES-256-GCM; relay sees ciphertext only | none for content |
 | Network eavesdropper | TLS + E2E | none for content |
 | Channel-name guessing | 128-bit random `channelId` + RLS | negligible |
-| Message tampering / replay garbage | GCM auth tag rejects modified ciphertext | replay of *valid* old envelopes not yet sequence-checked → **see below** |
-| **QR shoulder-surf / screenshot** | QR shown briefly; contains only a public key + channelId | **anyone who reads the QR can pair** — accepted in v1 |
-| **Pairing race / impersonation** | `waitForPeer` resolves on the first `pair.hello` | an attacker who saw the QR could pair first — accepted in v1 |
+| Message tampering / replay | GCM authentication plus encrypted stream ids and monotonic sequence numbers reject modified, duplicate, stale-stream, and non-monotonic envelopes | a relay can still delay or drop traffic |
+| **QR shoulder-surf / screenshot** | QR bearer grant expires after 10 minutes and is invalid after its first successful claim | someone who copies a fresh QR can still race the intended phone during that window |
+| **Pairing race / impersonation** | the grant is proved inside ECDH-encrypted data and atomically binds to the first valid phone key; every connection requires a fresh laptop challenge and encrypted private-key proof | first valid claimant wins, so protect the QR until pairing completes |
 | Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
 | Lost/stolen phone | `/weft` keys die with the session; Device Station identities can be invalidated with `weft rotate-pairing` | a phone paired to a persistent Device Station can reconnect until its identity is rotated |
 
 ### The QR is a bearer credential
 
-The QR encodes `{ channelId, laptopPublicKey }`. Both are non-secret individually,
-but together they are sufficient to **join the channel and complete the handshake**.
-Therefore, in v1, treat the QR like a glance-only password: don't screenshot it or share
-it. Run `weft rotate-pairing` if a persistent Device Station QR may have been exposed;
-restart `/weft` for a new per-session identity. This is the same trust level as someone
-watching your terminal.
+The QR encodes the channel id, laptop public key, pairing kind, relay descriptor, a
+short-lived bearer grant, expiry, and optional app version. A Supabase descriptor also
+includes its client-safe anon key. The bearer grant is presented only inside data
+encrypted to the laptop's ECDH key, but anyone who copies a still-valid QR can attempt
+to claim it first.
 
-### Replay / ordering
+Treat the QR like a glance-only password: don't screenshot or share it. An unclaimed QR
+expires after 10 minutes. Run `weft rotate-pairing` if a persistent Device Station QR or
+paired phone may have been exposed; restart `/weft` for a new per-session identity.
 
-AES-GCM rejects *modified* ciphertext, but the v1 protocol does not yet add a
-monotonic sequence number, so a relay could in principle re-deliver a previously valid
-envelope. Impact is low (live-only, no persistence, idempotent-ish UI), but adding a
-per-message counter inside the encrypted payload is a tracked hardening item.
+## What is stored where
 
-## What is NOT stored
+| Location | Stored data |
+|---|---|
+| Phone / installed PWA | Session metadata, transcript history, preferences, device records, and local pairing private keys. Capacitor Preferences is used in the native app without mirroring those values into page-readable `localStorage`; browser storage is used by the PWA. |
+| Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, and persistent Device Station pairing identity under `~/.weft/`. A per-session `/weft` identity is ephemeral. |
+| Relay infrastructure | No session content, transcripts, or key escrow. It handles encrypted envelopes in transit. The infrastructure provider may retain ordinary operational metadata or logs such as IP addresses, timestamps, and channel identifiers. |
 
-v1 keeps **no conversation history** in the relay: no database rows, prompt/response
-logs, or key escrow. A persistent Device Station identity is stored only on the laptop
-and phone to support reconnection. Closing a `copilot` terminal ends that session, the
-extension process dies, the relay channel vanishes, and the phone shows "Session Ended".
+Removing a session from the phone deletes its locally cached transcript. Rotating a
+persistent pairing invalidates the old pairing identity; clearing browser/app data or
+removing `~/.weft/` deletes the corresponding local state. Closing a `copilot` terminal
+ends that live session and its ephemeral `/weft` key.
 
 ## v2 evolution (forward-looking)
 

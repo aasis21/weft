@@ -16,11 +16,43 @@ import {
 import { readRegistry, writeRegistryAtomic } from "../src/registryFile.mjs";
 
 let dirs = [];
+const NOW = 1_800_000_000_000;
 const home = () => {
   const d = mkdtempSync(join(tmpdir(), "weft-attached-"));
   dirs.push(d);
   return d;
 };
+
+function retryRegistryMutation(mutate, complete, message) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    mutate();
+    if (complete()) return;
+  }
+  assert.fail(message);
+}
+
+function recordPersisted(session, options) {
+  retryRegistryMutation(
+    () => recordAttachedSession(session, options),
+    () => {
+      const entry = readRegistry(ATTACHED_SESSIONS_FILE, options)?.[session.sessionId];
+      return (
+        entry?.channelId === session.channelId &&
+        (options.now === undefined || entry.lastHealthyAt === options.now)
+      );
+    },
+    `attachment ${session.sessionId} was not persisted`,
+  );
+}
+
+function clearPersisted(sessionId, options) {
+  retryRegistryMutation(
+    () => clearAttachedSession(sessionId, options),
+    () => !readRegistry(ATTACHED_SESSIONS_FILE, options)?.[sessionId],
+    `attachment ${sessionId} was not cleared`,
+  );
+}
+
 test.afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs = [];
@@ -30,8 +62,11 @@ test("an attachment round-trips and is reported healthy while it keeps stamping"
   const baseDir = home();
   assert.equal(findAttachedSession("sid-1", { baseDir }), null, "nothing is attached to begin with");
 
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1", cwd: "/repo" }, { baseDir });
-  const found = findAttachedSession("sid-1", { baseDir });
+  recordPersisted(
+    { sessionId: "sid-1", channelId: "chan-1", cwd: "/repo" },
+    { baseDir, now: NOW },
+  );
+  const found = findAttachedSession("sid-1", { baseDir, now: NOW + HEALTHY_WINDOW_MS - 1 });
   assert.equal(found.channelId, "chan-1");
   assert.equal(found.cwd, "/repo");
   assert.equal(found.pid, process.pid);
@@ -40,17 +75,17 @@ test("an attachment round-trips and is reported healthy while it keeps stamping"
 
 test("an attachment that stops stamping is unhealthy but still identifies a live writer", () => {
   const baseDir = home();
-  const stale = Date.now() - HEALTHY_WINDOW_MS - 1;
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir, now: stale });
+  const stale = 0;
+  recordPersisted({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir, now: stale });
 
-  const found = findAttachedSession("sid-1", { baseDir });
+  const found = findAttachedSession("sid-1", { baseDir, now: NOW });
   assert.equal(found.pid, process.pid, "the process is alive — a pid guard would say 'attached'");
   assert.equal(found.healthy, false, "it has stopped proving its phone connection");
 });
 
 test("takeover requires exact registry ownership and confirmed process exit", async () => {
   const baseDir = home();
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
+  recordPersisted({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
   const killed = [];
   let alive = true;
   const result = await terminateAttachedSession("sid-1", {
@@ -80,9 +115,9 @@ test("takeover requires exact registry ownership and confirmed process exit", as
 
 test("takeover refuses a stale attachment because its live pid may have been reused", async () => {
   const baseDir = home();
-  recordAttachedSession(
+  recordPersisted(
     { sessionId: "sid-stale", channelId: "chan-stale" },
-    { baseDir, now: Date.now() - HEALTHY_WINDOW_MS - 1 },
+    { baseDir, now: 0 },
   );
   const result = await terminateAttachedSession("sid-stale", {
     baseDir,
@@ -96,9 +131,9 @@ test("takeover refuses a stale attachment because its live pid may have been reu
 
 test("explicit takeover may terminate an unhealthy attachment after exact ownership checks", async () => {
   const baseDir = home();
-  recordAttachedSession(
+  recordPersisted(
     { sessionId: "sid-wedged", channelId: "chan-wedged" },
-    { baseDir, now: Date.now() - HEALTHY_WINDOW_MS - 1 },
+    { baseDir, now: 0 },
   );
   let alive = true;
   const result = await terminateAttachedSession("sid-wedged", {
@@ -118,9 +153,9 @@ test("explicit takeover may terminate an unhealthy attachment after exact owners
 
 test("re-recording refreshes the heartbeat stamp without moving boundAt", () => {
   const baseDir = home();
-  const t0 = Date.now() - 60_000;
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1", cwd: "/repo" }, { baseDir, now: t0 });
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir, now: t0 + 45_000 });
+  const t0 = NOW - 60_000;
+  recordPersisted({ sessionId: "sid-1", channelId: "chan-1", cwd: "/repo" }, { baseDir, now: t0 });
+  recordPersisted({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir, now: t0 + 45_000 });
 
   const found = findAttachedSession("sid-1", { baseDir });
   assert.equal(found.boundAt, t0, "the attachment is the same one, not a new one");
@@ -130,11 +165,11 @@ test("re-recording refreshes the heartbeat stamp without moving boundAt", () => 
 
 test("clearing is idempotent and leaves other sessions alone", () => {
   const baseDir = home();
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
-  recordAttachedSession({ sessionId: "sid-2", channelId: "chan-2" }, { baseDir });
+  recordPersisted({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
+  recordPersisted({ sessionId: "sid-2", channelId: "chan-2" }, { baseDir });
 
-  clearAttachedSession("sid-1", { baseDir });
-  clearAttachedSession("sid-1", { baseDir });
+  clearPersisted("sid-1", { baseDir });
+  clearPersisted("sid-1", { baseDir });
 
   assert.equal(findAttachedSession("sid-1", { baseDir }), null);
   assert.equal(findAttachedSession("sid-2", { baseDir })?.channelId, "chan-2");
@@ -143,13 +178,17 @@ test("clearing is idempotent and leaves other sessions alone", () => {
 
 test("a session that died without cleaning up is pruned on read", () => {
   const baseDir = home();
-  recordAttachedSession({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
-  recordAttachedSession({ sessionId: "sid-2", channelId: "chan-2" }, { baseDir });
+  recordPersisted({ sessionId: "sid-1", channelId: "chan-1" }, { baseDir });
+  recordPersisted({ sessionId: "sid-2", channelId: "chan-2" }, { baseDir });
 
   // Stand in for a crashed session: rewrite one entry under a pid that cannot be running.
   const map = readRegistry(ATTACHED_SESSIONS_FILE, { baseDir });
   map["sid-1"] = { ...map["sid-1"], pid: 0x7ffffffe };
-  writeRegistryAtomic(ATTACHED_SESSIONS_FILE, map, { baseDir });
+  retryRegistryMutation(
+    () => writeRegistryAtomic(ATTACHED_SESSIONS_FILE, map, { baseDir }),
+    () => readRegistry(ATTACHED_SESSIONS_FILE, { baseDir })?.["sid-1"]?.pid === 0x7ffffffe,
+    "dead attachment fixture was not persisted",
+  );
 
   assert.equal(findAttachedSession("sid-1", { baseDir }), null, "the dead entry self-heals away");
   assert.equal(listAttachedSessions({ baseDir }).length, 1);

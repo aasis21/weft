@@ -11,7 +11,7 @@
 # config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written
 # via `weft set-transport` - there is NO env var / .env for this, so re-running this
 # installer to update to a newer build never silently resets or shadows your chosen
-# transport. No git clone, no Node build required on your machine (just Node itself).
+# transport. No git clone or Node build is required on your machine (just Node.js 20 or newer).
 #
 # Choose your transport non-interactively: WEFT_TRANSPORT=supabase|devtunnel
 #   curl -fsSL https://useweft.netlify.app/install.sh | WEFT_TRANSPORT=devtunnel bash
@@ -60,6 +60,18 @@ step()   { printf '\n\033[1m[%s/%s]\033[0m %s\n' "$1" "$TOTAL_STEPS" "$2"; }
 
 echo ""
 echo "$(bold "$(cyan '=== WEFT INSTALLER ===')")"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Weft requires Node.js 20 or newer. Install it from https://nodejs.org/ and rerun this installer." >&2
+  exit 1
+fi
+NODE_VERSION="$(node --version)"
+NODE_MAJOR="${NODE_VERSION#v}"
+NODE_MAJOR="${NODE_MAJOR%%.*}"
+if ! [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || [ "$NODE_MAJOR" -lt 20 ]; then
+  echo "Weft requires Node.js 20 or newer; found $NODE_VERSION. Upgrade Node.js and rerun this installer." >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1: pick a transport. An existing ~/.weft/weft.config.json choice always wins unless the
@@ -124,9 +136,29 @@ fi
 # PATH-coupled and OS-specific, so it stays in this installer.)
 # ---------------------------------------------------------------------------
 step 2 "Downloading Weft bundles"
-mkdir -p "$INSTALL_DIR"
-curl -fsSL "$BASE/weft.mjs" -o "$INSTALL_DIR/weft.mjs"
-WEFT_INSTALL_BASE="$BASE" WEFT_INSTALL_DIR="$INSTALL_DIR" node "$INSTALL_DIR/weft.mjs" install >/dev/null
+MANIFEST_TMP="$(mktemp "${TMPDIR:-/tmp}/weft-manifest.XXXXXX")"
+BOOTSTRAP_TMP="$(mktemp "${TMPDIR:-/tmp}/weft-bootstrap.XXXXXX.mjs")"
+trap 'rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"' EXIT
+curl -fsSL "$BASE/release-manifest.json" -o "$MANIFEST_TMP"
+curl -fsSL "$BASE/weft.mjs" -o "$BOOTSTRAP_TMP"
+EXPECTED_BOOTSTRAP_HASH="$(node -e '
+  const fs = require("fs");
+  const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const hash = manifest && manifest.files && manifest.files["weft.mjs"] && manifest.files["weft.mjs"].sha256;
+  if (!/^[a-f0-9]{64}$/i.test(hash || "")) process.exit(1);
+  process.stdout.write(hash.toLowerCase());
+' "$MANIFEST_TMP")" || { echo "Invalid release manifest." >&2; exit 1; }
+ACTUAL_BOOTSTRAP_HASH="$(node -e '
+  const fs = require("fs"), crypto = require("crypto");
+  process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));
+' "$BOOTSTRAP_TMP")"
+if [ "$ACTUAL_BOOTSTRAP_HASH" != "$EXPECTED_BOOTSTRAP_HASH" ]; then
+  echo "weft.mjs integrity check failed." >&2
+  exit 1
+fi
+WEFT_INSTALL_BASE="$BASE" WEFT_INSTALL_DIR="$INSTALL_DIR" node "$BOOTSTRAP_TMP" install >/dev/null
+rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"
+trap - EXIT
 SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
 ok "extension.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $INSTALL_DIR"
 ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"

@@ -73,7 +73,13 @@ export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: Setting
   // different builds, and until now the phone had no way to say so — the versions were listed side
   // by side and left for the reader to diff. Anything the laptop reports that isn't this build gets
   // called out explicitly.
-  const mismatched = deviceVersions.some((device) => device.version && device.version !== appVersion);
+  const knownLaptopVersions =
+    deviceVersions.length > 0
+      ? deviceVersions.flatMap((device) => (device.version ? [device.version] : []))
+      : laptopVersion
+        ? [laptopVersion]
+        : [];
+  const mismatched = knownLaptopVersions.some((version) => version !== appVersion);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,10 +245,64 @@ export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: Setting
             </dl>
             {mismatched ? (
               <p className="settings-about-warn" role="status">
-                A paired laptop is on a different build than this phone. Reinstall the extension with{' '}
-                <code>irm https://useweft.netlify.app/install.ps1 | iex</code> and reload this page.
+                A paired laptop is on a different build than this phone. Run <code>weft update</code>,
+                restart Copilot CLI or Device Station, then reload this app.{' '}
+                <a
+                  href="https://github.com/aasis21/weft/blob/main/docs/releases.md"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Update guide
+                </a>
               </p>
             ) : null}
+          </section>
+
+          <section className="settings-group" aria-labelledby="settings-help-title">
+            <div className="settings-row-head settings-group-title">
+              <div>
+                <h2 id="settings-help-title">Help &amp; trust</h2>
+                <p>Updates, data handling, security reporting, and support.</p>
+              </div>
+            </div>
+            <p className="settings-data-note">
+              Transcripts and pairing keys stay on your devices. Relay infrastructure stores no
+              session content.
+            </p>
+            <nav className="settings-link-grid" aria-label="Weft help and policies">
+              <a href="https://github.com/aasis21/weft/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">
+                Privacy
+              </a>
+              <a href="https://github.com/aasis21/weft/blob/main/SECURITY.md" target="_blank" rel="noreferrer">
+                Security
+              </a>
+              <a href="https://github.com/aasis21/weft/blob/main/SUPPORT.md" target="_blank" rel="noreferrer">
+                Support &amp; diagnostics
+              </a>
+              <a href="https://github.com/aasis21/weft/blob/main/TERMS.md" target="_blank" rel="noreferrer">
+                Hosted relay terms
+              </a>
+              <a href="https://github.com/aasis21/weft/releases" target="_blank" rel="noreferrer">
+                Release notes
+              </a>
+              <a
+                href="https://github.com/aasis21/weft/blob/main/docs/releases.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Update guide
+              </a>
+              <a href="https://github.com/aasis21/weft/issues/new/choose" target="_blank" rel="noreferrer">
+                Report an issue
+              </a>
+              <a href="https://github.com/aasis21/weft" target="_blank" rel="noreferrer">
+                Source code
+              </a>
+            </nav>
+            <p className="settings-update-note">
+              Laptop updates: <code>weft update --check</code>, then <code>weft update</code>.
+              PWA updates arrive through your browser.
+            </p>
           </section>
         </div>
       </section>

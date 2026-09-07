@@ -6,7 +6,7 @@ the real relay is the only user-gated step.
 
 ## Prerequisites
 
-- Node.js ≥ 18 (developed on Node 24).
+- Node.js 20 or newer.
 - For the mobile app on a device: Android Studio + SDK (a web/demo build needs neither).
 - The Copilot CLI extension uses `@github/copilot-sdk`, which the CLI provides at
   runtime — you do **not** install it to run the extension under `copilot`.
@@ -15,7 +15,7 @@ the real relay is the only user-gated step.
 
 ```sh
 cd weft
-npm install          # resolves the npm workspaces: shared, extension, mobile
+npm install --workspaces --include-workspace-root          # resolves the npm workspaces: shared, extension, mobile
 ```
 
 ## Verify everything (no network, no phone)
@@ -43,9 +43,10 @@ npm run dev          # open the printed localhost URL
 ```
 
 In the app choose **Demo / Simulator**. It stands up a fake laptop side in-process
-(real ECDH keypairs + `LocalTransport`), completes the real `pair.hello`/`pair.ack`
-handshake, then streams scripted assistant/tool events, an approval card, heartbeats,
-and reflects mode changes — all over AES-256-GCM (no plaintext on the wire).
+(real ECDH keypairs + `LocalTransport`), completes the real
+`pair.hello`/`pair.challenge`/`pair.proof`/`pair.ack` handshake, then streams scripted
+assistant/tool events, an approval card, heartbeats, and reflects mode changes — all
+application payloads travel over AES-256-GCM.
 
 ## Run the real extension under Copilot CLI (the "real" test)
 
@@ -77,19 +78,19 @@ absent or you explicitly passed `-SupabaseUrl`/`-SupabaseKey` (or `-Force`), and
 `setup.ps1`/`setup.sh` print a reminder to run `weft set-transport` if no pointer is
 configured yet.
 
-**2. Get the app on your phone** — pick one:
+**2. Get the app on your phone** — use the PWA by default:
 
-- **Hosted web app (easiest, zero install):** open **<https://useweft.netlify.app>**
-  on your phone. On Android Chrome it scans the QR with your camera directly in the browser
-  (via the `BarcodeDetector` API); on iOS Safari / Firefox it uses an on-page jsQR fallback,
-  and if the camera is unavailable you can paste the JSON payload. Served over HTTPS with a
-  `camera=(self)` permissions policy so scanning works.
-- **Native APK (camera QR scan):** `cd mobile && npx cap sync android` then build/install
-  via Android Studio (or `cd android && ./gradlew assembleDebug` and install the APK). The
-  build takes no env config — the phone learns the transport, URL, and anon key from the QR
-  it scans.
+- **Hosted PWA (supported primary distribution):** open **<https://useweft.netlify.app>** on your phone,
+  then choose **Install app** or **Add to Home Screen** in the browser. It can also run
+  directly in the browser. Android Chrome uses `BarcodeDetector` for QR scanning; iOS
+  Safari and Firefox use the in-page jsQR fallback.
+- **Android development shell:** Weft does not currently publish an APK. Debug,
+  unversioned, and third-party APKs are not supported release artifacts.
 - **Local dev server:** `cd mobile && npm run dev -- --host`, open the printed LAN URL on
   your phone (same in-browser camera scan + paste fallback as the hosted app).
+
+Developers who need to build the native shell from source can run `npx cap sync android`
+and use Android Studio, but that build is not a distributed release APK.
 
 > The hosted site is a static deploy of `mobile/dist` on Netlify (site `useweft`,
 > team `aasis21`). It points at the same public relay as everything else; the embedded
@@ -134,16 +135,38 @@ sources) — a test deploy therefore serves an installer that pulls *its own* bu
 deploy retargets to the test site's canonical URL, not the throwaway draft URL, since the draft URL
 is only known after the upload.)
 
-**3. Pair and drive it.** Start `copilot` in any repo; Weft prints a pairing QR via
-`session.log()` (run `/weft` to re-show it). Scan/paste it, then trigger a Copilot
-action (e.g. a file write) and watch the stream — approve/deny and switch modes from the
-phone. Everything on the relay is AES-256-GCM ciphertext.
+**3. Pair and drive it.** Run `weft start` and leave the Device Station terminal open.
+Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
+code. The phone can then start or resume Copilot sessions in registered projects.
+Everything on the relay is AES-256-GCM ciphertext.
+
+To mirror only one Copilot session instead, start `copilot` and run `/weft` inside it.
+That per-session flow and transport overrides are documented in
+[`advanced.md`](./advanced.md).
+
+The phone stores transcripts, session metadata, settings, and pairing keys locally so it
+can restore sessions after a reload. Persistent Device Station identity and configuration
+stay under `~/.weft/` on the laptop. Relay infrastructure stores no session content.
+
+## Updating an installed laptop
+
+```sh
+weft update --check
+weft update
+```
+
+The check is read-only. The update verifies downloaded bundles against the published
+release manifest, replaces installed code and the Weft skill, and preserves `~/.weft/`
+configuration, registered projects, and persistent pairing material. Restart Copilot CLI
+or Device Station after updating. PWA updates arrive through the browser; close and reopen
+the installed PWA if a newly published version is not visible.
 
 On first pair the app asks for **notification permission**. Grant it so that, when you've
 walked away and the app is backgrounded, the phone buzzes and raises a heads-up banner the
 moment Copilot pauses for an approval (or the session goes quiet). Alerts carry only the
-tool *name* — never arguments or stream content — and nothing is logged off-device. While
-the app is in the foreground the on-screen approval card is used instead of a banner. (This
+tool *name* — never arguments or stream content — and Weft does not write notification
+content to relay storage. While the app is in the foreground the on-screen approval card is
+used instead of a banner. (This
 covers the phone-in-hand / app-recent case; full wake-from-killed delivery via FCM is a
 planned follow-up.)
 
@@ -151,8 +174,9 @@ planned follow-up.)
 
 1. Create a fresh Supabase project. Configure its MCP like `kirana360` does
    (`https://mcp.supabase.com/mcp?project_ref=<ref>` in `mcp/mcp-config.json`).
-2. Enable **Realtime Authorization** and add RLS policies on `realtime.messages` so
-   only authorized clients may join `private:weft:*` channels. This is stored as code:
+2. Enable **Realtime Authorization** and add RLS policies on `realtime.messages` that
+   allow anonymous/authenticated broadcast only within the `private:weft:*` namespace.
+   This is namespace-level gating, not per-user channel authorization. It is stored as code:
    apply [`supabase/migrations/`](../supabase/migrations) to the project (via the Supabase
    MCP, the Supabase CLI `supabase db push`, or by pasting the SQL into the dashboard SQL
    editor). Channels are opened with `config.private = true`, so **joins are denied until

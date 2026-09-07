@@ -20,11 +20,26 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Verify release version
+        run: npm run check-version
+
+      - name: Run all unit and integration tests
+        run: npm test
+
+      - name: Install browser test runtimes
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run browser journeys
+        run: npm run test:e2e -w @aasis21/weft-mobile
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Install Netlify CLI
         run: npm install --global netlify-cli@26.2.0

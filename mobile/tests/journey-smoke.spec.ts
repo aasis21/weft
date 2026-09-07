@@ -13,7 +13,12 @@ function trackErrors(page: import('@playwright/test').Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
   page.on('console', (msg: ConsoleMessage) => {
-    if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`);
+    const text = msg.text();
+    const isUnsupportedWebKitViewportDirective =
+      text === 'Viewport argument key "interactive-widget" not recognized and ignored.';
+    if (msg.type() === 'error' && !isUnsupportedWebKitViewportDirective) {
+      errors.push(`console.error: ${text}`);
+    }
   });
   return errors;
 }

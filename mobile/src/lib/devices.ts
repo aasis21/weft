@@ -1,10 +1,12 @@
-import { Preferences } from '@capacitor/preferences';
 import type { TransportDescriptor } from '@aasis21/weft-shared';
+import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 
 const DEVICES_KEY = 'weft.devices.v1';
 
 export interface RegisteredDevice {
   channelId: string;
+  /** Pairing protocol used by the listener. Missing means legacy version 1. */
+  pairVersion?: 1 | 2;
   /** Listener public key from its LISTENER QR. */
   pub: string;
   /** Which transport + endpoint this listener was paired with — reused on reconnect via connectDevice. */
@@ -72,8 +74,7 @@ function normalize(parsed: unknown): RegisteredDevice[] {
 
 async function read(): Promise<RegisteredDevice[]> {
   try {
-    const { value } = await Preferences.get({ key: DEVICES_KEY });
-    const raw = value ?? globalThis.localStorage?.getItem(DEVICES_KEY);
+    const raw = await preferencesStorage.getItem(DEVICES_KEY);
     if (!raw) return [];
     return normalize(JSON.parse(raw));
   } catch {
@@ -84,8 +85,7 @@ async function read(): Promise<RegisteredDevice[]> {
 async function write(list: RegisteredDevice[]): Promise<void> {
   const deduped = normalize(list);
   const value = JSON.stringify({ devices: deduped });
-  await Preferences.set({ key: DEVICES_KEY, value });
-  globalThis.localStorage?.setItem(DEVICES_KEY, value);
+  await preferencesStorage.setItem(DEVICES_KEY, value);
 }
 
 export async function loadDevices(): Promise<RegisteredDevice[]> {

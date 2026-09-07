@@ -5,7 +5,7 @@
 **Your Copilot session, off the desk.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)](#quick-start)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)](#get-started)
 [![Built with](https://img.shields.io/badge/built%20with-Copilot%20CLI-24292e?logo=github)](https://github.com/github/copilot-cli)
 
 Weft mirrors your live GitHub Copilot terminal session to your phone over an end-to-end
@@ -22,8 +22,8 @@ chat back up, from anywhere.
 |---|---|---|
 | <img src="docs/assets/landing-hero.webp" width="220" alt="Onboarding screen" /><br>**Pair in seconds** | <img src="docs/assets/session-chat.webp" width="220" alt="A working session" /><br>**Watch it work** | <img src="docs/assets/session-transcript.webp" width="220" alt="Approval prompt" /><br>**Approve from anywhere** |
 
-> **Try it now (no install):** **<https://useweft.netlify.app>** — open on your phone,
-> scan the pairing QR your terminal prints (or paste it), and you're bound to the session.
+> **Fastest path:** install Weft on your laptop, run `weft start`, then open
+> **<https://useweft.netlify.app>** on your phone and scan the QR.
 
 ## What you can do
 
@@ -49,9 +49,13 @@ Everything you'd do at the terminal — now from your phone:
 - **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,
   and juggle several at once.
 
-All of it flows over the same end-to-end-encrypted channel — the relay only ever sees ciphertext.
+All live session traffic flows over the same end-to-end-encrypted channel. Weft stores
+transcripts, session metadata, and pairing keys locally on your devices so sessions can
+reconnect; the relay infrastructure forwards encrypted envelopes and stores no session content.
 
-### Install the extension on your laptop
+## Get started
+
+### 1. Install on your laptop
 
 One line. Downloads the prebuilt extension into `~/.copilot/extensions/weft/` (where
 Copilot CLI auto-discovers it) plus a "how to use Weft" skill into
@@ -67,19 +71,34 @@ irm https://useweft.netlify.app/install.ps1 | iex
 curl -fsSL https://useweft.netlify.app/install.sh | bash
 ```
 
-Then start `copilot` in any repo, open **<https://useweft.netlify.app>** on your phone,
-scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
+### 2. Start Weft
 
+```sh
+weft start
+```
+
+Leave that terminal open. The Device Station prints a pairing QR and lets the phone start
+or resume Copilot sessions on this laptop.
+
+### 3. Scan from your phone
+
+Open **<https://useweft.netlify.app>**, choose **Scan QR to pair**, and scan the code in
+the terminal. The browser app works immediately; use **Install app** or **Add to Home
+Screen** for an app-like experience and automatic web updates.
+
+- **PWA distribution** — the hosted PWA is the supported phone experience. Native
+  Android builds are currently developer builds only; Weft does not publish an APK
+  until a signed Android release pipeline is available.
 - **Zero-config** — uses the creator's hosted relay (a client-safe publishable key + RLS +
   end-to-end AES-256-GCM; Supabase only ever sees ciphertext).
-- **Run your own relay** — installer flags let you point at your own Supabase project:
-  `... | iex` becomes
-  `& ([scriptblock]::Create((irm https://useweft.netlify.app/install.ps1))) -SupabaseUrl <url> -SupabaseKey <key>`
-  on Windows, or `WEFT_SUPABASE_URL=<url> WEFT_SUPABASE_ANON_KEY=<key> bash -c "$(curl -fsSL https://useweft.netlify.app/install.sh)"` on Unix.
-  Prefer building from source? Use [`setup.ps1` / `setup.sh`](docs/setup.md).
-- **Uninstall** — delete `~/.copilot/extensions/weft/`, `~/.copilot/skills/weft-how-to-use/`, and
-  `~/.weft/` (your config: `weft.config.json` — registered projects, transport choice, device
-  name — plus `supabase.json` — the relay URL + anon key when the transport is `supabase`).
+- **Update safely** — `weft update --check` reports whether a hosted release is newer;
+  `weft update` verifies the published hashes, replaces only installed code and the Weft
+  skill, and leaves `~/.weft/` data untouched. Restart Copilot CLI or Device Station after.
+- **Uninstall** — remove the installed extension and skill. Remove `~/.weft/` only if you
+  also want to delete local configuration, registered projects, logs, and persistent
+  pairing keys. See [`SUPPORT.md`](SUPPORT.md) for the exact cleanup paths.
+- **Advanced options** — `/weft`, alternate transports, pairing lifetime, self-hosting,
+  and the full command reference live in [`docs/advanced.md`](docs/advanced.md).
 
 > Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
 > [`aasis21/anya`](https://github.com/aasis21/anya), and
@@ -87,70 +106,13 @@ scan the QR (or run `/weft` to re-show it), and approve/deny from anywhere.
 
 ---
 
-## Transports
+## Advanced use
 
-Weft pairs over one of two relays — both only ever carry end-to-end-encrypted
-envelopes (ECDH → AES-256-GCM), so the relay is untrusted infrastructure that learns
-only timing and channel ids. Pick with `weft set-transport` — and switch anytime,
-since the installer seeds the hosted Supabase creds no matter which one you chose,
-so flipping back to `supabase` never needs a URL or key.
-
-| Transport | What it is | Set it up |
-|---|---|---|
-| **Supabase** (default) | A Supabase Realtime channel. The installer seeds Weft's **hosted relay** — zero-config, no account, no keys to supply. | `weft set-transport supabase` |
-| **Dev tunnel** (bring your own) | A [Visual Studio Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) you run yourself — a private relay under your own account, **no third party in the path**. `weft start` brings it up for you; `/weft` attaches to a relay you started. | `weft set-transport devtunnel` (then `weft devtunnel start` if you want it to outlive the station, or for `/weft`) |
-
-See [`docs/hosting.md`](docs/hosting.md) for self-hosting, RLS, and operating a relay.
-
----
-
-## Pairing
-
-There are two ways to put a session on your phone, plus a choice of how long a pairing lasts.
-
-**`/weft` — mirror the session you're in.** Run it inside a live `copilot` terminal (the
-extension auto-loads there). It pairs your phone to *that exact session* and relays its token
-stream, diffs, and native approval prompts as they happen. Append a transport to override it for
-this session only: `/weft supabase` or `/weft devtunnel`.
-
-**`weft start` — a standalone Device Station.** Run it in its own terminal, before any Copilot
-session exists. Your phone pairs to the station and *spawns* new Copilot sessions in the projects
-you've registered (`weft add-project`) — one station, many sessions, driven from your pocket.
-On the `devtunnel` transport the station is self-contained: it starts (and signs into) the relay
-itself when one isn't already running, watches its health, and releases it when you Ctrl+C.
-
-**Pairing modes** apply to the standalone station only (`/weft` is always per-session — a fresh
-channel and key that die with the session):
-
-| Mode | Behaviour | Set it |
-|---|---|---|
-| **persistent** (default) | The same channel + key are reused across restarts, so an already-paired phone reconnects with no rescan. | `weft set-pairing persistent` |
-| **ephemeral** | A fresh channel + key on every `weft start`; re-scan the QR each time. | `weft set-pairing ephemeral` |
-
-Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidates the old QR — e.g. after losing a phone).
-
----
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `/weft [supabase\|devtunnel]` | *(inside a Copilot session)* Pair your phone to the current session; optional arg overrides the transport for this session only. |
-| `weft start` | Start the standalone Device Station and print a QR to pair from your phone. On the `devtunnel` transport it also brings the relay up (signing in with `devtunnel user login -g` if needed), health-watches it — reprinting a fresh QR inline if the relay comes back on a new URL — and releases it on exit unless another terminal owns it. |
-| `weft add-project <name> <path> [--default]` | Register a project directory Weft can launch sessions in. |
-| `weft remove-project <name>` | Forget a registered project. |
-| `weft list-projects` | List registered projects and which one is default. |
-| `weft set-default <name>` | Choose the project a bare pairing launches into. |
-| `weft set-transport <supabase\|devtunnel\|clear>` | Choose (or clear) the pairing transport. |
-| `weft set-pairing <persistent\|ephemeral>` | *(Device Station)* Reuse one channel/key across restarts (persistent, the default) or mint a fresh one each start (ephemeral). |
-| `weft rotate-pairing` | *(Device Station)* Force a brand-new persistent channel/key, invalidating the old QR. |
-| `weft show-transport` | Print the transport currently in effect and where it came from. |
-| `weft set-name <name>` | Set the display name this device shows to your phone (DEVICES list). Defaults to your OS hostname until set. |
-| `weft show-name` | Print the device name currently in effect and where it came from. |
-| `weft devtunnel start` | Bring up the shared devtunnel relay and keep it up across station restarts (required before `/weft` when the transport is `devtunnel`). Provisions on first run or reuses an already-running one; blocks with a live status line. |
-| `weft devtunnel status` | Check whether the shared devtunnel relay is running, without starting it. |
-| `weft devtunnel stop` | Tear down the shared devtunnel relay. |
-| `weft help` | Show usage. |
+The default hosted relay needs no configuration. If you want to mirror only one existing
+Copilot session with `/weft`, change pairing lifetime, use a Visual Studio Dev Tunnel,
+point at your own Supabase project, or browse every CLI command, see
+[`docs/advanced.md`](docs/advanced.md). Self-hosting details remain in
+[`docs/hosting.md`](docs/hosting.md).
 
 ---
 
@@ -161,7 +123,7 @@ Run `weft rotate-pairing` to mint a brand-new persistent channel/key (invalidate
 | Weft Mobile                  |        |   Supabase Realtime          |        |  Laptop terminal              |
 | (React + Capacitor, Android) |        |   Broadcast channel          |        |  copilot (parent)             |
 |                              |        |   private:weft:<channelId>   |        |   └─ extension.mjs (child)    |
-|  • scans QR (channel + pub)  |  WSS   |   • in-memory pub/sub        |  WSS   |   • joinSession()             |
+|  • scans QR (channel + grant)|  WSS   |   • in-memory pub/sub        |  WSS   |   • joinSession()             |
 |  • ECDH → AES-256-GCM        | <----> |   • zero DB persistence      | <----> |   • onPermissionRequest→relay |
 |  • decrypts token stream     |        |   • RLS-gated private chan   |        |   • on(assistant.message)→push|
 |  • native-style approval UI  |        |                              |        |   • session.send(phone prompt)|
@@ -176,16 +138,22 @@ Three layers, one monorepo:
 |---|---|
 | `extension/` | The Copilot CLI extension (`joinSession`) + a local test **harness** that mimics the phone with no Supabase needed. |
 | `shared/` | Contracts imported by **both** ends: message schema, E2E crypto (ECDH→AES-GCM), and a pluggable transport (LocalTransport now → SupabaseTransport later). |
-| `mobile/` | React + Vite + Capacitor app (Android first); also ships as a hosted **web app** ([useweft.netlify.app](https://useweft.netlify.app)) with in-browser camera QR scanning. |
+| `mobile/` | React + Vite + Capacitor app shipped as the supported **PWA** ([useweft.netlify.app](https://useweft.netlify.app)), with in-browser camera QR scanning and an Android development shell. |
 
 ### Design principles
 - **Approval = pure relay of native Copilot behavior.** The extension forwards the *native*
   permission prompt to the phone via `onPermissionRequest` and resolves with the user's tap. No
   custom policy or automatic decision timeout; the prompt stays pending until answered or the
   session ends.
-- **Ephemeral relay.** Supabase Realtime Broadcast is in-memory; zero DB persistence in v1.
-- **End-to-end encrypted.** ECDH key agreement (public key in the QR, no secret) → AES-256-GCM.
+- **Content-free relay storage.** Relay infrastructure forwards encrypted envelopes and
+  does not store session content. Providers may still process ordinary connection metadata
+  such as IP addresses, timestamps, and channel identifiers.
+- **End-to-end encrypted.** The QR carries the laptop public key plus a short-lived,
+  single-use pairing grant; ECDH + a fresh handshake nonce derives the AES-256-GCM key.
   Supabase only ever sees ciphertext.
+- **Local continuity.** The phone stores session metadata, transcript history, preferences,
+  and pairing keys locally. Persistent Device Station keys and configuration stay under
+  `~/.weft/` on the laptop. Removing a session deletes its locally cached phone transcript.
 - **stdout is sacred.** The CLI reserves stdout for JSON-RPC; all extension UX uses
   `session.log()`.
 
@@ -209,8 +177,10 @@ Three layers, one monorepo:
 
 ## Quick start
 
+Source builds require **Node.js 20 or newer**.
+
 ```sh
-npm install                                 # resolve workspaces (shared, extension, mobile)
+npm install --workspaces --include-workspace-root  # resolve shared, extension, and mobile
 npm test -w @aasis21/weft-shared            # crypto + pairing + transport + message tests
 node extension/harness/harness.mjs --auto   # full relay loop vs a simulated phone (no Supabase)
 npm run build -w @aasis21/weft-extension    # bundle -> extension/dist/extension.mjs
@@ -223,10 +193,17 @@ See [`docs/setup.md`](docs/setup.md) for the full developer guide.
 | Doc | What |
 |---|---|
 | [`docs/setup.md`](docs/setup.md) | install, verify, run, and Supabase wiring |
+| [`docs/advanced.md`](docs/advanced.md) | `/weft`, transports, pairing modes, and command reference |
 | [`docs/pairing.md`](docs/pairing.md) | the ECDH pairing handshake |
 | [`docs/security.md`](docs/security.md) | threat model & cryptography |
 | [`docs/mode-switching.md`](docs/mode-switching.md) | runtime interactive/plan/autopilot switching |
 | [`docs/hosting.md`](docs/hosting.md) | public instance vs self-hosting; operating a relay |
+| [`docs/releases.md`](docs/releases.md) | supported PWA, checksums, and laptop updates |
+| [`CHANGELOG.md`](CHANGELOG.md) | notable user-facing changes by release |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | development and pull-request guidance |
+| [`PRIVACY.md`](PRIVACY.md) | what is stored locally and what the relay can observe |
+| [`SECURITY.md`](SECURITY.md) | supported releases and private vulnerability reporting |
+| [`SUPPORT.md`](SUPPORT.md) | troubleshooting and issue-reporting checklist |
 
 ---
 
@@ -263,20 +240,13 @@ npm run test:e2e -w @aasis21/weft-mobile   # build dist/ + run the Playwright jo
 
 ---
 
-## Status
+## Releases, support, and security
 
-**v1 built end-to-end, with a live hosted relay and web app.** The shared contracts (E2E
-crypto, pairing handshake, message protocol, pluggable transport), the CLI extension
-(`joinSession`, native permission relay, prompt injection, real `session.rpc.mode.set` mode
-switching, on-device approval notifications, lifecycle), its local harness, and the
-React/Capacitor app (pairing, live stream, approval cards, prompt composer, mode selector,
-session-ended) all build and pass their checks. A real Supabase relay (RLS-gated Broadcast)
-is provisioned and the app is deployed at **[useweft.netlify.app](https://useweft.netlify.app)**
-with one-line installers for the laptop extension.
-
-**Remaining:** a full real-device pass (physical phone ↔ laptop over the live relay), plus
-hardening follow-ups (relay rate-limiting, replay sequence numbers). See the phased plan in
-the session artifacts.
+- Releases and changelogs: <https://github.com/aasis21/weft/releases>
+- Update the laptop installation: `weft update --check`, then `weft update`
+- General questions and reproducible bugs: [`SUPPORT.md`](SUPPORT.md)
+- Sensitive vulnerability reports: [`SECURITY.md`](SECURITY.md)
+- Data handling: [`PRIVACY.md`](PRIVACY.md)
 
 ## License
 

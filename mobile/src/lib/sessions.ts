@@ -1,11 +1,12 @@
-import { Preferences } from '@capacitor/preferences';
 import type { StoredPairing } from './storage';
 import { loadStoredPairing } from './storage';
+import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 import { freeSpaceUntilFitsSync } from './storageJanitor';
 import { clearTranscript } from './transcripts';
 import { clearEventLog } from './eventLog';
 
 const SESSIONS_KEY = 'weft.sessions.v1';
+let mutationQueue: Promise<void> = Promise.resolve();
 
 interface SessionsStore {
   sessions: StoredSession[];
@@ -90,8 +91,7 @@ function collectRawChannelIds(parsed: unknown): string[] {
 
 async function readStoreRaw(): Promise<{ store: SessionsStore; rawChannelIds: string[] }> {
   try {
-    const { value } = await Preferences.get({ key: SESSIONS_KEY });
-    const raw = value ?? globalThis.localStorage?.getItem(SESSIONS_KEY);
+    const raw = await preferencesStorage.getItem(SESSIONS_KEY);
     if (!raw) return { store: { sessions: [], lastActiveId: null }, rawChannelIds: [] };
     const parsed: unknown = JSON.parse(raw);
     return { store: normalizeStore(parsed), rawChannelIds: collectRawChannelIds(parsed) };
@@ -129,7 +129,8 @@ async function writeStore(store: SessionsStore): Promise<void> {
   // silently lost across a refresh (#186). Both stores are attempted; the read path already prefers
   // whichever has data.
   try {
-    globalThis.localStorage?.setItem(SESSIONS_KEY, value);
+    await preferencesStorage.setItem(SESSIONS_KEY, value);
+    return;
   } catch (err) {
     // A QuotaExceededError here used to silently drop the session list, making freshly-created chats
     // vanish on refresh (they only lived in the in-memory store). The session list + pairing are the
@@ -141,19 +142,22 @@ async function writeStore(store: SessionsStore): Promise<void> {
         validChannelIds: store.sessions.map((s) => s.pairing.channelId),
         protectChannelIds: store.lastActiveId ? [store.lastActiveId] : [],
       });
+      await preferencesStorage.setItem(SESSIONS_KEY, value);
+      return;
     }
-    // Otherwise localStorage is unavailable/blocked (private mode) — Preferences below is the store.
-  }
-  try {
-    await Preferences.set({ key: SESSIONS_KEY, value });
-  } catch {
-    // Native/web Preferences backend unavailable — the localStorage mirror above already holds it.
+    throw err;
   }
 }
 
 async function write(list: StoredSession[]): Promise<void> {
   const { lastActiveId } = await readStore();
   await writeStore({ sessions: list, lastActiveId });
+}
+
+function enqueueMutation(mutate: () => Promise<void>): Promise<void> {
+  const update = mutationQueue.then(mutate);
+  mutationQueue = update.catch(() => {});
+  return update;
 }
 
 /** Rank used to pick the winner among stored entries sharing a sessionId, compared lexicographically:
@@ -205,6 +209,7 @@ function dedupeBySessionId(list: StoredSession[]): StoredSession[] {
  * `weft.pairing.v1` entry into the multi-session list on first run.
  */
 export async function loadSessions(): Promise<StoredSession[]> {
+  await mutationQueue;
   const { store, rawChannelIds } = await readStoreRaw();
   const list = dedupeBySessionId(store.sessions);
 
@@ -236,21 +241,26 @@ export async function loadSessions(): Promise<StoredSession[]> {
 }
 
 export async function loadLastActiveSessionId(): Promise<string | null> {
+  await mutationQueue;
   return (await readStore()).lastActiveId;
 }
 
 export async function setLastActiveSessionId(channelId: string | null): Promise<void> {
-  const { sessions } = await readStore();
-  await writeStore({ sessions, lastActiveId: channelId });
+  await enqueueMutation(async () => {
+    const { sessions } = await readStore();
+    await writeStore({ sessions, lastActiveId: channelId });
+  });
 }
 
 export async function upsertSession(session: StoredSession): Promise<void> {
-  const list = await read();
-  const next = [
-    ...list.filter((s) => s.pairing.channelId !== session.pairing.channelId),
-    session,
-  ];
-  await write(next);
+  await enqueueMutation(async () => {
+    const list = await read();
+    const next = [
+      ...list.filter((s) => s.pairing.channelId !== session.pairing.channelId),
+      session,
+    ];
+    await write(next);
+  });
 }
 
 export async function patchSession(
@@ -274,17 +284,21 @@ export async function patchSession(
     >
   >,
 ): Promise<void> {
-  const list = await read();
-  let changed = false;
-  const next = list.map((s) => {
-    if (s.pairing.channelId !== channelId) return s;
-    changed = true;
-    return { ...s, ...patch };
+  await enqueueMutation(async () => {
+    const list = await read();
+    let changed = false;
+    const next = list.map((s) => {
+      if (s.pairing.channelId !== channelId) return s;
+      changed = true;
+      return { ...s, ...patch };
+    });
+    if (changed) await write(next);
   });
-  if (changed) await write(next);
 }
 
 export async function removeSession(channelId: string): Promise<void> {
-  const list = await read();
-  await write(list.filter((s) => s.pairing.channelId !== channelId));
+  await enqueueMutation(async () => {
+    const list = await read();
+    await write(list.filter((s) => s.pairing.channelId !== channelId));
+  });
 }

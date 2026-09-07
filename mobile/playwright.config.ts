@@ -22,6 +22,17 @@ export default defineConfig({
     hasTouch: true,
     trace: 'on-first-retry',
   },
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' } },
+    // WebKit's parallel demo sessions are timing-sensitive; keep a production-launch
+    // smoke here while Chromium runs the complete journey and accessibility matrix.
+    {
+      name: 'webkit-smoke',
+      testMatch: '**/journey-smoke.spec.ts',
+      grep: /onboarding Landing boots clean/,
+      use: { browserName: 'webkit' },
+    },
+  ],
   webServer: {
     command: `npx vite preview --port ${PORT} --strictPort`,
     url: BASE,

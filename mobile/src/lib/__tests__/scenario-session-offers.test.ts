@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeManager } from '@/test/helpers/makeManager';
 import { registry } from '@/test/helpers/fakeWeftClient';
 import * as B from '@/test/helpers/builders';
+import type { PairingPayload } from '@aasis21/weft-shared';
 
 function listenerQr(channelId: string): string {
   return JSON.stringify({
@@ -13,7 +14,7 @@ function listenerQr(channelId: string): string {
   });
 }
 
-function offerPayload(channelId: string) {
+function offerPayload(channelId: string): PairingPayload {
   return { v: 1, channelId, pub: `offer-pub-${channelId}`, kind: 'session', transport: { kind: 'local' } };
 }
 

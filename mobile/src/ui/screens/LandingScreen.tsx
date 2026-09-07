@@ -27,17 +27,17 @@ const STEPS = [
   {
     n: 1,
     title: 'Install on your laptop',
-    body: 'One line in your terminal — Copilot picks it up automatically. No accounts, no setup.',
+    body: 'Run one command in your terminal. It installs the Weft command and Copilot extension; no account is required.',
   },
   {
     n: 2,
-    title: 'Bring up a code',
-    body: 'Run weft start for the whole laptop, or /weft inside a Copilot chat for just that one. Each shows a QR.',
+    title: 'Run weft start',
+    body: 'Start the Device Station and leave that terminal open. It prints the QR your phone needs.',
   },
   {
     n: 3,
     title: 'Scan with your phone',
-    body: "Point your phone at it and you're connected — send it work, approve its moves, and pick up any chat right where you left off.",
+    body: 'Open this site on your phone, choose Scan QR to pair, and point the camera at the code.',
   },
 ];
 
@@ -260,6 +260,11 @@ export function LandingScreen({
             Try the demo
           </button>
         </div>
+        <p className="landing-install-note">
+          The browser app works immediately. For an app-like icon and automatic web updates, use
+          your browser&apos;s Install app or Add to Home Screen action. Android APKs are optional
+          and available from the <a href="/app.html">verified download page</a>.
+        </p>
         {error ? <p className="error-banner">{error}</p> : null}
       </section>
 
@@ -312,10 +317,19 @@ export function LandingScreen({
         <div>
           <strong>Yours alone.</strong>
           <p>
-            Every message is encrypted end to end and stored nowhere — the relay only ever sees
-            scrambled text.
-            <span className="privacy-fine">AES-256-GCM · zero storage · private channel</span>
+            Weft keeps transcripts and pairing keys locally on your devices so sessions can
+            reconnect. Relay infrastructure forwards encrypted traffic and stores no session
+            content.
+            <span className="privacy-fine">AES-256-GCM · local history · no relay content storage</span>
           </p>
+          <a
+            className="privacy-link"
+            href="https://github.com/aasis21/weft/blob/main/PRIVACY.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Read the privacy notice
+          </a>
         </div>
       </section>
 
@@ -338,7 +352,22 @@ export function LandingScreen({
           GitHub
         </a>
         <span aria-hidden="true">·</span>
-        <span>Apache-2.0 · Android-first · React · Vite · Capacitor</span>
+        <a href="https://github.com/aasis21/weft/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">
+          Privacy
+        </a>
+        <a href="https://github.com/aasis21/weft/blob/main/SECURITY.md" target="_blank" rel="noreferrer">
+          Security
+        </a>
+        <a href="https://github.com/aasis21/weft/blob/main/SUPPORT.md" target="_blank" rel="noreferrer">
+          Support
+        </a>
+        <a href="https://github.com/aasis21/weft/blob/main/TERMS.md" target="_blank" rel="noreferrer">
+          Terms
+        </a>
+        <a href="https://github.com/aasis21/weft/releases" target="_blank" rel="noreferrer">
+          Releases
+        </a>
+        <span>Apache-2.0 · PWA-first</span>
       </footer>
     </main>
   );

@@ -197,4 +197,7 @@ export const weftClientMock = {
   getSenderName(): string {
     return 'WebApp';
   },
+  getStableDeviceId(): string {
+    return 'phone-test-device';
+  },
 };

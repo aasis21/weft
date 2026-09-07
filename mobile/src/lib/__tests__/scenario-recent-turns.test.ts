@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
+import type { NoticeItem, TimelineItem } from '@/session/model';
 
 describe('scenario: recent turns backfill', () => {
   let h: ReturnType<typeof makeManager> | undefined;
@@ -42,10 +43,12 @@ describe('scenario: recent turns backfill', () => {
     ]);
   });
 
-  const texts = (items: readonly { text?: string }[] | undefined): string[] =>
-    (items ?? []).map((i) => ('text' in i ? (i.text as string) : ''));
-  const dividers = (items: readonly { kind: string; id: string }[] | undefined) =>
-    (items ?? []).filter((i) => i.kind === 'notice' && i.id.startsWith('recent-'));
+  const texts = (items: readonly TimelineItem[] | undefined): string[] =>
+    (items ?? []).map((i) => ('text' in i ? i.text : ''));
+  const dividers = (items: readonly TimelineItem[] | undefined): NoticeItem[] =>
+    (items ?? []).filter(
+      (i): i is NoticeItem => i.kind === 'notice' && i.id.startsWith('recent-'),
+    );
 
   it('orders backfilled history ABOVE an in-progress live turn on an active-turn join (#93)', async () => {
     const { client } = await h!.pair('c1');

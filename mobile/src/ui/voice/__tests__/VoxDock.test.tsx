@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { VoxDock } from '@/ui/voice/VoxDock';
+import type { AssistantItem } from '@/session/model';
 
 const speechInput = { supported: true, listening: false, error: null as string | null, start: vi.fn(), stop: vi.fn() };
 const speechOutput = {
@@ -16,8 +17,12 @@ const speechOutput = {
   cancel: vi.fn(),
 };
 
-/** A finished reply. Cast like the other fixtures here — the tests only ever read id and text. */
-const settledReply = { id: 'a1', text: 'All done.' } as never;
+const settledReply: AssistantItem = {
+  kind: 'assistant',
+  id: 'a1',
+  text: 'All done.',
+  ts: 1,
+};
 
 vi.mock('@/ui/hooks/useSpeechInput', () => ({ useSpeechInput: () => speechInput }));
 vi.mock('@/ui/hooks/useSpeechOutput', () => ({ useSpeechOutput: () => speechOutput }));
@@ -134,7 +139,7 @@ describe('Vox keeps its turn (#195)', () => {
     act(() => {
       rerender(
         <VoxDock
-          latestAssistant={{ id: 'a1', text: 'All done.' }}
+          latestAssistant={settledReply}
           agentBusy={false}
           toolActive={false}
           disabled={false}
@@ -163,7 +168,7 @@ describe('Vox keeps its turn (#195)', () => {
     act(() => {
       rerender(
         <VoxDock
-          latestAssistant={{ id: 'a1', text: 'All done.' }}
+          latestAssistant={settledReply}
           agentBusy={false}
           toolActive={false}
           disabled={false}

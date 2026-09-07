@@ -25,11 +25,13 @@ export function exportPublicKeyB64(publicKey: CryptoKey): Promise<string>;
 export function importPeerPublicKey(b64: string): Promise<CryptoKey>;
 export function deriveSessionKey(
   privateKey: CryptoKey,
-  peerPublicKeyB64: string
+  peerPublicKeyB64: string,
+  context?: string
 ): Promise<CryptoKey>;
 export function encryptJSON(key: CryptoKey, data: unknown): Promise<EncryptedPayload>;
 export function decryptJSON(key: CryptoKey, payload: EncryptedPayload): Promise<unknown>;
 export function randomChannelId(): string;
+export function randomPairingToken(): string;
 
 export const _internal: {
   bytesToB64(bytes: Uint8Array | ArrayBuffer): string;

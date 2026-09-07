@@ -4,7 +4,7 @@
 > envelope described here. The wire shape is `{ eventType, eventSubtype, channelId,
 > sessionId, senderId, senderName, msg, ts }`; `EVENT_TYPE` + `SUBTYPE` (nested per type)
 > replace the old `EVENTS` + `KIND` + `eventForKind()` mapping, which have been removed.
-> Pairing (`PAIR.HELLO`/`ACK`) travels on the same envelope. The "Current state" section
+> Pairing (`PAIR.HELLO`/`CHALLENGE`/`PROOF`/`ACK`) travels on the same envelope. The historical section
 > below is retained for historical context only.
 
 ## Problem with the current shape
@@ -103,11 +103,12 @@ Design rationale:
 | `control` | `state_request` | `{}` |
 | `control` | `state_snapshot` | `{ busy, abortable, mode, latestTurnIndex, approvals, elicitations }` |
 
-The `pair.hello` / `pair.ack` bootstrap events (`shared/pairing.mjs`) are
-unaffected by this doc — they run before a `SecureChannel`/AES key exists, so
-they're plaintext and out of scope for the envelope format.
+The pairing bootstrap events (`shared/pairing.mjs`) are outside the
+`SecureChannel` envelope. `pair.hello` and `pair.challenge` expose only public
+handshake data; `pair.proof` and `pair.ack` carry encrypted payloads bound to the
+fresh phone nonce and laptop challenge.
 
-## Current state (for contrast, as implemented today)
+## Historical pre-migration state
 
 ```js
 // shared/channel.mjs — SecureChannel.send()
@@ -129,7 +130,7 @@ Decrypted shape today, e.g. for `kind: "assistant.message"`:
 }
 ```
 
-## Implementation scope (when this is picked up)
+## Completed implementation scope
 
 Touches: `shared/messages.mjs` / `.d.ts` (rewrite), `shared/channel.mjs` (drop
 `eventForKind`, build the envelope), `extension/src/relay.mjs` (every
@@ -137,6 +138,6 @@ Touches: `shared/messages.mjs` / `.d.ts` (rewrite), `shared/channel.mjs` (drop
 `msg.foo` access), `mobile/src/lib/sessionManager.ts`, `mobile/src/lib/timeline.ts`,
 `mobile/src/lib/weftClient.ts`, and every test in `shared/test/*` and
 `mobile/src/lib/__tests__/*` that asserts on `kind` / `EVENTS` / flat payload
-fields. This is a **wire-protocol breaking change** — the extension and the
-mobile app must be redeployed together; there is no on-wire backward-compat
-shim planned.
+fields. This was a wire-protocol change. Current builds retain a version-1 compatibility
+mode for an updated phone connecting to an older laptop QR while version-2
+connections use the replay-protected stream envelope.

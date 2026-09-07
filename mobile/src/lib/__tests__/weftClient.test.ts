@@ -38,6 +38,8 @@ vi.mock('@aasis21/weft-shared', () => ({
     channelId: 'channel-1',
     publicKeyB64: 'laptop-public-key',
     transport: { kind: 'local' },
+    pairingToken: 'pairing-token',
+    expiresAt: Date.now() + 60_000,
   })),
   sayHello: vi.fn(() => Promise.resolve({ key: {} as CryptoKey })),
 }));
@@ -61,6 +63,27 @@ describe('pairSession', () => {
     await expect(pairSession('{"v":1}', { transport })).rejects.toThrow('connect failed');
 
     expect(shared.close).toHaveBeenCalledTimes(1);
+    const { sayHello } = await import('@aasis21/weft-shared');
+    expect(sayHello).toHaveBeenCalledWith(
+      expect.objectContaining({ pairingToken: 'pairing-token' }),
+    );
+  });
+
+  it('rejects an expired first-use QR before opening a transport', async () => {
+    const { pairSession } = await import('../weftClient');
+    const { parsePairingPayload, sayHello } = await import('@aasis21/weft-shared');
+    vi.mocked(parsePairingPayload).mockReturnValueOnce({
+      pairVersion: 2,
+      channelId: 'expired-channel',
+      publicKeyB64: 'laptop-public-key',
+      kind: 'session',
+      transport: { kind: 'local' },
+      pairingToken: 'expired-token',
+      expiresAt: Date.now() - 1,
+    });
+
+    await expect(pairSession('expired')).rejects.toThrow(/expired/i);
+    expect(sayHello).not.toHaveBeenCalled();
   });
 });
 
@@ -82,7 +105,7 @@ describe('connectDevice', () => {
     );
   });
 
-  it('reuses the stored keypair instead of minting a new one, and does not wait for an ack', async () => {
+  it('reuses the stored keypair and completes an authenticated reconnect handshake', async () => {
     const { connectDevice } = await import('../weftClient');
     const { sayHello, generateKeyPair } = await import('@aasis21/weft-shared');
     const transport = {
@@ -95,6 +118,7 @@ describe('connectDevice', () => {
     await connectDevice(
       {
         channelId: 'channel-1',
+        pairVersion: 2,
         peerPublicKeyB64: 'laptop-public-key',
         publicKeyB64: 'my-stored-phone-key',
         privateKeyJwk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'd' } as JsonWebKey,
@@ -111,7 +135,8 @@ describe('connectDevice', () => {
       expect.objectContaining({
         keyPair: expect.objectContaining({ publicKeyB64: 'my-stored-phone-key' }),
         peerPublicKeyB64: 'laptop-public-key',
-        waitForAck: false,
+        waitForAck: true,
+        pairVersion: 2,
       }),
     );
   });

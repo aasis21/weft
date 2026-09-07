@@ -377,7 +377,7 @@
 .row + .row { margin-top: 3px; }
 .row.turn-start { margin-top: 12px; }
 @keyframes weft-slide {
-  from { opacity: 0; transform: translateY(5px); }
+  from { transform: translateY(5px); }
 }
 
 /* user — right aligned, chip stacked beneath the bubble */
@@ -513,9 +513,8 @@
 .device-chip .device-glyph { display: inline-flex; }
 .device-chip .device-glyph svg { width: 11px; height: 11px; display: block; }
 
-/* backfilled pre-join history: muted, with a labelled divider before live items */
+/* Backfilled pre-join history is separated by a label; keep full opacity for readable contrast. */
 .history-block { display: flex; flex-direction: column; }
-.row.history { opacity: 0.7; }
 /* streaming caret + thinking row */
 .caret {
   display: inline-block;

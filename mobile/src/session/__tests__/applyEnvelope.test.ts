@@ -63,7 +63,7 @@ describe('session applyEnvelope', () => {
     ]);
 
     expect(session.transcript.items.filter((i) => i.kind === 'user')).toHaveLength(1);
-    expect(session.transcript.items.filter((i) => i.kind === 'user' || i.kind === 'assistant').map((i) => ('text' in i ? i.text : i.kind))).toEqual([
+    expect(session.transcript.items.filter((i) => i.kind === 'user' || i.kind === 'assistant').map((i) => i.text)).toEqual([
       'what is up',
       'not much',
     ]);

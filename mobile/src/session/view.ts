@@ -1,6 +1,5 @@
 import type { TimelineState } from '@/lib/timeline';
-import type { SpawnMode } from '@aasis21/weft-shared';
-import type { DebugEvent, ListenerDeviceState, SessionMeta, SessionStatus } from './model';
+import type { DebugEvent, ListenerDeviceState, SessionConnection, SessionMeta, SessionStatus } from './model';
 
 export type { SessionMeta, SessionStatus };
 
@@ -41,14 +40,7 @@ export interface SessionView {
    *  renders them newest-first. Persisted per session and restored on reload. */
   events: DebugEvent[];
   error?: string;
-  spawning?: {
-    requestId: string;
-    deviceId: string;
-    deviceName?: string;
-    projectName: string;
-    mode?: SpawnMode;
-    slow?: boolean;
-  };
+  spawning?: SessionConnection['spawning'];
 }
 
 /** The whole app state the SHELL subscribes to: readiness, the active session, and every card. */

@@ -72,12 +72,23 @@ export async function pairSession(
   raw: string | PairingPayload,
   opts?: { transport?: Transport; identity?: PhonePairingIdentity; timeoutMs?: number },
 ): Promise<{ client: WeftClient; pairing: StoredPairing }> {
-  const { channelId, publicKeyB64, transport: transportDescriptor, appVersion } = parsePairingPayload(raw);
+  const {
+    pairVersion,
+    channelId,
+    publicKeyB64,
+    transport: transportDescriptor,
+    appVersion,
+    pairingToken,
+    expiresAt,
+  } = parsePairingPayload(raw);
   return pairWithPublicKey({
     channelId,
+    pairVersion,
     publicKeyB64,
     transportDescriptor,
     appVersion,
+    pairingToken,
+    expiresAt,
     transport: opts?.transport,
     identity: opts?.identity,
     timeoutMs: opts?.timeoutMs,
@@ -95,24 +106,39 @@ export async function createPhonePairingIdentity(): Promise<PhonePairingIdentity
 
 export async function pairWithPublicKey(opts: {
   channelId: string;
+  pairVersion?: 1 | 2;
   publicKeyB64: string;
   /** Which transport + endpoint to connect with — laptop-resolved, carried in the QR/pairing payload. */
   transportDescriptor: TransportDescriptor;
   /** The laptop's Weft version from the pairing payload, persisted on StoredPairing for display. */
   appVersion?: string;
+  pairingToken?: string;
+  expiresAt?: number;
   transport?: Transport;
   identity?: PhonePairingIdentity;
   timeoutMs?: number;
 }): Promise<{ client: WeftClient; pairing: StoredPairing }> {
-  const { channelId, publicKeyB64, transportDescriptor, appVersion } = opts;
+  const {
+    channelId,
+    pairVersion,
+    publicKeyB64,
+    transportDescriptor,
+    appVersion,
+    pairingToken,
+    expiresAt,
+  } = opts;
+  if (!opts.identity && expiresAt !== undefined && Date.now() >= expiresAt) {
+    throw new Error('Weft: this pairing code has expired. Show a fresh QR on the laptop and scan it again.');
+  }
   const phoneKeys = opts.identity
     ? await importKeyPair({ privateKeyJwk: opts.identity.privateKeyJwk })
     : await generateKeyPair();
   const deviceId = opts.identity?.deviceId ?? getStableDeviceId();
   const transport = opts.transport ?? createTransportFromDescriptor(transportDescriptor, channelId);
   let key: CryptoKey;
+  let negotiatedProtocolVersion: 1 | 2;
   try {
-    ({ key } = await sayHello({
+    ({ key, protocolVersion: negotiatedProtocolVersion } = await sayHello({
       transport,
       keyPair: phoneKeys,
       peerPublicKeyB64: publicKeyB64,
@@ -121,6 +147,8 @@ export async function pairWithPublicKey(opts: {
       channelId,
       waitForAck: true,
       timeoutMs: opts.timeoutMs ?? 20_000,
+      pairingToken,
+      pairVersion,
     }));
   } catch (err) {
     void transport.close().catch(() => {});
@@ -134,12 +162,19 @@ export async function pairWithPublicKey(opts: {
     privateKeyJwk,
     deviceId,
     savedAt: Date.now(),
+    pairVersion,
     transport: transportDescriptor,
     ...(appVersion ? { appVersion } : {}),
   };
   let client: WeftClient;
   try {
-    client = await createClientFromMaterial({ channelId, key, deviceId, transport });
+    client = await createClientFromMaterial({
+      channelId,
+      key,
+      deviceId,
+      transport,
+      protocolVersion: negotiatedProtocolVersion,
+    });
   } catch (err) {
     void transport.close().catch(() => {});
     throw err;
@@ -151,6 +186,7 @@ export async function pairWithPublicKey(opts: {
  *  handshake" — satisfied by both StoredPairing (sessions) and RegisteredDevice (listeners). */
 interface ReconnectMaterial {
   channelId: string;
+  pairVersion?: 1 | 2;
   peerPublicKeyB64: string;
   publicKeyB64: string;
   privateKeyJwk: JsonWebKey;
@@ -164,8 +200,8 @@ interface ReconnectMaterial {
  * phone public key it sees per run (`boundPeerPub` in listener.mjs) and silently ignores any hello
  * from a different key ("ignoring pairing from a different phone"). Generating a fresh keypair on
  * every reconnect (as a first-time pairing does) would make the SAME phone look like an intruder
- * to its own listener. Reusing the stored keypair + a fire-and-forget hello (no ack wait, mirroring
- * connectSession) keeps the phone's identity stable across reconnects.
+ * to its own listener. Reusing the stored keypair keeps the phone's identity stable while the
+ * version-2 challenge still derives a fresh authenticated session key.
  */
 async function reconnectFromMaterial(
   material: ReconnectMaterial,
@@ -183,20 +219,22 @@ async function reconnectFromMaterial(
   try {
     return await withTimeout(
       (async () => {
-        const { key } = await sayHello({
+        const { key, protocolVersion } = await sayHello({
           transport,
           keyPair: { privateKey, publicKeyB64: material.publicKeyB64 },
           peerPublicKeyB64: material.peerPublicKeyB64,
           deviceId: material.deviceId,
           senderName: getSenderName(),
           channelId: material.channelId,
-          waitForAck: false,
+          waitForAck: true,
+          pairVersion: material.pairVersion ?? 1,
         });
         return createClientFromMaterial({
           channelId: material.channelId,
           key,
           deviceId: material.deviceId,
           transport,
+          protocolVersion,
         });
       })(),
       CONNECT_TIMEOUT_MS,
@@ -232,6 +270,7 @@ export async function createClientFromMaterial(opts: {
   key: CryptoKey;
   deviceId?: string;
   transport: Transport;
+  protocolVersion?: 1 | 2;
 }): Promise<WeftClient> {
   const channel = new SecureChannel({
     transport: opts.transport,
@@ -241,6 +280,7 @@ export async function createClientFromMaterial(opts: {
       senderId: opts.deviceId ?? getStableDeviceId(),
       senderName: getSenderName(),
     },
+    protocolVersion: opts.protocolVersion,
   });
   await channel.connect();
   return wrapChannel(opts.channelId, channel);

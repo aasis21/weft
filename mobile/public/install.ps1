@@ -12,8 +12,8 @@
   config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written via
   `weft set-transport` — there is NO env var / .env for this, so re-running this installer to
   update to a newer build never silently resets or shadows your chosen transport. Also
-  registers a `weft` command on your PATH. No git clone, no Node build required — just Node
-  itself.
+  registers a `weft` command on your PATH. No git clone or Node build is required — just
+  Node.js 20 or newer.
 
   Designed to be run with:
     irm https://useweft.netlify.app/install.ps1 | iex
@@ -94,6 +94,16 @@ function Warn($msg) { Write-Host "   $(Yellow '!') $msg" }
 $TOTAL_STEPS = 6
 Banner "WEFT INSTALLER"
 
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCommand) {
+    throw 'Weft requires Node.js 20 or newer. Install it from https://nodejs.org/ and rerun this installer.'
+}
+$nodeVersion = (& node --version).TrimStart('v')
+$nodeMajor = 0
+if (-not [int]::TryParse(($nodeVersion -split '\.')[0], [ref]$nodeMajor) -or $nodeMajor -lt 20) {
+    throw "Weft requires Node.js 20 or newer; found $nodeVersion. Upgrade Node.js and rerun this installer."
+}
+
 # ---------------------------------------------------------------------------------------------
 # Step 1: pick a transport. An existing ~/.weft/weft.config.json choice always wins unless the
 # caller explicitly passed -Transport or -Force — this installer only ever refreshes CODE under
@@ -160,12 +170,24 @@ if ($Transport -eq 'devtunnel') {
 # this script uses (so a -Base mirror flows through to the bundle downloads too).
 # ---------------------------------------------------------------------------------------------
 StepHeader 2 $TOTAL_STEPS 'Downloading Weft bundles'
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-Invoke-WebRequest -Uri "$base/weft.mjs" -OutFile (Join-Path $InstallDir 'weft.mjs') -UseBasicParsing
+$manifest = Invoke-RestMethod -Uri "$base/release-manifest.json" -UseBasicParsing
+$bootstrap = Join-Path ([System.IO.Path]::GetTempPath()) "weft-bootstrap-$PID.mjs"
+Invoke-WebRequest -Uri "$base/weft.mjs" -OutFile $bootstrap -UseBasicParsing
+$expectedBootstrapHash = $manifest.files.'weft.mjs'.sha256
+if (-not $expectedBootstrapHash) { throw 'release manifest is missing the weft.mjs checksum' }
+$actualBootstrapHash = (Get-FileHash -Algorithm SHA256 -Path $bootstrap).Hash.ToLowerInvariant()
+if ($actualBootstrapHash -ne $expectedBootstrapHash.ToLowerInvariant()) {
+    Remove-Item -Path $bootstrap -Force
+    throw "weft.mjs integrity check failed (expected $expectedBootstrapHash, received $actualBootstrapHash)"
+}
 $env:WEFT_INSTALL_BASE = $base
 $env:WEFT_INSTALL_DIR = $InstallDir
-& node (Join-Path $InstallDir 'weft.mjs') install | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "weft install failed (exit code $LASTEXITCODE)" }
+try {
+    & node $bootstrap install | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "weft install failed (exit code $LASTEXITCODE)" }
+} finally {
+    Remove-Item -Path $bootstrap -Force -ErrorAction SilentlyContinue
+}
 # $skillDir is referenced again in the Step 6 uninstall hint; keep it defined here.
 $skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
 Ok "extension.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $InstallDir"

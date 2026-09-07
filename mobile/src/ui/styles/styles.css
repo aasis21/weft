@@ -991,6 +991,25 @@ pre {
   padding: 0 24px;
 }
 
+.landing-install-note {
+  max-width: 42rem;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.landing-install-note a {
+  color: var(--accent-bright);
+  font-weight: 700;
+}
+
+.landing-install-note a:focus-visible,
+.privacy-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Desktop: let the tidy stacked group relax into a wrapping, content-width row. */
 @media (min-width: 620px) {
   .landing-cta {
@@ -1188,6 +1207,10 @@ pre {
   color: var(--accent-bright);
 }
 
+.landing-footer > span[aria-hidden] {
+  color: var(--line-strong);
+}
+
 /* ---- Landing: back-to-sessions + content bands ---------------------------- */
 .landing-topbar {
   display: flex;
@@ -1347,6 +1370,19 @@ pre {
   font-family: var(--mono);
   font-size: 0.74rem;
   letter-spacing: 0.04em;
+}
+
+.privacy-link {
+  display: inline-block;
+  margin-top: 9px;
+  color: var(--accent-bright);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.privacy-link:hover {
+  text-decoration: underline;
 }
 
 .landing-fin {

@@ -7,7 +7,15 @@ import { importKeyPair } from "@aasis21/weft-shared";
 import { launchIdentityPath } from "./launchOperations.mjs";
 
 export function writeIdentityFile(
-  { channelId, publicKeyB64, privateKeyJwk, operationId = null, operationOwnerToken = null },
+  {
+    channelId,
+    publicKeyB64,
+    privateKeyJwk,
+    pairingToken = null,
+    pairingExpiresAt = null,
+    operationId = null,
+    operationOwnerToken = null,
+  },
   { baseDir } = {},
 ) {
   if (!channelId || !publicKeyB64 || !privateKeyJwk) {
@@ -30,6 +38,8 @@ export function writeIdentityFile(
         channelId,
         publicKeyB64,
         privateKeyJwk,
+        ...(pairingToken ? { pairingToken } : {}),
+        ...(pairingExpiresAt ? { pairingExpiresAt } : {}),
         ...(operationId ? { operationId } : {}),
         ...(operationOwnerToken ? { operationOwnerToken } : {}),
       }),
@@ -68,6 +78,8 @@ export async function readIdentityFile(file) {
   return {
     channelId: parsed.channelId,
     laptopKeys,
+    pairingToken: typeof parsed.pairingToken === "string" ? parsed.pairingToken : null,
+    pairingExpiresAt: Number.isSafeInteger(parsed.pairingExpiresAt) ? parsed.pairingExpiresAt : null,
     operationId: typeof parsed.operationId === "string" ? parsed.operationId : null,
     operationOwnerToken: typeof parsed.operationOwnerToken === "string" ? parsed.operationOwnerToken : null,
   };

@@ -57,7 +57,7 @@ weft help
   flags) just flips the pointer and reuses whatever creds are already in `supabase.json`
   (the installer seeds the hosted defaults there on install); `weft set-transport supabase
   --url <url> --anon-key <key>` overwrites `supabase.json` and then flips the pointer.
-- **`weft set-pairing persistent`** — reuse the same channel + key across every
+- **`weft set-pairing persistent`** — reuse the same channel + device identity across every
   `weft start`, so an already-paired phone reconnects without rescanning the QR. This is
   the default. Use `weft set-pairing ephemeral` for a fresh channel + key on every station
   run. `weft rotate-pairing` forces a new persistent identity on demand. The in-session
@@ -113,7 +113,7 @@ spin the relay up for you; if it isn't running you get an actionable error point
    identity, it falls back to creating a brand-new one (URL changes → re-scan the QR),
 4. **health-check the relay every 30s** while the station runs, re-provisioning once if it
    disappears — and if the replacement lands on a **new URL**, the station rebinds itself
-   onto it and reprints the QR inline (same channel + keys, so you just re-scan; no
+   onto it and reprints the QR inline (same pairing identity, so you just re-scan; no
    restarting `weft start`), and
 5. **release it on exit** — only if this station started it. A relay from
    `weft devtunnel start` is never torn down by a station shutting down.

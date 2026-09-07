@@ -9,7 +9,7 @@ const config: CapacitorConfig = {
   },
   android: {
     captureInput: true,
-    webContentsDebuggingEnabled: true,
+    webContentsDebuggingEnabled: false,
   },
 };
 

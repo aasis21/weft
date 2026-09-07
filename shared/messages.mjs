@@ -122,7 +122,7 @@ export const SUBTYPE = Object.freeze({
     // drop it from its advertised set. Idempotent; carries the offered session's channelId.
     SESSION_CLAIMED: "session_claimed",
   }),
-  PAIR: Object.freeze({ HELLO: "hello", ACK: "ack" }),
+  PAIR: Object.freeze({ HELLO: "hello", CHALLENGE: "challenge", PROOF: "proof", ACK: "ack" }),
 });
 
 /** Session modes the phone can request. (Applied best-effort by the extension; see spike.) */

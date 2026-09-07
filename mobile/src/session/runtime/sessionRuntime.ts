@@ -40,6 +40,7 @@ import {
   connectSession,
   createPhonePairingIdentity,
   pairSession,
+  getStableDeviceId,
   getSenderName,
 } from '@/lib/weftClient';
 import type { PhonePairingIdentity, WeftClient } from '@/lib/weftClient';
@@ -1096,7 +1097,21 @@ export class SessionRuntime {
       // single authoritative parser on the real path and will surface invalid production payloads.
     }
     if (parsed?.kind === PAIR_KIND.LISTENER) return this.registerListenerFromQr(raw);
-    const { client, pairing } = await pairSession(raw);
+    const prior = parsed
+      ? (await loadSessions()).find(
+          (entry) =>
+            entry.pairing.channelId === parsed.channelId &&
+            entry.pairing.peerPublicKeyB64 === parsed.publicKeyB64,
+        )
+      : undefined;
+    const identity = prior
+      ? {
+          publicKeyB64: prior.pairing.publicKeyB64,
+          privateKeyJwk: prior.pairing.privateKeyJwk,
+          deviceId: prior.pairing.deviceId,
+        }
+      : undefined;
+    const { client, pairing } = await pairSession(raw, { identity });
     return this.openPairedSession(client, pairing);
   }
 
@@ -1143,10 +1158,18 @@ export class SessionRuntime {
         `You already have ${MAX_DEVICES} devices connected — forget one (Devices → Forget) before adding another.`,
       );
     }
-    const { client, pairing } = await pairSession(raw);
+    const identity = prior && prior.pub === parsed.publicKeyB64
+      ? {
+          publicKeyB64: prior.publicKeyB64,
+          privateKeyJwk: prior.privateKeyJwk,
+          deviceId: getStableDeviceId(),
+        }
+      : undefined;
+    const { client, pairing } = await pairSession(raw, { identity });
     const now = this.clock();
     const stored: RegisteredDevice = {
       channelId: pairing.channelId,
+      pairVersion: pairing.pairVersion,
       pub: pairing.peerPublicKeyB64,
       transport: pairing.transport,
       publicKeyB64: pairing.publicKeyB64,
@@ -1506,7 +1529,7 @@ export class SessionRuntime {
 
     const requestId = `resume-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
-    const displayName = opts.title?.trim() || basename(opts.cwd) || 'Resuming session';
+    const displayName = opts.title?.trim() || (opts.cwd ? basename(opts.cwd) : '') || 'Resuming session';
     const createdAt = this.clock();
     const meta: SessionMeta = {
       channelId: tempId,

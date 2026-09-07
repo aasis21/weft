@@ -9,10 +9,16 @@ export interface SecureChannelIdentity {
 }
 
 export declare class SecureChannel {
-  constructor(opts: { transport: Transport; key: CryptoKey; identity?: SecureChannelIdentity });
+  constructor(opts: {
+    transport: Transport;
+    key: CryptoKey;
+    identity?: SecureChannelIdentity;
+    protocolVersion?: 1 | 2;
+  });
   transport: Transport;
   key: CryptoKey;
   identity: SecureChannelIdentity;
+  protocolVersion: 1 | 2;
   connect(): Promise<void>;
   send(message: EventEnvelope): Promise<void>;
   onEvent(event: EventType | string, handler: (msg: EventEnvelope) => void): () => void;

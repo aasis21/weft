@@ -8,25 +8,38 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install
-        run: npm ci
+        run: npm ci --workspaces --include-workspace-root
 
-      - name: Shared contracts (crypto, pairing, transport, protocol)
-        run: npm test -w @aasis21/weft-shared
+      - name: Verify workspace versions
+        run: npm run check-version
+
+      - name: Test all workspaces
+        run: npm test
+
+      - name: Type-check mobile tests
+        run: npm run test:types -w @aasis21/weft-mobile
 
       - name: Extension relay loop (harness smoke)
-        run: node extension/harness/harness.mjs --auto
+        run: npm run harness -w @aasis21/weft-extension -- --auto
 
-      - name: Build extension bundle
-        run: npm run build -w @aasis21/weft-extension
+      - name: Build production workspaces
+        run: npm run build
 
-      - name: Build mobile (web)
-        run: npm run build -w @aasis21/weft-mobile
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run Playwright journeys
+        run: npm run test:e2e -w @aasis21/weft-mobile
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

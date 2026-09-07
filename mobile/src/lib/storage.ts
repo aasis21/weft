@@ -1,5 +1,5 @@
-import { Preferences } from '@capacitor/preferences';
 import type { TransportDescriptor } from '@aasis21/weft-shared';
+import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 
 const PAIRING_KEY = 'weft.pairing.v1';
 
@@ -10,6 +10,8 @@ export interface StoredPairing {
   privateKeyJwk: JsonWebKey;
   deviceId: string;
   savedAt: number;
+  /** Pairing protocol used by the laptop. Missing means legacy version 1. */
+  pairVersion?: 1 | 2;
   /** Which transport + endpoint this session was paired with — reused verbatim on reconnect. */
   transport: TransportDescriptor;
   /** The paired laptop's Weft version at pairing time (from the QR/pairing payload). Optional —
@@ -19,8 +21,7 @@ export interface StoredPairing {
 
 export async function loadStoredPairing(): Promise<StoredPairing | null> {
   try {
-    const { value } = await Preferences.get({ key: PAIRING_KEY });
-    const raw = value ?? globalThis.localStorage?.getItem(PAIRING_KEY);
+    const raw = await preferencesStorage.getItem(PAIRING_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as StoredPairing;
   } catch {
@@ -29,12 +30,9 @@ export async function loadStoredPairing(): Promise<StoredPairing | null> {
 }
 
 export async function saveStoredPairing(pairing: StoredPairing): Promise<void> {
-  const value = JSON.stringify(pairing);
-  await Preferences.set({ key: PAIRING_KEY, value });
-  globalThis.localStorage?.setItem(PAIRING_KEY, value);
+  await preferencesStorage.setItem(PAIRING_KEY, JSON.stringify(pairing));
 }
 
 export async function clearStoredPairing(): Promise<void> {
-  await Preferences.remove({ key: PAIRING_KEY });
-  globalThis.localStorage?.removeItem(PAIRING_KEY);
+  await preferencesStorage.removeItem(PAIRING_KEY);
 }

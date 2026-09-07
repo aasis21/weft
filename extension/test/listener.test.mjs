@@ -89,15 +89,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
 
   const phoneTransport = createLocalTransport({ channelId });
   const phoneKeys = await generateKeyPair();
-  const phoneKey = await deriveSessionKey(phoneKeys.privateKey, listenerKeys.publicKeyB64);
-  const phoneChannel = new SecureChannel({
-    transport: phoneTransport,
-    key: phoneKey,
-    identity: { channelId, senderId: "phone", senderName: "Phone" },
-  });
-  const messages = [];
-  phoneChannel.onEvent(EVENT_TYPE.CONTROL, (m) => messages.push(m));
-  await sayHello({
+  const { key: phoneKey } = await sayHello({
     transport: phoneTransport,
     keyPair: phoneKeys,
     peerPublicKeyB64: listenerKeys.publicKeyB64,
@@ -107,7 +99,16 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     waitForAck: true,
     timeoutMs: 1000,
     retryMs: 20,
+    pairingToken: listener.pairingPayload.token,
   });
+  const phoneChannel = new SecureChannel({
+    transport: phoneTransport,
+    key: phoneKey,
+    identity: { channelId, senderId: "phone", senderName: "Phone" },
+  });
+  const messages = [];
+  phoneChannel.onEvent(EVENT_TYPE.CONTROL, (m) => messages.push(m));
+  await phoneChannel.send(projectListRequest());
   await waitFor(() => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST), "project list");
   return { listener, listenerKeys, channelId, phoneChannel, phoneKeys, messages, connectionsHome };
 }
@@ -122,6 +123,34 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   assert.deepEqual(list.msg.projects, [{ name: "app", path: projectDir, isDefault: true }]);
   assert.ok(list.msg.deviceName);
   assert.equal(list.msg.deviceId, "test-device");
+  await listener.stop();
+});
+
+test("refreshes an unclaimed listener grant and notifies the host", async () => {
+  const { createLocalTransport } = await import("@aasis21/weft-shared");
+  const listenerKeys = await generateKeyPair();
+  const channelId = `chan-${Math.random().toString(16).slice(2)}`;
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-connections-"));
+  connectionsHomes.push(connectionsHome);
+  const refreshed = [];
+  const listener = createListener({
+    transport: createLocalTransport({ channelId }),
+    transportDescriptor: { kind: "local", channelId },
+    keyPair: listenerKeys,
+    channelId,
+    deviceId: "test-device",
+    connectionsHome,
+    pairingTtlMs: 25,
+    onPairingPayloadChanged: (payload) => refreshed.push(payload),
+  });
+  await listener.start();
+  const original = listener.pairingPayload;
+
+  await waitFor(() => refreshed.length > 0, "pairing grant refresh");
+  assert.notEqual(refreshed[0].token, original.token);
+  assert.equal(refreshed[0].channelId, original.channelId);
+  assert.ok(refreshed[0].expiresAt > original.expiresAt);
+
   await listener.stop();
 });
 
@@ -215,12 +244,27 @@ test("duplicate SPAWN_SESSION replays pairing/result/status without spawning aga
         .find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING && m.msg.requestId === "req-idempotent"),
     "replayed spawn pairing",
   );
-  assert.equal(spawnCount, 1);
-  assert.ok(
-    messages
-      .slice(before)
-      .some((m) => m.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS && m.msg.state === "launched"),
+  await waitFor(
+    () =>
+      messages
+        .slice(before)
+        .find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT && m.msg.requestId === "req-idempotent"),
+    "replayed spawn result",
   );
+  await waitFor(
+    () =>
+      messages
+        .slice(before)
+        .find(
+          (m) =>
+            m.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS &&
+            m.msg.requestId === "req-idempotent" &&
+            m.msg.state === "launched",
+        ),
+    "replayed launch status",
+  );
+  assert.equal(spawnCount, 1);
+  await phoneChannel.close();
   await listener.stop();
 });
 
@@ -414,6 +458,17 @@ test("unknown project emits SPAWN_RESULT ok:false", async () => {
   );
   assert.equal(result.msg.ok, false);
   assert.match(result.msg.error, /Unknown project/);
+  await waitFor(
+    () =>
+      messages.find(
+        (m) =>
+          m.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS &&
+          m.msg.requestId === "req-missing" &&
+          m.msg.state === "failed",
+      ),
+    "failed launch status",
+  );
+  await phoneChannel.close();
   await listener.stop();
 });
 
@@ -660,31 +715,21 @@ test("RESUME_SESSION force fails safely when prior process termination cannot be
   await listener.stop();
 });
 
-test("the same phone re-scanning the QR is re-paired, not rejected as a different phone", async () => {
+test("the same paired phone can reconnect with its existing key while the QR grant stays single-use", async () => {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const warnings = [];
-  const { listener, listenerKeys, channelId } = await pairedHarness({
+  const { listener, listenerKeys, channelId, phoneKeys } = await pairedHarness({
     projects: [],
     log: { warn: (m) => warnings.push(m) },
   });
 
-  // A re-scan mints a FRESH keypair on the phone but keeps its stable localStorage device id, so
-  // this is what "same handset, scanned the QR again" actually looks like on the wire.
   const rescanTransport = createLocalTransport({ channelId });
-  const rescanKeys = await generateKeyPair();
-  const rescanKey = await deriveSessionKey(rescanKeys.privateKey, listenerKeys.publicKeyB64);
-  const rescanChannel = new SecureChannel({
-    transport: rescanTransport,
-    key: rescanKey,
-    identity: { channelId, senderId: "phone-1", senderName: "Phone" },
-  });
   const rescanMessages = [];
-  rescanChannel.onEvent(EVENT_TYPE.CONTROL, (m) => rescanMessages.push(m));
 
   try {
-    await sayHello({
+    const { key } = await sayHello({
       transport: rescanTransport,
-      keyPair: rescanKeys,
+      keyPair: phoneKeys,
       peerPublicKeyB64: listenerKeys.publicKeyB64,
       channelId,
       deviceId: "phone-1",
@@ -692,13 +737,21 @@ test("the same phone re-scanning the QR is re-paired, not rejected as a differen
       waitForAck: true,
       timeoutMs: 1000,
       retryMs: 20,
+      pairingToken: listener.pairingPayload.token,
     });
+    const rescanChannel = new SecureChannel({
+      transport: rescanTransport,
+      key,
+      identity: { channelId, senderId: "phone-1", senderName: "Phone" },
+    });
+    rescanChannel.onEvent(EVENT_TYPE.CONTROL, (m) => rescanMessages.push(m));
+    await rescanChannel.send(projectListRequest());
 
     await waitFor(
       () => rescanMessages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST),
-      "project list on the re-scanned channel",
+      "project list on the reconnected channel",
     );
-    assert.deepEqual(warnings, [], "re-pairing the same phone must not warn about a different phone");
+    assert.deepEqual(warnings, []);
   } finally {
     // Always stop: a regression here leaves the listener holding its transport, and the test
     // runner then hangs on the open handles instead of reporting the failure.
@@ -709,27 +762,34 @@ test("the same phone re-scanning the QR is re-paired, not rejected as a differen
 test("a second different phone public key is ignored after first binding", async () => {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const warnings = [];
-  const { listener, listenerKeys, channelId, messages } = await pairedHarness({
+  const { listener, listenerKeys, channelId, phoneChannel, messages } = await pairedHarness({
     projects: [],
     log: { warn: (m) => warnings.push(m) },
   });
   const secondTransport = createLocalTransport({ channelId });
   const secondKeys = await generateKeyPair();
-  await sayHello({
-    transport: secondTransport,
-    keyPair: secondKeys,
-    peerPublicKeyB64: listenerKeys.publicKeyB64,
-    channelId,
-    deviceId: "phone-2",
-    senderName: "Other Phone",
-    waitForAck: true,
-    timeoutMs: 1000,
-    retryMs: 20,
-  });
-  await waitFor(() => warnings.length > 0, "ignored second phone warning");
-  assert.match(warnings[0], /ignoring pairing from a different phone/);
-  const lists = messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
-  assert.equal(lists.length, 1);
+  await assert.rejects(
+    sayHello({
+      transport: secondTransport,
+      keyPair: secondKeys,
+      peerPublicKeyB64: listenerKeys.publicKeyB64,
+      channelId,
+      deviceId: "phone-2",
+      senderName: "Other Phone",
+      waitForAck: true,
+      timeoutMs: 100,
+      retryMs: 20,
+      pairingToken: listener.pairingPayload.token,
+    }),
+    /no ack/,
+  );
+  assert.deepEqual(warnings, []);
+  const listCount = messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST).length;
+  await phoneChannel.send(projectListRequest());
+  await waitFor(
+    () => messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST).length > listCount,
+    "project list on the still-bound first phone",
+  );
   await listener.stop();
 });
 
@@ -820,7 +880,7 @@ test("relays SESSION_OFFERS for pending `/weft` sessions and drops them on SESSI
 // --- mid-run transport rebind (devtunnel relay came back on a NEW url) -----------------------
 // `weft start`'s relay watchdog calls listener.rebindTransport() so the station can re-pair
 // inline instead of forcing the user to kill it and re-run. What matters here: the pairing
-// identity survives (so the reprinted QR is the same channel/keys, only a new endpoint), the
+// identity survives (so the reprinted QR keeps the channel/keypair with a fresh grant and endpoint), the
 // stale phone is reported as gone rather than silently heartbeated at, and a phone that scans
 // the new QR binds normally.
 
@@ -855,10 +915,10 @@ test("rebindTransport is a no-op when the transport resolves unchanged", async (
   await listener.stop();
 });
 
-test("rebindTransport drops the phone bound to the dead endpoint, then accepts a fresh pairing", async () => {
+test("rebindTransport drops the dead endpoint, then accepts only the already-bound phone", async () => {
   const disconnects = [];
   const connects = [];
-  const { listener, listenerKeys, channelId } = await pairedHarness({
+  const { listener, listenerKeys, channelId, phoneKeys } = await pairedHarness({
     projects: [],
     transportDescriptor: { kind: "local", url: "wss://old.devtunnels.ms" },
     onDeviceConnected: () => connects.push("connected"),
@@ -870,29 +930,30 @@ test("rebindTransport drops the phone bound to the dead endpoint, then accepts a
   // The old phone still holds the dead URL — report it gone instead of heartbeating into a void.
   assert.equal(disconnects.length, 1, "bound phone is reported disconnected");
 
-  // A phone re-scanning the reprinted QR pairs again on the same channel/keys.
+  // The already-bound phone can reconnect on the new endpoint without making the one-time QR
+  // grant reusable by a different key.
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const rescanTransport = createLocalTransport({ channelId });
-  const rescanKeys = await generateKeyPair();
-  const rescanChannel = new SecureChannel({
+  const { key: rescanKey } = await sayHello({
     transport: rescanTransport,
-    key: await deriveSessionKey(rescanKeys.privateKey, listenerKeys.publicKeyB64),
-    identity: { channelId, senderId: "phone2", senderName: "Phone 2" },
-  });
-  const seen = [];
-  rescanChannel.onEvent(EVENT_TYPE.CONTROL, (m) => seen.push(m));
-  await sayHello({
-    transport: rescanTransport,
-    keyPair: rescanKeys,
+    keyPair: phoneKeys,
     peerPublicKeyB64: listenerKeys.publicKeyB64,
     channelId,
-    deviceId: "phone-2",
-    senderName: "Phone 2",
+    deviceId: "phone-1",
+    senderName: "Phone",
     waitForAck: true,
     timeoutMs: 1000,
     retryMs: 20,
   });
+  const rescanChannel = new SecureChannel({
+    transport: rescanTransport,
+    key: rescanKey,
+    identity: { channelId, senderId: "phone-1", senderName: "Phone" },
+  });
+  const seen = [];
+  rescanChannel.onEvent(EVENT_TYPE.CONTROL, (m) => seen.push(m));
+  await rescanChannel.send(projectListRequest());
   await waitFor(() => seen.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST), "project list after re-scan");
-  assert.equal(connects.length, 2, "re-scanned phone binds as a new connection");
+  assert.equal(connects.length, 2, "the bound phone reconnects on the new endpoint");
   await listener.stop();
 });

@@ -76,7 +76,7 @@ dist_dir="$root/mobile/dist"
 
 if [ ! -d "$root/node_modules" ]; then
   cyan "Installing workspace dependencies (npm install)"
-  npm install >/dev/null
+  npm install --workspaces --include-workspace-root >/dev/null
   ok "dependencies ready"
 fi
 
@@ -106,22 +106,29 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
     cp "$skill_source" "$root/mobile/public/weft-skill.md"
     ok "mobile/public/weft-skill.md  (served as /weft-skill.md; installer writes it to ~/.copilot/skills/weft-how-to-use/SKILL.md)"
   else
-    warn "no $skill_source - the how-to-use skill won't be (re)published"
+    echo "no $skill_source - cannot publish a verifiable release without the how-to-use skill" >&2
+    exit 1
   fi
+
+  cyan "Generating release integrity manifest"
+  node scripts/generate-release-manifest.mjs mobile/public >/dev/null
+  ok "mobile/public/release-manifest.json  (SHA-256 for every installer payload)"
 
   cyan "Building mobile web app (Vite)"
   npm run build -w @aasis21/weft-mobile >/dev/null
   [ -f "$dist_dir/index.html" ] || { echo "mobile build did not produce $dist_dir" >&2; exit 1; }
   ok "mobile/dist"
 
-  # Keep the downloadable Android package in parity with ship.ps1. The checked-in debug APK is
-  # optional; when present, stitch it into the web deploy so /app can serve /weft-debug.apk.
-  apk_source="$root/mobile/release/weft-debug.apk"
+  # Publish only a release APK. Debug packages are intentionally never exposed publicly.
+  version="$(tr -d '\r\n' < "$root/VERSION")"
+  apk_source="$root/mobile/release/weft-release.apk"
   if [ -f "$apk_source" ]; then
-    cp "$apk_source" "$dist_dir/weft-debug.apk"
-    ok "mobile/dist/weft-debug.apk  (served as /weft-debug.apk for the /app download page)"
+    apk_name="weft-$version.apk"
+    cp "$apk_source" "$dist_dir/$apk_name"
+    node scripts/generate-release-manifest.mjs mobile/dist >/dev/null
+    ok "mobile/dist/$apk_name  (versioned release APK with published SHA-256)"
   else
-    info "no mobile/release/weft-debug.apk - /app download page will not include an APK"
+    info "no mobile/release/weft-release.apk - the public download page will recommend the PWA"
   fi
 else
   info "skip-build: reusing existing extension/dist and mobile/dist"
