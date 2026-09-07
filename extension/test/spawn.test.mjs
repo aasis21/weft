@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
 import { spawnCopilotSession, writeIdentityFile } from "../src/spawn.mjs";
-import { readIdentityFile } from "../src/handoffIdentity.mjs";
+import { cleanupIdentityAfterPairing, readIdentityFile } from "../src/handoffIdentity.mjs";
 
 const cleanupFiles = [];
 const cleanupDirs = [];
@@ -50,6 +50,25 @@ test("handoff identity can be read by replacement extension processes", async ()
   assert.equal(replacement.channelId, material.channelId);
   assert.equal(replacement.laptopKeys.publicKeyB64, material.publicKeyB64);
   assert.equal(JSON.parse(readFileSync(file, "utf8")).channelId, material.channelId);
+});
+
+test("durable handoff identity survives pairing for extension reloads", async () => {
+  const weftHome = mkdtempSync(join(tmpdir(), "weft-durable-handoff-"));
+  cleanupDirs.push(weftHome);
+  const file = writeIdentityFile(await identity("chan-durable-reload"), {
+    baseDir: weftHome,
+  });
+  cleanupFiles.push(file);
+
+  assert.equal(cleanupIdentityAfterPairing(file, { durable: true }), false);
+  assert.equal((await readIdentityFile(file)).channelId, "chan-durable-reload");
+});
+
+test("transient handoff identity is removed after pairing", async () => {
+  const file = writeIdentityFile(await identity("chan-transient"));
+
+  assert.equal(cleanupIdentityAfterPairing(file), true);
+  assert.throws(() => readFileSync(file, "utf8"), /ENOENT/);
 });
 
 test("handoff identity preserves the one-time pairing grant for the spawned extension", async () => {

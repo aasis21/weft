@@ -84,3 +84,13 @@ export async function readIdentityFile(file) {
     operationOwnerToken: typeof parsed.operationOwnerToken === "string" ? parsed.operationOwnerToken : null,
   };
 }
+
+export function cleanupIdentityAfterPairing(file, { durable = false } = {}) {
+  if (!file || durable) return false;
+  try {
+    unlinkSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
