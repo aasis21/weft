@@ -17,10 +17,12 @@ describe('LandingScreen install command tabs accessibility', () => {
     expect(panel).toHaveAttribute('id', 'install-command-panel');
     expect(windows).toHaveAttribute('aria-controls', 'install-command-panel');
     expect(unix).toHaveAttribute('aria-controls', 'install-command-panel');
-    expect(panel).toHaveAttribute('aria-labelledby', windows.id);
+    const selected = windows.getAttribute('aria-selected') === 'true' ? windows : unix;
+    const other = selected === windows ? unix : windows;
+    expect(panel).toHaveAttribute('aria-labelledby', selected.id);
 
-    await user.click(unix);
-    expect(panel).toHaveAttribute('aria-labelledby', unix.id);
+    await user.click(other);
+    expect(panel).toHaveAttribute('aria-labelledby', other.id);
   });
 
   it('presents install, weft start, then scan as the primary path', () => {
