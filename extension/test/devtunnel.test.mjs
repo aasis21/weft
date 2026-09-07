@@ -747,6 +747,7 @@ test("persistent pairing: a restart reuses the preserved tunnel (same identity, 
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   const createLog = join(dir, "create-calls.log");
   const hostLog = join(dir, "host-calls.log");
+  const registryPath = join(homeDir, "devtunnel.json");
   try {
     const bin = makeFakeCli(dir);
     process.env.WEFT_DEVTUNNEL_BIN = bin;
@@ -758,7 +759,6 @@ test("persistent pairing: a restart reuses the preserved tunnel (same identity, 
 
     // First start: fresh create.
     await ensureDevTunnelRelay({ baseDir: homeDir });
-    const registryPath = join(homeDir, "devtunnel.json");
     await waitFor(() => existsSync(registryPath), "registry file to appear");
     const first = JSON.parse(readFileSync(registryPath, "utf8"));
 
@@ -790,6 +790,10 @@ test("persistent pairing: a restart reuses the preserved tunnel (same identity, 
     await forceKill(second.pid);
     rmSync(registryPath, { force: true });
   } finally {
+    if (existsSync(registryPath)) {
+      const entry = JSON.parse(readFileSync(registryPath, "utf8"));
+      if (entry.pid) await forceKill(entry.pid);
+    }
     delete process.env.WEFT_DEVTUNNEL_BIN;
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
     delete process.env.FAKE_DEVTUNNEL_CREATE_LOG;

@@ -246,6 +246,15 @@ export async function killProcessTreeByPid(pid) {
   }
 }
 
+async function waitForPidExit(pid, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !isPidAlive(pid);
+}
+
 export function spawnDevTunnelHost(bin, tunnelId) {
   return spawn(process.execPath, [DEVTUNNEL_HOST_WATCHDOG_PATH, String(process.pid), bin, tunnelId], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -625,6 +634,16 @@ export async function forceStopDevTunnel({ baseDir } = {}) {
         process.kill(entry.pid);
       } catch {
         // best-effort
+      }
+      // SIGTERM is asynchronous on POSIX. Do not report the relay stopped while it may still own
+      // the preserved port; an immediate persistent restart must be able to bind that same port.
+      if (!(await waitForPidExit(entry.pid))) {
+        try {
+          process.kill(entry.pid, "SIGKILL");
+        } catch {
+          // best-effort — process may have exited between the check and the signal.
+        }
+        await waitForPidExit(entry.pid, 1_000);
       }
     }
   }
