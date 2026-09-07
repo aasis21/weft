@@ -26,7 +26,7 @@ Installed alongside the extension as a `weft`/`weft.cmd` shim on PATH (open a **
 terminal after install for PATH changes to take effect). Full command list:
 
 ```
-weft start
+weft start [--new-device]
 weft add-project <name> <path> [--default]
 weft remove-project <name>
 weft list-projects
@@ -45,6 +45,10 @@ weft help
   `/weft` does, but without needing an active Copilot CLI session (useful for headless
   boxes or testing transport setup independently). On the `devtunnel` transport it is
   self-contained — see "Self-provisioning" below.
+- **`weft start --new-device`** — forgets the previously trusted phone, rotates the
+  persistent pairing identity, and starts immediately with a fresh QR. Use it for a
+  different phone, after reinstalling/refreshing the phone app or clearing its storage,
+  or when a valid QR repeatedly reports that the laptop did not acknowledge it.
 - **`weft add-project` / `remove-project` / `list-projects` / `set-default`** — manage
   named project shortcuts the mobile app can launch a session into.
 - **`weft set-transport` / `show-transport`** — the ONLY way transport is configured.
@@ -152,6 +156,10 @@ status`/`stop` exist as independent commands, separate from any single Copilot s
   confirm, and check `~/.weft/weft.config.json` exists.
 - **`weft` command not found after install** → open a **new** terminal (PATH is updated
   per-user but existing shells don't pick it up).
+- **A valid QR says the laptop could not be reached** → keep the Device Station terminal
+  open. If the phone was refreshed/reinstalled, its cryptographic identity changed while
+  persistent pairing still trusts the prior one. Stop the station and run
+  `weft start --new-device`, then scan the new QR.
 - **`/weft` seems to hang while the agent is working** → it isn't hung, it's queued. Unlike
   built-in TUI commands such as `/tasks` or `/session`, `/weft` is an *extension* command:
   the runtime round-trips it to the extension subprocess and serializes that dispatch behind

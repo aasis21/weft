@@ -26,7 +26,9 @@ describe('usePairing', () => {
       "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.",
     );
     expect(pairingErrorMessage(new Error('weft/pairing: no ack from laptop'))).toBe(
-      "Couldn't reach your laptop — make sure the terminal shows the QR and try again.",
+      "Couldn't reach your laptop. Keep `weft start` running and scan again. " +
+        "If this phone was refreshed, reinstalled, or is replacing another phone, run " +
+        "`weft start --new-device` on the laptop and scan its new QR.",
     );
   });
 
@@ -51,7 +53,10 @@ describe('usePairing', () => {
       },
       {
         err: new Error('weft/pairing: no ack from laptop'),
-        message: "Couldn't reach your laptop — make sure the terminal shows the QR and try again.",
+        message:
+          "Couldn't reach your laptop. Keep `weft start` running and scan again. " +
+          "If this phone was refreshed, reinstalled, or is replacing another phone, run " +
+          "`weft start --new-device` on the laptop and scan its new QR.",
       },
       {
         err: new Error('Something else failed.'),
