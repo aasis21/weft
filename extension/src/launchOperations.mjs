@@ -330,7 +330,13 @@ export function publicLaunchDetails(record) {
 }
 
 export async function pruneLaunchOperations(
-  { baseDir, now = Date.now(), resolvedTtlMs = RESOLVED_TTL_MS, unresolvedNewTtlMs = UNRESOLVED_NEW_TTL_MS } = {},
+  {
+    baseDir,
+    now = Date.now(),
+    resolvedTtlMs = RESOLVED_TTL_MS,
+    unresolvedNewTtlMs = UNRESOLVED_NEW_TTL_MS,
+    isProcessAlive = isPidAlive,
+  } = {},
 ) {
   const records = listLaunchOperations({ baseDir });
   for (const record of records) {
@@ -347,6 +353,7 @@ export async function pruneLaunchOperations(
       continue;
     }
     if (age <= resolvedTtlMs) continue;
+    if (Number.isInteger(record.pid) && record.pid > 0 && isProcessAlive(record.pid)) continue;
     await withEntryLock("request", record.requestId, baseDir, async () => {
       const latest = readLaunchOperation(record.requestId, { baseDir });
       if (!latest || !TERMINAL_STATES.has(latest.state)) return;

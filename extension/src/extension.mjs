@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { unlinkSync } from "node:fs";
 import { basename } from "node:path";
 import QRCode from "qrcode";
 import { joinSession } from "@github/copilot-sdk/extension";
@@ -18,7 +17,7 @@ import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
 import { resolveVersion } from "./version.mjs";
 import { isStationRunning, registerPendingSession, removePendingSession } from "./pendingSessions.mjs";
-import { readIdentityFile } from "./handoffIdentity.mjs";
+import { cleanupIdentityAfterPairing, readIdentityFile } from "./handoffIdentity.mjs";
 import { updateLaunchOperation } from "./launchOperations.mjs";
 
 // Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
@@ -425,7 +424,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
         if (durableLaunchHandoff) {
           await updateLaunchOperation(
             launchOperationId,
-            { state: "ready", sessionId: session.sessionId || null },
+            { state: "ready", sessionId: session.sessionId || null, pid: process.pid },
             { ownerToken: launchOperationOwnerToken },
           );
         }
@@ -578,7 +577,7 @@ async function attachForPeer(transport, { key, peer }) {
   if (durableLaunchHandoff) {
     await updateLaunchOperation(
       launchOperationId,
-      { state: "claimed", sessionId: session.sessionId || null },
+      { state: "claimed", sessionId: session.sessionId || null, pid: process.pid },
       { ownerToken: launchOperationOwnerToken },
     );
   }
@@ -646,20 +645,17 @@ async function loadIdentityFromFile(file) {
   }
 }
 
-// The spawn hand-off identity file (containing this session's private key JWK) is deliberately NOT
-// deleted on read — a transient/replacement extension process must be able to re-read the same
-// pre-minted identity (see PR #213). Instead we remove it exactly once, after the FIRST successful
-// pairing with the phone: by then the identity has served its purpose and no later process needs
-// it, so leaving the private key sitting in tmp would be a needless secret-at-rest leak.
+// A durable phone launch keeps its identity through extension/MCP reloads. The launch-operation
+// pruner removes it after the terminal operation has been resolved for 24 hours. Legacy transient
+// handoffs have no durable cleanup owner, so remove those after their first successful pairing.
 let handoffFileConsumed = false;
 function consumeHandoffFile() {
   if (handoffFileConsumed || !identityFileEnv) return;
   handoffFileConsumed = true;
-  try {
-    unlinkSync(identityFileEnv);
+  if (cleanupIdentityAfterPairing(identityFileEnv, { durable: durableLaunchHandoff })) {
     appendSessionLog("handoff.file_cleaned", {});
-  } catch {
-    // best-effort: already gone, or never existed (env-only channel id). Never block pairing.
+  } else if (durableLaunchHandoff) {
+    appendSessionLog("handoff.file_retained", { operationId: launchOperationId });
   }
 }
 

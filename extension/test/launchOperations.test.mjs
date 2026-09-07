@@ -118,6 +118,35 @@ test("pruning keeps resume safety, abandons stale new launches, and later remove
   assert.ok(oldNew.record.ownerToken);
 });
 
+test("pruning retains a resolved launch while its extension process is alive", async () => {
+  const baseDir = home();
+  const first = await beginLaunchOperation(
+    { requestId: "live-claimed", operation: "new", projectName: "app" },
+    { baseDir, now: 1 },
+  );
+  await updateLaunchOperation(
+    "live-claimed",
+    { state: "claimed", pid: 4321 },
+    { baseDir, ownerToken: first.record.ownerToken, now: 10 },
+  );
+
+  await pruneLaunchOperations({
+    baseDir,
+    now: 1_000,
+    resolvedTtlMs: 100,
+    isProcessAlive: (pid) => pid === 4321,
+  });
+  assert.equal(readLaunchOperation("live-claimed", { baseDir }).state, "claimed");
+
+  await pruneLaunchOperations({
+    baseDir,
+    now: 1_000,
+    resolvedTtlMs: 100,
+    isProcessAlive: () => false,
+  });
+  assert.equal(readLaunchOperation("live-claimed", { baseDir }), null);
+});
+
 test("public launch details omit ownership and private identity material", async () => {
   const baseDir = home();
   const first = await beginLaunchOperation(
