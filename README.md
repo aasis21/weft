@@ -12,7 +12,7 @@ Weft mirrors your live GitHub Copilot terminal session to your phone over an end
 encrypted relay — watch it work, approve its moves, steer it by text or voice, and pick any
 chat back up, from anywhere.
 
-**[✨ Live site → aasis21.github.io/weft](https://aasis21.github.io/weft/)** · **[Try the web app → useweft.netlify.app](https://useweft.netlify.app)**
+**[Product & web app → useweft.netlify.app](https://useweft.netlify.app)** · **[Documentation → aasis21.github.io/weft](https://aasis21.github.io/weft/)**
 
 <img src="docs/assets/session-transcript.webp" width="360" alt="A live Copilot session mirrored to a phone, with an inline approval prompt." />
 

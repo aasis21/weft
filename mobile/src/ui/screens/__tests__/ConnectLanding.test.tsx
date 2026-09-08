@@ -31,6 +31,8 @@ describe('LandingScreen', () => {
     render(<LandingScreen onBeginPair={onBeginPair} onStartDemo={onStartDemo} error={null} onError={vi.fn()} />);
 
     expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: 'Set up your laptop' })[0]).toHaveAttribute('href', '#get-started');
+    expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]).toHaveClass('secondary-action');
     await user.click(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]);
     expect(onBeginPair).toHaveBeenCalledWith(false);
 
@@ -56,6 +58,7 @@ describe('LandingScreen', () => {
     );
 
     expect(screen.getByText('Pairing failed')).toHaveClass('error-banner');
+    expect(screen.queryByRole('link', { name: 'Set up your laptop' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '← Back to your sessions' }));
     await user.click(screen.getAllByRole('button', { name: 'Open your sessions' })[0]);
     expect(onOpenSessions).toHaveBeenCalledTimes(2);
@@ -119,6 +122,8 @@ describe('ConnectScreen', () => {
       <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
     );
     expect(screen.queryByRole('button', { name: 'Paste a code' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Set up your laptop' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]).toHaveClass('primary-action');
     unmount();
 
     render(

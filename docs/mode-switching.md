@@ -1,5 +1,10 @@
 # Runtime mode switching spike
 
+[Documentation handbook: runtime modes](https://aasis21.github.io/weft/#runtime-modes)
+
+These are implementation research notes, not a guarantee that every Copilot host
+supports the same runtime behavior.
+
 ## Question & summary verdict
 
 **Verdict: Supported via `session.rpc.mode.set({ mode })` in the installed SDK.**
