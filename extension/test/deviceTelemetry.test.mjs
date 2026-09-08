@@ -180,6 +180,8 @@ test("power telemetry reads AC independently, including desktops and unknown bat
       execFn: async (_file, args, options) => {
         if (args.at(-1).includes("Get-Process")) return { stdout: "[]" };
         assert.ok(args.at(-1).includes("GetSystemPowerStatus"));
+        assert.ok(args.at(-1).includes("BatteryLifePercent"));
+        assert.ok(args.at(-1).includes("BatteryFlag -band 8"));
         assert.ok(args.at(-1).includes("Win32_Battery"));
         assert.ok(args.at(-1).includes("$null -ne $battery.EstimatedChargeRemaining"));
         assert.equal(options.windowsHide, true);
