@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { attachTerminal, isTerminalReply, localTerminalDimensions } from "../src/terminalClient.mjs";
 import { parseStartOptions } from "../src/startOptions.mjs";
 
-test("full shell grant is explicit and default start remains unchanged", () => {
+test("terminal access is controlled by configuration, not startup flags", () => {
   assert.equal(parseStartOptions().allowTerminal, undefined);
-  assert.equal(parseStartOptions(["--allow-terminal"]).allowTerminal, true);
+  assert.throws(() => parseStartOptions(["--allow-terminal"]), /terminal.enabled/);
   assert.throws(() => parseStartOptions(["--allow-termina"]));
 });
 

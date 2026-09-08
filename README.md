@@ -46,8 +46,9 @@ Everything you'd do at the terminal — now from your phone:
   into a running one, across multiple laptops with a default device.
 - **Recover slow launches safely** — New and Resume requests survive phone reloads and temporary
   Devbox outages; **Try again** reconnects to the same launch instead of silently opening duplicates.
-- **Use a shared terminal** — opt in with `weft start --allow-terminal` on a supported Windows
+- **Use a shared terminal** — start Device Station with `weft start` on a supported Windows
   laptop, then open or resume one real shell from the phone and its visible laptop window.
+  Enabled by default; disable it with `terminal.enabled: false` in the laptop configuration.
   See [terminal controls and access boundaries](docs/terminal.md).
 - **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,
   and juggle several at once.

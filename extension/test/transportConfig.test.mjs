@@ -16,6 +16,7 @@ import {
   savePairingMode,
   loadDeviceName,
   saveDeviceName,
+  isTerminalEnabled,
 } from "../src/transportConfig.mjs";
 
 let weftHome;
@@ -30,6 +31,25 @@ afterEach(() => {
 
 test("loadTransportConfig returns null when nothing is configured", () => {
   assert.equal(loadTransportConfig({ baseDir: weftHome }), null);
+});
+
+test("terminal defaults on and preserves an explicit configuration opt-out", () => {
+  assert.equal(isTerminalEnabled({ baseDir: weftHome }), true);
+  const file = join(weftHome, "weft.config.json");
+  writeFileSync(file, JSON.stringify({ terminal: { enabled: false } }));
+  assert.equal(isTerminalEnabled({ baseDir: weftHome }), false);
+  saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
+  assert.equal(isTerminalEnabled({ baseDir: weftHome }), false);
+  writeFileSync(file, JSON.stringify({ terminal: { enabled: true } }));
+  assert.equal(isTerminalEnabled({ baseDir: weftHome }), true);
+});
+
+test("invalid configuration cannot silently enable terminal access", () => {
+  const file = join(weftHome, "weft.config.json");
+  for (const value of ["{broken", "null", "[]", '{"terminal":null}', '{"terminal":{"enabled":"false"}}']) {
+    writeFileSync(file, value);
+    assert.throws(() => isTerminalEnabled({ baseDir: weftHome }), /configuration|terminal.enabled/);
+  }
 });
 
 test("save/load round-trips a local descriptor", () => {

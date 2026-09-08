@@ -521,7 +521,7 @@ export function createTerminalHost({
     try {
       return await enqueue(async () => {
         await initialize();
-        if (!allowTerminal) throw new Error("Remote shell access is disabled. Restart the laptop Station with weft start --allow-terminal.");
+        if (!allowTerminal) throw new Error("Remote shell access is disabled. Set terminal.enabled to true in ~/.weft/weft.config.json and restart Station.");
         if (!runtime) throw new Error(supportError);
         if (stopped) throw new Error("Station is shutting down.");
         validateTerminalRequest(request);

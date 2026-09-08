@@ -8,7 +8,7 @@ export function parseStartOptions(args = []) {
     } else if (arg === "--new-device" || arg === "--rotate-pairing") {
       options.newDevice = true;
     } else if (arg === "--allow-terminal") {
-      options.allowTerminal = true;
+      throw new Error("Terminal access is enabled by default. Configure terminal.enabled in ~/.weft/weft.config.json, then run `weft start` without --allow-terminal.");
     } else {
       throw new Error(`Unknown option for weft start: ${arg}\nRun \`weft start --help\` for supported options.`);
     }

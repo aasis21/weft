@@ -500,8 +500,9 @@ export function LandingScreen({
             <p>Weft encrypts session traffic between your paired devices. The relay forwards encrypted
               messages, not readable prompts or code; local history and pairing keys remain on your devices.
               Your paired phone can send prompts and answer Copilot&apos;s permission requests, so keep
-              the phone and pairing QR private. Shared terminal access requires a separate laptop-side
-              grant: <code>weft start --allow-terminal</code>. Terminal commands run with your laptop
+              the phone and pairing QR private. Shared terminal access is enabled by default on supported
+              Windows laptops. Disable it with <code>terminal.enabled: false</code> in the laptop configuration.
+              Terminal commands run with your laptop
               account permissions, not through Copilot&apos;s approval flow.
               This does not change how GitHub Copilot processes your
               requests under its own service policies. <a href={`${DOCS}#security`}>Read the privacy and trust boundaries.</a></p>

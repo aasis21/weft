@@ -21,7 +21,7 @@ import {
   forceStopDevTunnel,
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
-import { loadTransportConfig } from "../src/transportConfig.mjs";
+import { loadTransportConfig, isTerminalEnabled } from "../src/transportConfig.mjs";
 import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
 import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
@@ -412,7 +412,8 @@ function createProvisionStatusLine() {
   };
 }
 
-async function start({ newDevice = false, allowTerminal = false } = {}) {
+async function start({ newDevice = false } = {}) {
+  const allowTerminal = isTerminalEnabled();
   const lock = acquireLock();
   let released = false;
   const release = () => {
@@ -1402,7 +1403,7 @@ function runBootstrapInstaller() {
 
 function usage() {
   console.log(`Usage:
-  weft start [--new-device] [--allow-terminal]
+  weft start [--new-device]
   weft terminal attach
   weft add-project <name> <path> [--default]
   weft remove-project <name>
@@ -1426,6 +1427,10 @@ Supabase's connection details live separately in ~/.weft/supabase.json — the i
 once with Weft's hosted defaults, so \`weft set-transport supabase\` is a zero-config pointer flip.
 There is no .env / WEFT_TRANSPORT env var — reinstalling or rebuilding the extension never touches
 either file, so your chosen transport always survives.
+
+Terminal access: Enabled by default on supported Windows laptops.
+To disable it, set "terminal": {"enabled": false} in ~/.weft/weft.config.json
+and restart Station. Commands run with your local account permissions, not Copilot approvals.
 
 Your device's display name (shown to phones in the DEVICES list) defaults to your OS hostname
 until you set your own with \`weft set-name <name>\` — the installer offers this as an
@@ -1459,16 +1464,16 @@ function printStartHelp() {
   console.log(`Usage:
   weft start
   weft start --new-device
-  weft start --allow-terminal
 
 Options:
   --new-device       Forget the previously trusted phone, create a fresh persistent
                      pairing identity, and start the Device Station with a new QR.
   --rotate-pairing   Alias for --new-device.
-  --allow-terminal   Grant the paired phone full shell access as your local account.
-                     Windows only; starts in the registered default project.
-                     The workspace is NOT a sandbox. Closing the laptop terminal
-                     or Station ends the shell; leaving the phone page does not.
+Terminal access:
+  Enabled by default on supported Windows laptops, with your local account permissions.
+  To disable, set "terminal": {"enabled": false} in ~/.weft/weft.config.json
+  and restart Station. No startup flag is required. The workspace is NOT a sandbox.
+  Closing the laptop terminal or Station ends the shell; leaving the phone page does not.
   -h, --help         Show this help without starting the station.
 
 Use plain \`weft start\` when the same phone still has its saved Weft identity; it reconnects

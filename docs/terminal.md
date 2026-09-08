@@ -7,22 +7,35 @@ from Copilot sessions: a command goes directly to the shell, not to the AI agent
 The laptop window and phone show the same shell, with the same working directory,
 environment, and running program.
 
-## Enable access on the laptop
+## Start on the laptop
 
-Stop an existing Device Station before starting it with terminal access enabled:
+Terminal access is enabled by default on supported Windows laptops. Start Device Station normally:
 
 ```powershell
-weft start --allow-terminal
+weft start
 ```
 
 Use your existing phone pairing. On the device page, select **Open terminal**.
 The first open creates the shell and a visible laptop attach window. Later opens
 reconnect to that terminal rather than creating another shell or window.
 
-Remote shell access is **off by default**. It grants the paired phone direct access
+Remote shell access is **enabled by default**. It grants the paired phone direct access
 with the local account's permissions; Copilot approval prompts do not mediate these
 commands. The registered workspace is only a starting directory, not a sandbox.
-To revoke this access, stop Station and restart without `--allow-terminal`.
+To disable it, add or update the following property in `~/.weft/weft.config.json`,
+preserving your other settings, then restart Station:
+
+```json
+{
+  "terminal": {
+    "enabled": false
+  }
+}
+```
+
+Set `terminal.enabled` to `true`, or remove that setting, to enable access again.
+Configuration changes take effect when Station restarts. No terminal startup flag is required.
+Invalid or unreadable configuration stops startup rather than silently enabling access.
 
 Shared terminal currently requires Windows 10 build 18309 or newer, including
 Windows 11, and an interactive desktop for the visible laptop window. It uses
@@ -80,7 +93,7 @@ secrets into commands where the shell or invoked program might record them.
 
 | Symptom | What to do |
 | --- | --- |
-| Open terminal is unavailable | Update both endpoints and start Station with `--allow-terminal` on a supported laptop. |
+| Open terminal is unavailable | Update both endpoints, check `terminal.enabled` in the laptop configuration, and restart Station on a supported Windows laptop. |
 | Native terminal runtime is missing or incompatible | Reinstall or update the complete supported release; copying only the JavaScript bundle is insufficient. |
 | Laptop window could not open | Read the Station error and fix the local console/terminal launch problem before retrying. |
 | Output stops after a connection loss | Reconnect to the existing terminal. Do not open another shell or repeat a command blindly. |

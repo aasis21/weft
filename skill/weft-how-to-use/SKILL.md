@@ -26,7 +26,7 @@ Installed alongside the extension as a `weft`/`weft.cmd` shim on PATH (open a **
 terminal after install for PATH changes to take effect). Full command list:
 
 ```
-weft start [--new-device] [--allow-terminal]
+weft start [--new-device]
 weft add-project <name> <path> [--default]
 weft remove-project <name>
 weft list-projects
@@ -49,10 +49,10 @@ weft help
   persistent pairing identity, and starts immediately with a fresh QR. Use it for a
   different phone, after reinstalling/refreshing the phone app or clearing its storage,
   or when a valid QR repeatedly reports that the laptop did not acknowledge it.
-- **`weft start --allow-terminal`** — explicitly authorizes the paired phone to open
-  or resume one real shell on a supported Windows laptop. This is direct local-account
-  shell access, not a Copilot tool approval. Do not enable it implicitly for a request
-  that only asks to pair a phone or start ordinary Device Station.
+- **Shared terminal access** is enabled by default on supported Windows laptops.
+  To disable it, set `"terminal": {"enabled": false}` in `~/.weft/weft.config.json`,
+  preserving other settings, then restart Station. This is direct local-account
+  shell access, not a Copilot tool approval. No startup flag is required.
 - **`weft add-project` / `remove-project` / `list-projects` / `set-default`** — manage
   named project shortcuts the mobile app can launch a session into.
 - **`weft set-transport` / `show-transport`** — the ONLY way transport is configured.
@@ -101,7 +101,7 @@ The shared terminal backend requires Windows 10 build 18309 or newer (including
 Windows 11) and an interactive desktop. Do not advertise this capability on macOS
 or Linux merely because native runtime assets are packaged for those systems.
 
-With `--allow-terminal`, choose **Open terminal** on the phone's device page. Station
+With Station running, choose **Open terminal** on the phone's device page. Station
 creates one shell and a visible local attach window, or reconnects to the existing
 terminal. A registered workspace is the initial directory, not a sandbox.
 

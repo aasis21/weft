@@ -100,7 +100,7 @@ test("downloads enforce exact bytes and SHA-256 before extraction", async (t) =>
 
 test("isolated packaged native PTY spawns, accepts input, returns output, resizes and closes", {
   skip: !NATIVE_TARGETS.includes(`${process.platform}-${process.arch}`) && "No vendor prebuild exists for this platform",
-  timeout: 30_000,
+  timeout: 90_000,
 }, async (t) => {
   const directory = fixture(t);
   const installed = join(directory, "installed");
@@ -108,7 +108,7 @@ test("isolated packaged native PTY spawns, accepts input, returns output, resize
   const smoke = join(installed, "smoke.mjs");
   writeFileSync(smoke, readFileSync(new URL("./native-runtime-smoke.mjs", import.meta.url)));
   const result = spawnSync(process.execPath, [smoke], {
-    cwd: installed, encoding: "utf8", timeout: 25_000,
+    cwd: installed, encoding: "utf8", timeout: 75_000,
     env: { ...process.env, NODE_PATH: "", NODE_OPTIONS: "" },
   });
   assert.equal(result.status, 0, `${result.error?.message ?? ""}\n${result.stderr}\n${result.stdout}`);

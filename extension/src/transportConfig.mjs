@@ -57,14 +57,31 @@ function isValidTransportDescriptor(t) {
 /** Read the whole config object (weft.config.json), or {} if unset/unreadable/invalid. Kept
  * generic — beyond `transport`, other user-facing settings can be added here over time — so this
  * one file stays the single place a user's ~/.weft config lives. */
-function loadConfig({ baseDir } = {}) {
+function loadConfig({ baseDir, strict = false } = {}) {
   const file = storePath(baseDir);
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
+    if (strict && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) {
+      throw new Error("Invalid configuration object");
+    }
     return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
+  } catch (error) {
+    if (strict && error.code !== "ENOENT") {
+      throw new Error("Weft: cannot read a valid weft.config.json. Fix the configuration before starting Device Station.");
+    }
     return {};
   }
+}
+
+/** Terminal access defaults on; a malformed configuration must never override an opt-out. */
+export function isTerminalEnabled({ baseDir } = {}) {
+  const { terminal } = loadConfig({ baseDir, strict: true });
+  if (terminal === undefined) return true;
+  if (!terminal || typeof terminal !== "object" || Array.isArray(terminal) ||
+      (terminal.enabled !== undefined && typeof terminal.enabled !== "boolean")) {
+    throw new Error("Weft: terminal.enabled in weft.config.json must be true or false.");
+  }
+  return terminal.enabled !== false;
 }
 
 /** Atomically overwrite weft.config.json with `config`. */

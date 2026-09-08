@@ -137,8 +137,8 @@ test("documentation runs locally without remote scripts, styles, fonts, or Markd
 test("terminal guidance explains authorization, lifecycle, and private output", () => {
   assert.ok(document.querySelector("#open-terminal"));
   const sessions = document.querySelector("#sessions").textContent;
-  for (const requirement of ["weft start --allow-terminal", "same shell", "Take control",
-    "Close terminal", "off by default", "not a sandbox", "bounded scrollback"]) {
+  for (const requirement of ["weft start", "same shell", "Take control",
+    "Close terminal", "enabled by default", "weft.config.json", "not a sandbox", "bounded scrollback"]) {
     assert.ok(sessions.includes(requirement), `Missing terminal guidance: ${requirement}`);
   }
   assert.doesNotMatch(sessions, /Open terminal.{0,70}(?:disabled|Coming soon)/);

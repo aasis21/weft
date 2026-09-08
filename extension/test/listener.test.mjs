@@ -384,7 +384,7 @@ test("encrypted terminal controls bypass generic logging and require the explici
     await waitFor(() => messages.some((message) => message.msg?.requestId === "terminal-denied"));
     const reply = messages.find((message) => message.msg?.requestId === "terminal-denied");
     assert.equal(reply.eventSubtype, SUBTYPE.CONTROL.TERMINAL_STATE);
-    assert.match(reply.msg.error, /--allow-terminal/);
+    assert.match(reply.msg.error, /terminal.enabled/);
     assert.equal(controls.length, count);
   } finally { await listener.stop(); }
 });

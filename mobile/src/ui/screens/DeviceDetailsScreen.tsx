@@ -658,12 +658,12 @@ export function DeviceDetailsScreen({
             >
               <span className="device-action-icon" aria-hidden="true"><TerminalGlyph /></span>
               <strong>Open terminal</strong>
-              {!terminalSupported ? <small className="device-action-status">Enable on laptop</small> : null}
+              {!terminalSupported ? <small className="device-action-status">Unavailable</small> : null}
             </button>
           </div>
           {!terminalSupported ? (
             <p id="terminal-enable-guidance" className="device-offline-note">
-              Terminal access is unavailable. Update Weft on the laptop, then run <code>weft start --allow-terminal</code>.
+              Terminal access is unavailable. Update Weft on a supported Windows laptop and check <code>terminal.enabled</code> in <code>~/.weft/weft.config.json</code>, then restart Station.
             </p>
           ) : null}
           {!online || !clipboardSupported || !keepAwakeSupported ? (

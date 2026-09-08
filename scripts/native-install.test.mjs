@@ -29,7 +29,7 @@ test("bundled help and Copilot startup work without native assets; terminal fail
   };
   copyFileSync(join(dist, "weft.mjs"), join(directory, "weft.mjs"));
   copyFileSync(join(dist, "extension.mjs"), join(directory, "extension.mjs"));
-  for (const args of [["help"], ["start", "--help"], ["start", "--allow-terminal", "--help"]]) {
+  for (const args of [["help"], ["start", "--help"]]) {
     const result = await run(process.execPath, [join(directory, "weft.mjs"), ...args], { cwd: directory, env, timeout: 10_000 });
     assert.match(result.stdout, /weft|WEFT/);
     assert.doesNotMatch(result.stderr, /Cannot find module.*node-pty|native module/i);
@@ -77,7 +77,7 @@ await authorized.stop();
 test("hosted bootstrap, installed updater and local install deliver an isolated working PTY transactionally", {
   skip: !NATIVE_TARGETS.includes(target) ? "No vendor prebuild for this platform" :
     !existsSync(join(dist, "weft.mjs")) ? "Build extension first; native distribution CI runs this after build" : false,
-  timeout: 90_000,
+  timeout: 180_000,
 }, async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "weft-native-install-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -160,7 +160,7 @@ test("hosted bootstrap, installed updater and local install deliver an isolated 
   await run(process.execPath, [bootstrap, "install", "--from", dist, "--skill", join(release, "weft-skill.md")], { cwd: directory, env, timeout: 30_000 });
   const smoke = join(installed, "smoke.mjs");
   copyFileSync(fileURLToPath(new URL("./native-runtime-smoke.mjs", import.meta.url)), smoke);
-  const result = await run(process.execPath, [smoke], { cwd: installed, env, timeout: 25_000 });
+  const result = await run(process.execPath, [smoke], { cwd: installed, env, timeout: 75_000 });
   assert.match(result.stdout, /isolated native PTY spawn\/input\/output\/resize\/close OK/);
   assert.equal(readFileSync(join(unrelatedModule, "sentinel"), "utf8"), "preserve unrelated node_modules");
 });

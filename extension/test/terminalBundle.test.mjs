@@ -43,7 +43,8 @@ test("isolated bundles work without native assets and fail only explicit termina
   }
   const run = promisify(execFile);
   const help = await run(process.execPath, [join(dir, "weft.mjs"), "help"], { cwd: dir, env, timeout: 10000 });
-  assert.match(help.stdout, /--allow-terminal/);
+  assert.match(help.stdout, /Enabled by default/);
+  assert.match(help.stdout, /"terminal": \{"enabled": false\}/);
   const startHelp = await run(process.execPath, [join(dir, "weft.mjs"), "start", "--help"], { cwd: dir, env, timeout: 10000 });
   assert.match(startHelp.stdout, /NOT a sandbox/);
   await run(process.execPath, ["--input-type=module", "-e", `

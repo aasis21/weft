@@ -107,8 +107,9 @@ separate channels; see [the diagnostic guide](https://aasis21.github.io/weft/#di
 
 ## Shared terminal controls
 
-Terminal support is separately negotiated through `device-terminal-v1` and requires
-explicit laptop-side authorization. `terminal_request` carries a correlated action:
+Terminal support is separately negotiated through `device-terminal-v1`. It is enabled
+by default unless the laptop configuration sets `terminal.enabled` to `false`.
+`terminal_request` carries a correlated action:
 `open`, `attach`, `detach`, `input`, `resize`, `claim`, or `close`. Operations on an
 existing terminal include its `terminalId`; input also includes a monotonically
 increasing `inputSeq`. Station rejects stale terminal identities and sequence gaps,

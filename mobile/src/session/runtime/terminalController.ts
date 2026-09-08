@@ -5,7 +5,7 @@ import {
 } from '@aasis21/weft-shared';
 
 export const TERMINAL_GUIDANCE =
-  'Update Weft on the laptop and start Device Station with weft start --allow-terminal. The shell runs with your laptop account permissions; the workspace is not a sandbox.';
+  'Terminal access is enabled by default on supported Windows laptops. If unavailable, update Weft and check terminal.enabled in ~/.weft/weft.config.json, then restart Station. The shell runs with your laptop account permissions; the workspace is not a sandbox.';
 const MAX_BUFFER = 512 * 1024;
 const MAX_INPUT = 16 * 1024;
 export const MAX_TERMINAL_SNAPSHOT_BYTES = 128 * 1024;

@@ -52,7 +52,7 @@ describe('device terminal runtime', () => {
     terminal().enter();
     terminal().open();
     expect(requests()).toHaveLength(0);
-    expect(terminal().getSnapshot().error).toContain('weft start --allow-terminal');
+    expect(terminal().getSnapshot().error).toContain('terminal.enabled');
     client().emit(projectList([], 'Laptop', null, ['device-terminal-v1']));
     terminal().open();
     terminal().open();

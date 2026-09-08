@@ -14,9 +14,19 @@ const terminal = pty.spawn(shell, windows ? ["-NoLogo", "-NoProfile"] : [], {
   cols: 80, rows: 24, cwd: process.cwd(),
   env: { ...process.env, WEFT_SMOKE_SUFFIX: "OK" }, useConpty: true, useConptyDll: windows,
 });
-const deadline = setTimeout(() => { terminal.kill(); process.exitCode = 1; }, 15_000);
 let output = "";
 let completed = false;
+let timedOut = false;
+// Cold Windows ARM64 runners need headroom for PowerShell startup and graceful exit.
+const timeoutMs = 60_000;
+const diagnostics = () => `${process.platform}/${process.arch} ${process.version}; ` +
+  `phase=${completed ? "shell exit" : "command output"}; output=${JSON.stringify(output.slice(-2048))}`;
+const deadline = setTimeout(() => {
+  timedOut = true;
+  console.error(`Native PTY smoke timed out after ${timeoutMs}ms; ${diagnostics()}`);
+  process.exitCode = 1;
+  terminal.kill();
+}, timeoutMs);
 terminal.onData((data) => {
   output += data;
   if (!completed && output.includes("WEFT_NATIVE_" + "OK")) {
@@ -29,14 +39,15 @@ terminal.onData((data) => {
 });
 terminal.onExit(({ exitCode }) => {
   clearTimeout(deadline);
-  assert.ok(completed, "shell did not return expected output");
-  assert.equal(exitCode, 0);
   // Match Station's pinned node-pty 1.1.0 ConPTY DLL idle-worker cleanup.
   if (windows) {
     terminal.kill();
     assert.equal(typeof terminal._agent?._conoutSocketWorker?.dispose, "function");
     terminal._agent._conoutSocketWorker.dispose();
   }
+  assert.equal(timedOut, false, diagnostics());
+  assert.ok(completed, `shell did not return expected output; ${diagnostics()}`);
+  assert.equal(exitCode, 0, diagnostics());
   console.log("isolated native PTY spawn/input/output/resize/close OK");
 });
 terminal.write(windows
