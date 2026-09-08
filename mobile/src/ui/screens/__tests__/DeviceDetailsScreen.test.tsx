@@ -91,14 +91,16 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     expect(onResumeOnDevice).toHaveBeenCalledWith('chan-1');
   });
 
-  it('presents a uniform four-item quick-action grid without pretending future actions work', () => {
+  it('presents one compact four-item action rail without pretending future actions work', () => {
     renderDetails();
 
     expect(screen.getByRole('button', { name: /start copilot/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /resume copilot/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /explore files/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();
-    expect(screen.getAllByText('Coming soon')).toHaveLength(2);
+    expect(screen.getAllByText('Soon')).toHaveLength(2);
+    expect(screen.queryByText('New session')).toBeNull();
+    expect(screen.queryByText('Recent session')).toBeNull();
   });
 
   it('no longer carries a resumable-session list or a bare permission toggle', () => {
@@ -191,12 +193,12 @@ describe('DeviceDetailsScreen workspaces', () => {
     renderDetails({ device: makeDevice({ projects }) });
 
     expect(screen.getByRole('heading', { name: 'Copilot workspaces' })).toBeTruthy();
-    expect(screen.getByText('Folders registered on this laptop for starting sessions.')).toBeTruthy();
+    expect(screen.queryByText('Folders registered on this laptop for starting sessions.')).toBeNull();
     expect(screen.getByText('Default')).toBeTruthy();
     expect(screen.getByText('C:\\work\\Workspace 1')).toBeTruthy();
     expect(screen.getByText('…/me/src/Workspace 2')).toBeTruthy();
-    expect(screen.getByText('Workspace 4')).toBeTruthy();
-    expect(screen.queryByText('Workspace 5')).toBeNull();
+    expect(screen.getByText('Workspace 3')).toBeTruthy();
+    expect(screen.queryByText('Workspace 4')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /show all 6 workspaces/i }));
     expect(screen.getByText('Workspace 6')).toBeTruthy();
@@ -329,7 +331,7 @@ describe('DeviceDetailsScreen monitoring', () => {
     expect(screen.queryByText(/battery/i)).toBeNull();
   });
 
-  it('limits Running Now to five apps and expands without exposing window titles or controls', () => {
+  it('limits Running Now to three apps and expands without exposing window titles or controls', () => {
     const apps = Array.from({ length: 7 }, (_, index) => ({
       id: `app-${index + 1}`,
       name: `App ${index + 1}`,
@@ -374,8 +376,8 @@ describe('DeviceDetailsScreen monitoring', () => {
       }),
     });
 
-    expect(screen.getByText('App 5')).toBeTruthy();
-    expect(screen.queryByText('App 6')).toBeNull();
+    expect(screen.getByText('App 3')).toBeTruthy();
+    expect(screen.queryByText('App 4')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /show all 7/i }));
     expect(screen.getByText('App 7')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /end task|focus|close app/i })).toBeNull();

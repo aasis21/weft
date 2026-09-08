@@ -10,7 +10,7 @@ The Device Details screen shows whether a Windows device is reachable, but not w
 - Send an immediate snapshot when monitoring starts, followed by periodic snapshots only while Device Details is visible.
 - Refresh fast system metrics on every tick while caching slower application, disk, and battery observations.
 - Automatically expire monitoring when stop messages are missed because the phone disconnects or backgrounds.
-- Display a compact device-health header, readable resource cards, and a privacy-preserving Running Now section designed for a phone rather than copying Task Manager.
+- Display a compact device-health header, readable resource cards, a single-row quick-action rail, lightweight Copilot workspace rows, and a privacy-preserving three-item Running Now summary designed for a phone rather than copying Task Manager.
 - Keep the existing two-minute device heartbeat focused exclusively on liveness.
 
 ## Capabilities

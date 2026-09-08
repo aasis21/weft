@@ -1744,6 +1744,9 @@
   margin: 0 auto;
   padding: 12px 12px 0;
 }
+.weft-session.device-details-screen .session-join-inner {
+  gap: 11px;
+}
 
 .weft-session .session-join-head {
   display: flex;
@@ -2731,7 +2734,7 @@
 .weft-session .device-running {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 .weft-session .device-running-head {
   display: flex;
@@ -2762,7 +2765,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--bg-rule);
   font-size: 13px;
 }
@@ -2782,14 +2785,14 @@
 }
 
 /* ---- Device details screen -------------------------------------------------------------------
-   The details page is a stack of cards: system health, quick actions, current applications,
-   projects, then Copilot sessions split into Active and a collapsed Inactive bucket. Everything
-   administrative lives in the header's "⋯" menu instead of competing with primary actions. */
+   The details page uses lightweight sections for actions, current applications, workspaces, and
+   Copilot sessions. Everything administrative lives in the header's "⋯" menu instead of
+   competing with primary actions. */
 
 /* Shared heading for every card section on this screen, so "Projects", "Active" and "Offered
    sessions" all read at the same weight rather than each card inventing its own. */
 .weft-session .device-section-label {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -2802,33 +2805,7 @@
 .weft-session .device-workspaces {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-.weft-session .device-workspaces-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-.weft-session .device-workspaces-head .device-section-label {
-  margin-bottom: 3px;
-}
-.weft-session .device-workspaces-head .device-card-sub {
-  margin: 0;
-}
-.weft-session .device-workspace-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 25px;
-  height: 25px;
-  padding: 0 7px;
-  border: 1px solid var(--bg-rule);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--fg-dim);
-  font-size: 11px;
-  font-weight: 700;
+  gap: 5px;
 }
 .weft-session .device-workspace-list {
   display: flex;
@@ -2840,29 +2817,29 @@
 .weft-session .device-workspace-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 9px 0;
+  padding: 6px 0;
   border-top: 1px solid var(--bg-rule);
 }
 .weft-session .device-workspace-row:first-child {
   border-top: 0;
-  padding-top: 2px;
+  padding-top: 0;
 }
 .weft-session .device-workspace-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 11%, var(--bg));
   color: var(--accent);
 }
 .weft-session .device-workspace-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 .weft-session .device-workspace-copy {
   display: flex;
@@ -2949,8 +2926,8 @@
   font-size: 10.5px;
 }
 
-/* Device-level actions share one compact card vocabulary. Actions without a protocol yet stay
-   visible but explicitly marked as coming soon instead of pretending to work. */
+/* Keep all device-level actions in one short row. Actions without a protocol remain disabled and
+   explicitly marked as future work. */
 .weft-session .device-quick-actions {
   display: flex;
   flex-direction: column;
@@ -2958,21 +2935,23 @@
 }
 .weft-session .device-action-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
 }
 .weft-session .device-quick-action {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 9px;
+  justify-content: center;
+  gap: 3px;
   min-width: 0;
-  min-height: 58px;
-  padding: 10px 11px;
+  min-height: 56px;
+  padding: 6px 4px;
   border: 1px solid var(--bg-rule);
-  border-radius: 13px;
+  border-radius: 11px;
   background: var(--bg-elev);
   color: var(--fg);
-  text-align: left;
+  text-align: center;
   cursor: pointer;
 }
 .weft-session .device-quick-action:not(:disabled):active {
@@ -2981,30 +2960,25 @@
 }
 .weft-session .device-quick-action:disabled {
   cursor: default;
-  opacity: 0.58;
+  opacity: 0.62;
 }
 .weft-session .device-quick-action .device-action-icon {
-  width: 20px;
-  height: 20px;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
   color: var(--accent);
 }
-.weft-session .device-quick-action > span:last-child {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 2px;
-}
 .weft-session .device-quick-action strong {
-  overflow: hidden;
-  font-size: 12.5px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.weft-session .device-quick-action small {
-  color: var(--fg-dim);
   font-size: 10.5px;
-  line-height: 1.2;
+  line-height: 1.1;
+}
+.weft-session .device-action-status {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 /* Offline replaces the button pair outright. The old UI disabled the buttons and explained why in
@@ -3033,7 +3007,7 @@
 .weft-session.device-details-screen .device-sessions-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3050,7 +3024,7 @@
 .weft-session.device-details-screen .device-session-row {
   position: relative;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 /* Collapsed bucket for finished/archived sessions — present, counted, but not in the way. */
@@ -3146,10 +3120,11 @@
   z-index: 1;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 10px;
   background: var(--bg-elev);
-  border-radius: 12px;
+  border-radius: 10px;
   transition: transform 160ms ease;
 }
 .weft-session.device-details-screen .device-session-row.row-swipe-open .device-session-open {

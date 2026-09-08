@@ -14,9 +14,10 @@
 
 - [x] 3.1 Extend mobile device state and reducers to hold capabilities plus runtime-only snapshot and monitoring state
 - [x] 3.2 Start and renew one monitor while Device Details is visible, stop it during cleanup, and reject mismatched or reordered snapshots
-- [x] 3.3 Render a compact health header, percentage-first system cards, and a five-item expandable Running Now list
+- [x] 3.3 Render a compact health header, percentage-first system cards, and a three-item expandable Running Now list
 - [x] 3.4 Render loading, partial-unavailable, stale, and laptop-update states without fabricated zero values
 - [x] 3.5 Add runtime and screen tests for capability gating, snapshot ordering, monitor lifecycle, and responsive presentation
+- [x] 3.6 Reduce Device Details density with a single-row action rail, lightweight Copilot workspace rows, and compact session rows
 
 ## 4. Validation
 

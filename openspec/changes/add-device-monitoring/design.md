@@ -120,10 +120,9 @@ The page uses this hierarchy:
 │ Uptime 2d 4h            Battery 81% │
 ├──────────────────────────────────────┤
 │ QUICK ACTIONS                        │
-│ Start Copilot       Resume Copilot  │
-│ Explore Files       Open Terminal   │
+│ Start · Resume · Explore [soon] · …  │
 ├──────────────────────────────────────┤
-│ RUNNING NOW · 5 APPS                 │
+│ RUNNING NOW · 3 APPS                 │
 │ Visual Studio Code        3 windows  │
 │ Microsoft Edge            1.2 GB     │
 │ Terminal                  2 windows  │
@@ -138,7 +137,7 @@ The page uses this hierarchy:
 └──────────────────────────────────────┘
 ```
 
-The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Quick actions use a uniform two-column card grid; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the five most relevant entries with a `Show all` affordance. Registered project folders are presented to users as Copilot workspaces, with readable names, compact path context, a default marker, and controlled expansion for longer lists. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
+The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Quick actions use one compact horizontal rail without secondary descriptions; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the three most relevant entries with a `Show all` affordance. Registered project folders are presented to users as Copilot workspaces, with readable names, restrained path context, a default marker, and an initial limit of three. The workspace section avoids redundant explanatory copy and count chrome. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
 
 Application relevance is ordered by foreground status when available, then aggregate memory. Multiple processes/windows are grouped into one row. Window titles, file names, browser tabs, executable paths, and application-control buttons are excluded from the MVP.
 

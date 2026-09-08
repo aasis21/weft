@@ -125,12 +125,13 @@ Device Details SHALL present a compact system summary and a curated Running Now 
 
 #### Scenario: Device actions are presented
 - **WHEN** the user views Device Details
-- **THEN** Start Copilot, Resume Copilot, Explore Files, and Open Terminal use one consistent quick-action layout
+- **THEN** Start Copilot, Resume Copilot, Explore Files, and Open Terminal use one compact horizontal quick-action layout
 - **AND** actions without an implemented protocol are visibly unavailable rather than pretending to succeed
 
 #### Scenario: Registered launch folders are presented
 - **WHEN** the Device Station reports registered projects
-- **THEN** Device Details presents them as Copilot workspaces with names, compact paths, default state, and a bounded initial list
+- **THEN** Device Details presents them as Copilot workspaces with names, restrained path context, default state, and an initial limit of three
+- **AND** longer lists can be expanded without adding redundant explanatory copy or count chrome
 
 #### Scenario: Monitoring events are inspected
 - **WHEN** the user opens the device event log
@@ -139,7 +140,7 @@ Device Details SHALL present a compact system summary and a curated Running Now 
 
 #### Scenario: Running applications are available
 - **WHEN** the latest snapshot contains visible applications
-- **THEN** the screen displays friendly grouped application names, relevant window counts or memory, and initially limits the list to five entries
+- **THEN** the screen displays friendly grouped application names, relevant window counts or memory, and initially limits the list to three entries
 
 #### Scenario: Battery is unavailable
 - **WHEN** the device does not report battery information

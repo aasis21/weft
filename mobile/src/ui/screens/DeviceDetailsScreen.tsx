@@ -186,8 +186,8 @@ export function DeviceDetailsScreen({
     snapshot && now - snapshot.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
   );
   const visibleApps = snapshot?.apps ?? [];
-  const shownApps = allAppsOpen ? visibleApps : visibleApps.slice(0, 5);
-  const shownProjects = allProjectsOpen ? device.projects : device.projects.slice(0, 4);
+  const shownApps = allAppsOpen ? visibleApps : visibleApps.slice(0, 3);
+  const shownProjects = allProjectsOpen ? device.projects : device.projects.slice(0, 3);
   const appsUnavailable = snapshot?.issues.some((issue) => issue.component === 'apps') ?? false;
   const hasPartialSystemIssues =
     snapshot?.issues.some((issue) => issue.component !== 'apps') ?? false;
@@ -576,7 +576,7 @@ export function DeviceDetailsScreen({
               onClick={() => onStartOnDevice(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
-              <span><strong>Start Copilot</strong><small>New session</small></span>
+              <strong>Start Copilot</strong>
             </button>
             <button
               type="button"
@@ -585,15 +585,27 @@ export function DeviceDetailsScreen({
               onClick={() => onResumeOnDevice(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><ResumeGlyph /></span>
-              <span><strong>Resume Copilot</strong><small>Recent session</small></span>
+              <strong>Resume Copilot</strong>
             </button>
-            <button type="button" className="device-quick-action" disabled>
+            <button
+              type="button"
+              className="device-quick-action"
+              aria-label="Explore files (coming soon)"
+              disabled
+            >
               <span className="device-action-icon" aria-hidden="true"><FolderGlyph /></span>
-              <span><strong>Explore files</strong><small>Coming soon</small></span>
+              <strong>Explore files</strong>
+              <small className="device-action-status">Soon</small>
             </button>
-            <button type="button" className="device-quick-action" disabled>
+            <button
+              type="button"
+              className="device-quick-action"
+              aria-label="Open terminal (coming soon)"
+              disabled
+            >
               <span className="device-action-icon" aria-hidden="true"><TerminalGlyph /></span>
-              <span><strong>Open terminal</strong><small>Coming soon</small></span>
+              <strong>Open terminal</strong>
+              <small className="device-action-status">Soon</small>
             </button>
           </div>
         </section>
@@ -611,7 +623,7 @@ export function DeviceDetailsScreen({
           <section className="session-join-fallback device-running">
             <div className="device-running-head">
               <h3 className="device-section-label">Running now · {visibleApps.length} apps</h3>
-              {visibleApps.length > 5 ? (
+              {visibleApps.length > 3 ? (
                 <button type="button" onClick={() => setAllAppsOpen((open) => !open)}>
                   {allAppsOpen ? 'Show less' : `Show all ${visibleApps.length}`}
                 </button>
@@ -669,15 +681,7 @@ export function DeviceDetailsScreen({
         ) : null}
 
         <section className="session-join-fallback device-workspaces">
-          <div className="device-workspaces-head">
-            <div>
-              <h3 className="device-section-label">Copilot workspaces</h3>
-              <p className="device-card-sub">Folders registered on this laptop for starting sessions.</p>
-            </div>
-            {!device.projectsLoading && device.projects.length > 0 ? (
-              <span className="device-workspace-count">{device.projects.length}</span>
-            ) : null}
-          </div>
+          <h3 className="device-section-label">Copilot workspaces</h3>
           {device.projectsLoading ? (
             <p className="device-card-sub">{online ? 'Refreshing workspaces…' : 'Loading workspaces…'}</p>
           ) : device.projects.length > 0 ? (
@@ -698,7 +702,7 @@ export function DeviceDetailsScreen({
                   </li>
                 ))}
               </ul>
-              {device.projects.length > 4 ? (
+              {device.projects.length > 3 ? (
                 <button
                   type="button"
                   className="device-workspaces-toggle"
