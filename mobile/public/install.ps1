@@ -191,6 +191,7 @@ try {
 # $skillDir is referenced again in the Step 6 uninstall hint; keep it defined here.
 $skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
 Ok "extension.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $InstallDir"
+Ok 'Native PTY runtime installed for this Node.js architecture (no compiler required).'
 Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"
 
 # ---------------------------------------------------------------------------------------------

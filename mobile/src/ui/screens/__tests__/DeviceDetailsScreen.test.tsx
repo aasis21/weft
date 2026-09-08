@@ -98,7 +98,7 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     expect(screen.getByRole('button', { name: /resume copilot/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /explore files/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();
-    expect(screen.getAllByText('Soon')).toHaveLength(2);
+    expect(screen.getAllByText('Soon')).toHaveLength(1);
     expect(screen.queryByText('New session')).toBeNull();
     expect(screen.queryByText('Recent session')).toBeNull();
   });
@@ -113,7 +113,14 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     renderDetails({ device: makeDevice({ connected: false }) });
     expect(screen.getByRole('button', { name: /start copilot/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /resume copilot/i })).toBeDisabled();
-    expect(screen.getByText(/weft start/i).textContent).toMatch(/weft start/);
+    expect(screen.getAllByText(/weft start/i).some((element) => element.textContent?.includes('weft start'))).toBe(true);
+  });
+
+  it('enables the terminal only for an authorized capable laptop', () => {
+    const onOpenTerminal = vi.fn();
+    renderDetails({ device: makeDevice({ capabilities: ['device-terminal-v1'] }), onOpenTerminal });
+    fireEvent.click(screen.getByRole('button', { name: 'Open terminal' }));
+    expect(onOpenTerminal).toHaveBeenCalledWith('chan-1');
   });
 });
 

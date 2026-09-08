@@ -83,6 +83,8 @@ separately from each Copilot session's stream:
 | Launch or resume work | `spawn_session`, `resume_session`, `spawn_pairing`, `spawn_result`, `launch_status` |
 | Join a session offered by the laptop | `session_offers`, `session_claimed` |
 | Request current health | `device_monitor_start`, `device_monitor_stop`, `device_snapshot` |
+| Shared terminal lifecycle and input | `terminal_request`, `terminal_state` |
+| Private terminal output and reconnect screen | `terminal_output`, `terminal_snapshot` |
 | Remove device trust | `forget_device` |
 
 Health monitoring is capability-negotiated with `device-monitor-v1`. Its snapshot
@@ -94,6 +96,24 @@ The phone's device event log includes `device_snapshot`, but it is not a lossles
 wire capture: consecutive heartbeat/snapshot messages of the same subtype and
 direction are coalesced, and retention is bounded. Device and session logs use
 separate channels; see [the diagnostic guide](https://aasis21.github.io/weft/#diagnostics).
+
+## Shared terminal controls
+
+Terminal support is separately negotiated through `device-terminal-v1` and requires
+explicit laptop-side authorization. `terminal_request` carries a correlated action:
+`open`, `attach`, `detach`, `input`, `resize`, `claim`, or `close`. Operations on an
+existing terminal include its `terminalId`; input also includes a monotonically
+increasing `inputSeq`. Station rejects stale terminal identities and sequence gaps,
+and does not apply duplicate input twice.
+
+`terminal_state` describes the lifecycle, owner, dimensions, and next accepted input
+sequence. `terminal_snapshot` establishes a serialized screen at an output sequence
+boundary; later `terminal_output` chunks extend it. A gap requests another snapshot,
+not command replay. Buffers and snapshots are bounded, with truncation indicated.
+
+These terminal messages are intentionally excluded from raw diagnostic event-log
+capture and persistence. Encryption protects them in transit, but a generic local
+event log must not become an unintended terminal transcript.
 
 ## Pairing bootstrap
 

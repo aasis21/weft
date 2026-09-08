@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodeNativeRuntime, NATIVE_TARGETS, nativeAssetName, nativeRuntimeDescriptor } from "./native-runtime.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const REQUIRED_RELEASE_FILES = [
@@ -12,6 +13,7 @@ export const REQUIRED_RELEASE_FILES = [
   "devtunnelHostWatchdog.mjs",
   "weft.mjs",
   "weft-skill.md",
+  ...NATIVE_TARGETS.map(nativeAssetName),
 ];
 
 export function generateReleaseManifest(directory, version) {
@@ -27,6 +29,8 @@ export function generateReleaseManifest(directory, version) {
       continue;
     }
     const contents = readFileSync(path);
+    const nativeTarget = NATIVE_TARGETS.find((target) => nativeAssetName(target) === name);
+    if (nativeTarget) decodeNativeRuntime(contents, nativeTarget);
     files[name] = {
       bytes: contents.byteLength,
       sha256: createHash("sha256").update(contents).digest("hex"),
@@ -38,6 +42,7 @@ export function generateReleaseManifest(directory, version) {
     version,
     generatedAt: new Date().toISOString(),
     files,
+    nativeRuntime: nativeRuntimeDescriptor(),
   };
   const output = join(directory, "release-manifest.json");
   writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);

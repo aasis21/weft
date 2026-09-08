@@ -11,7 +11,11 @@ permissions:
   attestations: write
 
 jobs:
+  native-runtime:
+    uses: ./.github/workflows/native-runtime.yml
+
   release:
+    needs: native-runtime
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -54,6 +58,7 @@ jobs:
           cp extension/dist/relayServerProcess.mjs release/
           cp extension/dist/devtunnelHostWatchdog.mjs release/
           cp extension/dist/weft.mjs release/
+          cp extension/dist/native-runtime-*.json release/
           cp skill/weft-how-to-use/SKILL.md release/weft-skill.md
           cp mobile/public/install.ps1 release/
           cp mobile/public/install.sh release/

@@ -26,7 +26,7 @@ Installed alongside the extension as a `weft`/`weft.cmd` shim on PATH (open a **
 terminal after install for PATH changes to take effect). Full command list:
 
 ```
-weft start [--new-device]
+weft start [--new-device] [--allow-terminal]
 weft add-project <name> <path> [--default]
 weft remove-project <name>
 weft list-projects
@@ -49,6 +49,10 @@ weft help
   persistent pairing identity, and starts immediately with a fresh QR. Use it for a
   different phone, after reinstalling/refreshing the phone app or clearing its storage,
   or when a valid QR repeatedly reports that the laptop did not acknowledge it.
+- **`weft start --allow-terminal`** — explicitly authorizes the paired phone to open
+  or resume one real shell on a supported Windows laptop. This is direct local-account
+  shell access, not a Copilot tool approval. Do not enable it implicitly for a request
+  that only asks to pair a phone or start ordinary Device Station.
 - **`weft add-project` / `remove-project` / `list-projects` / `set-default`** — manage
   named project shortcuts the mobile app can launch a session into.
 - **`weft set-transport` / `show-transport`** — the ONLY way transport is configured.
@@ -90,6 +94,27 @@ weft help
 - **`weft devtunnel stop`** — force-tears-down the shared relay from anywhere (kills the
   child process tree, deletes the cloud tunnel, clears the registry). Use it when you
   want to stop the tunnel without switching back to the owning terminal.
+
+## Shared terminal
+
+With `--allow-terminal`, choose **Open terminal** on the phone's device page. Station
+creates one shell and a visible local attach window, or reconnects to the existing
+terminal. A registered workspace is the initial directory, not a sandbox.
+
+The phone offers a command editor, direct terminal input, special keys, and input
+ownership. Leaving its terminal page does not end the shell. Confirmed **Close
+terminal**, closing the owned laptop window, or stopping Station ends it. Reconnect
+restores bounded screen state; never automatically repeat an uncertain command.
+
+Terminal input/output are not diagnostic event-log content. The shell's own history
+and programs can still persist data. If native support is missing, use `weft update`
+with the current CLI to install the complete runtime, then restart Station. Do not
+copy only `weft.mjs`, ask users to compile native dependencies, or claim that merely
+updating the source checkout updates the installed CLI.
+
+`weft terminal attach` is Station's internal laptop frontend. It attaches through
+authenticated local IPC; it is not a way to take over arbitrary existing terminals.
+See [terminal operation and boundaries](https://aasis21.github.io/weft/#open-terminal).
 
 ## Picking a transport
 

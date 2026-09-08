@@ -23,7 +23,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
+    { name: 'chromium', use: { browserName: 'chromium', channel: process.env.PLAYWRIGHT_CHANNEL } },
     // WebKit's parallel demo sessions are timing-sensitive; keep a production-launch
     // smoke here while Chromium runs the complete journey and accessibility matrix.
     {

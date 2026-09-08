@@ -26,7 +26,7 @@ test.describe('Journey: session management', () => {
     await expect(page.locator('.drawer')).toBeVisible();
     await expect(page.locator('.drawer-title')).toHaveText('WEFT');
 
-    const row = page.locator('.session-row').first();
+    const row = page.locator('.session-row:not(.device-drawer-row)').first();
     await expect(row.locator('.session-title')).toContainText('Demo session');
     await expect(row.locator('.tag.demo')).toContainText('demo');
     // The active session is highlighted.
@@ -45,7 +45,7 @@ test.describe('Journey: session management', () => {
   });
 
   test('deleting a drawer session is a two-step inline confirmation', async ({ page }) => {
-    const row = page.locator('.session-row').first();
+    const row = page.locator('.session-row:not(.device-drawer-row)').first();
     const openDelete = async (): Promise<void> => {
       await page.locator('.drawer-btn').click();
       await row.getByRole('button', { name: 'More actions' }).click();

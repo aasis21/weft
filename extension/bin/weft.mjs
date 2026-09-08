@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -27,6 +27,9 @@ import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
 import { resolveVersion } from "../src/version.mjs";
 import { parseStartOptions } from "../src/startOptions.mjs";
+import { attachTerminal } from "../src/terminalClient.mjs";
+import { NATIVE_TARGETS, stageNativeRuntime } from "../../scripts/native-runtime.mjs";
+import { commitStagedFiles } from "../../scripts/install-transaction.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -114,6 +117,9 @@ async function main() {
       const options = parseStartOptions(args);
       if (options.help) printStartHelp();
       else await start(options);
+    } else if (command === "terminal") {
+      if (args.length !== 1 || args[0] !== "attach") throw new Error("Usage: weft terminal attach (opened by Station)");
+      await attachTerminal();
     } else if (command === "add-project") {
       const [name, path, ...rest] = args;
       if (!name || !path) throw new Error("Usage: weft add-project <name> <path> [--default]");
@@ -406,7 +412,7 @@ function createProvisionStatusLine() {
   };
 }
 
-async function start({ newDevice = false } = {}) {
+async function start({ newDevice = false, allowTerminal = false } = {}) {
   const lock = acquireLock();
   let released = false;
   const release = () => {
@@ -433,6 +439,7 @@ async function start({ newDevice = false } = {}) {
 
   const status = createStatusLine();
   const listener = createListener({
+    allowTerminal,
     onDeviceConnected: (peer) => {
       status.setConnected(true);
       appendStationLog("device.connected", { phone: peer?.senderName ?? peer?.deviceId ?? "unknown" });
@@ -1121,9 +1128,7 @@ function printVersion() {
 // Download one file from the cloud release into `dest`, atomically (tmp + rename) so a partial
 // or interrupted download can never leave a half-written bundle that Node would then try to run.
 async function downloadTo(url, dest, { expectedSha256 } = {}) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed (HTTP ${res.status}) for ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
+  const buf = await downloadBytes(url);
   if (expectedSha256) {
     const actual = createHash("sha256").update(buf).digest("hex");
     if (actual !== expectedSha256.toLowerCase()) {
@@ -1131,8 +1136,25 @@ async function downloadTo(url, dest, { expectedSha256 } = {}) {
     }
   }
   const tmp = `${dest}.${process.pid}.download.tmp`;
-  writeFileSync(tmp, buf);
-  renameSync(tmp, dest);
+  try {
+    writeFileSync(tmp, buf);
+    renameSync(tmp, dest);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+async function downloadBytes(url, maxBytes = 32 * 1024 * 1024) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000), cache: "no-store" });
+  if (!res.ok) throw new Error(`Download failed (HTTP ${res.status}) for ${url}`);
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of res.body) {
+    bytes += chunk.length;
+    if (bytes > maxBytes) throw new Error(`Download exceeds the ${maxBytes}-byte limit for ${url}`);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 let releaseManifestPromise;
@@ -1140,9 +1162,7 @@ async function loadReleaseManifest() {
   if (releaseManifestPromise) return releaseManifestPromise;
   const url = `${INSTALL_BASE}/release-manifest.json`;
   releaseManifestPromise = (async () => {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Could not download the Weft release manifest (HTTP ${res.status}) from ${url}`);
-    const manifest = await res.json();
+    const manifest = JSON.parse((await downloadBytes(url, 2 * 1024 * 1024)).toString("utf8"));
     if (manifest?.schemaVersion !== 1 || typeof manifest?.version !== "string" || !manifest?.files) {
       throw new Error(`Invalid Weft release manifest from ${url}`);
     }
@@ -1191,7 +1211,21 @@ async function placeBundles({ fromDir } = {}) {
     stage: join(dir, `.${name}.${transactionId}.stage`),
     backup: join(dir, `.${name}.${transactionId}.backup`),
   }));
-  const replaced = [];
+  const native = NATIVE_TARGETS.includes(`${process.platform}-${process.arch}`) ? {
+    name: "node-pty",
+    dest: join(dir, "node_modules", "node-pty"),
+    stage: join(dir, "node_modules", `.node-pty.${transactionId}.stage`),
+    backup: join(dir, "node_modules", `.node-pty.${transactionId}.backup`),
+    recursive: true,
+  } : null;
+  const files = native ? [...staged, native] : staged;
+  const lockPath = join(dir, ".install.lock");
+  let lock;
+  try { lock = openSync(lockPath, "wx"); }
+  catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    throw new Error(`Another Weft install/update holds ${lockPath}. Wait for it to finish; remove this lock only if that installer is no longer running.`);
+  }
   try {
     // Verify the complete release before touching any currently installed bundle.
     for (const file of staged) {
@@ -1205,30 +1239,20 @@ async function placeBundles({ fromDir } = {}) {
         });
       }
     }
-    for (const file of staged) {
-      if (existsSync(file.dest)) renameSync(file.dest, file.backup);
-      try {
-        renameSync(file.stage, file.dest);
-        replaced.push(file);
-      } catch (error) {
-        if (existsSync(file.backup)) renameSync(file.backup, file.dest);
-        throw error;
-      }
+    if (native) {
+      mkdirSync(join(dir, "node_modules"), { recursive: true });
+      await stageNativeRuntime({ fromDir, manifest, base: INSTALL_BASE, stageDir: native.stage });
     }
-    for (const file of staged) {
-      rmSync(file.backup, { force: true });
+    commitStagedFiles(files);
+    for (const file of files) {
       console.log(`${c.green("✓")} ${file.name}`);
     }
-  } catch (error) {
-    for (const file of [...replaced].reverse()) {
-      rmSync(file.dest, { force: true });
-      if (existsSync(file.backup)) renameSync(file.backup, file.dest);
-    }
-    throw error;
   } finally {
-    for (const file of staged) {
-      rmSync(file.stage, { force: true });
-      rmSync(file.backup, { force: true });
+    try {
+      for (const file of files) rmSync(file.stage, { force: true, recursive: Boolean(file.recursive) });
+    } finally {
+      closeSync(lock);
+      rmSync(lockPath, { force: true });
     }
   }
   return dir;
@@ -1306,6 +1330,8 @@ async function update(cmdArgs = []) {
     }
     return;
   }
+  // An older updater may have installed this version's JavaScript without its native
+  // assets. A non-check update must repair the full release even at the same version.
   await placeBundles();
   await installSkill();
   ensureWindowsShim(extensionInstallDir());
@@ -1376,7 +1402,8 @@ function runBootstrapInstaller() {
 
 function usage() {
   console.log(`Usage:
-  weft start [--new-device]
+  weft start [--new-device] [--allow-terminal]
+  weft terminal attach
   weft add-project <name> <path> [--default]
   weft remove-project <name>
   weft list-projects
@@ -1432,16 +1459,24 @@ function printStartHelp() {
   console.log(`Usage:
   weft start
   weft start --new-device
+  weft start --allow-terminal
 
 Options:
   --new-device       Forget the previously trusted phone, create a fresh persistent
                      pairing identity, and start the Device Station with a new QR.
   --rotate-pairing   Alias for --new-device.
+  --allow-terminal   Grant the paired phone full shell access as your local account.
+                     Windows only; starts in the registered default project.
+                     The workspace is NOT a sandbox. Closing the laptop terminal
+                     or Station ends the shell; leaving the phone page does not.
   -h, --help         Show this help without starting the station.
 
 Use plain \`weft start\` when the same phone still has its saved Weft identity; it reconnects
 automatically. Use \`weft start --new-device\` for a different phone, after clearing browser/app
 storage, after reinstalling the phone app, or when a valid QR repeatedly reports no laptop ACK.
+
+Older updaters install JavaScript only. If terminal runtime is unavailable after an update,
+run \`weft update\` once more, then restart Station. No new pairing is required.
 
 If pairing still fails:
   1. Run \`weft show-transport\` and confirm the QR and phone use that transport.

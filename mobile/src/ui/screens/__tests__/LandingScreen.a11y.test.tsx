@@ -89,4 +89,17 @@ describe('LandingScreen install command tabs accessibility', () => {
     expect(screen.getByRole('link', { name: 'Security' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Support' })).toBeInTheDocument();
   });
+
+  it('explains opt-in shared terminal access separately from Copilot permissions', async () => {
+    const user = userEvent.setup();
+    render(
+      <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
+    );
+    await user.click(screen.getByText('Where does my work run? Can I leave my desk?'));
+    expect(screen.getByText(/Open terminal creates or resumes one real laptop shell/)).toBeVisible();
+    await user.click(screen.getByText('Who can see or control my session?'));
+    expect(screen.getByText('weft start --allow-terminal')).toBeVisible();
+    expect(screen.getByText(/not through Copilot's approval flow/)).toBeVisible();
+    expect(screen.getByText(/Terminal input and output are excluded from Weft diagnostic logs/)).toBeVisible();
+  });
 });

@@ -13,6 +13,9 @@
   "dependencies": {
     "@aasis21/weft-shared": "*",
     "@supabase/supabase-js": "^2.39.7",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "1.1.0",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0"
   },

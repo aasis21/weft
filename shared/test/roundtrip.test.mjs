@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { generateKeyPair, deriveSessionKey, decryptJSON, randomChannelId } from "../crypto.mjs";
 import { SecureChannel } from "../channel.mjs";
 import { createLocalTransport, _resetLocalBus } from "../transport-local.mjs";
-import { EVENT_TYPE, assistantMessage, prompt } from "../messages.mjs";
+import { EVENT_TYPE, assistantMessage, prompt, terminalRequest, terminalOutput, terminalSnapshot } from "../messages.mjs";
 
 test("ECDH session keys match on both sides and round-trip an encrypted envelope", async () => {
   _resetLocalBus();
@@ -143,6 +143,34 @@ function createBufferedTransport() {
     close: async () => {},
   };
 }
+
+test("terminal controls and ANSI screen data round-trip encrypted without exposing content to the relay", async () => {
+  const laptop = await generateKeyPair();
+  const phone = await generateKeyPair();
+  const senderKey = await deriveSessionKey(laptop.privateKey, phone.publicKeyB64);
+  const receiverKey = await deriveSessionKey(phone.privateKey, laptop.publicKeyB64);
+  const transport = createBufferedTransport();
+  const sender = new SecureChannel({ transport, key: senderKey });
+  const receiver = new SecureChannel({ transport, key: receiverKey });
+  const received = [];
+  receiver.onEvent(EVENT_TYPE.CONTROL, (message) => received.push(message));
+  const messages = [
+    terminalRequest({ action: "input", requestId: "r1", terminalId: "t1", inputSeq: 1, data: "terminal-private-command\r" }),
+    terminalSnapshot({ terminalId: "t1", seq: 5, data: "\u001b[Hterminal-private-screen", cols: 80, rows: 24, truncated: false }),
+    terminalOutput({ terminalId: "t1", seq: 6, data: "\u001b[32mterminal-private-output\u001b[0m\r\n" }),
+  ];
+  try {
+    for (const message of messages) await sender.send(message);
+    assert.doesNotMatch(JSON.stringify(transport.published), /terminal-private|terminal_request|terminal_output|terminal_snapshot/);
+    for (let i = 0; i < messages.length; i += 1) await transport.deliver(i);
+    assert.deepEqual(received.map((message) => message.msg), messages.map((message) => message.msg));
+    await transport.deliver(0);
+    assert.equal(received.length, messages.length, "an encrypted input replay must not be delivered twice");
+  } finally {
+    await sender.close();
+    await receiver.close();
+  }
+});
 
 test("SecureChannel authenticates monotonic sequence data and rejects replayed or out-of-order envelopes", async () => {
   const ext = await generateKeyPair();

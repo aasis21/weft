@@ -35,6 +35,7 @@ export const EVENT_TYPE: {
 
 export const DEVICE_CAPABILITY: {
   readonly MONITOR_V1: "device-monitor-v1";
+  readonly TERMINAL_V1: "device-terminal-v1";
 };
 
 export const SUBTYPE: {
@@ -80,6 +81,10 @@ export const SUBTYPE: {
     readonly DEVICE_MONITOR_START: "device_monitor_start";
     readonly DEVICE_MONITOR_STOP: "device_monitor_stop";
     readonly DEVICE_SNAPSHOT: "device_snapshot";
+    readonly TERMINAL_REQUEST: "terminal_request";
+    readonly TERMINAL_STATE: "terminal_state";
+    readonly TERMINAL_OUTPUT: "terminal_output";
+    readonly TERMINAL_SNAPSHOT: "terminal_snapshot";
     readonly VOICE_MODE: "voice_mode";
     readonly INVOKE_COMMAND: "invoke_command";
     readonly SESSION_OFFERS: "session_offers";
@@ -455,6 +460,46 @@ export interface DeviceSnapshotMsg {
   observedAt: DeviceSnapshotObservedAt;
   issues: DeviceSnapshotIssue[];
 }
+export type TerminalAction = "open" | "attach" | "detach" | "input" | "resize" | "claim" | "close";
+export type TerminalStatus = "opening" | "open" | "closed" | "error";
+export type TerminalOwner = "phone" | "laptop" | null;
+export interface TerminalRequestMsg {
+  requestId: string;
+  action: TerminalAction;
+  terminalId?: string;
+  projectName?: string;
+  data?: string;
+  /** Per-phone sequence within this terminal generation; only input consumes it. */
+  inputSeq?: number;
+  cols?: number;
+  rows?: number;
+}
+export interface TerminalStateMsg {
+  requestId: string | null;
+  terminalId: string | null;
+  status: TerminalStatus;
+  shell: string | null;
+  cwd: string | null;
+  cols: number;
+  rows: number;
+  owner: TerminalOwner;
+  nextInputSeq: number;
+  error: string | null;
+}
+export interface TerminalOutputMsg {
+  terminalId: string;
+  seq: number;
+  data: string;
+}
+export interface TerminalSnapshotMsg {
+  terminalId: string;
+  /** Last output sequence already represented by the serialized screen. */
+  seq: number;
+  data: string;
+  cols: number;
+  rows: number;
+  truncated: boolean;
+}
 export interface VoiceModeMsg {
   active: boolean;
 }
@@ -529,6 +574,11 @@ export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHear
 export type DeviceMonitorStart = Envelope<"control", "device_monitor_start", DeviceMonitorStartMsg>;
 export type DeviceMonitorStop = Envelope<"control", "device_monitor_stop", DeviceMonitorStopMsg>;
 export type DeviceSnapshot = Envelope<"control", "device_snapshot", DeviceSnapshotMsg>;
+export type TerminalRequest = Envelope<"control", "terminal_request", TerminalRequestMsg>;
+export type TerminalState = Envelope<"control", "terminal_state", TerminalStateMsg>;
+export type TerminalOutput = Envelope<"control", "terminal_output", TerminalOutputMsg>;
+export type TerminalSnapshot = Envelope<"control", "terminal_snapshot", TerminalSnapshotMsg>;
+export type TerminalEnvelope = TerminalRequest | TerminalState | TerminalOutput | TerminalSnapshot;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
 export type InvokeCommandMessage = Envelope<"control", "invoke_command", InvokeCommandMsg>;
 export type SessionOffersMessage = Envelope<"control", "session_offers", SessionOffersMsg>;
@@ -579,6 +629,7 @@ export type EventEnvelope =
   | DeviceMonitorStart
   | DeviceMonitorStop
   | DeviceSnapshot
+  | TerminalEnvelope
   | VoiceModeMessage
   | InvokeCommandMessage
   | SessionOffersMessage
@@ -714,6 +765,10 @@ export function deviceMonitorStart(
 ): DeviceMonitorStart;
 export function deviceMonitorStop(monitorId: string): DeviceMonitorStop;
 export function deviceSnapshot(snapshot: Omit<DeviceSnapshotMsg, "schemaVersion">): DeviceSnapshot;
+export function terminalRequest(request: TerminalRequestMsg): TerminalRequest;
+export function terminalState(state: TerminalStateMsg): TerminalState;
+export function terminalOutput(output: TerminalOutputMsg): TerminalOutput;
+export function terminalSnapshot(snapshot: TerminalSnapshotMsg): TerminalSnapshot;
 export function voiceMode(active: boolean): VoiceModeMessage;
 export function invokeCommand(name: string, input?: string): InvokeCommandMessage;
 export function sessionOffers(offers: SessionOffer[]): SessionOffersMessage;

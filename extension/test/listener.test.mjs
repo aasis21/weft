@@ -22,6 +22,7 @@ import {
   sessionClaimed,
   deviceMonitorStart,
   deviceMonitorStop,
+  terminalRequest,
 } from "@aasis21/weft-shared";
 import { createListener } from "../src/listener.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
@@ -56,7 +57,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, monitoringLimits, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, monitoringLimits, allowTerminal, terminalHostFactory, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -72,6 +73,8 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi
     channelId,
     deviceId: "test-device",
     heartbeatMs,
+    allowTerminal,
+    terminalHostFactory,
     ...(telemetryApi ? { telemetryApi } : {}),
     ...(monitoringLimits ? { monitoringLimits } : {}),
     projectsApi,
@@ -125,12 +128,50 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   const { listener, messages } = await pairedHarness({
     projects: [{ name: "app", path: projectDir, default: true }],
   });
+
   const list = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
   assert.deepEqual(list.msg.projects, [{ name: "app", path: projectDir, isDefault: true }]);
   assert.ok(list.msg.deviceName);
   assert.equal(list.msg.deviceId, "test-device");
   assert.deepEqual(list.msg.capabilities, [DEVICE_CAPABILITY.MONITOR_V1]);
   await listener.stop();
+});
+
+test("encrypted terminal controls bypass generic logging and require the explicit grant", async () => {
+  const controls = [];
+  const { listener, phoneChannel, messages } = await pairedHarness({ onControl: (event) => controls.push(event) });
+  try {
+    const count = controls.length;
+    await phoneChannel.send(terminalRequest({ requestId: "terminal-denied", action: "open" }));
+    await waitFor(() => messages.some((message) => message.msg?.requestId === "terminal-denied"));
+    const reply = messages.find((message) => message.msg?.requestId === "terminal-denied");
+    assert.equal(reply.eventSubtype, SUBTYPE.CONTROL.TERMINAL_STATE);
+    assert.match(reply.msg.error, /--allow-terminal/);
+    assert.equal(controls.length, count);
+  } finally { await listener.stop(); }
+});
+
+test("terminal capability follows initialized runtime and Station stop disposes the host", async () => {
+  let initialized = false, stopped = 0;
+  const requests = [];
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    allowTerminal: true,
+    terminalHostFactory: ({ allowTerminal }) => ({
+      initialize: async () => { initialized = true; },
+      get supported() { return initialized && allowTerminal; },
+      handle: async (request) => requests.push(request),
+      disconnectPhone() {},
+      stop: async () => { stopped++; },
+    }),
+  });
+  try {
+    const list = messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
+    assert.ok(list.msg.capabilities.includes(DEVICE_CAPABILITY.TERMINAL_V1));
+    await phoneChannel.send(terminalRequest({ requestId: "terminal-open", action: "open" }));
+    await waitFor(() => requests.length === 1);
+    assert.equal(requests[0].requestId, "terminal-open");
+  } finally { await listener.stop(); }
+  assert.equal(stopped, 1);
 });
 
 test("refreshes an unclaimed listener grant and notifies the host", async () => {

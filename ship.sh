@@ -101,6 +101,10 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   ok "mobile/public/devtunnelHostWatchdog.mjs  (served as /devtunnelHostWatchdog.mjs by the installer)"
   cp "$weft_cli_bundle" "$root/mobile/public/weft.mjs"
   ok "mobile/public/weft.mjs  (served as /weft.mjs by the installer)"
+  for target in win32-x64 win32-arm64 darwin-x64 darwin-arm64; do
+    cp "$root/extension/dist/native-runtime-$target.json" "$root/mobile/public/"
+  done
+  ok "native PTY runtime payloads (Windows/macOS x64 and arm64, compiler-free)"
   skill_source="$root/skill/weft-how-to-use/SKILL.md"
   if [ -f "$skill_source" ]; then
     cp "$skill_source" "$root/mobile/public/weft-skill.md"
@@ -137,6 +141,8 @@ else
   [ -f "$weft_cli_bundle" ] || { echo "no $weft_cli_bundle - run once without --skip-build first" >&2; exit 1; }
   [ -f "$dist_dir/index.html" ] || { echo "no $dist_dir - run once without --skip-build first" >&2; exit 1; }
 fi
+
+node scripts/verify-release-manifest.mjs "$dist_dir"
 
 if [ "$SKIP_DEPLOY" -eq 0 ]; then
   kind=$([ "$DRAFT" -eq 1 ] && echo "preview (draft)" || echo "production")
@@ -180,39 +186,14 @@ if [ "$INSTALL" -eq 1 ]; then
   cyan "Installing extension on this laptop (~/.copilot/extensions/weft)"
   [ -f "$ext_bundle" ] || { echo "no $ext_bundle to install - drop --skip-build" >&2; exit 1; }
   dest="$HOME/.copilot/extensions/weft"
-  mkdir -p "$dest"
-  cp "$ext_bundle" "$dest/extension.mjs"
-  ok "extension.mjs -> $dest"
-  if [ -f "$relay_bundle" ]; then
-    cp "$relay_bundle" "$dest/relayServerProcess.mjs"
-    ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
-  else
-    warn "no $relay_bundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
-  fi
-  if [ -f "$watchdog_bundle" ]; then
-    cp "$watchdog_bundle" "$dest/devtunnelHostWatchdog.mjs"
-    ok "devtunnelHostWatchdog.mjs -> $dest  (sibling of relayServerProcess.mjs - devtunnel.mjs resolves it the same way)"
-  else
-    warn "no $watchdog_bundle - the devtunnel host will fail to start until rebuilt"
-  fi
+  node "$weft_cli_bundle" install --from "$root/extension/dist" --skill "$root/skill/weft-how-to-use/SKILL.md"
   if [ -f "$weft_cli_bundle" ]; then
-    cp "$weft_cli_bundle" "$dest/weft.mjs"
-    ok "weft.mjs -> $dest  (standalone Device Station CLI)"
     shim_path="$dest/weft"
     printf '#!/usr/bin/env bash\nexec node "%s/weft.mjs" "$@"\n' "$dest" > "$shim_path"
     chmod +x "$shim_path"
     ok "weft -> $dest  (symlink/shim it onto your PATH, e.g. ln -sf \"$shim_path\" /usr/local/bin/weft)"
   else
     warn "no $weft_cli_bundle - the standalone 'weft' command was not (re)installed"
-  fi
-  skill_source="$root/skill/weft-how-to-use/SKILL.md"
-  if [ -f "$skill_source" ]; then
-    skill_dest="$HOME/.copilot/skills/weft-how-to-use"
-    mkdir -p "$skill_dest"
-    cp "$skill_source" "$skill_dest/SKILL.md"
-    ok "SKILL.md -> $skill_dest  (how-to-use skill, alongside the extension)"
-  else
-    warn "no $skill_source - the how-to-use skill was not (re)installed"
   fi
   # Transport lives in a single file, ~/.weft/weft.config.json, written only by `weft
   # set-transport` - ship.sh never touches it, so reinstalling/rebuilding the extension can

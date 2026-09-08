@@ -23,7 +23,7 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
-import { transportIdentity } from '@aasis21/weft-shared';
+import { DEVICE_CAPABILITY, transportIdentity } from '@aasis21/weft-shared';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNowTick } from '@/ui/hooks/useNowTick';
 
@@ -44,6 +44,7 @@ interface DeviceDetailsScreenProps {
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
   onStartOnDevice(channelId: string): void;
+  onOpenTerminal?(channelId: string): void;
   onOpenDeviceDetails?(channelId: string): void;
   onJoinOffer(deviceChannelId: string, offerChannelId: string): void;
   onOpenSession(channelId: string): void;
@@ -128,6 +129,7 @@ export function DeviceDetailsScreen({
   onSetDefault,
   onForget,
   onStartOnDevice,
+  onOpenTerminal,
   onOpenDeviceDetails,
   onJoinOffer,
   onOpenSession,
@@ -174,6 +176,7 @@ export function DeviceDetailsScreen({
   const tracked = new Set(sessions.map((s) => s.meta.channelId));
   const offers = (device.offers ?? []).filter((o) => o && o.channelId && !tracked.has(o.channelId));
   const online = device.connected;
+  const terminalSupported = device.capabilities?.includes(DEVICE_CAPABILITY.TERMINAL_V1) ?? false;
   const monitoringSupported = device.capabilities?.includes('device-monitor-v1') ?? false;
   const snapshot = device.monitoring?.snapshot;
   const system = snapshot?.system;
@@ -600,14 +603,21 @@ export function DeviceDetailsScreen({
             <button
               type="button"
               className="device-quick-action"
-              aria-label="Open terminal (coming soon)"
-              disabled
+              aria-label="Open terminal"
+              aria-describedby={!terminalSupported ? 'terminal-enable-guidance' : undefined}
+              disabled={!online || !terminalSupported || !onOpenTerminal}
+              onClick={() => onOpenTerminal?.(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><TerminalGlyph /></span>
               <strong>Open terminal</strong>
-              <small className="device-action-status">Soon</small>
+              {!terminalSupported ? <small className="device-action-status">Enable on laptop</small> : null}
             </button>
           </div>
+          {!terminalSupported ? (
+            <p id="terminal-enable-guidance" className="device-offline-note">
+              Terminal access is unavailable. Update Weft on the laptop, then run <code>weft start --allow-terminal</code>.
+            </p>
+          ) : null}
         </section>
 
         {!online ? (

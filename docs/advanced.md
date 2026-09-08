@@ -40,6 +40,16 @@ Registration is a launch convenience, not a security sandbox. See the
 [project walkthrough](https://aasis21.github.io/weft/#projects) for platform-specific
 examples.
 
+## Open a shared terminal
+
+Run `weft start --allow-terminal` on a supported Windows laptop to explicitly enable
+direct shell access for its paired phone. **Open terminal** on the device page creates
+or reconnects to one shell, also displayed in a visible laptop attach window.
+Leaving the phone page keeps it running; confirmed Close terminal ends it.
+This is direct access under your local account, not a Copilot tool approval or a
+workspace sandbox. See the [terminal guide](terminal.md) for controls, lifecycle,
+privacy, and troubleshooting.
+
 ## Pairing lifetime
 
 Pairing modes apply to `weft start`; `/weft` is always per-session.
@@ -85,6 +95,7 @@ uses the intended connection.
 | Command | What it does |
 |---|---|
 | `weft start` | Start the Device Station and print a pairing QR. |
+| `weft start --allow-terminal` | Enable one shared terminal for the paired phone on a supported laptop. |
 | `weft start --new-device` | Replace the previously trusted phone identity and start with a fresh QR. |
 | `weft start --help` | Show station options without starting it. |
 | `weft add-project <name> <path> [--default]` | Register a project directory. |

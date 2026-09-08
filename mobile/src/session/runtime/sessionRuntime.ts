@@ -152,6 +152,7 @@ import {
 import { makeUserItem } from '@/session/reducers/applyEnvelope';
 import { optimistic } from '@/session/intents/optimistic';
 import { selectAllSessions, selectManagerSnapshot, toTimelineState } from '@/session/selectors';
+import { TerminalController, isTerminalEnvelope } from './terminalController';
 
 // --- liveness / persistence constants (identical to the pre-refactor god-object) -----------------
 const IDLE_AFTER_MS = 20_000;
@@ -368,6 +369,8 @@ export class SessionRuntime {
    *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
   private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly deviceMonitors = new Map<string, DeviceMonitorLease>();
+  private readonly terminals = new Map<string, TerminalController>();
+  private readonly demoDevices = new Map<string, string>();
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
@@ -862,6 +865,7 @@ export class SessionRuntime {
   }
 
   private onMessage(channelId: string, client: WeftClient, message: EventEnvelope): void {
+    if (isTerminalEnvelope(message)) return;
     const ctrl = this.controllers.get(channelId);
     const before = this.session(channelId);
     if (!ctrl || !before) return;
@@ -1159,6 +1163,18 @@ export class SessionRuntime {
     this.registry.adopt(channelId, demo.client);
     this.store.dispatch(sessionActivated(channelId));
     this.attach(channelId, demo.client);
+    if (demo.station) {
+      const { pairing, client: stationClient } = demo.station;
+      const deviceChannelId = pairing.channelId;
+      this.demoDevices.set(channelId, deviceChannelId);
+      this.store.dispatch(deviceUpserted({
+        channelId: deviceChannelId, pub: pairing.peerPublicKeyB64,
+        transport: pairing.transport, publicKeyB64: pairing.publicKeyB64, privateKeyJwk: pairing.privateKeyJwk,
+        name: 'Demo laptop', savedAt: this.clock(), isDefault: false,
+        projects: [], projectsLoading: false, connected: true, events: [],
+      }));
+      this.attachListener(deviceChannelId, stationClient);
+    }
     return channelId;
   }
 
@@ -1217,6 +1233,23 @@ export class SessionRuntime {
     return this.getSnapshot().devices;
   }
 
+  terminal(channelId: string): TerminalController {
+    let terminal = this.terminals.get(channelId);
+    if (!terminal) {
+      terminal = new TerminalController({
+        capabilities: () => this.device(channelId)?.capabilities ?? [],
+        send: async (message) => {
+          const client = this.listenerController(channelId)?.client;
+          if (!client || !this.device(channelId)?.connected) throw new Error('Device disconnected.');
+          await client.send(message);
+        },
+      });
+      terminal.setConnected(this.device(channelId)?.connected ?? false);
+      this.terminals.set(channelId, terminal);
+    }
+    return terminal;
+  }
+
   async connectDevice(channelId: string): Promise<void> {
     const device = this.device(channelId);
     if (!device) return;
@@ -1229,6 +1262,7 @@ export class SessionRuntime {
     // wedged the device in "reconnecting" forever. attachListener() closes the previous client, so
     // replacing it here is clean.
     if (ctrl.client && device.connected) return;
+    this.terminals.get(channelId)?.setConnected(false);
     ctrl.reconnecting = true;
     this.store.dispatch(deviceProjectsLoadingSet({ channelId, loading: true, attempt: true }));
     try {
@@ -1730,6 +1764,8 @@ export class SessionRuntime {
   }
 
   async forgetDevice(channelId: string): Promise<void> {
+    this.terminals.get(channelId)?.dispose();
+    this.terminals.delete(channelId);
     this.stopDeviceMonitoring(channelId);
     const ctrl = this.listenerController(channelId);
     if (ctrl?.client) {
@@ -1761,12 +1797,14 @@ export class SessionRuntime {
     const stopEvents = client.subscribe((message) => this.onListenerMessage(channelId, client, message));
     const stopStatus = client.onStatus((status) => {
       this.store.dispatch(deviceErrorSet({ channelId, connected: status === 'connected' }));
+      this.terminals.get(channelId)?.setConnected(status === 'connected');
     });
     ctrl.unsubscribe = () => {
       stopEvents();
       stopStatus();
     };
     this.store.dispatch(deviceErrorSet({ channelId, error: undefined, connected: true }));
+    this.terminals.get(channelId)?.setConnected(true);
     // Fresh client: drop any stale in-flight marker from the previous (now-closed) socket so this
     // genuine (re)attach always issues exactly one project_list_request.
     this.clearProjectListInflight(channelId);
@@ -1778,6 +1816,8 @@ export class SessionRuntime {
       const { removedChannelIds, merged } = await reconcileDeviceId(channelId, deviceId);
       this.store.dispatch(deviceReconciled({ channelId, removedChannelIds, merged }));
       for (const dead of removedChannelIds) {
+        this.terminals.get(dead)?.dispose();
+        this.terminals.delete(dead);
         this.stopDeviceMonitoring(dead);
         this.clearProjectListInflight(dead);
         this.listenerController(dead)?.dispose();
@@ -1791,6 +1831,11 @@ export class SessionRuntime {
   private onListenerMessage(channelId: string, client: WeftClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
+    if (isTerminalEnvelope(message)) {
+      this.store.dispatch(deviceSeen({ channelId }));
+      this.terminals.get(channelId)?.receive(message);
+      return;
+    }
     this.recordDeviceEvent(channelId, 'in', message);
     // Single inbound choke point: ANY control message is proof the laptop is alive right now, so
     // refresh "last seen" here — before the per-subtype branches — so SPAWN_PAIRING, SPAWN_RESULT
@@ -2035,6 +2080,15 @@ export class SessionRuntime {
   }
 
   async remove(channelId: string): Promise<void> {
+    const demoDevice = this.demoDevices.get(channelId);
+    if (demoDevice) {
+      this.terminals.get(demoDevice)?.dispose();
+      this.terminals.delete(demoDevice);
+      this.listenerControllers.get(demoDevice)?.dispose();
+      this.listenerControllers.delete(demoDevice);
+      this.store.dispatch(deviceRemoved(demoDevice));
+      this.demoDevices.delete(channelId);
+    }
     const session = this.session(channelId);
     if (!session) return;
     for (const pending of [...this.pendingSpawns.values()]) {
@@ -2409,6 +2463,7 @@ export class SessionRuntime {
   }
 
   private recordEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
+    if (isTerminalEnvelope(message)) return;
     // Heartbeats fire ~every 2.5s; the reducer collapses a run of consecutive heartbeats down to
     // the latest one (#67, #185) so they surface liveness in the log without evicting the
     // substantive event chain (prompts, approvals, tool_start/complete, elicitations).
@@ -2421,6 +2476,8 @@ export class SessionRuntime {
   /** Mirrors recordEvent() but for the DEVICE (listener) channel — same shape, its own (smaller,
    *  now-persisted) ring buffer, and the same consecutive-heartbeat collapsing (#185). */
   private recordDeviceEvent(channelId: string, dir: 'in' | 'out', message: EventEnvelope): void {
+    if (isTerminalEnvelope(message)) return;
+    if ([...this.demoDevices.values()].includes(channelId)) return;
     const fallback = dir === 'out' ? getSenderName() : (this.device(channelId)?.name ?? 'Listener');
     const event = toDebugEvent(dir, message, (this.eventSeq += 1), fallback);
     this.store.dispatch(deviceEventAppended({ channelId, event }));
@@ -2594,6 +2651,7 @@ export class SessionRuntime {
       for (const device of this.store.getState().sessions.devices) {
         if (device.connected && device.lastSeenAt && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {
           this.store.dispatch(deviceErrorSet({ channelId: device.channelId, connected: false }));
+          this.terminals.get(device.channelId)?.setConnected(false);
         }
         // Self-heal a wedged device without waiting for an app foreground (handleResume) or restart
         // (init): the devtunnel/relay socket never re-opens on its own (unlike supabase), so once it
@@ -2656,6 +2714,8 @@ export class SessionRuntime {
         this.deviceReconnectFails.delete(device.channelId);
         this.deviceReconnectAt.delete(device.channelId);
         void this.connectDevice(device.channelId);
+      } else {
+        this.terminals.get(device.channelId)?.reattach();
       }
     }
   };
@@ -2696,6 +2756,8 @@ export class SessionRuntime {
 
   /** Tear down every socket, timer, and listener. Called when the app (or a test harness) shuts down. */
   dispose(): void {
+    for (const terminal of this.terminals.values()) terminal.dispose();
+    this.terminals.clear();
     if (this.watchdog !== null) {
       clearInterval(this.watchdog);
       this.watchdog = null;

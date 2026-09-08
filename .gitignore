@@ -23,6 +23,7 @@ mobile/public/devtunnelHostWatchdog.mjs
 mobile/public/weft.mjs
 mobile/public/weft-skill.md
 mobile/public/release-manifest.json
+mobile/public/native-runtime-*.json
 
 # env & secrets
 .env

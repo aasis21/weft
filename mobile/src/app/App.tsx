@@ -19,8 +19,12 @@ const DeviceDetailsScreen = lazy(() =>
 const SessionScreen = lazy(() =>
   import('@/ui/screens/SessionScreen').then((module) => ({ default: module.SessionScreen })),
 );
+const TerminalScreen = lazy(() =>
+  import('@/ui/screens/TerminalScreen').then((module) => ({ default: module.TerminalScreen })),
+);
 
-type ModalHistoryState = { weftView: 'devices' } | { weftView: 'device-details'; channelId: string } | null;
+type ModalHistoryState = { weftView: 'devices' } |
+  { weftView: 'device-details' | 'terminal'; channelId: string } | null;
 
 function loadingScreen(label: string): JSX.Element {
   return (
@@ -41,6 +45,7 @@ export default function App(): JSX.Element {
   const [startMode, setStartMode] = useState<StartMode>('new');
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);
+  const [terminalChannelId, setTerminalChannelId] = useState<string | undefined>();
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +60,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const onPopState = (event: PopStateEvent): void => {
       const state = event.state as ModalHistoryState;
+      setTerminalChannelId(state?.weftView === 'terminal' ? state.channelId : undefined);
       if (state?.weftView === 'devices') {
         setDevicesOpen(true);
         setDeviceDetailsChannelId(undefined);
@@ -71,6 +77,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openJoin = useCallback((manual = false): void => {
+    setTerminalChannelId(undefined);
     window.history.replaceState(null, '');
     setError(null);
     setAddManual(manual);
@@ -81,6 +88,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openStart = useCallback((channelId?: string, mode: StartMode = 'new'): void => {
+    setTerminalChannelId(undefined);
     window.history.replaceState(null, '');
     setError(null);
     setAdding(false);
@@ -92,6 +100,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openDevices = useCallback((): void => {
+    setTerminalChannelId(undefined);
     setError(null);
     setAdding(false);
     setStarting(false);
@@ -101,12 +110,22 @@ export default function App(): JSX.Element {
   }, []);
 
   const openDeviceDetails = useCallback((channelId: string): void => {
+    setTerminalChannelId(undefined);
     setError(null);
     setAdding(false);
     setStarting(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(channelId);
     window.history.pushState({ weftView: 'device-details', channelId } satisfies ModalHistoryState, '');
+  }, []);
+  const openTerminal = useCallback((channelId: string): void => {
+    const terminal = sessionRuntime.terminal(channelId);
+    terminal.enter();
+    terminal.open();
+    setTerminalChannelId(channelId);
+    setDeviceDetailsChannelId(undefined);
+    setDevicesOpen(false);
+    window.history.pushState({ weftView: 'terminal', channelId } satisfies ModalHistoryState, '');
   }, []);
   const startDeviceMonitoring = useCallback((channelId: string): void => {
     sessionRuntime.startDeviceMonitoring(channelId);
@@ -125,6 +144,7 @@ export default function App(): JSX.Element {
   }, [openDeviceDetails]);
 
   const closeDeviceScreens = useCallback((): void => {
+    setTerminalChannelId(undefined);
     window.history.replaceState(null, '');
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
@@ -268,6 +288,22 @@ export default function App(): JSX.Element {
     );
   }
 
+  if (terminalChannelId) {
+    const device = snapshot.devices.find((d) => d.channelId === terminalChannelId);
+    if (device) {
+      return (
+        <Suspense fallback={loadingScreen('Opening terminal…')}>
+          <TerminalScreen
+            device={device}
+            controller={sessionRuntime.terminal(terminalChannelId)}
+            onBack={() => window.history.back()}
+            onReconnect={() => void sessionRuntime.connectDevice(terminalChannelId)}
+          />
+        </Suspense>
+      );
+    }
+  }
+
   // Single-device drill-down: live status, event log, and every session ever spawned from this
   // device (matched by its stable deviceId, so it survives weft restarts).
   if (deviceDetailsChannelId) {
@@ -282,6 +318,7 @@ export default function App(): JSX.Element {
             devices={snapshot.devices}
             onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
             onStartMonitoring={startDeviceMonitoring}
+            onOpenTerminal={openTerminal}
             onStopMonitoring={stopDeviceMonitoring}
             onResumeOnDevice={(id) => openStart(id, 'resume')}
             onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}

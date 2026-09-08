@@ -21,6 +21,18 @@ registered projects, logs, relay settings, and persistent Device Station pairing
 material are stored under `~/.weft/`. A `/weft` pairing inside one Copilot session uses
 an ephemeral identity that ends with that session.
 
+## Optional shared terminal
+
+When explicitly enabled with `weft start --allow-terminal`, terminal commands and
+output pass between the paired phone and laptop over the encrypted device channel.
+The local attach frontend communicates with Station through authenticated local IPC.
+
+Weft keeps bounded terminal screen state and phone command recall in memory, not in
+diagnostic logs or persistent phone transcripts. The shell's own history, programs
+you run, and operating-system monitoring can independently record commands or
+output. Remote terminal access runs with the laptop account's permissions and is
+not restricted to the initial workspace.
+
 ## Data handled by relay infrastructure
 
 Session traffic is end-to-end encrypted between the paired phone and laptop. Relay

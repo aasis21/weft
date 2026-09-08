@@ -5,11 +5,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateReleaseManifest, REQUIRED_RELEASE_FILES } from "./generate-release-manifest.mjs";
+import { packageNativeRuntime } from "./package-native-runtime.mjs";
 
 test("release manifest contains deterministic hashes and optional versioned APK metadata", () => {
   const dir = mkdtempSync(join(tmpdir(), "weft-release-"));
   try {
     for (const name of REQUIRED_RELEASE_FILES) writeFileSync(join(dir, name), `payload:${name}`);
+    packageNativeRuntime(dir);
     writeFileSync(join(dir, "weft-1.2.3.apk"), "apk");
 
     const { manifest, output } = generateReleaseManifest(dir, "1.2.3");

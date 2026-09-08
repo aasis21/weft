@@ -77,7 +77,7 @@ const CAN_DO = [
   {
     icon: 'devices',
     title: 'Run a whole fleet',
-    body: 'Many laptops, many chats. Start a fresh one or jump into a running one, and switch between them in a tap.',
+    body: 'Many laptops, many chats. Start a fresh one or jump into a running one. Opt in on a supported laptop to share a real terminal, too.',
   },
   {
     icon: 'refresh',
@@ -452,7 +452,8 @@ export function LandingScreen({
           <p>
             Weft keeps transcripts and pairing keys locally on your devices so sessions can
             reconnect. Relay infrastructure forwards encrypted traffic and stores no session
-            content.
+            content. Terminal input and output are excluded from Weft diagnostic logs;
+            the shell and programs can still keep their own history.
             <span className="privacy-fine">AES-256-GCM · local history · no relay content storage</span>
           </p>
           <a
@@ -490,13 +491,19 @@ export function LandingScreen({
               move your development environment to the cloud. You can use a different Wi-Fi network
               or mobile data, as long as both devices can reach the relay. Keep the laptop awake,
               online, and the Device Station terminal open.</p>
+            <p>With terminal access enabled, Open terminal creates or resumes one real laptop shell,
+              shared with its local window. Leaving the phone terminal screen keeps that shell running;
+              confirmed Close ends it. The initial workspace is not a sandbox.</p>
           </details>
           <details>
             <summary>Who can see or control my session?</summary>
             <p>Weft encrypts session traffic between your paired devices. The relay forwards encrypted
               messages, not readable prompts or code; local history and pairing keys remain on your devices.
               Your paired phone can send prompts and answer Copilot&apos;s permission requests, so keep
-              the phone and pairing QR private. This does not change how GitHub Copilot processes your
+              the phone and pairing QR private. Shared terminal access requires a separate laptop-side
+              grant: <code>weft start --allow-terminal</code>. Terminal commands run with your laptop
+              account permissions, not through Copilot&apos;s approval flow.
+              This does not change how GitHub Copilot processes your
               requests under its own service policies. <a href={`${DOCS}#security`}>Read the privacy and trust boundaries.</a></p>
           </details>
         </div>

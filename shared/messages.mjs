@@ -32,6 +32,7 @@ export const EVENT_TYPE = Object.freeze({
 
 export const DEVICE_CAPABILITY = Object.freeze({
   MONITOR_V1: "device-monitor-v1",
+  TERMINAL_V1: "device-terminal-v1",
 });
 
 /**
@@ -111,6 +112,10 @@ export const SUBTYPE = Object.freeze({
     DEVICE_MONITOR_START: "device_monitor_start",
     DEVICE_MONITOR_STOP: "device_monitor_stop",
     DEVICE_SNAPSHOT: "device_snapshot",
+    TERMINAL_REQUEST: "terminal_request",
+    TERMINAL_STATE: "terminal_state",
+    TERMINAL_OUTPUT: "terminal_output",
+    TERMINAL_SNAPSHOT: "terminal_snapshot",
     // phone -> ext: Voice Mode (#168) is on/off. While on, the extension prepends a directive to
     // each relayed prompt so the agent authors its reply for SPEECH (concise, no verbatim code).
     VOICE_MODE: "voice_mode",
@@ -460,6 +465,17 @@ export const forgetDevice = () =>
  */
 export const deviceHeartbeat = (deviceId = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT, { deviceId: deviceId ?? null });
+
+// Terminal payloads remain private to the terminal consumers, not the diagnostic event log.
+// Receivers validate action-specific fields before any PTY or rendering operation.
+export const terminalRequest = (request) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.TERMINAL_REQUEST, { ...request });
+export const terminalState = (state) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.TERMINAL_STATE, { ...state });
+export const terminalOutput = (output) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.TERMINAL_OUTPUT, { ...output });
+export const terminalSnapshot = (snapshot) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.TERMINAL_SNAPSHOT, { ...snapshot });
 
 export const deviceMonitorStart = (monitorId, intervalMs = null, leaseMs = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_MONITOR_START, {

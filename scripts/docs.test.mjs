@@ -97,7 +97,7 @@ test("handbook includes operating-system setup, recovery, limitations, and all t
     "service-role key", "namespace", "private keys", "metadata", "does not currently publish",
   ]) assert.ok(content.includes(required), `Missing essential documentation: ${required}`);
   assert.ok(document.querySelector('a[href="https://useweft.netlify.app"]'));
-  for (const guide of ["setup", "advanced", "pairing", "hosting", "security", "releases", "mode-switching", "event-envelope"]) {
+  for (const guide of ["setup", "advanced", "pairing", "hosting", "security", "releases", "mode-switching", "event-envelope", "terminal"]) {
     assert.ok(document.querySelector(`#guides a[href="https://github.com/aasis21/weft/blob/main/docs/${guide}.md"]`));
     assert.match(readFileSync(resolve(docs, `${guide}.md`), "utf8"), /https:\/\/aasis21\.github\.io\/weft\/#/);
   }
@@ -132,4 +132,19 @@ test("documentation runs locally without remote scripts, styles, fonts, or Markd
   assert.match(css, /:focus-visible/);
   assert.match(css, /@media print/);
   assert.ok(document.querySelector('button#theme-toggle[aria-label="Switch to dark mode"]'));
+});
+
+test("terminal guidance explains authorization, lifecycle, and private output", () => {
+  assert.ok(document.querySelector("#open-terminal"));
+  const sessions = document.querySelector("#sessions").textContent;
+  for (const requirement of ["weft start --allow-terminal", "same shell", "Take control",
+    "Close terminal", "off by default", "not a sandbox", "bounded scrollback"]) {
+    assert.ok(sessions.includes(requirement), `Missing terminal guidance: ${requirement}`);
+  }
+  assert.doesNotMatch(sessions, /Open terminal.{0,70}(?:disabled|Coming soon)/);
+  const guide = readFileSync(resolve(docs, "terminal.md"), "utf8");
+  for (const requirement of ["ConPTY", "Ctrl+C", "does not automatically resend input",
+    "diagnostic event logs", "shell's own history", "not supported"]) {
+    assert.ok(guide.includes(requirement), `Missing terminal limitation: ${requirement}`);
+  }
 });

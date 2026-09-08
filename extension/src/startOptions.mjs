@@ -7,6 +7,8 @@ export function parseStartOptions(args = []) {
       options.help = true;
     } else if (arg === "--new-device" || arg === "--rotate-pairing") {
       options.newDevice = true;
+    } else if (arg === "--allow-terminal") {
+      options.allowTerminal = true;
     } else {
       throw new Error(`Unknown option for weft start: ${arg}\nRun \`weft start --help\` for supported options.`);
     }

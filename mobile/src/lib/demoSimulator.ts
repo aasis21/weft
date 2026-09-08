@@ -27,11 +27,13 @@ import {
 import type { ApprovalDecision, ElicitationResponse, ModeChange, PromptMessage } from '@aasis21/weft-shared';
 import { pairSession } from './weftClient';
 import type { WeftClient } from './weftClient';
+import { startDemoStation } from './demoStation';
 
 export interface DemoSession {
   client: WeftClient;
   channelId: string;
   pairingJson: string;
+  station?: Awaited<ReturnType<typeof startDemoStation>>;
   stop(): Promise<void>;
 }
 
@@ -232,11 +234,14 @@ export async function startDemoSession(): Promise<DemoSession> {
   );
   push(120_000, () => extension.send(channelDown('Demo script finished.')));
 
+  const station = await startDemoStation();
   return {
     client,
     channelId,
+    station,
     pairingJson: JSON.stringify(pairingPayload),
     async stop() {
+      await station.stop();
       window.clearInterval(heartbeatTimer);
       for (const timer of timers) window.clearTimeout(timer);
       for (const unsub of unsubs) unsub();

@@ -1,5 +1,6 @@
 import { Preferences } from '@capacitor/preferences';
 import type { EventEnvelope } from '@aasis21/weft-shared';
+import { isTerminalEnvelope } from '@/session/runtime/terminalController';
 
 // Per-session debug event log. The phone records every envelope it exchanges with the laptop — both
 // inbound (Copilot → phone) and outbound (phone → Copilot) — so the session-detail debug panel can
@@ -75,7 +76,7 @@ export function toDebugEvent(
     eventSubtype: message.eventSubtype,
     senderName: message.senderName ?? senderFallback,
     ts,
-    msg: compactMsg(message.msg),
+    msg: isTerminalEnvelope(message) ? { private: true } : compactMsg(message.msg),
   };
 }
 
@@ -89,7 +90,7 @@ export async function loadEventLog(channelId: string): Promise<DebugEvent[]> {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Stored;
     if (!parsed || parsed.v !== VERSION || !Array.isArray(parsed.events)) return [];
-    return parsed.events.slice(-EVENT_LOG_CAP);
+    return parsed.events.filter((event) => !isTerminalEnvelope(event)).slice(-EVENT_LOG_CAP);
   } catch {
     return [];
   }
@@ -102,7 +103,7 @@ export async function saveEventLog(channelId: string, events: DebugEvent[]): Pro
   const value = JSON.stringify({
     v: VERSION,
     savedAt: Date.now(),
-    events: events.slice(-EVENT_LOG_CAP),
+    events: events.filter((event) => !isTerminalEnvelope(event)).slice(-EVENT_LOG_CAP),
   } satisfies Stored);
   try {
     globalThis.localStorage?.setItem(key, value);

@@ -80,6 +80,24 @@ Device Station QR or paired phone may have been exposed, then start and pair aga
 replacing the stored identity does not remove one already held in memory by a running
 process. End an old per-session connection before establishing a new `/weft` identity.
 
+## Optional remote shell access
+
+`weft start --allow-terminal` explicitly authorizes the paired phone to control one
+Station-owned shell on a supported laptop. This is broader than relaying Copilot
+prompts and approvals: shell commands run directly with the local user's permissions.
+A registered workspace sets the initial directory and is not a sandbox.
+
+The visible laptop frontend attaches through authenticated local IPC. Terminal
+messages use the existing encrypted device channel, a terminal-generation identity,
+input ownership, and input sequence checks. Reconnection restores screen state; it
+does not authorize retransmission of commands whose delivery is uncertain.
+
+Terminal input, output, and screen snapshots bypass diagnostic logs and phone
+transcript persistence. In-memory buffers are bounded. Shell history, invoked
+programs, and operating-system monitoring can still record commands or output
+independently of Weft. To revoke remote shell access, stop Station and restart it
+without `--allow-terminal`; rotate pairing as well if the phone is no longer trusted.
+
 ## What is stored where
 
 | Location | Stored data |

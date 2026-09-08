@@ -151,6 +151,11 @@ try {
         $publicWeftCliBundle = Join-Path $root 'mobile\public\weft.mjs'
         Copy-Item $weftCliBundle $publicWeftCliBundle -Force
         Ok 'mobile/public/weft.mjs  (served as /weft.mjs by the installer)'
+        foreach ($target in @('win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64')) {
+            $name = "native-runtime-$target.json"
+            Copy-Item (Join-Path $root "extension\dist\$name") (Join-Path $root "mobile\public\$name") -Force
+        }
+        Ok 'native PTY runtime payloads (Windows/macOS x64 and arm64, compiler-free)'
         $skillSource = Join-Path $root 'skill\weft-how-to-use\SKILL.md'
         $publicSkillBundle = Join-Path $root 'mobile\public\weft-skill.md'
         if (Test-Path $skillSource) {
@@ -191,6 +196,9 @@ try {
         if (-not (Test-Path $weftCliBundle)) { throw "no $weftCliBundle - run once without -SkipBuild first" }
         if (-not (Test-Path (Join-Path $distDir 'index.html'))) { throw "no $distDir - run once without -SkipBuild first" }
     }
+
+    & node (Join-Path $root 'scripts\verify-release-manifest.mjs') $distDir
+    if ($LASTEXITCODE -ne 0) { throw 'release integrity verification failed; rebuild before shipping' }
 
     if (-not $SkipDeploy) {
         $kind = if ($Draft) { 'preview (draft)' } else { 'production' }
@@ -233,24 +241,9 @@ try {
         Step 'Installing extension on this laptop (~/.copilot/extensions/weft)'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle to install - drop -SkipBuild" }
         $dest = Join-Path $env:USERPROFILE '.copilot\extensions\weft'
-        New-Item -ItemType Directory -Force -Path $dest | Out-Null
-        Copy-Item $extBundle (Join-Path $dest 'extension.mjs') -Force
-        Ok "extension.mjs -> $dest"
-        if (Test-Path $relayBundle) {
-            Copy-Item $relayBundle (Join-Path $dest 'relayServerProcess.mjs') -Force
-            Ok "relayServerProcess.mjs -> $dest  (must sit next to extension.mjs - devtunnel.mjs resolves it as a sibling file at runtime)"
-        } else {
-            Warn "no $relayBundle - /weft devtunnel will fail to spawn the shared relay until rebuilt"
-        }
-        if (Test-Path $watchdogBundle) {
-            Copy-Item $watchdogBundle (Join-Path $dest 'devtunnelHostWatchdog.mjs') -Force
-            Ok "devtunnelHostWatchdog.mjs -> $dest  (sibling of relayServerProcess.mjs - devtunnel.mjs resolves it the same way)"
-        } else {
-            Warn "no $watchdogBundle - the devtunnel host will fail to start until rebuilt"
-        }
+        & node $weftCliBundle install --from (Join-Path $root 'extension\dist') --skill (Join-Path $root 'skill\weft-how-to-use\SKILL.md')
+        if ($LASTEXITCODE -ne 0) { throw "local code/runtime installation failed ($LASTEXITCODE)" }
         if (Test-Path $weftCliBundle) {
-            Copy-Item $weftCliBundle (Join-Path $dest 'weft.mjs') -Force
-            Ok "weft.mjs -> $dest  (standalone Device Station CLI)"
             $shimPath = Join-Path $dest 'weft.cmd'
             @"
 @echo off
@@ -267,15 +260,6 @@ node "%~dp0weft.mjs" %*
             }
         } else {
             Warn "no $weftCliBundle - the standalone \`weft\` command was not (re)installed"
-        }
-        $skillSource = Join-Path $root 'skill\weft-how-to-use\SKILL.md'
-        if (Test-Path $skillSource) {
-            $skillDest = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
-            New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
-            Copy-Item $skillSource (Join-Path $skillDest 'SKILL.md') -Force
-            Ok "SKILL.md -> $skillDest  (how-to-use skill, alongside the extension)"
-        } else {
-            Warn "no $skillSource - the how-to-use skill was not (re)installed"
         }
         # Transport lives in a single file, ~/.weft/weft.config.json, written only by `weft
         # set-transport` — ship.ps1 never touches it, so reinstalling/rebuilding the extension can

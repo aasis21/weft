@@ -88,7 +88,7 @@
           <div><dt>Network</dt><dd>Both devices must reach the relay. Different Wi-Fi networks or phone mobile data are fine. Keep the laptop awake and the Device Station terminal open while working remotely.</dd></div>
         </dl>
         <p>You do not need to clone this repository, build Weft, create a Supabase account, or set up a dev tunnel for the default installation. Those are <a href="#development">developer</a> and <a href="#transports">relay-operator</a> tasks.</p>
-        <p class="note">Weft is not remote desktop software. It connects to Copilot sessions; it does not provide a general-purpose file browser or interactive terminal. The hosted PWA is the supported phone distribution. Weft does not currently publish an Android APK.</p>
+        <p class="note">Weft is not remote desktop software. It connects to Copilot sessions and offers an <a href="#open-terminal">explicitly enabled shared terminal</a> on supported laptops; it does not provide a general-purpose file browser. The hosted PWA is the supported phone distribution. Weft does not currently publish an Android APK.</p>
       </section>
 
       <section id="quickstart" aria-labelledby="quickstart-title">
@@ -149,7 +149,12 @@
         <p>A direct session pairing has its own fresh channel and key and ends with the session. Use <code>/weft supabase</code> or <code>/weft devtunnel</code> only when choosing a per-session relay override.</p>
         <h3 id="session-status"><a class="heading-link" href="#session-status">Find existing work</a></h3>
         <p>The device view groups work under <strong>Active Copilot sessions</strong> and <strong>Inactive Copilot sessions</strong>. A saved transcript is not proof of a live connection. <strong>Archived</strong> means the phone is not keeping a live socket for that session; reopen it to reconnect. <strong>Offline</strong> indicates a connection problem; use the recovery banner above the session composer.</p>
-        <p class="note"><strong>Explore files</strong> and <strong>Open terminal</strong> are disabled cards labeled <strong>Coming soon</strong>. They do not currently provide file browsing or an interactive terminal.</p>
+        <h3 id="open-terminal"><a class="heading-link" href="#open-terminal">Open a shared terminal</a></h3>
+        <p>On a supported Windows laptop, start Device Station with <code>weft start --allow-terminal</code>, then choose <strong>Open terminal</strong> on the phone. The first open creates one real shell and a visible laptop attach window. Opening again reconnects to that same shell, not a second terminal.</p>
+        <p>Edit a command on the phone and choose <strong>Run</strong>, or use direct terminal input and special keys for an interactive program. Use <strong>Take control</strong> when the laptop owns input. Both views share the working directory, running process, and terminal dimensions.</p>
+        <p>Leaving the phone page keeps the shell running while Station remains running. Reconnect restores available screen state and bounded scrollback without repeating commands. Confirmed <strong>Close terminal</strong>, closing its laptop window, or stopping Station ends the terminal.</p>
+        <p class="note"><strong>Direct shell access is off by default.</strong> It runs with your local account's permissions, without Copilot approval prompts; a workspace is not a sandbox. Terminal contents are excluded from Weft diagnostic logs, but your shell and programs can maintain their own history. <strong>Explore files</strong> remains <strong>Coming soon</strong>.</p>
+        <p class="source-link">See <a href="https://github.com/aasis21/weft/blob/main/docs/terminal.md">terminal controls, access boundaries, and troubleshooting</a>.</p>
         <p class="source-link">More detail: <a href="https://github.com/aasis21/weft/blob/main/docs/advanced.md">advanced usage on GitHub</a>.</p>
       </section>
 
@@ -292,6 +297,7 @@ weft update</code></pre></div>
         </div>
         <p>Use event names and timestamps to follow a recent request/response. Expand an entry for its payload; use <strong>Identifiers</strong> in the device log for connection identifiers. This is troubleshooting context, not an exhaustive audit trail.</p>
         <p class="note">Payloads can contain private content. Review and redact before sharing; compaction is not a promise that a raw log is safe to publish.</p>
+        <p>Diagnostic logs exclude terminal requests, output, and reconnect screen state. A shared terminal is not a persisted Weft transcript; the shell or invoked programs can still keep their own history.</p>
         <h3 id="report-problem"><a class="heading-link" href="#report-problem">Report a problem safely</a></h3>
         <p>Open a <a href="https://github.com/aasis21/weft/issues/new/choose">GitHub issue</a> with the smallest reproducible example. Include:</p>
         <ul>
@@ -338,6 +344,7 @@ weft update</code></pre></div>
         <div class="table-wrap" tabindex="0" role="region" aria-label="Connection and pairing commands">
           <table><thead><tr><th scope="col">Laptop shell command</th><th scope="col">Purpose</th></tr></thead><tbody>
             <tr><td><code>weft start</code></td><td>Start Device Station; reuse persistent phone trust by default.</td></tr>
+            <tr><td><code>weft start --allow-terminal</code></td><td>Explicitly enable one shared shell for the paired phone on a supported laptop.</td></tr>
             <tr><td><code>weft start --new-device</code></td><td>Replace phone trust and start with a fresh QR. Stop the old station first.</td></tr>
             <tr><td><code>weft start --help</code></td><td>Show station options without starting.</td></tr>
             <tr><td><code>weft set-pairing &lt;persistent|ephemeral&gt;</code></td><td>Choose whether subsequent station starts reuse the pairing identity.</td></tr>
@@ -466,6 +473,7 @@ npm run dev</code></pre></div>
             <tr><th scope="row">Pairing</th><td><a href="#pairing">Connect &amp; recover</a>; <a href="#handshake">handshake</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/pairing.md">pairing.md on GitHub</a></td></tr>
             <tr><th scope="row">Hosting</th><td><a href="#transports">Select or operate a relay</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/hosting.md">hosting.md on GitHub</a></td></tr>
             <tr><th scope="row">Releases</th><td><a href="#updates">Update &amp; compare versions</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/releases.md">releases.md on GitHub</a></td></tr>
+            <tr><th scope="row">Shared terminal</th><td><a href="#open-terminal">Open, reconnect, and close</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/terminal.md">terminal.md on GitHub</a></td></tr>
             <tr><th scope="row">Security</th><td><a href="#security">Trust &amp; storage boundaries</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/security.md">security.md on GitHub</a></td></tr>
             <tr><th scope="row">Modes</th><td><a href="#runtime-modes">Runtime mode switching</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/mode-switching.md">mode-switching.md on GitHub</a></td></tr>
             <tr><th scope="row">Protocol</th><td><a href="#event-envelope">Event envelope</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/event-envelope.md">event-envelope.md on GitHub</a></td></tr>

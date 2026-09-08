@@ -161,6 +161,10 @@ rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"
 trap - EXIT
 SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
 ok "extension.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $INSTALL_DIR"
+case "$(node -p 'process.platform')" in
+  darwin) ok "Native PTY runtime installed for this Node.js architecture (no compiler required)." ;;
+  *) warn "Native terminal support is not distributed for this platform; ordinary Weft features remain available." ;;
+esac
 ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"
 
 # ---------------------------------------------------------------------------

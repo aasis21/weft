@@ -1,7 +1,9 @@
 import { build } from "esbuild";
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { packageNativeRuntime } from "../scripts/package-native-runtime.mjs";
+import { stageNativeRuntime } from "../scripts/native-runtime.mjs";
 
 const outfile = "dist/extension.mjs";
 
@@ -20,7 +22,7 @@ await build({
   format: "esm",
   sourcemap: true,
   define,
-  external: ["@github/copilot-sdk", "@github/copilot-sdk/extension"],
+  external: ["@github/copilot-sdk", "@github/copilot-sdk/extension", "node-pty"],
   // Bundled CommonJS deps (qrcode, supabase transitive deps) call require("fs").
   // In ESM output esbuild's shim throws "Dynamic require of ... is not supported"
   // because `require` is undefined. Re-create a real require from import.meta.url
@@ -53,6 +55,7 @@ for (const name of SIBLING_ENTRYPOINTS) {
     format: "esm",
     sourcemap: true,
     define,
+    external: ["node-pty"],
     banner: {
       js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
     },
@@ -75,11 +78,18 @@ await build({
   format: "esm",
   sourcemap: true,
   define,
+  external: ["node-pty"],
   banner: {
     js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },
   logLevel: "info",
 });
+
+// Native modules must resolve next to the installed bundle, never a checkout.
+// The release envelopes also include the vendor's other supported architectures.
+packageNativeRuntime("dist");
+rmSync("dist/node_modules/node-pty", { recursive: true, force: true });
+await stageNativeRuntime({ fromDir: "dist", stageDir: "dist/node_modules/node-pty" });
 
 // Post-build smoke check: import the freshly built bundle with the host SDK stubbed.
 // Reaching the stub means all top-level CJS requires initialized — i.e. the bundle is

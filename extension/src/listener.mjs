@@ -37,6 +37,7 @@ import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mj
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { resolveVersion } from "./version.mjs";
 import { createDeviceTelemetryCollector } from "./deviceTelemetry.mjs";
+import { createTerminalHost } from "./terminalHost.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
@@ -94,6 +95,8 @@ export function createListener({
   heartbeatMs = DEVICE_HEARTBEAT_MS,
   telemetryApi = createDeviceTelemetryCollector(),
   monitoringLimits = {},
+  allowTerminal = false,
+  terminalHostFactory = createTerminalHost,
   spawnFn,
   projectsApi = projectsStore,
   // Pending in-session `/weft` offers registry (see pendingSessions.mjs) — injectable so tests can
@@ -180,11 +183,21 @@ export function createListener({
   // start's status line) can tell "first scan ever" from "reconnecting a known phone" before
   // anything has connected THIS run. Stays null in ephemeral mode (no persisted state exists).
   let listenerEverConnectedBeforeThisRun = null;
+  const terminalHost = terminalHostFactory({
+    allowTerminal, projectsApi,
+    send: async (message) => {
+      if (!channel || stopped) throw new Error("Phone disconnected.");
+      await channel.send(message);
+    },
+    lifecycle: ({ event }) => log.info?.(`weft terminal: ${event}`),
+  });
 
   const start = async () => {
     if (started) return api;
     started = true;
     stopped = false;
+    await terminalHost.initialize();
+    if (allowTerminal && terminalHost.supportError) log.warn?.(terminalHost.supportError);
     // A remembered peer key authorizes only that already-paired phone to reconnect. A different
     // phone requires an explicit identity rotation and fresh QR.
     let trustedPeerPublicKeyB64 = null;
@@ -288,6 +301,8 @@ export function createListener({
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    let terminalStopError = null;
+    try { await terminalHost.stop(); } catch (error) { terminalStopError = error; }
     if (pairingGrantTimer) clearTimeout(pairingGrantTimer);
     pairingGrantTimer = null;
     stopHeartbeat();
@@ -324,6 +339,7 @@ export function createListener({
         // best-effort UI hook
       }
     }
+    if (terminalStopError) throw terminalStopError;
   };
 
   /**
@@ -347,6 +363,7 @@ export function createListener({
     }
 
     const hadPeer = boundPeerPub !== null;
+    terminalHost.disconnectPhone();
     stopHeartbeat();
     stopMonitoring();
     try {
@@ -564,6 +581,7 @@ export function createListener({
       return;
     }
     if (channel) {
+      terminalHost.disconnectPhone();
       stopHeartbeat();
       stopMonitoring();
       try {
@@ -630,7 +648,7 @@ export function createListener({
       projects,
       listenerDeviceName,
       listenerDeviceId,
-      [DEVICE_CAPABILITY.MONITOR_V1],
+      [DEVICE_CAPABILITY.MONITOR_V1, ...(terminalHost.supported ? [DEVICE_CAPABILITY.TERMINAL_V1] : [])],
     ));
   }
 
@@ -805,6 +823,11 @@ export function createListener({
 
   async function handleControl(envelope) {
     if (stopped || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
+    // Private shell traffic never reaches generic device event or diagnostic hooks.
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.TERMINAL_REQUEST) {
+      await terminalHost.handle(envelope.msg);
+      return;
+    }
     try {
       onControl?.({ subtype: envelope.eventSubtype ?? null });
     } catch {

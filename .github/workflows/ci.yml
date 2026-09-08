@@ -6,6 +6,9 @@ on:
   pull_request:
 
 jobs:
+  native-runtime:
+    uses: ./.github/workflows/native-runtime.yml
+
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
