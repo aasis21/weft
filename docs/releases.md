@@ -1,5 +1,7 @@
 # Releases and updates
 
+[Documentation handbook: releases and updates](https://aasis21.github.io/weft/#updates)
+
 ## Phone app
 
 The hosted PWA at <https://useweft.netlify.app> is the primary Weft phone experience.

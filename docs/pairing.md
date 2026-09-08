@@ -1,7 +1,28 @@
 # Weft pairing handshake
 
+[Documentation handbook: pairing and recovery](https://aasis21.github.io/weft/#pairing)
+
 How a phone attaches to a live `copilot` session and establishes an end-to-end
 encrypted channel without transmitting the resulting session encryption key.
+
+## Device Station recovery
+
+The Device Station persists its pairing identity by default. An already-paired
+phone reconnects using its stored key; a claimed QR is not an invitation for another
+phone. If the phone changes, browser profile changes, or browser/app storage is
+cleared, stop the old station and run:
+
+```sh
+weft start --new-device
+```
+
+Scan the fresh QR. This replaces the previously trusted phone identity, so the old
+pairing no longer reconnects. It does not restore transcripts deleted from phone
+storage. `weft start --rotate-pairing` is an alias for the same option.
+
+For an exposed persistent identity, stop the station and run `weft rotate-pairing`
+before starting and pairing again. Stop a running station before rotating its
+stored identity so it cannot continue using the old identity in memory.
 
 ## Why a handshake is needed
 
@@ -82,10 +103,10 @@ A worked, runnable example lives in `shared/test/pairing.test.mjs`.
 `channel.on(...)` listeners must be registered before `channel.subscribe(...)`. The
 in-process `LocalTransport` (harness, tests, mobile demo) has no such constraint.
 
-> **Resolved (p4):** `SupabaseTransport` is now subscribe-order independent — it registers
-> a single catch-all broadcast listener at channel creation and dispatches to per-event
-> handlers from an in-memory map. `attachRelay` may therefore register `SecureChannel`
-> handlers after `waitForPeer` has connected without losing events.
+`SupabaseTransport` is subscribe-order independent — it registers
+a single catch-all broadcast listener at channel creation and dispatches to per-event
+handlers from an in-memory map. `attachRelay` may therefore register `SecureChannel`
+handlers after `waitForPeer` has connected without losing events.
 
 ## Security boundary
 

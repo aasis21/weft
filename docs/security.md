@@ -1,5 +1,7 @@
 # Weft security model
 
+[Documentation handbook: security and privacy](https://aasis21.github.io/weft/#security)
+
 Weft's promise: **relay infrastructure stores no session content and cannot decrypt
 session traffic.** Supabase or a dev tunnel transports opaque ciphertext.
 Confidentiality and integrity live on the paired endpoints.
@@ -32,12 +34,14 @@ Confidentiality and integrity live on the paired endpoints.
 - **Channel id:** 128 bits of CSPRNG entropy, hex. Namespaces the relay channel as
   `private:weft:<channelId>`.
 
-Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing else
-— no plaintext metadata, no tool names, no prompts.
+Encrypted application envelope on the wire:
+`{ iv: base64, ciphertext: base64, ts: number }`. Tool names and prompts are inside
+the ciphertext. Public handshake values and infrastructure metadata (including
+channel identifiers, timing, and traffic sizes) remain visible.
 
-## Supabase configuration (Phase 2)
+## Supabase configuration
 
-- Use **Realtime Broadcast** with **zero database persistence** in v1.
+- Use **Realtime Broadcast** without database persistence of session content.
 - Enable **Realtime Authorization** and add **RLS** policies on `realtime.messages`
   that limit anonymous/authenticated broadcast traffic to the `private:weft:*`
   namespace. The current policy is namespace-level, not per-user or per-channel
@@ -50,10 +54,10 @@ Envelope on the wire: `{ iv: base64, ciphertext: base64, ts: number }`. Nothing 
 
 ## Threats & mitigations
 
-| Threat | Mitigation | Residual risk (v1) |
+| Threat | Mitigation | Residual risk |
 |---|---|---|
-| Relay/operator reads sessions | E2E AES-256-GCM; relay sees ciphertext only | none for content |
-| Network eavesdropper | TLS + E2E | none for content |
+| Relay/operator reads sessions | E2E AES-256-GCM; relay sees ciphertext only | requires trusted endpoints and client code; connection metadata remains visible |
+| Network eavesdropper | TLS + E2E | traffic metadata remains visible; endpoint compromise is outside this protection |
 | Channel-name guessing | 128-bit random `channelId` + RLS | negligible |
 | Message tampering / replay | GCM authentication plus encrypted stream ids and monotonic sequence numbers reject modified, duplicate, stale-stream, and non-monotonic envelopes | a relay can still delay or drop traffic |
 | **QR shoulder-surf / screenshot** | QR bearer grant expires after 10 minutes and is invalid after its first successful claim | someone who copies a fresh QR can still race the intended phone during that window |
@@ -70,8 +74,11 @@ encrypted to the laptop's ECDH key, but anyone who copies a still-valid QR can a
 to claim it first.
 
 Treat the QR like a glance-only password: don't screenshot or share it. An unclaimed QR
-expires after 10 minutes. Run `weft rotate-pairing` if a persistent Device Station QR or
-paired phone may have been exposed; restart `/weft` for a new per-session identity.
+expires after 10 minutes. Stop the station and run `weft rotate-pairing` if a persistent
+Device Station QR or paired phone may have been exposed, then start and pair again.
+`weft start --new-device` combines rotation and startup. Stop the old station first:
+replacing the stored identity does not remove one already held in memory by a running
+process. End an old per-session connection before establishing a new `/weft` identity.
 
 ## What is stored where
 
@@ -86,11 +93,10 @@ persistent pairing invalidates the old pairing identity; clearing browser/app da
 removing `~/.weft/` deletes the corresponding local state. Closing a `copilot` terminal
 ends that live session and its ephemeral `/weft` key.
 
-## v2 evolution (forward-looking)
+## Endpoint and availability limitations
 
-A multi-machine command center (all of one user's sessions in one app) introduces the
-core tension between E2E ("we can't read your sessions") and cloud sync. Two paths are
-documented in `plan.md` §9: stay E2E via account-derived keys + key wrapping (Path A,
-the privacy differentiator) or a normal TLS+RLS SaaS posture (Path B). v1's
-device-local ephemeral keys and per-session channelId are intentionally swappable to
-keep both paths open.
+Encryption does not protect a compromised laptop, phone, or delivered client build.
+The hosted app's provider delivers code trusted on the phone. Protect browser profiles
+and local pairing keys, and review the permissions of the connected Copilot session.
+A relay can delay, drop, or block traffic even when it cannot decrypt it. Local history
+is not a cloud backup, and deleting browser storage requires pairing again.

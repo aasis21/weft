@@ -1,5 +1,7 @@
 # Event envelope
 
+[Documentation handbook: protocol reference](https://aasis21.github.io/weft/#event-envelope)
+
 Weft uses one nested envelope for messages exchanged between the phone and the
 Copilot CLI extension. The shared contract lives in `shared/messages.mjs` and is
 used consistently by `shared/`, `extension/`, and `mobile/`.

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { usePairing } from '@/ui/hooks/usePairing';
 import { WeftMark } from '@/ui/brand/WeftMark';
 import { isDesktopInput } from '@/lib/platform';
+import { applyTheme, getTheme, setTheme, subscribeSettings, type ThemeSetting } from '@/lib/settings';
 
 interface LandingScreenProps {
   onBeginPair(manual?: boolean): void;
@@ -17,6 +18,7 @@ interface LandingScreenProps {
 }
 
 type OsTab = 'windows' | 'unix';
+const DOCS = 'https://aasis21.github.io/weft/';
 
 const INSTALL: Record<OsTab, { label: string; cmd: string }> = {
   windows: { label: 'Windows', cmd: 'irm https://useweft.netlify.app/install.ps1 | iex' },
@@ -55,12 +57,12 @@ const CAN_DO = [
   {
     icon: 'check',
     title: 'Approve before it acts',
-    body: 'When it wants to run something, it waits for your yes. Allow or deny with a tap, from wherever you are.',
+    body: 'Review the permission requests Copilot sends you. Allow or deny from your phone, with the command in view.',
   },
   {
     icon: 'voice',
     title: 'Go hands-free with Vox',
-    body: 'Tap the orb and just talk. Vox hears you, sends it, and reads the reply back — eyes-free, hands-free.',
+    body: 'Dictate a prompt and hear replies with Vox on supported browsers. Prefer typing? The composer is always there.',
   },
   {
     icon: 'image',
@@ -80,7 +82,7 @@ const CAN_DO = [
   {
     icon: 'refresh',
     title: 'Come back anytime',
-    body: 'Sessions stay warm and reconnect when you reopen Weft. Step away, pick up right where you left off.',
+    body: 'Reopen Weft to reconnect while your laptop and session are running. Your local history stays on your devices.',
   },
 ];
 
@@ -155,17 +157,21 @@ function detectOs(): OsTab {
 
 function InstallCommand(): JSX.Element {
   const [os, setOs] = useState<OsTab>(detectOs());
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  const resetTimer = useRef<ReturnType<typeof setTimeout>>();
   const panelId = 'install-command-panel';
   const activeTabId = `install-tab-${os}`;
 
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
+
   const copy = async (): Promise<void> => {
+    clearTimeout(resetTimer.current);
     try {
       await navigator.clipboard.writeText(INSTALL[os].cmd);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      setCopyStatus('Copied to clipboard.');
+      resetTimer.current = setTimeout(() => setCopyStatus(''), 2500);
     } catch {
-      /* clipboard blocked — the command text is still selectable */
+      setCopyStatus('Copy unavailable. Select the command and copy it manually.');
     }
   };
 
@@ -180,20 +186,96 @@ function InstallCommand(): JSX.Element {
             role="tab"
             aria-selected={os === key}
             aria-controls={panelId}
+            tabIndex={os === key ? 0 : -1}
             className={`install-tab${os === key ? ' active' : ''}`}
-            onClick={() => setOs(key)}
+            onClick={() => { setOs(key); setCopyStatus(''); }}
+            onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 'windows' : event.key === 'End' ? 'unix' : key === 'windows' ? 'unix' : 'windows';
+              setOs(next);
+              setCopyStatus('');
+              document.getElementById(`install-tab-${next}`)?.focus();
+            }}
           >
             {INSTALL[key].label}
           </button>
         ))}
       </div>
-      <div id={panelId} className="install-row" role="tabpanel" aria-labelledby={activeTabId}>
+      <div id={panelId} className="install-row" role="tabpanel" aria-labelledby={activeTabId} tabIndex={0}>
         <code className="install-code">{INSTALL[os].cmd}</code>
         <button type="button" className="copy-btn" onClick={() => void copy()}>
-          {copied ? 'Copied!' : 'Copy'}
+          Copy
         </button>
       </div>
+      <p className="install-copy-status" role="status">{copyStatus}</p>
     </div>
+  );
+}
+
+function SessionPreview(): JSX.Element {
+  return (
+    <figure className="product-preview" aria-label="Illustrative Weft session preview">
+      <div className="preview-terminal">
+        <span className="preview-label">On your laptop</span>
+        <code>$ weft start</code>
+        <span>Device Station ready</span>
+      </div>
+      <div className="preview-phone">
+        <div className="preview-session-bar">
+          <WeftMark size={23} />
+          <strong>My project</strong>
+          <span>Illustration</span>
+        </div>
+        <div className="preview-thread">
+          <p className="preview-message preview-user">Add a dark mode toggle and show me the changes.</p>
+          <p className="preview-message">I&apos;ll use the existing theme tokens and update the header.</p>
+          <div className="preview-tool"><span aria-hidden="true">↳</span> Editing Header.tsx</div>
+          <div className="preview-approval">
+            <span className="preview-label">You stay in control</span>
+            <strong>Run the project tests?</strong>
+            <code>npm test</code>
+            <span className="preview-decision">Review on your phone</span>
+          </div>
+        </div>
+        <div className="preview-composer">Send a follow-up… <span aria-hidden="true">↑</span></div>
+      </div>
+      <figcaption>Your code runs on your laptop. You stay in the conversation.</figcaption>
+    </figure>
+  );
+}
+
+function ThemeSelect(): JSX.Element {
+  const [theme, setSelectedTheme] = useState<ThemeSetting | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getTheme().then((saved) => { if (active) setSelectedTheme(saved); });
+    const unsubscribe = subscribeSettings((settings) => setSelectedTheme(settings.theme));
+    return () => { active = false; unsubscribe(); };
+  }, []);
+
+  return (
+    <label className="product-theme">
+      <span>Theme</span>
+      <select
+        aria-label="Theme"
+        value={theme ?? 'system'}
+        disabled={theme === null}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next === 'light' || next === 'dark' || next === 'system') {
+            setSelectedTheme(next);
+            applyTheme(next);
+            void setTheme(next);
+          }
+        }}
+      >
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
   );
 }
 
@@ -208,9 +290,28 @@ export function LandingScreen({
 }: LandingScreenProps): JSX.Element {
   const { busy, run } = usePairing(onError);
   const showSessions = hasSessions && !!onOpenSessions;
+  const desktop = isDesktopInput();
+
+  useEffect(() => {
+    // The app mounts after the browser's initial fragment scroll.
+    const section = window.location.hash.slice(1);
+    if (['product', 'get-started', 'features', 'privacy'].includes(section)) {
+      document.getElementById(section)?.scrollIntoView();
+    }
+  }, []);
 
   return (
     <main className="landing-shell">
+      <a className="landing-skip" href="#get-started">Skip to setup</a>
+      <nav className="product-nav" aria-label="Product navigation">
+        <a className="product-brand" href="#product"><WeftMark size={30} /> <span>weft</span></a>
+        <div className="product-nav-links">
+          <a href="#features">Features</a>
+          <a href={DOCS}>Docs</a>
+          <a href="https://github.com/aasis21/weft">GitHub</a>
+          <ThemeSelect />
+        </div>
+      </nav>
       {showSessions ? (
         <div className="landing-topbar">
           <button type="button" className="sessions-link" onClick={onOpenSessions}>
@@ -219,64 +320,79 @@ export function LandingScreen({
         </div>
       ) : null}
 
-      <section className="landing-hero">
-        <div className="brand-mark" aria-hidden="true">
-          <WeftMark size={48} />
+      <section className="landing-hero" id="product">
+        <div className="product-intro">
+          <p className="eyebrow">GitHub Copilot, off the desk</p>
+          <h1>
+            Your Copilot session, now in your <em className="serif">hand.</em>
+          </h1>
+          <p className="lede">
+            Step away from your desk, not your work. Send prompts, follow the changes,
+            and answer permission requests from your phone. Copilot keeps running on your laptop.
+          </p>
+          <div className="landing-cta">
+            {showSessions ? (
+              <button type="button" className="primary-action" onClick={onOpenSessions}>
+                Open your sessions
+              </button>
+            ) : null}
+            {desktop && !showSessions ? (
+              <a className="primary-action" href="#get-started">Set up your laptop</a>
+            ) : null}
+            {!desktop ? (
+              <button
+                type="button"
+                className={showSessions ? 'secondary-action' : 'primary-action'}
+                onClick={() => onBeginPair(false)}
+              >
+                Scan QR to pair
+              </button>
+            ) : null}
+            {showSessions && onStartSession ? (
+              <button type="button" className="secondary-action" onClick={onStartSession}>
+                Start another session
+              </button>
+            ) : null}
+            <button type="button" className="demo-action" disabled={busy} onClick={() => void run(onStartDemo)}>
+              Try the demo
+            </button>
+          </div>
+          {desktop ? (
+            <div className="product-pair-options">
+              <span>Already have a pairing code?</span>
+              <button type="button" className="secondary-action" onClick={() => onBeginPair(false)}>
+                Scan QR to pair
+              </button>
+              <button type="button" className="secondary-action" onClick={() => onBeginPair(true)}>
+                Paste a code
+              </button>
+            </div>
+          ) : null}
+          <p className="landing-context">
+            {showSessions
+              ? 'Your sessions are one tap away. Pair again only to add or replace a device.'
+              : desktop
+                ? 'Start here on your laptop. Then open useweft.netlify.app on your phone to scan.'
+                : 'Have a QR on your laptop? Scan it above. New here? Follow the setup below.'}
+          </p>
+          <ul className="product-proof" aria-label="At a glance">
+            <li>End-to-end encrypted</li>
+            <li>Open source</li>
+            <li>No Weft account</li>
+          </ul>
+          {error ? <p className="error-banner" role="alert">{error}</p> : null}
         </div>
-        <p className="eyebrow">GitHub Copilot, off the desk</p>
-        <h1>
-          Your Copilot session, now in your <em className="serif">hand.</em>
-        </h1>
-        <p className="lede">
-          Your Copilot runs on your laptop — Weft brings it to your phone. Pick up a chat
-          that&apos;s already going, or start a new one on any laptop you&apos;ve paired. Everything
-          you&apos;d do at the terminal, you do from your phone — send it work, watch it think,
-          approve what it runs. From anywhere. Private, end&nbsp;to&nbsp;end.
-        </p>
-        <div className="landing-cta">
-          {showSessions ? (
-            <button type="button" className="primary-action" onClick={onOpenSessions}>
-              Open your sessions
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className={showSessions ? 'secondary-action' : 'primary-action'}
-            onClick={() => onBeginPair(false)}
-          >
-            Scan QR to pair
-          </button>
-          {showSessions && onStartSession ? (
-            <button type="button" className="secondary-action" onClick={onStartSession}>
-              Start another session
-            </button>
-          ) : null}
-          {isDesktopInput() ? (
-            <button type="button" className="secondary-action" onClick={() => onBeginPair(true)}>
-              Paste a code
-            </button>
-          ) : null}
-          <button type="button" className="demo-action" disabled={busy} onClick={() => void run(onStartDemo)}>
-            Try the demo
-          </button>
-        </div>
-        <p className="landing-install-note">
-          The browser app works immediately. For an app-like icon and automatic web updates, use
-          your browser&apos;s Install app or Add to Home Screen action. Android APKs are optional
-          and available from the <a href="/app.html">verified download page</a>.
-        </p>
-        {error ? <p className="error-banner">{error}</p> : null}
+        <SessionPreview />
       </section>
 
-      <section className="landing-pitch">
-        <p>
-          Start a chat at your desk, keep it going from the couch. Pair more than one laptop, run as
-          many chats as you like — Weft keeps them all in one place, warm and ready.
-        </p>
-      </section>
-
-      <section className="landing-steps" aria-label="How it works">
-        <h2>How it works</h2>
+      <section className="landing-steps" id="get-started" aria-label="How it works" tabIndex={-1}>
+        <div className="product-section-heading">
+          <p className="product-kicker">One laptop. One phone. Your workflow.</p>
+          <h2>From your terminal to your phone.</h2>
+          <p>Use a laptop with Node.js 20+ and an installed, signed-in GitHub Copilot CLI.
+            Keep it awake and connected while you work remotely.</p>
+          <a href={`${DOCS}#quickstart`}>Full setup guide →</a>
+        </div>
         <ol className="step-grid">
           {STEPS.map((step) => (
             <li key={step.n} className="step-card">
@@ -287,14 +403,24 @@ export function LandingScreen({
                 <h3>{step.title}</h3>
                 <p>{step.body}</p>
                 {step.n === 1 ? <InstallCommand /> : null}
+                {step.n === 2 ? <pre className="product-command"><code>weft start</code></pre> : null}
+                {step.n === 3 ? <a className="product-inline-link" href="https://useweft.netlify.app">useweft.netlify.app →</a> : null}
               </div>
             </li>
           ))}
         </ol>
+        <p className="landing-install-note">
+          Use the phone browser right away, or choose Install app / Add to Home Screen.
+          No app-store download needed. <a href="/app.html">App installation options</a>
+        </p>
       </section>
 
-      <section className="landing-do" aria-label="What you can do">
-        <h2>What you can do from your phone</h2>
+      <section className="landing-do" id="features" aria-label="What you can do">
+        <div className="product-section-heading">
+          <p className="product-kicker">More than a remote view</p>
+          <h2>Keep the conversation moving.</h2>
+          <p>From the first prompt to the next decision, take the useful parts of your terminal with you.</p>
+        </div>
         <div className="do-grid">
           {CAN_DO.map((item) => (
             <div key={item.title} className="do-card">
@@ -310,12 +436,12 @@ export function LandingScreen({
         </div>
       </section>
 
-      <section className="landing-privacy" aria-label="Privacy">
+      <section className="landing-privacy" id="privacy" aria-label="Privacy">
         <span className="privacy-lock" aria-hidden="true">
           {LOCK_ICON}
         </span>
         <div>
-          <strong>Yours alone.</strong>
+          <strong>Your work stays on your devices.</strong>
           <p>
             Weft keeps transcripts and pairing keys locally on your devices so sessions can
             reconnect. Relay infrastructure forwards encrypted traffic and stores no session
@@ -333,14 +459,53 @@ export function LandingScreen({
         </div>
       </section>
 
+      <section className="product-help" aria-labelledby="product-help-title">
+        <div>
+          <p className="product-kicker">Before you get started</p>
+          <h2 id="product-help-title">A few things worth knowing.</h2>
+          <p>What you need, where your work runs, and how the connection stays private.</p>
+          <a className="product-inline-link" href={DOCS}>Explore the docs →</a>
+          <p>Already using Weft? <a href={`${DOCS}#recovery`}>Get help reconnecting a phone.</a></p>
+        </div>
+        <div className="product-faq">
+          <details>
+            <summary>What do I need to get started?</summary>
+            <p>A Windows, macOS, or Linux laptop with Node.js 20+ and a signed-in GitHub Copilot CLI,
+              plus a phone with a current browser. Install Weft on the laptop, run <code>weft start</code>,
+              and scan its QR from your phone. No phone download or separate Weft account is needed;
+              you still need access to GitHub Copilot. Want a look first? Choose Try the demo above,
+              with no pairing or changes to your files.</p>
+          </details>
+          <details>
+            <summary>Where does my work run? Can I leave my desk?</summary>
+            <p>Your files, terminal commands, and Copilot session stay on your laptop.
+              Weft brings the conversation and permission requests to your phone; it does not
+              move your development environment to the cloud. You can use a different Wi-Fi network
+              or mobile data, as long as both devices can reach the relay. Keep the laptop awake,
+              online, and the Device Station terminal open.</p>
+          </details>
+          <details>
+            <summary>Who can see or control my session?</summary>
+            <p>Weft encrypts session traffic between your paired devices. The relay forwards encrypted
+              messages, not readable prompts or code; local history and pairing keys remain on your devices.
+              Your paired phone can send prompts and answer Copilot&apos;s permission requests, so keep
+              the phone and pairing QR private. This does not change how GitHub Copilot processes your
+              requests under its own service policies. <a href={`${DOCS}#security`}>Read the privacy and trust boundaries.</a></p>
+          </details>
+        </div>
+      </section>
+
       <section className="landing-fin">
         <p className="fin-line">
           Ship from <em className="serif">anywhere.</em>
           <span className="fin-caret">_</span>
         </p>
+        {desktop && !showSessions ? (
+          <a className="primary-action" href="#get-started">Set up your laptop</a>
+        ) : null}
         <button
           type="button"
-          className="primary-action"
+          className={desktop && !showSessions ? 'secondary-action' : 'primary-action'}
           onClick={() => (showSessions ? onOpenSessions?.() : onBeginPair(false))}
         >
           {showSessions ? 'Open your sessions' : 'Scan QR to pair'}
@@ -348,6 +513,7 @@ export function LandingScreen({
       </section>
 
       <footer className="landing-footer">
+        <a href={DOCS}>Documentation</a>
         <a href="https://github.com/aasis21/weft" target="_blank" rel="noreferrer">
           GitHub
         </a>

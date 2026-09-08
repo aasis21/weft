@@ -1,8 +1,11 @@
 # Weft setup & developer guide
 
-This is the v1 developer workflow. The whole vertical slice runs locally with **no
-Supabase and no phone** via the in-process harness + the mobile Demo/Simulator; wiring
-the real relay is the only user-gated step.
+[Documentation handbook](https://aasis21.github.io/weft/#development) ·
+[Install the prebuilt release](https://aasis21.github.io/weft/#quickstart)
+
+The developer workflow runs locally with **no Supabase and no phone** via the
+in-process harness and the mobile Demo/Simulator. A real relay and paired device
+are needed to validate cross-device connectivity.
 
 ## Prerequisites
 
@@ -42,7 +45,7 @@ cd mobile
 npm run dev          # open the printed localhost URL
 ```
 
-In the app choose **Demo / Simulator**. It stands up a fake laptop side in-process
+In the app choose **Try the demo**. It stands up a fake laptop side in-process
 (real ECDH keypairs + `LocalTransport`), completes the real
 `pair.hello`/`pair.challenge`/`pair.proof`/`pair.ack` handshake, then streams scripted
 assistant/tool events, an approval card, heartbeats, and reflects mode changes — all
@@ -50,15 +53,15 @@ application payloads travel over AES-256-GCM.
 
 ## Run the real extension under Copilot CLI (the "real" test)
 
-> The HQ rule is to never write to `~/.copilot` from automation, so **you** run the
-> installer; the agent only ships it.
+The source installer writes code into your personal Copilot extensions directory.
+Review it before running it in a managed environment.
 
 **1. Install the extension** (builds + copies the single bundled `extension.mjs` into
 `~/.copilot/extensions/weft/`, where the CLI auto-discovers it — that directory holds
 installed **code only**):
 
 ```sh
-./setup.ps1     # Windows
+.\setup.ps1     # Windows PowerShell
 ./setup.sh      # macOS/Linux
 # remove later with ./uninstall.ps1 / ./uninstall.sh
 ```
@@ -87,7 +90,8 @@ configured yet.
 - **Android development shell:** Weft does not currently publish an APK. Debug,
   unversioned, and third-party APKs are not supported release artifacts.
 - **Local dev server:** `cd mobile && npm run dev -- --host`, open the printed LAN URL on
-  your phone (same in-browser camera scan + paste fallback as the hosted app).
+  your phone (the same in-browser camera scanner as the hosted app; manual paste is
+  available on keyboard-and-mouse devices).
 
 Developers who need to build the native shell from source can run `npx cap sync android`
 and use Android Studio, but that build is not a distributed release APK.
@@ -138,7 +142,12 @@ is only known after the upload.)
 **3. Pair and drive it.** Run `weft start` and leave the Device Station terminal open.
 Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
 code. The phone can then start or resume Copilot sessions in registered projects.
-Everything on the relay is AES-256-GCM ciphertext.
+Application session payloads on the relay are AES-256-GCM encrypted; public
+handshake values and connection metadata remain visible.
+
+If the phone has changed or its browser/app storage was cleared, stop the running
+station and use `weft start --new-device`, then scan the fresh QR. This replaces the
+old trusted phone identity. See [pairing and recovery](https://aasis21.github.io/weft/#pairing).
 
 To mirror only one Copilot session instead, start `copilot` and run `/weft` inside it.
 That per-session flow and transport overrides are documented in
@@ -170,10 +179,9 @@ used instead of a banner. (This
 covers the phone-in-hand / app-recent case; full wake-from-killed delivery via FCM is a
 planned follow-up.)
 
-## Wire Supabase (Phase 2 — user-provided project)
+## Wire your own Supabase project
 
-1. Create a fresh Supabase project. Configure its MCP like `kirana360` does
-   (`https://mcp.supabase.com/mcp?project_ref=<ref>` in `mcp/mcp-config.json`).
+1. Create a Supabase project.
 2. Enable **Realtime Authorization** and add RLS policies on `realtime.messages` that
    allow anonymous/authenticated broadcast only within the `private:weft:*` namespace.
    This is namespace-level gating, not per-user channel authorization. It is stored as code:
@@ -187,8 +195,9 @@ planned follow-up.)
    creds at install time, then select the transport:
    ```sh
    # bash installer: seed your own project's creds
-   WEFT_SUPABASE_URL=<your-project-url> WEFT_SUPABASE_ANON_KEY=<your-anon-key> \
-     curl -fsSL https://useweft.netlify.app/install.sh | bash
+   curl -fsSL https://useweft.netlify.app/install.sh | \
+     WEFT_SUPABASE_URL="https://YOUR_PROJECT.supabase.co" \
+     WEFT_SUPABASE_ANON_KEY="YOUR_CLIENT_SAFE_ANON_KEY" bash
    # (or edit ~/.weft/supabase.json directly), then:
    weft set-transport supabase
    ```
@@ -200,7 +209,7 @@ planned follow-up.)
    `shared/` package stays dependency-free by injecting the client). The extension does
    this automatically once `weft set-transport supabase` has been run.
 
-> **Resolved (p4):** `SupabaseTransport` registers a single catch-all broadcast listener
+> `SupabaseTransport` registers a single catch-all broadcast listener
 > before `subscribe()` and dispatches internally, so subscriptions added after `connect()`
 > still receive events. No subscribe-ordering constraint remains for cross-device use.
 

@@ -1,5 +1,7 @@
 # Advanced: hosting & self-hosting
 
+[Documentation handbook: transports and hosting](https://aasis21.github.io/weft/#transports)
+
 Weft's relay is a Supabase Realtime Broadcast channel. The **code** is open source
 (Apache-2.0); operating a **relay** is a separate concern. This page covers both the
 public instance and self-hosting.
@@ -20,8 +22,9 @@ requires *their* permission. Open code ≠ a seat on someone's infrastructure bi
 
 ## Option A — use a public instance (if offered)
 
-If a public Weft relay is advertised, the mobile app ships pointing at it. There is no
-account — pairing is by QR. The operator may rate-limit or revoke abusive clients. The
+The installer configures the hosted relay, and the phone reads its connection
+details from the pairing QR. No Weft account is needed. The operator may rate-limit
+or revoke abusive clients. The
 relay only ever carries ciphertext and stores no session content (see
 [`security.md`](./security.md)); the operator does not hold the endpoint keys needed to
 decrypt your session. The infrastructure provider may process ordinary connection
@@ -30,7 +33,7 @@ metadata and operational logs. Use is subject to [`../TERMS.md`](../TERMS.md) an
 
 ## Option B — self-host (recommended for privacy / control)
 
-You only need a free Supabase project.
+You need a Supabase project with Realtime enabled and quotas appropriate to your usage.
 
 1. Create a Supabase project.
 2. Enable Realtime; add RLS policies on `realtime.messages` that gate `private:weft:*`
@@ -42,6 +45,9 @@ You only need a free Supabase project.
    - installer (PowerShell): `... -SupabaseUrl <your-url> -SupabaseKey <your-anon-key>`
    - installer (bash): `WEFT_SUPABASE_URL=<your-url> WEFT_SUPABASE_ANON_KEY=<your-anon-key> ...`
    - or edit `~/.weft/supabase.json` (`{"url": "...", "anonKey": "..."}`) and run `weft set-transport supabase`
+
+Use only the client-safe anon/publishable key, never a service-role key: the phone
+receives this configuration in the QR. Restart the station after changing relay settings.
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is
 untrusted infrastructure: it routes ciphertext and stores no session content. Depending
@@ -84,7 +90,8 @@ pass `-Transport` / `-SupabaseUrl` / `-SupabaseKey`) ever writes them.
 If you run a relay for others, protect it operationally — none of this is the code
 license's job:
 
-- **RLS** on `realtime.messages` so a client can only touch `private:weft:<channelId>`.
+- **RLS** on `realtime.messages` to gate the `private:weft:*` namespace. The current
+  policy is namespace-level, not per-user or per-channel authorization.
 - **Rate limits / quotas** to cap abuse of your Supabase bill.
 - **Acceptable-use terms** ([`../TERMS.md`](../TERMS.md)) and the right to revoke.
 - Keep real project keys out of the repo — the `anon` key is public-by-design; RLS is
