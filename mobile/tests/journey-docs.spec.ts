@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-for (const width of [320, 390, 768, 1440]) {
+for (const width of [320, 390, 640, 760, 768, 1440]) {
   test(`documentation navigation and deep links at ${width}px`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'light' });
     await page.setViewportSize({ width, height: 900 });
@@ -39,6 +39,21 @@ for (const width of [320, 390, 768, 1440]) {
     const nav = page.getByRole('navigation', { name: 'Documentation', exact: true });
     if (width <= 760) {
       await expect(menu).not.toHaveAttribute('open');
+      const header = await page.locator('.site-header').boundingBox();
+      const heading = await page.locator('#page-title').boundingBox();
+      expect(header!.height).toBeLessThanOrEqual(64);
+      expect(heading!.y).toBeLessThanOrEqual(180);
+      for (const control of [
+        page.getByRole('link', { name: 'GitHub', exact: true }),
+        page.getByRole('link', { name: 'Open app', exact: true }),
+        page.getByRole('button', { name: 'Switch to dark mode' }),
+        menu.locator('summary'),
+      ]) {
+        await expect(control).toBeVisible();
+        const box = await control.boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(44);
+        expect(box!.width).toBeGreaterThanOrEqual(44);
+      }
       await menu.locator('summary').focus();
       await page.keyboard.press('Enter');
     }
@@ -53,7 +68,12 @@ for (const width of [320, 390, 768, 1440]) {
     await expect(page.locator('#recovery')).toBeInViewport();
     await page.reload();
     await expect(page.locator('#recovery')).toBeInViewport();
-    await expect(page.getByRole('link', { name: 'Product & web app' }))
+    if (width <= 760) {
+      const recovery = await page.locator('#recovery').boundingBox();
+      const sidebar = await page.locator('.sidebar').boundingBox();
+      expect(recovery!.y).toBeGreaterThanOrEqual(sidebar!.y + sidebar!.height);
+    }
+    await expect(page.getByRole('link', { name: 'Open app', exact: true }))
       .toHaveAttribute('href', 'https://useweft.netlify.app');
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
 

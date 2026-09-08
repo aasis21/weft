@@ -35,6 +35,7 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 .brand-label { color: var(--muted); font-size: 18px; font-weight: 450; letter-spacing: -.2px; }
 .header-links { display: flex; gap: 20px; align-items: center; font-size: 14px; font-weight: 600; }
 .header-links a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+.github-link svg { display: none; }
 .app-link { padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; gap: 8px; }
 .header-links a:hover { color: var(--ink); text-decoration: underline; }
 .theme-toggle { display: inline-grid; place-items: center; flex: 0 0 auto; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; }
@@ -117,26 +118,31 @@ figcaption { font-size: 14px; color: var(--muted); }
   .docs-layout { gap: 32px; padding: 0 24px; grid-template-columns: 216px minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  :root { --header-height: 124px; }
-  .site-header { padding: 10px 20px; gap: 10px; }
-  .brand { font-size: 22px; gap: 8px; }
-  .brand-label { font-size: 16px; }
-  .header-links { font-size: 12px; gap: 10px; width: 100%; justify-content: space-between; }
-  .app-link { padding: 6px 10px; }
+  :root { --header-height: 64px; }
+  .site-header { padding: 8px 12px; gap: 8px; }
+  .brand { font-size: 20px; gap: 6px; min-height: 44px; }
+  .brand svg { width: 24px; height: 24px; }
+  .brand-label { font-size: 14px; }
+  .header-links { font-size: 12px; gap: 4px; }
+  .github-link { justify-content: center; width: 44px; }
+  .github-link svg { display: block; }
+  .github-link span, .app-link .external-icon { display: none; }
+  .app-link { padding: 6px 8px; }
   .docs-layout { display: block; padding: 0 22px; }
-  .sidebar { position: relative; top: auto; max-height: none; overflow: visible; padding: 18px 0 0; }
-  .enhanced .sidebar { position: sticky; top: var(--header-height); z-index: 4; background: var(--page); padding: 12px 0; }
-  .enhanced [id] { scroll-margin-top: calc(var(--header-height) + 88px); }
+  .sidebar { position: relative; top: auto; max-height: none; overflow: visible; padding: 8px 0 0; }
+  .enhanced .sidebar { position: sticky; top: var(--header-height); z-index: 4; background: var(--page); padding: 8px 0; }
+  .enhanced [id] { scroll-margin-top: calc(var(--header-height) + 72px); }
   .navigation { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
-  .navigation summary, .enhanced .navigation summary { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; min-height: 48px; font-size: 14px; font-weight: 650; cursor: pointer; list-style: none; }
+  .navigation summary, .enhanced .navigation summary { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; min-height: 44px; font-size: 14px; font-weight: 650; cursor: pointer; list-style: none; }
   .navigation summary::-webkit-details-marker { display: none; }
   .navigation[open] summary { border-bottom: 1px solid var(--line); }
   .navigation[open] summary span { transform: rotate(45deg); }
   .navigation nav { padding: 16px; }
-  .enhanced .navigation nav { max-height: calc(100dvh - var(--header-height) - 92px); overflow-y: auto; }
+  .enhanced .navigation nav { max-height: calc(100dvh - var(--header-height) - 64px); overflow-y: auto; }
   .navigation nav a { display: flex; align-items: center; min-height: 44px; }
   .sidebar-note { display: none; }
-  main { padding-top: 36px; }
+  main { padding-top: 16px; }
+  .eyebrow { margin-bottom: 12px; }
   section { margin-bottom: 40px; padding-bottom: 36px; }
   h1 { font-size: 40px; }
   h2 { font-size: 27px; }
@@ -146,10 +152,6 @@ figcaption { font-size: 14px; color: var(--muted); }
   .facts > div { grid-template-columns: 100px minmax(0, 1fr); }
 }
 @media (max-width: 440px) {
-  :root { --header-height: 118px; }
-  .site-header { flex-wrap: wrap; padding: 8px 18px; }
-  .header-links { width: 100%; justify-content: space-between; }
-  .header-links a { min-height: 44px; }
   .docs-layout { padding: 0 18px; }
   h1 { font-size: 36px; }
   .guide-grid { grid-template-columns: 1fr; gap: 12px; }
