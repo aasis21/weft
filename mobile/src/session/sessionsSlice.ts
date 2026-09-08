@@ -14,6 +14,7 @@ import type {
   SessionStatus,
   UserItem,
 } from './model';
+import type { DeviceHealthCache } from '@/lib/devices';
 import {
   applyEnvelope,
   appendNotice,
@@ -264,6 +265,13 @@ const sessionsSlice = createSlice({
       monitoring.snapshot = snapshot;
       monitoring.error = undefined;
     },
+    deviceHealthCached(
+      state,
+      action: PayloadAction<{ channelId: string; cachedHealth: DeviceHealthCache }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.cachedHealth = action.payload.cachedHealth;
+    },
     // The laptop's current set of in-session `/weft` offers (SESSION_OFFERS). Replaces the device's
     // whole `offers` list — the station always relays the full live set, never a delta — and doubles
     // as a liveness signal (arrives over the same connected channel as PROJECT_LIST).
@@ -325,7 +333,17 @@ const sessionsSlice = createSlice({
         state.devices = state.devices.filter((d) => !removedChannelIds.includes(d.channelId));
       }
       const device = state.devices.find((d) => d.channelId === channelId);
-      if (device) Object.assign(device, merged);
+      if (device) {
+        const currentHealth = device.cachedHealth;
+        const mergedHealth = merged.cachedHealth;
+        Object.assign(device, merged);
+        if (
+          currentHealth &&
+          (!mergedHealth || currentHealth.capturedAt > mergedHealth.capturedAt)
+        ) {
+          device.cachedHealth = currentHealth;
+        }
+      }
       if (state.devices.length > 0 && !state.devices.some((d) => d.isDefault)) {
         state.devices[0].isDefault = true;
       }
@@ -584,6 +602,7 @@ export const {
   deviceMonitoringStopped,
   deviceMonitoringFailed,
   deviceSnapshotReceived,
+  deviceHealthCached,
   deviceSessionOffersReceived,
   deviceSessionsReceived,
   deviceSessionsLoadingSet,

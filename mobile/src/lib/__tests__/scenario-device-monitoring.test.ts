@@ -6,6 +6,7 @@ vi.mock('@capacitor/app', () => ({
 import { App } from '@capacitor/app';
 import { registry } from '@/test/helpers/fakeWeftClient';
 import { makeManager } from '@/test/helpers/makeManager';
+import { loadDevices } from '@/lib/devices';
 import * as B from '@/test/helpers/builders';
 
 function listenerQr(channelId: string): string {
@@ -85,6 +86,17 @@ describe('scenario: device monitoring', () => {
     client.emit(snapshot(monitorId, 1));
     await h!.flush();
     expect(h!.snapshot().devices[0]!.monitoring?.snapshot?.sequence).toBe(2);
+    expect(h!.snapshot().devices[0]!.cachedHealth).toMatchObject({
+      capturedAt: Date.now(),
+      system: { cpuPercent: 25 },
+    });
+    expect((await loadDevices())[0]!.cachedHealth).toMatchObject({
+      capturedAt: Date.now(),
+      effectiveIntervalMs: 10_000,
+      system: { cpuPercent: 25 },
+      issues: [],
+    });
+    expect((await loadDevices())[0]!.cachedHealth).not.toHaveProperty('apps');
     const snapshotEvents = h!.snapshot().devices[0]!.events.filter(
       (event) => event.eventSubtype === 'device_snapshot',
     );
@@ -105,5 +117,6 @@ describe('scenario: device monitoring', () => {
     await h!.flush();
     expect(client.sentOfKind('control.device_monitor_stop')).toEqual([{ monitorId: restarted }]);
     expect(h!.snapshot().devices[0]!.monitoring).toBeUndefined();
+    expect(h!.snapshot().devices[0]!.cachedHealth?.system.cpuPercent).toBe(25);
   });
 });

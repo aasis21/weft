@@ -63,6 +63,7 @@ import {
   setDefaultDevice as persistDefaultDevice,
   upsertDevice,
   type RegisteredDevice,
+  type DeviceHealthCache,
 } from '@/lib/devices';
 import { creativeName } from '@/lib/sessionNames';
 import type { StoredSession } from '@/lib/sessions';
@@ -114,6 +115,7 @@ import {
   deviceMonitoringFailed,
   deviceMonitoringStarted,
   deviceMonitoringStopped,
+  deviceHealthCached,
   deviceSnapshotReceived,
   deviceSessionOffersReceived,
   deviceSessionsReceived,
@@ -206,6 +208,7 @@ const DEVICE_MONITOR_CAPABILITY = 'device-monitor-v1';
 const DEVICE_MONITOR_INTERVAL_MS = 10_000;
 const DEVICE_MONITOR_LEASE_MS = 45_000;
 const DEVICE_MONITOR_RENEW_MS = 30_000;
+const DEVICE_HEALTH_CACHE_WRITE_MS = 60_000;
 /** Fail-safe window after a `session_list_request` is sent: if the async SESSION_LIST reply never
  *  arrives (wedged laptop), the "Resume a session" loading flag auto-clears after this window so the
  *  Load/Refresh button re-enables instead of spinning forever. */
@@ -368,6 +371,9 @@ export class SessionRuntime {
    *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
   private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly deviceMonitors = new Map<string, DeviceMonitorLease>();
+  /** Persist the first fresh sample of a visit immediately, then at most once a minute while the
+   *  page stays open. This keeps the cache useful without writing native Preferences every tick. */
+  private readonly deviceHealthCacheWrittenAt = new Map<string, number>();
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
@@ -1317,6 +1323,7 @@ export class SessionRuntime {
     if (!lease) return;
     clearInterval(lease.renewal);
     this.deviceMonitors.delete(channelId);
+    this.deviceHealthCacheWrittenAt.delete(channelId);
     this.store.dispatch(deviceMonitoringStopped({ channelId, monitorId: lease.monitorId }));
 
     const ctrl = this.listenerController(channelId);
@@ -1830,9 +1837,30 @@ export class SessionRuntime {
       ) {
         return;
       }
+      const monitoring = this.store.getState().sessions.devices
+        .find((device) => device.channelId === channelId)?.monitoring;
+      if (
+        !monitoring ||
+        snapshot.monitorId !== monitoring.monitorId ||
+        snapshot.sequence <= monitoring.latestSequence
+      ) {
+        return;
+      }
       this.store.dispatch(
         deviceSnapshotReceived({ channelId, snapshot }),
       );
+      const cachedHealth: DeviceHealthCache = {
+        capturedAt: snapshot.capturedAt,
+        effectiveIntervalMs: snapshot.effectiveIntervalMs ?? DEVICE_MONITOR_INTERVAL_MS,
+        system: snapshot.system,
+        issues: snapshot.issues.filter((issue) => issue.component !== 'apps'),
+      };
+      this.store.dispatch(deviceHealthCached({ channelId, cachedHealth }));
+      const lastCacheWrite = this.deviceHealthCacheWrittenAt.get(channelId);
+      if (lastCacheWrite === undefined || this.clock() - lastCacheWrite >= DEVICE_HEALTH_CACHE_WRITE_MS) {
+        this.deviceHealthCacheWrittenAt.set(channelId, this.clock());
+        void patchDevice(channelId, { cachedHealth });
+      }
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
@@ -2714,6 +2742,7 @@ export class SessionRuntime {
     this.listenerControllers.clear();
     for (const lease of this.deviceMonitors.values()) clearInterval(lease.renewal);
     this.deviceMonitors.clear();
+    this.deviceHealthCacheWrittenAt.clear();
     for (const pending of this.pendingSpawns.values()) clearSpawnTimers(pending);
     this.pendingSpawns.clear();
     this.registry.disposeAll();

@@ -22,11 +22,14 @@ function fakeOs() {
 
 test("collector returns fresh system metrics and privacy-safe visible applications", async () => {
   let powerShellCalls = 0;
+  let cpuSampleMs = null;
   const collector = createDeviceTelemetryCollector({
     platform: "win32",
     now: () => 1_000,
     osApi: fakeOs(),
-    wait: async () => {},
+    wait: async (ms) => {
+      cpuSampleMs = ms;
+    },
     statfsFn: async () => ({ bsize: 10, blocks: 100, bavail: 25 }),
     execFn: async (_file, args) => {
       powerShellCalls += 1;
@@ -50,6 +53,7 @@ test("collector returns fresh system metrics and privacy-safe visible applicatio
   assert.equal(snapshot.system.memoryUsedBytes, 750);
   assert.equal(snapshot.system.diskUsedBytes, 750);
   assert.equal(snapshot.system.batteryPercent, 78);
+  assert.equal(cpuSampleMs, 500);
   assert.deepEqual(snapshot.apps.map((app) => app.name), ["Microsoft Edge", "Visual Studio Code"]);
   assert.equal("windowTitle" in snapshot.apps[0], false);
   assert.deepEqual(snapshot.issues, []);

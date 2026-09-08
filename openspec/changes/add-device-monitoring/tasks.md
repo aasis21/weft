@@ -4,6 +4,7 @@
 - [x] 1.2 Add typed monitor-ID-scoped start, stop, and ordered snapshot messages to the shared protocol
 - [x] 1.3 Implement a dependency-injectable Windows telemetry collector with bounded CPU sampling, cached slow sections, stable issue codes, and PowerShell timeouts
 - [x] 1.4 Add protocol and collector tests covering capability compatibility, sequencing, nullable metrics, visible-app grouping, caching, and partial failures
+- [x] 1.5 Stabilize CPU utilization with a 500 ms aggregate counter-delta sample
 
 ## 2. Device Station Monitoring
 
@@ -19,6 +20,7 @@
 - [x] 3.5 Add runtime and screen tests for capability gating, snapshot ordering, monitor lifecycle, and responsive presentation
 - [x] 3.6 Reduce Device Details density with a single-row action rail, lightweight Copilot workspace rows, and compact session rows
 - [x] 3.7 Unify Device Details sections around one width, surface, heading, metadata, row, and divider system
+- [x] 3.8 Persist the last system-health summary and show it while a fresh page-scoped snapshot loads
 
 ## 4. Validation
 

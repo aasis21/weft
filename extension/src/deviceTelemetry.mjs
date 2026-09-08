@@ -5,7 +5,7 @@ import { cpus, freemem, totalmem, uptime } from "node:os";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const CPU_SAMPLE_MS = 100;
+const CPU_SAMPLE_MS = 500;
 const APPS_CACHE_MS = 30_000;
 const SLOW_CACHE_MS = 60_000;
 const POWERSHELL_TIMEOUT_MS = 5_000;

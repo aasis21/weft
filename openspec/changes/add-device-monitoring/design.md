@@ -103,7 +103,7 @@ Cached slower values remain in each full snapshot with section-specific `observe
 
 ### Collect portable metrics in Node and Windows applications through PowerShell
 
-Node's built-in `os` and `fs.statfs` APIs provide CPU sampling inputs, memory, uptime, and disk capacity without a dependency. On Windows, a bounded non-interactive PowerShell command enumerates processes with a visible main window and returns application name, process count, and aggregate working-set memory. Window titles are not transmitted. Battery is queried best-effort through Windows CIM.
+Node's built-in `os` and `fs.statfs` APIs provide CPU sampling inputs, memory, uptime, and disk capacity without a dependency. CPU utilization is calculated from the aggregate idle and total counter deltas across all cores over a 500 ms sample window. This is long enough to avoid the worst 100 ms spikes while remaining much shorter than the normal 10-second publication cadence. On Windows, a bounded non-interactive PowerShell command enumerates processes with a visible main window and returns application name, process count, and aggregate working-set memory. Window titles are not transmitted. Battery is queried best-effort through Windows CIM.
 
 The collector returns nullable fields when the operating system cannot provide a metric. Collection failures become stable component issue codes rather than raw exception messages and never terminate the Device Station.
 
@@ -146,9 +146,21 @@ The system area shows percentage-first values with small progress indicators; se
 
 Application relevance is ordered by foreground status when available, then aggregate memory. Multiple processes/windows are grouped into one row. Window titles, file names, browser tabs, executable paths, and application-control buttons are excluded from the MVP.
 
-### Treat snapshots as runtime-only state
+### Persist only the last system-health summary
 
-Snapshots are stored only in the mobile Redux runtime. They are replaced atomically by newer snapshots and cleared when the device is removed. The UI displays capture time so stale data is distinguishable from current data.
+Complete snapshots remain in the mobile Redux runtime and are replaced atomically by newer snapshots.
+After accepting an ordered snapshot, the phone also persists a bounded system-health summary on the
+registered device: capture time, effective interval, system metrics, and non-application issue codes.
+Device Details renders that summary immediately on a later visit with an explicit `Updating` or
+offline-saved label, then atomically replaces it when the live monitor returns a newer snapshot.
+
+Running-application data remains runtime-only and is never included in the persisted health summary.
+Removing the paired device removes its cached health with the rest of the device record. The UI
+always displays capture time so saved or stale data is distinguishable from current data.
+Device-record mutations are serialized because caching, stable-device reconciliation, and forgetting
+a device all update the same persisted list; a delayed cache write must never restore a removed or
+superseded record. A definitive connected response without `device-monitor-v1` takes precedence over
+old cached health because that cache cannot refresh until the laptop is updated.
 
 ## Risks / Trade-offs
 

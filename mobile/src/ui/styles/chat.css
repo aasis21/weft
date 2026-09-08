@@ -2668,17 +2668,16 @@
   justify-content: space-between;
   gap: 12px;
 }
-.weft-session .device-health-head > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 .weft-session .device-section-meta,
 .weft-session .device-section-count {
   color: var(--fg-dim);
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
+}
+.weft-session .device-health-head .device-section-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .weft-session .device-section-tools {
   display: flex;

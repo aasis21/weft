@@ -176,23 +176,26 @@ export function DeviceDetailsScreen({
   const online = device.connected;
   const monitoringSupported = device.capabilities?.includes('device-monitor-v1') ?? false;
   const snapshot = device.monitoring?.snapshot;
-  const system = snapshot?.system;
+  const cachedHealth = device.cachedHealth;
+  const health = snapshot ?? cachedHealth;
+  const usingCachedHealth = !snapshot && Boolean(cachedHealth);
+  const system = health?.system;
   const memoryPercent = system ? percent(system.memoryUsedBytes, system.memoryTotalBytes) : null;
   const diskPercent = system ? percent(system.diskUsedBytes, system.diskTotalBytes) : null;
   const batteryPercent = system?.batteryPercent ?? null;
   const uptime = formatUptime(system?.uptimeSeconds ?? null);
-  const effectiveInterval = snapshot?.effectiveIntervalMs ?? 10_000;
+  const effectiveInterval = health?.effectiveIntervalMs ?? 10_000;
   const snapshotStale = Boolean(
-    snapshot && now - snapshot.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
+    health && now - health.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
   );
   const visibleApps = snapshot?.apps ?? [];
   const shownApps = allAppsOpen ? visibleApps : visibleApps.slice(0, 3);
   const shownProjects = allProjectsOpen ? device.projects : device.projects.slice(0, 3);
   const appsUnavailable = snapshot?.issues.some((issue) => issue.component === 'apps') ?? false;
   const hasPartialSystemIssues =
-    snapshot?.issues.some((issue) => issue.component !== 'apps') ?? false;
+    health?.issues.some((issue) => issue.component !== 'apps') ?? false;
   const systemUnavailable = Boolean(
-    snapshot &&
+    health &&
       system?.cpuPercent === null &&
       memoryPercent === null &&
       diskPercent === null &&
@@ -480,35 +483,24 @@ export function DeviceDetailsScreen({
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
         <section className="device-monitor-summary device-panel" aria-label="Device health">
-          {!online ? (
-            <div className="device-monitor-state">
-              <strong>System health unavailable</strong>
-              <span>Monitoring resumes when this laptop reconnects.</span>
-            </div>
-          ) : device.capabilities === undefined ? (
-            <div className="device-monitor-state" role="status">
-              <strong>Checking Device Station capabilities…</strong>
-              <span>Waiting for this laptop to describe the features it supports.</span>
-            </div>
-          ) : !monitoringSupported ? (
+          {online && device.capabilities !== undefined && !monitoringSupported ? (
             <div className="device-monitor-state device-monitor-update">
               <strong>Update Weft on this laptop</strong>
               <span>Install the latest Device Station to see system health and running apps.</span>
             </div>
-          ) : !snapshot ? (
-            <div className="device-monitor-state" role="status">
-              <strong>Checking system health…</strong>
-              <span>{device.monitoring?.error ?? 'Waiting for the first snapshot from this laptop.'}</span>
-            </div>
-          ) : (
+          ) : health ? (
             <>
               <div className="device-section-head device-health-head">
-                <div>
-                  <h3 className="device-section-label">System health</h3>
-                  <span className="device-section-meta">
-                    {snapshotStale ? 'Update delayed' : `Updated ${formatLastSeen(snapshot.capturedAt, now) ?? 'just now'}`}
-                  </span>
-                </div>
+                <h3 className="device-section-label">System health</h3>
+                <span className="device-section-meta">
+                  {usingCachedHealth
+                    ? online
+                      ? `Updating · saved ${formatLastSeen(health.capturedAt, now) ?? 'recently'}`
+                      : `Saved ${formatLastSeen(health.capturedAt, now) ?? 'recently'} · offline`
+                    : snapshotStale
+                      ? 'Update delayed'
+                      : `Updated ${formatLastSeen(health.capturedAt, now) ?? 'just now'}`}
+                </span>
               </div>
               <div className="device-metrics">
                 {system?.cpuPercent !== null && system?.cpuPercent !== undefined ? (
@@ -563,6 +555,21 @@ export function DeviceDetailsScreen({
                 <p className="device-monitor-partial">Some system details are temporarily unavailable.</p>
               ) : null}
             </>
+          ) : !online ? (
+            <div className="device-monitor-state">
+              <strong>System health unavailable</strong>
+              <span>Monitoring resumes when this laptop reconnects.</span>
+            </div>
+          ) : device.capabilities === undefined ? (
+            <div className="device-monitor-state" role="status">
+              <strong>Checking Device Station capabilities…</strong>
+              <span>Waiting for this laptop to describe the features it supports.</span>
+            </div>
+          ) : (
+            <div className="device-monitor-state" role="status">
+              <strong>Checking system health…</strong>
+              <span>{device.monitoring?.error ?? 'Waiting for the first snapshot from this laptop.'}</span>
+            </div>
           )}
         </section>
 

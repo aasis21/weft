@@ -331,6 +331,67 @@ describe('DeviceDetailsScreen monitoring', () => {
     expect(screen.queryByText(/battery/i)).toBeNull();
   });
 
+  it('shows cached system health immediately while waiting for a fresh snapshot', () => {
+    const capturedAt = Date.now() - 60_000;
+    renderDetails({
+      device: makeDevice({
+        capabilities: ['device-monitor-v1'],
+        cachedHealth: {
+          capturedAt,
+          effectiveIntervalMs: 10_000,
+          system: {
+            cpuPercent: 18,
+            memoryUsedBytes: 10 * 1024 ** 3,
+            memoryTotalBytes: 16 * 1024 ** 3,
+            uptimeSeconds: 90_000,
+            diskUsedBytes: 70 * 1024 ** 3,
+            diskTotalBytes: 100 * 1024 ** 3,
+            batteryPercent: null,
+            batteryCharging: null,
+          },
+          issues: [],
+        },
+        monitoring: {
+          monitorId: 'monitor-2',
+          startedAt: Date.now(),
+          latestSequence: -1,
+        },
+      }),
+    });
+
+    expect(screen.getByText('18%')).toBeTruthy();
+    expect(screen.getByText(/updating · saved/i)).toBeTruthy();
+    expect(screen.queryByText(/checking system health/i)).toBeNull();
+    expect(screen.queryByRole('heading', { name: /running now/i })).toBeNull();
+  });
+
+  it('shows the laptop update state instead of a cache that can no longer refresh', () => {
+    renderDetails({
+      device: makeDevice({
+        capabilities: [],
+        cachedHealth: {
+          capturedAt: Date.now() - 60_000,
+          effectiveIntervalMs: 10_000,
+          system: {
+            cpuPercent: 18,
+            memoryUsedBytes: null,
+            memoryTotalBytes: null,
+            uptimeSeconds: null,
+            diskUsedBytes: null,
+            diskTotalBytes: null,
+            batteryPercent: null,
+            batteryCharging: null,
+          },
+          issues: [],
+        },
+      }),
+    });
+
+    expect(screen.getByText(/update weft on this laptop/i)).toBeTruthy();
+    expect(screen.queryByText('18%')).toBeNull();
+    expect(screen.queryByText(/updating · saved/i)).toBeNull();
+  });
+
   it('limits Running Now to three apps and expands without exposing window titles or controls', () => {
     const apps = Array.from({ length: 7 }, (_, index) => ({
       id: `app-${index + 1}`,

@@ -94,7 +94,13 @@ The mobile application SHALL display system statistics and running applications 
 
 #### Scenario: First snapshot is pending
 - **WHEN** Device Details has requested monitoring but no snapshot has arrived
-- **THEN** the screen presents a loading state without fabricating metric values
+- **THEN** the screen presents the last saved system-health summary with an updating label when one exists
+- **AND** otherwise presents a loading state without fabricating metric values
+
+#### Scenario: System health is cached between visits
+- **WHEN** the phone accepts a newer ordered device snapshot
+- **THEN** it persists the system metrics, capture time, effective interval, and non-application issue codes with the registered device
+- **AND** it does not persist the Running Now application list
 
 #### Scenario: Snapshot arrives
 - **WHEN** the runtime receives a newer device snapshot
