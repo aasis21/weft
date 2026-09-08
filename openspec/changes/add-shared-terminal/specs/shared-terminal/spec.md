@@ -55,6 +55,10 @@ reconnect/close actions without forcing a reader to the bottom.
 - **WHEN** new output arrives while the reader is above the latest output
 - **THEN** the reading position is preserved and a return-to-latest action is available
 
+#### Scenario: Device quick actions fit in two rows
+- **WHEN** the phone displays the device page
+- **THEN** Start Copilot, Resume Copilot, Clipboard, Keep Awake, and Open terminal occupy two balanced rows of three and two controls, with touch targets at least 44 pixels wide and tall
+
 ### Requirement: Private content and installable runtime
 Terminal contents and attachment credentials MUST NOT be persisted in diagnostic
 logs. Supported installed Windows builds MUST include a usable native PTY runtime.

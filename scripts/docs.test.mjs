@@ -103,10 +103,10 @@ test("handbook includes operating-system setup, recovery, limitations, and all t
   }
 });
 
-test("device guidance distinguishes usable actions, planned cards, and bounded diagnostics", () => {
+test("device guidance describes available actions and bounded diagnostics", () => {
   const sessions = document.querySelector("#sessions").textContent;
   for (const label of ["Start Copilot", "Resume Copilot", "Default", "Allow all",
-    "Active Copilot sessions", "Inactive Copilot sessions", "Coming soon"]) {
+    "Active Copilot sessions", "Inactive Copilot sessions", "Clipboard", "Keep Awake", "Open terminal"]) {
     assert.ok(sessions.includes(label), `Document the current UI label: ${label}`);
   }
   const health = document.querySelector("#device-health").textContent;
@@ -144,7 +144,7 @@ test("terminal guidance explains authorization, lifecycle, and private output", 
   assert.doesNotMatch(sessions, /Open terminal.{0,70}(?:disabled|Coming soon)/);
   const guide = readFileSync(resolve(docs, "terminal.md"), "utf8");
   for (const requirement of ["ConPTY", "Ctrl+C", "does not automatically resend input",
-    "diagnostic event logs", "shell's own history", "not supported"]) {
+    "diagnostic event logs", "shell's own history", "not supported", "build 18309", "Windows-only"]) {
     assert.ok(guide.includes(requirement), `Missing terminal limitation: ${requirement}`);
   }
 });

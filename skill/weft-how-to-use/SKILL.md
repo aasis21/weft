@@ -97,6 +97,10 @@ weft help
 
 ## Shared terminal
 
+The shared terminal backend requires Windows 10 build 18309 or newer (including
+Windows 11) and an interactive desktop. Do not advertise this capability on macOS
+or Linux merely because native runtime assets are packaged for those systems.
+
 With `--allow-terminal`, choose **Open terminal** on the phone's device page. Station
 creates one shell and a visible local attach window, or reconnects to the existing
 terminal. A registered workspace is the initial directory, not a sandbox.

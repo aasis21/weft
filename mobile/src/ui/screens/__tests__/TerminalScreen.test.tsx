@@ -9,6 +9,12 @@ const renderer = vi.hoisted(() => ({
   scroll: null as (() => void) | null,
   clipboard: vi.fn(),
   write: vi.fn(),
+  reset: vi.fn(),
+  resize: vi.fn(),
+  deferWrites: false,
+  pendingWrites: [] as (() => void)[],
+  text: '',
+  modes: { applicationCursorKeysMode: false },
   scrollToLine: vi.fn(),
   beforeFlush: null as (() => void) | null,
   options: { disableStdin: true, theme: {} },
@@ -16,6 +22,9 @@ const renderer = vi.hoisted(() => ({
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    cols = 80;
+    rows = 24;
+    modes = renderer.modes;
     options = renderer.options;
     buffer = { active: renderer.active };
     parser = { registerOscHandler: renderer.clipboard.mockReturnValue({ dispose: vi.fn() }) };
@@ -23,13 +32,22 @@ vi.mock('@xterm/xterm', () => ({
     open = vi.fn();
     onData = (fn: (data: string) => void) => { renderer.data = fn; return { dispose: vi.fn() }; };
     onScroll = (fn: () => void) => { renderer.scroll = fn; return { dispose: vi.fn() }; };
-    reset = vi.fn();
-    resize = vi.fn();
+    reset = () => { renderer.reset(); renderer.text = ''; };
+    resize = (cols: number, rows: number) => {
+      renderer.resize(cols, rows);
+      this.cols = cols;
+      this.rows = rows;
+    };
     write = (data: string, callback?: () => void) => {
       renderer.write(data);
-      if (data.includes('QUERY')) renderer.data?.('\x1b[0n');
-      if (data === 'live-scroll') renderer.beforeFlush?.();
-      callback?.();
+      const flush = () => {
+        renderer.text += data;
+        if (data.includes('QUERY')) renderer.data?.('\x1b[0n');
+        if (data === 'live-scroll') renderer.beforeFlush?.();
+        callback?.();
+      };
+      if (renderer.deferWrites) renderer.pendingWrites.push(flush);
+      else flush();
     };
     scrollToBottom = vi.fn();
     scrollToLine = renderer.scrollToLine;
@@ -49,10 +67,18 @@ let controller: TerminalController;
 beforeEach(() => {
   renderer.active.viewportY = renderer.active.baseY = 0;
   renderer.beforeFlush = null;
+  renderer.deferWrites = false;
+  renderer.pendingWrites = [];
+  renderer.text = '';
+  renderer.modes.applicationCursorKeysMode = false;
+  renderer.reset.mockClear();
+  renderer.resize.mockClear();
+  renderer.write.mockClear();
+  renderer.scrollToLine.mockClear();
 });
 afterEach(() => controller?.dispose());
 
-function setup(owner: 'phone' | 'laptop' = 'phone') {
+function setup(owner: 'phone' | 'laptop' = 'phone', deviceOverrides: Partial<ListenerDeviceState> = {}) {
   const sent: EventEnvelope[] = [];
   controller = new TerminalController({
     send: async (message) => { sent.push(message); },
@@ -68,7 +94,7 @@ function setup(owner: 'phone' | 'laptop' = 'phone') {
   };
   controller.receive(terminalState({ ...state, requestId: requests().at(-1)!.requestId }));
   controller.receive(terminalSnapshot({ terminalId: 'shell', seq: 0, data: 'QUERY', cols: 80, rows: 24, truncated: false }));
-  const result = render(<TerminalScreen device={device} controller={controller} onBack={vi.fn()} onReconnect={vi.fn()} />);
+  const result = render(<TerminalScreen device={{ ...device, ...deviceOverrides }} controller={controller} onBack={vi.fn()} onReconnect={vi.fn()} />);
   const acknowledge = (nextInputSeq: number) => act(() => controller.receive(terminalState({
     ...state, requestId: requests().at(-1)!.requestId, nextInputSeq,
   })));
@@ -76,6 +102,92 @@ function setup(owner: 'phone' | 'laptop' = 'phone') {
 }
 
 describe('TerminalScreen', () => {
+  it('serializes snapshot replacement, resizing and output while coalescing pending views', () => {
+    renderer.deferWrites = true;
+    const h = setup();
+    const snapshot = (seq: number, data: string) => act(() => controller.receive(terminalSnapshot({
+      terminalId: 'shell', seq, data, cols: 80, rows: 24, truncated: false,
+    })));
+    snapshot(1, 'FIRST SNAPSHOT QUERY');
+    snapshot(2, 'SECOND SNAPSHOT QUERY');
+    act(() => controller.receive(terminalOutput({ terminalId: 'shell', seq: 3, data: '-LIVE' })));
+    act(() => controller.receive(terminalState({
+      ...controller.getSnapshot().state!, requestId: null, cols: 100, rows: 30,
+    })));
+    expect(renderer.reset).toHaveBeenCalledTimes(1);
+    expect(renderer.resize).not.toHaveBeenCalledWith(100, 30);
+    act(() => renderer.pendingWrites.shift()!());
+    expect(renderer.reset).toHaveBeenCalledTimes(2);
+    expect(renderer.text).toBe('');
+    expect(renderer.resize).not.toHaveBeenCalledWith(100, 30);
+    act(() => renderer.pendingWrites.shift()!());
+    expect(renderer.resize).toHaveBeenLastCalledWith(100, 30);
+    expect(h.requests().filter((r) => r.action === 'input')).toHaveLength(0);
+    act(() => renderer.pendingWrites.shift()!());
+    expect(renderer.text).toBe('SECOND SNAPSHOT QUERY-LIVE');
+    expect(renderer.write).not.toHaveBeenCalledWith('FIRST SNAPSHOT QUERY');
+    expect(renderer.pendingWrites).toHaveLength(0);
+  });
+
+  it('retains a queued snapshot and output on error without restoring input readiness', () => {
+    renderer.deferWrites = true;
+    setup();
+    act(() => controller.receive(terminalSnapshot({
+      terminalId: 'shell', seq: 1, data: 'SECOND SNAPSHOT QUERY', cols: 80, rows: 24, truncated: false,
+    })));
+    act(() => controller.receive(terminalOutput({ terminalId: 'shell', seq: 2, data: '-LIVE' })));
+    act(() => controller.receive(terminalState({
+      ...controller.getSnapshot().state!, requestId: null, status: 'error', error: 'Snapshot unavailable.',
+    })));
+    expect(controller.getSnapshot().snapshot).toBeNull();
+    act(() => renderer.pendingWrites.shift()!());
+    act(() => renderer.pendingWrites.shift()!());
+    act(() => renderer.pendingWrites.shift()!());
+    expect(renderer.text).toBe('SECOND SNAPSHOT QUERY-LIVE');
+    expect(controller.canInput()).toBe(false);
+    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Snapshot unavailable.');
+  });
+
+  it('ignores pending renderer callbacks after unmount', () => {
+    renderer.deferWrites = true;
+    const h = setup();
+    act(() => controller.receive(terminalSnapshot({
+      terminalId: 'shell', seq: 1, data: 'LATER', cols: 100, rows: 30, truncated: false,
+    })));
+    h.unmount();
+    act(() => renderer.pendingWrites.shift()!());
+    expect(renderer.reset).toHaveBeenCalledTimes(1);
+    expect(renderer.resize).not.toHaveBeenCalledWith(100, 30);
+    expect(renderer.pendingWrites).toHaveLength(0);
+  });
+
+  it('sends toolbar arrows in the current terminal cursor mode', () => {
+    const h = setup();
+    const arrows = [['Up', 'A'], ['Down', 'B'], ['Left', 'D'], ['Right', 'C']] as const;
+    let nextInputSeq = 1;
+    for (const application of [false, true, false]) {
+      renderer.modes.applicationCursorKeysMode = application;
+      for (const [label, code] of arrows) {
+        fireEvent.click(screen.getByRole('button', { name: label }));
+        expect(h.requests().at(-1)).toMatchObject({
+          action: 'input', data: `${application ? '\x1bO' : '\x1b['}${code}`,
+        });
+        h.acknowledge(++nextInputSeq);
+      }
+    }
+  });
+
+  it('reopens using Station default selection rather than the last Copilot project', () => {
+    const h = setup('phone', { lastProjectName: 'nondefault-project' });
+    act(() => controller.receive(terminalState({
+      ...controller.getSnapshot().state!, requestId: null, status: 'closed', owner: null,
+    })));
+    fireEvent.click(screen.getByRole('button', { name: 'Open new terminal' }));
+    expect(h.requests().at(-1)?.action).toBe('open');
+    expect(h.requests().at(-1)?.projectName).toBeUndefined();
+  });
+
   it('edits multiline commands without sending until Run and recalls only in memory', () => {
     const h = setup();
     expect(screen.getByText('Started in: C:\\project')).toHaveAttribute('title', 'Initial workspace: C:\\project');

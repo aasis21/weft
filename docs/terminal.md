@@ -24,10 +24,12 @@ with the local account's permissions; Copilot approval prompts do not mediate th
 commands. The registered workspace is only a starting directory, not a sandbox.
 To revoke this access, stop Station and restart without `--allow-terminal`.
 
-The Windows backend uses ConPTY, available in Windows 10 version 1809 and later,
-including Windows 11. Supported installed builds include the native runtime; users
-do not need WSL, an SSH server, or C++ compilation tools. The phone enables the
-action only when Station advertises terminal support.
+Shared terminal currently requires Windows 10 build 18309 or newer, including
+Windows 11, and an interactive desktop for the visible laptop window. It uses
+ConPTY. Supported installed builds include the native runtime; users do not need
+WSL, an SSH server, or C++ compilation tools. The phone enables the action only
+when Station advertises terminal support. Other Weft features remain available on
+macOS and Linux, but this shared terminal backend is Windows-only.
 
 ## Work from the phone
 

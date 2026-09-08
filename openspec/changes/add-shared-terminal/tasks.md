@@ -16,11 +16,13 @@
 - [x] 3.1 Wire capability-gated Open terminal, device navigation, terminal runtime, output sequencing, snapshots, and disconnect behavior.
 - [x] 3.2 Build the responsive terminal screen, command editor, special keys, ownership, return-to-latest, and confirmed close.
 - [x] 3.3 Add component/runtime and browser coverage, including reconnect and no terminal contents in diagnostic persistence.
+- [x] 3.4 Resolve phone review regressions: serialize asynchronous snapshot rendering and resize, honor application cursor keys, and reopen with the Station default workspace.
+- [x] 3.5 Preserve latest-main utilities and fit all five device quick actions into two balanced rows with usable touch targets.
 
 ## 4. Distribution and delivery
 
 - [x] 4.1 Package native terminal dependencies for bundled builds, installers, and updates without requiring end-user compilers.
 - [x] 4.2 Document authorization, one-terminal behavior, supported systems, lifecycle, privacy, and troubleshooting.
 - [x] 4.3 Exercise real Windows PTY/local attach behavior and the built distribution, not only mocked shell tests.
-- [ ] 4.4 Run repository tests/build/lint/version checks, mobile types, browser journeys, and scoped change review.
-- [ ] 4.5 Commit and push the integrated change to main without overwriting concurrent work.
+- [x] 4.4 Run repository tests/build/lint/version checks, mobile types, browser journeys, and scoped change review.
+- [x] 4.5 Commit and push the integrated change to main without overwriting concurrent work.

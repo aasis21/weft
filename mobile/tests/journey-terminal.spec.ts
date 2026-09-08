@@ -14,6 +14,22 @@ for (const layout of [
       await expect(page.locator('.weft-session')).toBeVisible();
       if (layout.width < 1024) await page.locator('.drawer-btn').click();
       await page.getByRole('button', { name: /Demo laptop/ }).first().click();
+      const actions = page.locator('.device-action-grid > button');
+      await expect(actions).toHaveCount(5);
+      const actionBounds = await actions.evaluateAll((buttons) =>
+        buttons.map((button) => {
+          const { top, width, height } = button.getBoundingClientRect();
+          return { top, width, height };
+        }),
+      );
+      const actionRows = new Map<number, number>();
+      for (const { top } of actionBounds) {
+        const row = Math.round(top);
+        actionRows.set(row, (actionRows.get(row) ?? 0) + 1);
+      }
+      expect([...actionRows.values()]).toEqual([3, 2]);
+      expect(actionBounds.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+      await page.locator('.device-quick-actions').screenshot({ path: testInfo.outputPath('quick-actions.png') });
       await expect(page.getByRole('button', { name: 'Open terminal', exact: true })).toBeEnabled();
       await page.getByRole('button', { name: 'Open terminal', exact: true }).click();
       await expect(page.getByRole('main', { name: 'Shared terminal' })).toBeVisible();

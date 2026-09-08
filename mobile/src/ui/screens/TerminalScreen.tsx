@@ -3,7 +3,7 @@ import type { JSX } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ListenerDeviceState } from '@/session/model';
-import { TerminalController, TERMINAL_GUIDANCE } from '@/session/runtime/terminalController';
+import { TerminalController, TERMINAL_GUIDANCE, type TerminalView } from '@/session/runtime/terminalController';
 import { deviceLabel } from './deviceDisplay';
 import { BackGlyph, TerminalGlyph } from './deviceGlyphs';
 import '@xterm/xterm/css/xterm.css';
@@ -25,7 +25,7 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
   const terminal = useRef<Terminal>();
   const fit = useRef<FitAddon>();
   const closeButton = useRef<HTMLButtonElement>(null);
-  const rendered = useRef<{ snapshot: typeof view.snapshot; seq: number }>({ snapshot: null, seq: -1 });
+  const renderView = useRef<(view: TerminalView) => void>();
   const replaying = useRef(false);
   const writing = useRef(false);
   const userScrollVersion = useRef(0);
@@ -94,8 +94,72 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
     terminalHost.addEventListener('pointerdown', userScroll);
     terminalHost.addEventListener('pointermove', pointerMove);
     terminalHost.addEventListener('keydown', userScroll);
-    rendered.current = { snapshot: null, seq: -1 };
+    let disposed = false;
+    let busy = false;
+    let pending: TerminalView | undefined;
+    let renderedSnapshot: TerminalView['snapshot'] = null;
+    let renderedSeq = -1;
+    const drain = (): void => {
+      if (disposed || busy || !pending) return;
+      const next = pending;
+      pending = undefined;
+      const snapshot = next.snapshot;
+      const isSnapshot = !!snapshot && snapshot !== renderedSnapshot;
+      const output = next.output.filter((chunk) => chunk.seq > (isSnapshot ? snapshot.seq : renderedSeq));
+      const state = next.state;
+      const resize = (): void => {
+        if (state && state.cols >= 20 && state.cols <= 240 && state.rows >= 5 && state.rows <= 100 &&
+          (term.cols !== state.cols || term.rows !== state.rows)) term.resize(state.cols, state.rows);
+      };
+      const viewport = term.buffer.active.viewportY;
+      const atBottom = viewport >= term.buffer.active.baseY;
+      const scrollVersion = userScrollVersion.current;
+      busy = true;
+      writing.current = true;
+      const finish = (): void => {
+        if (disposed) return;
+        if (scrollVersion === userScrollVersion.current) {
+          if (isSnapshot && atBottom) term.scrollToBottom();
+          else if (!atBottom) term.scrollToLine(Math.min(viewport, term.buffer.active.baseY));
+        }
+        writing.current = false;
+        busy = false;
+        setLatest(term.buffer.active.viewportY >= term.buffer.active.baseY);
+        drain();
+      };
+      const writeOutput = (): void => {
+        if (disposed) return;
+        replaying.current = false;
+        resize();
+        for (const chunk of output) renderedSeq = chunk.seq;
+        if (output.length) term.write(output.map((chunk) => chunk.data).join(''), finish);
+        else finish();
+      };
+      if (isSnapshot) {
+        replaying.current = true;
+        term.reset();
+        term.resize(snapshot.cols, snapshot.rows);
+        renderedSnapshot = snapshot;
+        renderedSeq = snapshot.seq;
+        term.write(snapshot.data, writeOutput);
+      } else writeOutput();
+    };
+    renderView.current = (next) => {
+      // Output is cumulative until the next snapshot. Keep only the newest bounded view
+      // while xterm parses; resets and resizes must wait for the previous write callback.
+      // An error invalidates input readiness, not an accepted screen still awaiting rendering.
+      const queuedSnapshot = pending?.snapshot;
+      pending = !next.snapshot && queuedSnapshot && queuedSnapshot.terminalId === next.state?.terminalId
+        ? { ...next, snapshot: queuedSnapshot }
+        : next;
+      drain();
+    };
     return () => {
+      disposed = true;
+      pending = undefined;
+      renderView.current = undefined;
+      replaying.current = false;
+      writing.current = false;
       controller.leave();
       observer.disconnect();
       media.removeEventListener('change', theme);
@@ -120,44 +184,8 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
   }, [direct, canInput]);
 
   useEffect(() => {
-    const term = terminal.current;
-    if (!term) return;
-    const snapshot = view.snapshot;
-    const isSnapshot = !!snapshot && snapshot !== rendered.current.snapshot;
-    const output = view.output.filter((chunk) => chunk.seq > (isSnapshot ? snapshot.seq : rendered.current.seq));
-    if (!isSnapshot && !output.length) return;
-    const viewport = term.buffer.active.viewportY;
-    const atBottom = viewport >= term.buffer.active.baseY;
-    const scrollVersion = userScrollVersion.current;
-    writing.current = true;
-    if (isSnapshot) {
-      replaying.current = true;
-      term.reset();
-      term.resize(snapshot.cols, snapshot.rows);
-      rendered.current = { snapshot, seq: snapshot.seq };
-      term.write(snapshot.data, () => { if (terminal.current === term) replaying.current = false; });
-    }
-    for (const chunk of output) rendered.current.seq = chunk.seq;
-    term.write(output.map((chunk) => chunk.data).join(''), () => {
-      if (terminal.current !== term) return;
-      // Anchor a stationary reader, but never undo a new user scroll during an async write.
-      if (isSnapshot) {
-        if (atBottom) term.scrollToBottom();
-        else term.scrollToLine(Math.min(viewport, term.buffer.active.baseY));
-      } else if (!atBottom && scrollVersion === userScrollVersion.current) {
-        term.scrollToLine(Math.min(viewport, term.buffer.active.baseY));
-      }
-      writing.current = false;
-      setLatest(term.buffer.active.viewportY >= term.buffer.active.baseY);
-    });
-  }, [view.snapshot, view.output]);
-
-  useEffect(() => {
-    const state = view.state;
-    if (state && terminal.current && state.cols >= 20 && state.cols <= 240 && state.rows >= 5 && state.rows <= 100) {
-      terminal.current.resize(state.cols, state.rows);
-    }
-  }, [view.state?.cols, view.state?.rows]);
+    renderView.current?.(view);
+  }, [view, controller]);
 
   const run = (): void => {
     if (!command.trim() || !controller.input(`${command.replace(/\r?\n/g, '\r')}\r`)) return;
@@ -209,7 +237,7 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
       {!view.state?.terminalId || closed ? (
         <div className="terminal-notice">
           <p>{closed ? 'This shell has ended. Opening a new shell will not repeat previous commands.' : TERMINAL_GUIDANCE}</p>
-          <button type="button" disabled={!view.connected || view.syncing} onClick={() => controller.open(device.lastProjectName)}>
+          <button type="button" disabled={!view.connected || view.syncing} onClick={() => controller.open()}>
             {closed ? 'Open new terminal' : 'Open terminal'}
           </button>
         </div>
@@ -225,7 +253,10 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
       </section>
       <div className="terminal-keys" role="toolbar" aria-label="Terminal special keys">
         {KEYS.map(([label, data]) => <button type="button" key={label} disabled={!canInput}
-          onClick={() => controller.input(data)}>{label}</button>)}
+          onClick={() => {
+            const applicationArrow = data.startsWith('\x1b[') && terminal.current?.modes.applicationCursorKeysMode;
+            controller.input(applicationArrow ? `\x1bO${data.slice(2)}` : data);
+          }}>{label}</button>)}
       </div>
       <section className="terminal-editor" aria-label="Command editor">
         <div className="terminal-editor-heading">
