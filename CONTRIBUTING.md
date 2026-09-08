@@ -5,6 +5,8 @@ features.
 
 ## Before coding
 
+- Read [`AGENTS.md`](AGENTS.md) for the repository architecture, compatibility rules,
+  validation commands, and version/release policy.
 - Search [existing issues](https://github.com/aasis21/weft/issues).
 - For a substantial behavior or protocol change, open an issue first so the approach and
   compatibility impact can be discussed.
