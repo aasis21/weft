@@ -245,37 +245,44 @@ function SessionPreview(): JSX.Element {
   );
 }
 
-function ThemeSelect(): JSX.Element {
+function ThemeToggle(): JSX.Element {
   const [theme, setSelectedTheme] = useState<ThemeSetting | null>(null);
+  const [systemDark, setSystemDark] = useState(() => globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
 
   useEffect(() => {
     let active = true;
     void getTheme().then((saved) => { if (active) setSelectedTheme(saved); });
     const unsubscribe = subscribeSettings((settings) => setSelectedTheme(settings.theme));
-    return () => { active = false; unsubscribe(); };
+    const media = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
+    const onChange = (): void => setSystemDark(media?.matches ?? false);
+    media?.addEventListener('change', onChange);
+    return () => { active = false; unsubscribe(); media?.removeEventListener('change', onChange); };
   }, []);
 
+  const dark = theme === 'dark' || ((theme === 'system' || theme === null) && systemDark);
+  const label = dark ? 'Switch to light mode' : 'Switch to dark mode';
   return (
-    <label className="product-theme">
-      <span>Theme</span>
-      <select
-        aria-label="Theme"
-        value={theme ?? 'system'}
-        disabled={theme === null}
-        onChange={(event) => {
-          const next = event.target.value;
-          if (next === 'light' || next === 'dark' || next === 'system') {
-            setSelectedTheme(next);
-            applyTheme(next);
-            void setTheme(next);
-          }
-        }}
-      >
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-    </label>
+    <button
+      type="button"
+      className="product-theme-toggle"
+      aria-label={label}
+      title={label}
+      disabled={theme === null}
+      onClick={() => {
+        const next = dark ? 'light' : 'dark';
+        setSelectedTheme(next);
+        applyTheme(next);
+        void setTheme(next);
+      }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        {dark ? (
+          <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>
+        ) : (
+          <path d="M20.8 13.2A9 9 0 0 1 10.8 3.2 9 9 0 1 0 20.8 13.2Z" />
+        )}
+      </svg>
+    </button>
   );
 }
 
@@ -309,7 +316,7 @@ export function LandingScreen({
           <a href="#features">Features</a>
           <a href={DOCS}>Docs</a>
           <a href="https://github.com/aasis21/weft">GitHub</a>
-          <ThemeSelect />
+          <ThemeToggle />
         </div>
       </nav>
       {showSessions ? (

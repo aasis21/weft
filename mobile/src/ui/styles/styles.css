@@ -1422,18 +1422,20 @@ pre {
   text-decoration: none;
 }
 .product-nav-links a:hover { color: var(--ink); }
-.product-theme { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.8rem; }
-.product-theme select {
-  width: auto;
+.product-theme-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 44px;
   min-height: 44px;
-  padding: 8px 10px;
+  padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
-  background: var(--panel-strong);
-  color: var(--ink);
-  font: inherit;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
 }
+.product-theme-toggle:hover { color: var(--ink); border-color: var(--accent); }
 .product-intro { min-width: 0; }
 .product-intro .lede { margin-bottom: 22px; font-size: 1.05rem; line-height: 1.7; }
 .product-pair-options { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 20px; }

@@ -25,7 +25,8 @@ from Netlify's `mobile/dist` app deployment.
   to the laptop; `/weft` belongs inside a Copilot session.
 - Keep site scripts and styles local. No session state or pairing payload should
   be read or stored by the documentation. Only the documentation theme preference
-  is stored locally; System follows the browser's color scheme, including without
+  is stored locally. The moon/sun button switches light and dark; until a preference
+  is chosen, the site follows the browser's color scheme, including without
   JavaScript. Print output stays light.
 
 ## Focused checks

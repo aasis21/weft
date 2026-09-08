@@ -78,5 +78,5 @@ test("documentation runs locally without remote scripts, styles, fonts, or Markd
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /:focus-visible/);
   assert.match(css, /@media print/);
-  assert.ok(document.querySelector('select[aria-label="Theme"]'));
+  assert.ok(document.querySelector('button#theme-toggle[aria-label="Switch to dark mode"]'));
 });

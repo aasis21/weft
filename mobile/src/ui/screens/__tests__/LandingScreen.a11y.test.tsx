@@ -67,7 +67,7 @@ describe('LandingScreen install command tabs accessibility', () => {
     );
 
     const steps = within(screen.getByRole('region', { name: 'How it works' })).getByRole('list');
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Theme' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Switch to .* mode/ })).toBeEnabled());
     const items = within(steps).getAllByRole('listitem');
     expect(items).toHaveLength(3);
     expect(items[0]).toHaveTextContent('Install on your laptop');
@@ -81,7 +81,7 @@ describe('LandingScreen install command tabs accessibility', () => {
       <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
     );
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Theme' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Switch to .* mode/ })).toBeEnabled());
     expect(screen.getAllByRole('link', { name: 'Privacy' })[0]).toHaveAttribute(
       'href',
       'https://github.com/aasis21/weft/blob/main/PRIVACY.md',

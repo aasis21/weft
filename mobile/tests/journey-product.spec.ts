@@ -8,25 +8,26 @@ const layouts = [
   { name: 'laptop', width: 1440, height: 900, touch: false },
 ];
 
-test('homepage theme choice persists and follows the system when requested', async ({ page }) => {
+test('homepage icon follows the system until a saved theme is chosen', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
-  const theme = page.getByRole('combobox', { name: 'Theme' });
+  const theme = page.getByRole('button', { name: /Switch to .* mode/ });
   await expect(theme).toBeEnabled();
-  await theme.selectOption('dark');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.reload();
-  await expect(theme).toHaveValue('dark');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await theme.selectOption('light');
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await theme.selectOption('system');
   await expect(page.locator('html')).not.toHaveAttribute('data-theme');
   await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(theme).toHaveAccessibleName('Switch to light mode');
   await expect(page.locator('html')).toHaveCSS('background-color', 'rgb(10, 14, 20)');
   await page.emulateMedia({ colorScheme: 'light' });
+  await expect(theme).toHaveAccessibleName('Switch to dark mode');
+  await theme.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(theme).toHaveAccessibleName('Switch to light mode');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await theme.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect(page.locator('html')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-  await theme.selectOption('dark');
+  await theme.click();
   await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
   await expect(page.locator('.weft-session')).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

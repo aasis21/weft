@@ -32,6 +32,7 @@ test.beforeEach(async ({ page }) => {
 
 for (const width of [320, 390, 768, 1440]) {
   test(`documentation navigation and deep links at ${width}px`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/handbook/');
     const menu = page.locator('#navigation');
@@ -56,21 +57,21 @@ for (const width of [320, 390, 768, 1440]) {
       .toHaveAttribute('href', 'https://useweft.netlify.app');
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
 
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(11, 17, 25)');
+    await expect(page.getByRole('button', { name: 'Switch to light mode' })).toBeVisible();
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(247, 248, 250)');
     for (const theme of ['dark', 'light']) {
-      await page.getByRole('combobox', { name: 'Theme' }).selectOption(theme);
+      await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await page.reload();
-      await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveValue(theme);
+      await expect(page.getByRole('button', { name: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` })).toBeVisible();
       const { violations } = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
       expect(violations).toEqual([]);
     }
-    await page.getByRole('combobox', { name: 'Theme' }).selectOption('system');
-    await expect(page.locator('html')).not.toHaveAttribute('data-theme');
-    await page.emulateMedia({ colorScheme: 'dark' });
-    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(11, 17, 25)');
-    await page.emulateMedia({ colorScheme: 'light' });
-    await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(247, 248, 250)');
   });
 }
 

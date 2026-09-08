@@ -37,9 +37,9 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 .header-links a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
 .app-link { padding: 7px 14px; border: 1px solid var(--line); border-radius: 8px; gap: 8px; }
 .header-links a:hover { color: var(--ink); text-decoration: underline; }
-.theme-control { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--muted); font-size: 13px; }
-.theme-control[hidden] { display: none; }
-.theme-control select { min-height: 44px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.theme-toggle { display: inline-grid; place-items: center; flex: 0 0 auto; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; }
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.theme-toggle[hidden], .theme-toggle[data-next-theme="light"] .icon-moon, .theme-toggle[data-next-theme="dark"] .icon-sun { display: none; }
 .theme-status { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
 .theme-status:empty { display: none; }
 .site-header { flex-wrap: wrap; }

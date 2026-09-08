@@ -23,16 +23,13 @@
       </svg>
       <span>weft <span class="brand-label">/ docs</span></span>
     </a>
-    <label class="theme-control" hidden>Theme
-        <select id="theme-select" aria-label="Theme">
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-    </label>
     <nav class="header-links" aria-label="Weft websites">
       <a href="https://github.com/aasis21/weft">GitHub</a>
       <a class="app-link" href="https://useweft.netlify.app">Product &amp; web app <span aria-hidden="true">&#8599;</span></a>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" title="Switch to dark mode" hidden>
+        <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.8 13.2A9 9 0 0 1 10.8 3.2 9 9 0 1 0 20.8 13.2Z"/></svg>
+        <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+      </button>
     </nav>
     <p id="theme-status" role="status" class="theme-status"></p>
   </header>

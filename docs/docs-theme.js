@@ -16,14 +16,24 @@
   apply();
 
   document.addEventListener("DOMContentLoaded", () => {
-    const select = document.querySelector("#theme-select");
+    const button = document.querySelector("#theme-toggle");
     const status = document.querySelector("#theme-status");
-    select.value = theme;
-    select.closest("label").hidden = false;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    function updateButton() {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      button.dataset.nextTheme = dark ? "light" : "dark";
+      const label = dark ? "Switch to light mode" : "Switch to dark mode";
+      button.setAttribute("aria-label", label);
+      button.title = label;
+    }
+    updateButton();
+    media.addEventListener("change", updateButton);
+    button.hidden = false;
     if (storageUnavailable) status.textContent = "Theme preferences cannot be saved in this browser.";
-    select.addEventListener("change", () => {
-      theme = select.value;
+    button.addEventListener("click", () => {
+      theme = button.dataset.nextTheme;
       apply();
+      updateButton();
       try {
         if (theme === "system") localStorage.removeItem(key);
         else localStorage.setItem(key, theme);
