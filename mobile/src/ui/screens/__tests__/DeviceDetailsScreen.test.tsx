@@ -588,17 +588,17 @@ describe('DeviceDetailsScreen monitoring', () => {
       expect(screen.queryByText(/enable unavailable utilities/)).toBeNull();
     });
 
-    it('shows authoritative remaining time on the action and Power card', () => {
+    it('shows authoritative remaining time only on the Keep Awake action', () => {
       renderDetails({ device: utilityDevice({ keepAwake: { pending: false, status: awakeStatus() }, cachedHealth: powerHealth({ onAcPower: true }) }) });
       expect(screen.getByRole('button', { name: /Keep Awake/ })).toHaveTextContent('15m left');
-      expect(screen.getByRole('group', { name: 'Power' })).toHaveTextContent('Keep Awake · 15m left');
+      expect(screen.getByRole('group', { name: 'Power' })).not.toHaveTextContent('Keep Awake');
     });
 
-    it('retains a single Power card and active utility status without monitoring support', () => {
+    it('retains a single focused Power card without monitoring support', () => {
       renderDetails({ device: utilityDevice({ capabilities: [DEVICE_CAPABILITY.KEEP_AWAKE_V1], keepAwake: { pending: false, status: awakeStatus() } }) });
       expect(screen.getAllByRole('group', { name: 'Power' })).toHaveLength(1);
       expect(screen.getByRole('group', { name: 'Power' })).toHaveTextContent('Power unavailable');
-      expect(screen.getByRole('group', { name: 'Power' })).toHaveTextContent('15m left');
+      expect(screen.getByRole('group', { name: 'Power' })).not.toHaveTextContent('15m left');
     });
 
     it('shows pending feedback on the action without inventing a successful lease', () => {
@@ -613,7 +613,7 @@ describe('DeviceDetailsScreen monitoring', () => {
       try {
         act(() => vi.advanceTimersByTime(60_000));
         expect(screen.getByRole('button', { name: /Keep Awake/ })).toHaveTextContent('14m left');
-        expect(screen.getByRole('group', { name: 'Power' })).toHaveTextContent('14m left');
+        expect(screen.getByRole('group', { name: 'Power' })).not.toHaveTextContent('14m left');
         expect(view.props.onStartDeviceKeepAwake).not.toHaveBeenCalled();
         expect(view.props.onStopDeviceKeepAwake).not.toHaveBeenCalled();
       } finally {

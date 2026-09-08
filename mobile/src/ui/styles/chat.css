@@ -2987,7 +2987,6 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.weft-session .device-awake-status { color: var(--success); }
 .weft-session .device-utility-support {
   margin: 0;
   color: var(--fg-dim);

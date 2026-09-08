@@ -115,10 +115,7 @@ function formatBytes(value: number | null): string | null {
   return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
 }
 
-function PowerCard({ system, remainingAwake }: {
-  system: DeviceSystemSnapshot | undefined;
-  remainingAwake: string | null;
-}): JSX.Element {
+function PowerCard({ system }: { system: DeviceSystemSnapshot | undefined }): JSX.Element {
   const batteryPercent = system?.batteryPercent ?? null;
   const source = batteryPercent !== null
     ? system?.batteryCharging === true || system?.onAcPower === true
@@ -130,7 +127,6 @@ function PowerCard({ system, remainingAwake }: {
       <span className="device-metric-name">Power</span>
       {batteryPercent !== null ? <strong>{formatPercent(batteryPercent)}</strong> : system?.onAcPower === true ? <strong>AC</strong> : null}
       {source ? <span className="device-metric-detail">{source}</span> : batteryPercent === null ? <span className="device-metric-detail">Power unavailable</span> : null}
-      {remainingAwake ? <span className="device-metric-detail device-awake-status">Keep Awake · {remainingAwake}</span> : null}
       {batteryPercent !== null ? (
         <span className="device-meter" aria-hidden="true"><i style={{ width: `${batteryPercent}%` }} /></span>
       ) : null}
@@ -567,7 +563,7 @@ export function DeviceDetailsScreen({
                     <span className="device-meter" aria-hidden="true"><i style={{ width: `${diskPercent}%` }} /></span>
                   </div>
                 ) : null}
-                <PowerCard system={system} remainingAwake={remainingAwake} />
+                <PowerCard system={system} />
               </div>
               {systemUnavailable ? (
                 <p className="device-monitor-partial">System metrics are temporarily unavailable.</p>
@@ -593,7 +589,7 @@ export function DeviceDetailsScreen({
             </div>
           )}
           {!health || (online && device.capabilities !== undefined && !monitoringSupported) ? (
-            <div className="device-metrics"><PowerCard system={undefined} remainingAwake={remainingAwake} /></div>
+            <div className="device-metrics"><PowerCard system={undefined} /></div>
           ) : null}
         </section>
 

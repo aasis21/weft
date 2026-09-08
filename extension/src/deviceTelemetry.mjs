@@ -50,6 +50,8 @@ public static class WeftPower {
   if ([WeftPower]::GetSystemPowerStatus([ref]$power)) {
     if ($power.ACLineStatus -eq 0) { $result.onAcPower = $false }
     if ($power.ACLineStatus -eq 1) { $result.onAcPower = $true }
+    if ($power.BatteryLifePercent -le 100) { $result.percent = [double]$power.BatteryLifePercent }
+    if ($power.BatteryFlag -notin @(128, 255)) { $result.charging = ($power.BatteryFlag -band 8) -ne 0 }
   } else { $result.powerUnavailable = $true }
 } catch { $result.powerUnavailable = $true }
 try {
@@ -58,7 +60,9 @@ try {
     if ($null -ne $battery.EstimatedChargeRemaining) { $result.percent = [double]$battery.EstimatedChargeRemaining }
     if ($null -ne $battery.BatteryStatus) { $result.charging = $battery.BatteryStatus -in @(6, 7, 8, 9) }
   }
-} catch { $result.batteryUnavailable = $true }
+} catch {
+  if ($null -eq $result.percent -and $null -eq $result.charging) { $result.batteryUnavailable = $true }
+}
 $result | ConvertTo-Json -Compress
 `;
 
