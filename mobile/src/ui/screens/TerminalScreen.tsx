@@ -10,8 +10,8 @@ import '@xterm/xterm/css/xterm.css';
 import '@/ui/styles/terminal.css';
 
 const KEYS = [
-  ['Ctrl+C', '\x03'], ['Esc', '\x1b'], ['Tab', '\t'], ['Up', '\x1b[A'],
-  ['Down', '\x1b[B'], ['Left', '\x1b[D'], ['Right', '\x1b[C'], ['Enter', '\r'],
+  ['Ctrl+C', '\x03'], ['Esc', '\x1b'], ['Tab', '\t'], ['Enter', '\r'],
+  ['Up', '\x1b[A'], ['Down', '\x1b[B'], ['Left', '\x1b[D'], ['Right', '\x1b[C'],
 ] as const;
 
 export function TerminalScreen({ device, controller, onBack, onReconnect }: {
@@ -21,6 +21,7 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
   onReconnect(): void;
 }): JSX.Element {
   const view = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const screenRoot = useRef<HTMLElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal>();
   const fit = useRef<FitAddon>();
@@ -30,12 +31,10 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
   const writing = useRef(false);
   const userScrollVersion = useRef(0);
   const [command, setCommand] = useState('');
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const draft = useRef('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [latest, setLatest] = useState(true);
   const [confirmClose, setConfirmClose] = useState(false);
-  const [direct, setDirect] = useState(false);
   const [rendererError, setRendererError] = useState<string | null>(null);
   const canInput = controller.canInput();
   const canResize = controller.canResize();
@@ -44,6 +43,23 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
   useEffect(() => {
     controller.setConnected(device.connected);
   }, [controller, device.connected]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = (): void => {
+      if (viewport.scale !== 1) return;
+      screenRoot.current?.style.setProperty('--terminal-height', `${viewport.height}px`);
+      screenRoot.current?.style.setProperty('--terminal-top', `${viewport.offsetTop}px`);
+    };
+    update();
+    viewport.addEventListener('resize', update);
+    viewport.addEventListener('scroll', update);
+    return () => {
+      viewport.removeEventListener('resize', update);
+      viewport.removeEventListener('scroll', update);
+    };
+  }, []);
 
   useEffect(() => {
     if (!controller.getSnapshot().attached) controller.enter();
@@ -94,6 +110,17 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
     terminalHost.addEventListener('pointerdown', userScroll);
     terminalHost.addEventListener('pointermove', pointerMove);
     terminalHost.addEventListener('keydown', userScroll);
+    const paste = (event: ClipboardEvent): void => {
+      if (!event.clipboardData) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const text = event.clipboardData.getData('text/plain');
+      if (text) {
+        setCommand(text);
+        setEditorOpen(true);
+      }
+    };
+    terminalHost.addEventListener('paste', paste, true);
     let disposed = false;
     let busy = false;
     let pending: TerminalView | undefined;
@@ -171,6 +198,7 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
       terminalHost.removeEventListener('pointerdown', userScroll);
       terminalHost.removeEventListener('pointermove', pointerMove);
       terminalHost.removeEventListener('keydown', userScroll);
+      terminalHost.removeEventListener('paste', paste, true);
       term.dispose();
       terminal.current = undefined;
       fit.current = undefined;
@@ -180,8 +208,27 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
   useEffect(() => {
     const term = terminal.current;
     if (!term) return;
-    term.options.disableStdin = !direct || !canInput;
-  }, [direct, canInput]);
+    term.options.disableStdin = !canInput;
+  }, [canInput, controller]);
+
+  useEffect(() => {
+    const element = host.current;
+    if (!element || !canResize || !canInput || rendererError || view.error) return;
+    let frame = 0;
+    const resize = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!controller.canResize() || !controller.canInput() || controller.getSnapshot().error) return;
+        const size = fit.current?.proposeDimensions();
+        if (size) controller.resize(size.cols, size.rows);
+      });
+    };
+    // Only the input owner adapts the shared grid, including when the phone keyboard opens.
+    const observer = new ResizeObserver(resize);
+    observer.observe(element);
+    resize();
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [controller, canResize, canInput, rendererError, view.error]);
 
   useEffect(() => {
     renderView.current?.(view);
@@ -189,49 +236,53 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
 
   const run = (): void => {
     if (!command.trim() || !controller.input(`${command.replace(/\r?\n/g, '\r')}\r`)) return;
-    setHistory((items) => [command, ...items.filter((item) => item !== command)].slice(0, 30));
-    setHistoryIndex(-1);
     setCommand('');
-    draft.current = '';
-  };
-  const recall = (direction: number): void => {
-    if (historyIndex === -1) draft.current = command;
-    const next = Math.min(history.length - 1, Math.max(-1, historyIndex + direction));
-    setHistoryIndex(next);
-    setCommand(next < 0 ? draft.current : history[next]!);
   };
   const fitPhone = (): void => {
     const dimensions = fit.current?.proposeDimensions();
     if (dimensions) controller.resize(dimensions.cols, dimensions.rows);
   };
+  const showKeyboard = (): void => {
+    if (!controller.canInput() || !terminal.current) return;
+    setEditorOpen(false);
+    terminal.current.options.disableStdin = false;
+    terminal.current.focus();
+  };
 
   return (
-    <main className="terminal-screen" aria-label="Shared terminal">
+    <main ref={screenRoot} className="terminal-screen" aria-label="Shared terminal">
       <header className="terminal-header">
         <button type="button" className="icon-btn" aria-label="Back to device" onClick={onBack}><BackGlyph /></button>
         <span className="device-action-icon" aria-hidden="true"><TerminalGlyph /></span>
-        <div><h1>Terminal</h1><p>{deviceLabel(device)} - one shared shell</p></div>
+        <div><h1>Terminal</h1><p>{deviceLabel(device)}</p></div>
         <button type="button" ref={closeButton} disabled={!view.state?.terminalId || closed || !view.connected}
           onClick={() => setConfirmClose(true)}>Close</button>
       </header>
       <section className="terminal-status" aria-label="Terminal status">
-        <span role="status">{!view.connected ? 'Disconnected' : closed ? 'Shell closed' :
+        <span className="terminal-connection" data-connected={view.connected && !closed && !view.error} role="status">{!view.connected ? 'Disconnected' : closed ? 'Shell closed' :
           view.state?.status === 'error' ? 'Terminal error' :
           view.syncing ? 'Syncing terminal...' : view.state?.status === 'open' ? 'Connected' : 'No terminal attached'}</span>
-        <span>{view.state?.owner === 'phone' ? 'You have control' :
+        <span className="terminal-owner">{view.state?.owner === 'phone' ? 'You have control' :
           view.state?.owner === 'laptop' ? 'Laptop has control' : 'No input owner'}</span>
-        {view.state?.shell ? <span>{view.state.shell}</span> : null}
-        {view.state?.cwd ? (
-          <span className="terminal-cwd" title={`Initial workspace: ${view.state.cwd}`}>
-            Started in: {view.state.cwd}
-          </span>
-        ) : null}
         {view.state?.owner !== 'phone' && !closed && view.state?.terminalId ? (
           <button type="button" disabled={!view.connected || view.syncing} onClick={() => controller.claim()}>Take control</button>
         ) : null}
-        <button type="button" onClick={() => { onReconnect(); controller.reattach(); }}>Reattach</button>
-        <button type="button" disabled={!canResize} onClick={fitPhone}>Fit to phone</button>
+        <button type="button" className="terminal-details-toggle" aria-expanded={detailsOpen}
+          aria-controls="terminal-details" onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>
       </section>
+      {detailsOpen ? (
+        <section id="terminal-details" className="terminal-details" aria-label="Terminal details">
+          {view.state?.shell ? <strong>{view.state.shell}</strong> : null}
+          {view.state?.cwd ? (
+            <span className="terminal-cwd" title={`Initial workspace: ${view.state.cwd}`}>
+              Started in: {view.state.cwd}
+            </span>
+          ) : null}
+          <p>One shell shared with your laptop. Commands run with your account permissions, not in a sandbox.
+            Leaving this page keeps the shell running.</p>
+          <button type="button" onClick={() => { onReconnect(); controller.reattach(); }}>Reattach</button>
+        </section>
+      ) : null}
       {view.error || rendererError ? <p className="terminal-notice" role="alert">{rendererError ?? view.error}</p> : null}
       {view.snapshot?.truncated ? <p className="terminal-notice">Earlier scrollback was omitted from this bounded snapshot.</p> : null}
       {!view.state?.terminalId || closed ? (
@@ -253,32 +304,35 @@ export function TerminalScreen({ device, controller, onBack, onReconnect }: {
       </section>
       <div className="terminal-keys" role="toolbar" aria-label="Terminal special keys">
         {KEYS.map(([label, data]) => <button type="button" key={label} disabled={!canInput}
+          onPointerDown={(event) => event.preventDefault()}
           onClick={() => {
             const applicationArrow = data.startsWith('\x1b[') && terminal.current?.modes.applicationCursorKeysMode;
             controller.input(applicationArrow ? `\x1bO${data.slice(2)}` : data);
           }}>{label}</button>)}
       </div>
-      <section className="terminal-editor" aria-label="Command editor">
+      <div className="terminal-actions" aria-label="Terminal controls">
+        <button type="button" disabled={!canInput || !!rendererError} onClick={showKeyboard}>Keyboard</button>
+        <button type="button" aria-expanded={editorOpen} aria-controls="terminal-editor"
+          onClick={() => setEditorOpen(!editorOpen)}>Write / paste</button>
+        <button type="button" disabled={!canResize || !!rendererError} onClick={fitPhone}>Fit to phone</button>
+      </div>
+      {editorOpen ? <section id="terminal-editor" className="terminal-editor" aria-label="Command editor">
         <div className="terminal-editor-heading">
           <label htmlFor="terminal-command">Command</label>
-          <button type="button" disabled={!canInput} aria-pressed={direct}
-            onClick={() => { setDirect(!direct); if (!direct) terminal.current?.focus(); }}>Direct typing</button>
-          <button type="button" disabled={!history.length || historyIndex === history.length - 1}
-            aria-label="Previous command" onClick={() => recall(1)}>Previous</button>
-          <button type="button" disabled={historyIndex < 0} aria-label="Next command" onClick={() => recall(-1)}>Next</button>
+          <span>Draft first. Run when ready.</span>
         </div>
-        <textarea id="terminal-command" rows={3} maxLength={16384} value={command} autoCapitalize="off" autoCorrect="off"
-          spellCheck={false} placeholder="Write a command, then tap Run"
+        <textarea id="terminal-command" rows={2} maxLength={16384} value={command} autoCapitalize="off" autoCorrect="off"
+          autoFocus spellCheck={false} placeholder="Write or paste a command"
           onChange={(event) => setCommand(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
             event.preventDefault(); run();
           } }} />
         <div className="terminal-editor-footer">
-          <small>Runs with laptop account permissions, not in a sandbox. Leaving only detaches output.</small>
+          <small>Pasting here never runs a command automatically.</small>
           <button type="button" className="primary-action" disabled={!canInput || !command.trim() || view.pendingInput}
             onClick={run}>Run</button>
         </div>
-      </section>
+      </section> : null}
       {confirmClose ? (
         <div className="terminal-confirm-backdrop">
         <div className="terminal-confirm" role="dialog" aria-modal="true" aria-labelledby="terminal-close-title"

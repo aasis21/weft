@@ -105,8 +105,12 @@ With Station running, choose **Open terminal** on the phone's device page. Stati
 creates one shell and a visible local attach window, or reconnects to the existing
 terminal. A registered workspace is the initial directory, not a sandbox.
 
-The phone offers a command editor, direct terminal input, special keys, and input
-ownership. Leaving its terminal page does not end the shell. Confirmed **Close
+Tap **Keyboard** to type at the real prompt, with visible special keys and shell
+history via Up/Down. **Write / paste** opens an optional draft editor; clipboard
+paste into the terminal also goes there for review, never automatic execution.
+While the phone owns input, the shared grid fits its available display, including
+keyboard changes. **Details** contains the starting directory and **Reattach**.
+Leaving the terminal page does not end the shell. Confirmed **Close
 terminal**, closing the owned laptop window, or stopping Station ends it. Reconnect
 restores bounded screen state; never automatically repeat an uncertain command.
 

@@ -11,6 +11,8 @@ const renderer = vi.hoisted(() => ({
   write: vi.fn(),
   reset: vi.fn(),
   resize: vi.fn(),
+  focus: vi.fn(),
+  open: vi.fn(),
   deferWrites: false,
   pendingWrites: [] as (() => void)[],
   text: '',
@@ -29,7 +31,7 @@ vi.mock('@xterm/xterm', () => ({
     buffer = { active: renderer.active };
     parser = { registerOscHandler: renderer.clipboard.mockReturnValue({ dispose: vi.fn() }) };
     loadAddon = vi.fn();
-    open = vi.fn();
+    open = renderer.open;
     onData = (fn: (data: string) => void) => { renderer.data = fn; return { dispose: vi.fn() }; };
     onScroll = (fn: () => void) => { renderer.scroll = fn; return { dispose: vi.fn() }; };
     reset = () => { renderer.reset(); renderer.text = ''; };
@@ -51,7 +53,7 @@ vi.mock('@xterm/xterm', () => ({
     };
     scrollToBottom = vi.fn();
     scrollToLine = renderer.scrollToLine;
-    focus = vi.fn();
+    focus = renderer.focus;
     dispose = vi.fn();
   },
 }));
@@ -74,14 +76,17 @@ beforeEach(() => {
   renderer.reset.mockClear();
   renderer.resize.mockClear();
   renderer.write.mockClear();
+  renderer.focus.mockClear();
+  renderer.open.mockReset();
   renderer.scrollToLine.mockClear();
 });
-afterEach(() => controller?.dispose());
+afterEach(() => { controller?.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function setup(owner: 'phone' | 'laptop' = 'phone', deviceOverrides: Partial<ListenerDeviceState> = {}) {
   const sent: EventEnvelope[] = [];
+  const send = vi.fn(async (message: EventEnvelope) => { sent.push(message); });
   controller = new TerminalController({
-    send: async (message) => { sent.push(message); },
+    send,
     capabilities: () => ['device-terminal-v1'],
   });
   controller.setConnected(true);
@@ -98,7 +103,7 @@ function setup(owner: 'phone' | 'laptop' = 'phone', deviceOverrides: Partial<Lis
   const acknowledge = (nextInputSeq: number) => act(() => controller.receive(terminalState({
     ...state, requestId: requests().at(-1)!.requestId, nextInputSeq,
   })));
-  return { ...result, requests, acknowledge };
+  return { ...result, requests, acknowledge, send };
 }
 
 describe('TerminalScreen', () => {
@@ -145,7 +150,7 @@ describe('TerminalScreen', () => {
     act(() => renderer.pendingWrites.shift()!());
     expect(renderer.text).toBe('SECOND SNAPSHOT QUERY-LIVE');
     expect(controller.canInput()).toBe(false);
-    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Keyboard' })).toBeDisabled();
     expect(screen.getByRole('alert')).toHaveTextContent('Snapshot unavailable.');
   });
 
@@ -188,18 +193,106 @@ describe('TerminalScreen', () => {
     expect(h.requests().at(-1)?.projectName).toBeUndefined();
   });
 
-  it('edits multiline commands without sending until Run and recalls only in memory', () => {
+  it('keeps optional details and editor collapsed, and submits multiline drafts only on Run', () => {
     const h = setup();
+    expect(screen.queryByLabelText('Command')).not.toBeInTheDocument();
+    expect(screen.queryByText('Started in: C:\\project')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Previous command' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getByText('Started in: C:\\project')).toHaveAttribute('title', 'Initial workspace: C:\\project');
+    fireEvent.click(screen.getByRole('button', { name: 'Write / paste' }));
     fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'first\nsecond' } });
     expect(h.requests().filter((r) => r.action === 'input')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Run' }));
     expect(h.requests().at(-1)).toMatchObject({ action: 'input', data: 'first\rsecond\r', inputSeq: 1 });
     expect(screen.getByLabelText('Command')).toHaveValue('');
     h.acknowledge(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Previous command' }));
-    expect(screen.getByLabelText('Command')).toHaveValue('first\nsecond');
     expect(JSON.stringify(localStorage)).not.toContain('first');
+  });
+
+  it('keeps a draft across editor toggles without submitting or focusing the terminal automatically', () => {
+    const h = setup();
+    expect(renderer.focus).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Write / paste' }));
+    fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'unsent draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard' }));
+    expect(renderer.focus).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('Command')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Write / paste' }));
+    expect(screen.getByLabelText('Command')).toHaveValue('unsent draft');
+    expect(h.requests().filter((r) => r.action === 'input')).toHaveLength(0);
+  });
+
+  it('routes terminal clipboard paste to the draft without executing any input', () => {
+    const h = setup();
+    fireEvent.paste(h.container.querySelector('.terminal-host')!, {
+      clipboardData: { getData: () => 'first\nsecond\n' },
+    });
+    expect(screen.getByLabelText('Command')).toHaveValue('first\nsecond\n');
+    expect(h.requests().filter((r) => r.action === 'input')).toHaveLength(0);
+  });
+
+  it('fits the shared grid only while the phone owns connected input', () => {
+    vi.useFakeTimers();
+    const h = setup();
+    act(() => vi.advanceTimersByTime(20));
+    expect(h.requests().at(-1)).toMatchObject({ action: 'resize', cols: 42, rows: 18 });
+    act(() => controller.receive(terminalState({
+      ...controller.getSnapshot().state!, requestId: h.requests().at(-1)!.requestId, cols: 42, rows: 18,
+    })));
+    act(() => vi.advanceTimersByTime(20));
+    expect(h.requests().filter((r) => r.action === 'resize')).toHaveLength(1);
+    act(() => controller.receive(terminalState({
+      ...controller.getSnapshot().state!, requestId: null, owner: 'laptop', cols: 80, rows: 24,
+    })));
+    act(() => vi.advanceTimersByTime(20));
+    expect(renderer.options.disableStdin).toBe(true);
+    expect(h.requests().filter((r) => r.action === 'resize')).toHaveLength(1);
+    h.unmount();
+  });
+
+  it('follows the visual viewport around the keyboard without interfering with pinch zoom', () => {
+    const viewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0, scale: 1 });
+    const remove = vi.spyOn(viewport, 'removeEventListener');
+    vi.stubGlobal('visualViewport', viewport);
+    const h = setup();
+    const root = screen.getByRole('main', { name: 'Shared terminal' });
+    expect(root.style.getPropertyValue('--terminal-height')).toBe('844px');
+    viewport.height = 420;
+    viewport.offsetTop = 12;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(root.style.getPropertyValue('--terminal-height')).toBe('420px');
+    expect(root.style.getPropertyValue('--terminal-top')).toBe('12px');
+    viewport.scale = 2;
+    viewport.height = 210;
+    act(() => viewport.dispatchEvent(new Event('resize')));
+    expect(root.style.getPropertyValue('--terminal-height')).toBe('420px');
+    h.unmount();
+    expect(remove).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(remove).toHaveBeenCalledWith('scroll', expect.any(Function));
+  });
+
+  it('does not start an automatic retry loop after a resize transport failure', async () => {
+    vi.useFakeTimers();
+    const h = setup();
+    h.send.mockRejectedValueOnce(new Error('Connection failed'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(screen.getByRole('alert')).toBeVisible();
+    expect(h.send.mock.calls.filter(([message]) => (message.msg as TerminalRequestMsg).action === 'resize'))
+      .toHaveLength(1);
+    h.unmount();
+  });
+
+  it('leaves the failure visible instead of trying to fit a renderer that could not open', () => {
+    vi.useFakeTimers();
+    renderer.open.mockImplementationOnce(() => { throw new Error('Renderer unavailable'); });
+    const h = setup();
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('alert')).toHaveTextContent('renderer could not start');
+    expect(screen.getByRole('button', { name: 'Keyboard' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Fit to phone' })).toBeDisabled();
+    expect(h.requests().filter((r) => r.action === 'resize')).toHaveLength(0);
+    h.unmount();
   });
 
   it('blocks snapshot-generated responses and clipboard escapes, and supports explicit interactive input', () => {
@@ -208,7 +301,7 @@ describe('TerminalScreen', () => {
     expect(renderer.clipboard).toHaveBeenCalledWith(52, expect.any(Function));
     const osc = renderer.clipboard.mock.calls.at(-1)![1] as () => boolean;
     expect(osc()).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Direct typing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard' }));
     expect(renderer.options.disableStdin).toBe(false);
     act(() => renderer.data?.('q'));
     expect(h.requests().at(-1)).toMatchObject({ action: 'input', data: 'q' });
@@ -219,7 +312,7 @@ describe('TerminalScreen', () => {
 
   it('shows ownership and never emits terminal-generated responses as a spectator', () => {
     const h = setup('laptop');
-    expect(screen.getByRole('button', { name: 'Run' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Keyboard' })).toBeDisabled();
     act(() => renderer.data?.('\x1b[0n'));
     expect(h.requests().filter((r) => r.action === 'input')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Take control' }));

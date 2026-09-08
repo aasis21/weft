@@ -46,22 +46,29 @@ macOS and Linux, but this shared terminal backend is Windows-only.
 
 ## Work from the phone
 
-- Edit or paste a command in the command editor, then choose **Run**. Nothing is
-  submitted merely by pasting it.
-- Recall recent commands in the phone's in-memory history and edit before sending.
-- Use direct terminal input for interactive programs. The special-key controls send
-  Enter, Tab, Escape, arrows, and Ctrl+C to the existing terminal.
+- Tap **Keyboard** and type at the real shell prompt. Press Enter to submit; use
+  Up and Down for the shell's history or navigation in an interactive program.
+- Ctrl+C, Esc, Tab, Enter, and arrow keys stay visible below the terminal. Tapping
+  them keeps the phone keyboard open.
+- For a longer command, expand **Write / paste**, prepare your draft, then choose
+  **Run** (or Ctrl+Enter / Command+Enter). Pasting into the terminal also opens this
+  editor for review instead of sending clipboard text directly to the shell.
+  Closing the editor preserves its unsent draft while this page stays open.
 - Read and select output without being forced back to the bottom. Use the
   return-to-latest control when ready to follow output again.
 - Check who has input control. Choose **Take control** before typing if the laptop
   currently controls the terminal. Local interaction can take control back.
+- Open **Details** for the shell, starting directory, permission reminder, and
+  **Reattach** control. The starting directory is not a live working-directory display.
 
 The shell determines what input means. If a program is asking a question, submitted
 text answers that program; it is not automatically a new shell command. Ctrl+C is
 an interrupt request, not a guarantee that every program exits.
 
-Both views use one terminal grid. A wide terminal can require horizontal movement
-on a narrow phone, especially for full-screen applications.
+Both views use one terminal grid. While the phone owns input, that grid fits its
+available display and adjusts when the phone keyboard opens or closes. **Fit to phone**
+also lets you request a fit explicitly. While the laptop owns input, the phone leaves
+the grid unchanged; a wide terminal can require horizontal movement.
 
 ## Leaving, reconnecting, and closing
 
