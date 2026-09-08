@@ -1,16 +1,28 @@
-# Weft setup & developer guide
+# Developer setup
 
 [Documentation handbook](https://aasis21.github.io/weft/#development) ·
 [Install the prebuilt release](https://aasis21.github.io/weft/#quickstart)
 
-The developer workflow runs locally with **no Supabase and no phone** via the
-in-process harness and the mobile Demo/Simulator. A real relay and paired device
-are needed to validate cross-device connectivity.
+This guide is for changing Weft itself. To use Weft without a source checkout,
+follow the [installation quickstart](https://aasis21.github.io/weft/#quickstart).
+
+Work in this order: install dependencies, exercise the local harness and demo,
+then install your source build and try a real phone. Local simulation needs no
+Supabase project or phone; it does not prove cross-device connectivity.
+
+- [Prerequisites and dependencies](#prerequisites)
+- [Local validation](#verify-everything-no-network-no-phone)
+- [Demo and simulator](#run-the-mobile-demosimulator)
+- [Install and pair a source build](#run-the-real-extension-under-copilot-cli-the-real-test)
+- [Deployments](#shipping-it-environments)
+- [Custom Supabase](#wire-your-own-supabase-project)
+- [Dev Tunnel lifecycle](#pairing-with-the-devtunnel-transport)
 
 ## Prerequisites
 
 - Node.js 20 or newer.
-- For the mobile app on a device: Android Studio + SDK (a web/demo build needs neither).
+- For the hosted web app and demo: a current browser.
+- Only for building the native Android shell: Android Studio + Android SDK.
 - The Copilot CLI extension uses `@github/copilot-sdk`, which the CLI provides at
   runtime — you do **not** install it to run the extension under `copilot`.
 
@@ -18,10 +30,13 @@ are needed to validate cross-device connectivity.
 
 ```sh
 cd weft
-npm install --workspaces --include-workspace-root          # resolves the npm workspaces: shared, extension, mobile
+npm ci --workspaces --include-workspace-root
 ```
 
 ## Verify everything (no network, no phone)
+
+After dependencies are installed, these checks exercise core flows without an
+external relay or physical phone:
 
 ```sh
 # 1. Shared contracts: crypto, pairing handshake, transport, message round-trips
@@ -37,6 +52,12 @@ npm run build -w @aasis21/weft-extension   # -> extension/dist/extension.mjs
 # 4. Build the mobile app (Vite production build)
 npm run build -w @aasis21/weft-mobile
 ```
+
+For the repository-wide checks, run `npm test`, `npm run build`, `npm run lint`,
+and `npm run check-version`. Mobile type tests use
+`npm run test:types -w @aasis21/weft-mobile`. For browser journeys, install the
+Playwright runtimes once with `npx playwright install chromium webkit`, then run
+`npm run test:e2e -w @aasis21/weft-mobile`.
 
 ## Run the mobile Demo/Simulator
 
@@ -89,32 +110,47 @@ configured yet.
   Safari and Firefox use the in-page jsQR fallback.
 - **Android development shell:** Weft does not currently publish an APK. Debug,
   unversioned, and third-party APKs are not supported release artifacts.
-- **Local dev server:** `cd mobile && npm run dev -- --host`, open the printed LAN URL on
-  your phone (the same in-browser camera scanner as the hosted app; manual paste is
-  available on keyboard-and-mouse devices).
+- **Local dev server:** `cd mobile && npm run dev` serves the demo on your development
+  computer. For a physical phone, use an HTTPS-served development deployment:
+  an ordinary HTTP LAN address is not a secure context for camera and Web Crypto
+  APIs. Manual paste is available on keyboard-and-mouse devices, not touch-only phones.
 
 Developers who need to build the native shell from source can run `npx cap sync android`
 and use Android Studio, but that build is not a distributed release APK.
 
-> The hosted site is a static deploy of `mobile/dist` on Netlify (site `useweft`,
-> team `aasis21`). It points at the same public relay as everything else; the embedded
-> publishable key is client-safe and the channel is guarded by RLS + end-to-end AES-256-GCM.
-> Redeploy after a change with `npm run build -w @aasis21/weft-mobile` then a Netlify deploy
-> of `mobile/dist` (or connect the repo — `netlify.toml` already has the build config).
+**3. Pair and drive it.** Run `weft start` and leave the Device Station terminal open.
+Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
+code. The phone can then start or resume Copilot sessions in registered projects.
+For a source-built phone UI, use your HTTPS development deployment instead.
+
+Keep the same browser identity when testing reconnection. If its storage has been
+cleared, stop the station and follow
+[phone replacement](https://aasis21.github.io/weft/#recovery). Do not reset pairing
+as a substitute for diagnosing a relay problem.
+
+To mirror one existing Copilot session, run `/weft` inside that session instead.
+See [advanced usage](./advanced.md) for per-session transport overrides.
+
+> The web app is a static build of `mobile/dist`; the docs site is the separate
+> `docs/` tree on GitHub Pages. The phone reads relay details from its pairing QR,
+> so a custom relay does not require a separate web-app build. Deploy the app using
+> the release scripts or workflows below so hosted installers and the release
+> manifest stay consistent with the app.
 
 ### Shipping it: environments
 
-`ship.sh` / `ship.ps1` deploy to Netlify from a laptop. The same scripts also run in CI, via two
-manually-dispatched GitHub Actions workflows that differ only in which GitHub Environment (and so
-which `NETLIFY_SITE_ID`) they use:
+`ship.sh` / `ship.ps1` deploy to Netlify from a laptop. GitHub Actions uses `ship.sh`
+with the target environment's site configuration. The test and production workflows
+have different triggers and publication rules:
 
 | Workflow | Environment | Netlify site | URL | Triggers |
 | --- | --- | --- | --- | --- |
 | `Deploy Netlify Production` | `production` | `useweft` | <https://useweft.netlify.app> | manual only |
-| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> | push to `main` + manual |
+| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> | successful `main` CI + manual |
 
-The test site auto-deploys on every push to `main`, so it always mirrors the tip of the default
-branch. Production never deploys automatically — it is always an explicit dispatch:
+The test workflow runs after CI succeeds on `main` and checks out that CI run's commit.
+A successful deployment publishes that validated commit; a pending or failed deployment
+leaves the previous site in place. Production requires an explicit dispatch:
 
 ```sh
 gh workflow run "Deploy Netlify Production" --repo aasis21/weft
@@ -129,8 +165,8 @@ gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=previe
 
 `mode=preview` (the default for a manual run) is a Netlify *draft* deploy: it publishes to a unique
 throwaway URL and leaves `useweft-test.netlify.app` alone, so several branches can be in flight at
-once. `mode=live` overwrites the shared test site — which is also what a push to `main` does, since
-push events carry no inputs. The resulting URL is printed in the run's job summary.
+once. `mode=live` overwrites the shared test site, as does the automatic deployment after
+successful `main` CI. The resulting URL is printed in the run's job summary.
 
 Each environment holds `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`. The installers are checked in
 with the production origin as their default, so at deploy time the ship scripts resolve the target
@@ -138,24 +174,6 @@ site's real URL and rewrite the `mobile/dist` copies of `install.sh` / `install.
 sources) — a test deploy therefore serves an installer that pulls *its own* bundles. (A preview
 deploy retargets to the test site's canonical URL, not the throwaway draft URL, since the draft URL
 is only known after the upload.)
-
-**3. Pair and drive it.** Run `weft start` and leave the Device Station terminal open.
-Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
-code. The phone can then start or resume Copilot sessions in registered projects.
-Application session payloads on the relay are AES-256-GCM encrypted; public
-handshake values and connection metadata remain visible.
-
-If the phone has changed or its browser/app storage was cleared, stop the running
-station and use `weft start --new-device`, then scan the fresh QR. This replaces the
-old trusted phone identity. See [pairing and recovery](https://aasis21.github.io/weft/#pairing).
-
-To mirror only one Copilot session instead, start `copilot` and run `/weft` inside it.
-That per-session flow and transport overrides are documented in
-[`advanced.md`](./advanced.md).
-
-The phone stores transcripts, session metadata, settings, and pairing keys locally so it
-can restore sessions after a reload. Persistent Device Station identity and configuration
-stay under `~/.weft/` on the laptop. Relay infrastructure stores no session content.
 
 ## Updating an installed laptop
 
@@ -170,14 +188,11 @@ configuration, registered projects, and persistent pairing material. Restart Cop
 or Device Station after updating. PWA updates arrive through the browser; close and reopen
 the installed PWA if a newly published version is not visible.
 
-On first pair the app asks for **notification permission**. Grant it so that, when you've
-walked away and the app is backgrounded, the phone buzzes and raises a heads-up banner the
-moment Copilot pauses for an approval (or the session goes quiet). Alerts carry only the
-tool *name* — never arguments or stream content — and Weft does not write notification
-content to relay storage. While the app is in the foreground the on-screen approval card is
-used instead of a banner. (This
-covers the phone-in-hand / app-recent case; full wake-from-killed delivery via FCM is a
-planned follow-up.)
+Notification behavior depends on the browser and operating system. Exercise permission
+prompts and background behavior on a real device; do not treat the local demo as proof of
+notification delivery. The session thread remains the place to review pending approvals.
+Do not promise that a backgrounded or killed PWA will wake for a request. See the
+[notification limitations](https://aasis21.github.io/weft/#notifications).
 
 ## Wire your own Supabase project
 

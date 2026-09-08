@@ -12,6 +12,13 @@ from Netlify's `mobile/dist` app deployment.
 
 ## Content changes
 
+- Organize the handbook by reader task: first connection, everyday use, recovery
+  and safety, then command/operator/developer reference. Keep sidebar order equal
+  to document order so reading and navigation tell the same story.
+- Keep the existing theme and compact navigation. Prefer clearer headings,
+  concrete steps, expected results, and symptom-to-fix links over marketing copy.
+- Describe implemented behavior, not planned features. In particular, Device
+  Station is not a general-purpose file browser or remote terminal.
 - Keep primary tasks complete in the handbook. The sidebar and guide directory
   should lead to real sections, not raw Markdown downloads.
 - Markdown files remain detailed repository references, rendered by GitHub.
@@ -28,6 +35,22 @@ from Netlify's `mobile/dist` app deployment.
   is stored locally. The moon/sun button switches light and dark; until a preference
   is chosen, the site follows the browser's color scheme, including without
   JavaScript. Print output stays light.
+
+## Check claims against the implementation
+
+| Documentation topic | Source of truth |
+| --- | --- |
+| CLI commands, updates, and installation effects | `extension/bin/weft.mjs` |
+| Registered projects and default folders | `extension/src/projects.mjs` |
+| Relay settings and persistent identity | `extension/src/transportConfig.mjs`, `extension/src/pairingIdentity.mjs`, `shared/pairing.mjs` |
+| Phone workflow and visible labels | `mobile/src/ui/screens/`, `mobile/src/app/App.tsx` |
+| Device health and platform limits | `extension/src/deviceTelemetry.mjs`, `mobile/src/ui/screens/DeviceDetailsScreen.tsx` |
+| Event-log retention and filtering | `mobile/src/lib/eventLog.ts`, `mobile/src/session/runtime/sessionRuntime.ts`, `mobile/src/session/sessionsSlice.ts` |
+
+When changing a public command, action label, storage effect, or capability, update
+the relevant handbook section and linked Markdown reference together. Keep
+technical implementation details in the references; make the handbook sufficient
+for someone completing the task for the first time.
 
 ## Focused checks
 

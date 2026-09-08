@@ -73,6 +73,10 @@ for (const width of [320, 390, 640, 760, 768, 1440]) {
       const sidebar = await page.locator('.sidebar').boundingBox();
       expect(recovery!.y).toBeGreaterThanOrEqual(sidebar!.y + sidebar!.height);
     }
+    for (const id of ['projects', 'device-health', 'diagnostics']) {
+      await page.goto(`/handbook/#${id}`);
+      await expect(page.locator(`#${id}`)).toBeInViewport();
+    }
     await expect(page.getByRole('link', { name: 'Open app', exact: true }))
       .toHaveAttribute('href', 'https://useweft.netlify.app');
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
@@ -94,6 +98,21 @@ for (const width of [320, 390, 640, 760, 768, 1440]) {
     }
   });
 }
+
+test('the handbook connects setup, everyday use, and symptom-based recovery', async ({ page }) => {
+  await page.goto('/handbook/');
+  await page.getByRole('link', { name: /First connection.*Install and pair/ }).click();
+  await expect(page).toHaveURL(/#quickstart$/);
+  await expect(page.locator('#quickstart')).toContainText('You are connected when:');
+  await page.goto('/handbook/#troubleshooting');
+  await page.getByRole('link', { name: 'Understand diagnostic scope and retention' }).click();
+  await expect(page).toHaveURL(/#diagnostics$/);
+  await expect(page.locator('#diagnostics')).toBeInViewport();
+  await page.goto('/handbook/#pairing');
+  await page.getByRole('link', { name: 'Restart normally' }).click();
+  await expect(page).toHaveURL(/#reconnect$/);
+  await expect(page.locator('#reconnect')).toBeInViewport();
+});
 
 test.describe('documentation without JavaScript', () => {
   test.use({ javaScriptEnabled: false });

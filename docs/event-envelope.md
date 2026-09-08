@@ -2,9 +2,9 @@
 
 [Documentation handbook: protocol reference](https://aasis21.github.io/weft/#event-envelope)
 
-Weft uses one nested envelope for messages exchanged between the phone and the
-Copilot CLI extension. The shared contract lives in `shared/messages.mjs` and is
-used consistently by `shared/`, `extension/`, and `mobile/`.
+Weft uses one nested envelope for messages exchanged between the phone, Device
+Station, and Copilot session extensions. The shared contract lives in
+`shared/messages.mjs` and `shared/messages.d.ts`.
 
 ## Wire format
 
@@ -13,10 +13,10 @@ interface EventEnvelope {
   eventType: string;    // "stream" | "prompt" | "approval" | "decision"
                          // | "elicitation" | "elicitation_response" | "control"
   eventSubtype: string; // fine-grained type scoped under eventType
-  channelId: string;    // the pairing's channel id (private:weft:<channelId>)
-  sessionId: string;    // the Copilot CLI session being mirrored
-  senderId: string;     // stable device identifier: "laptop" | "phone-<uuid>"
-  senderName: string;   // display label for who sent it
+  channelId?: string;   // populated by the secure channel on publish
+  sessionId?: string;   // present when the event identifies a Copilot session
+  senderId?: string;    // sender identity, when stamped
+  senderName?: string;  // display label, when available
   msg: Record<string, unknown>;  // everything kind-specific — nested, never flattened
   ts: number;
 }
@@ -31,23 +31,30 @@ Design principles:
 - **`msg` is always an object,** even when empty (`interrupt`, `state_request`).
   Nothing kind-specific ever lives outside it.
 - **`channelId` and `sessionId` identify routing context** independently of the
-  message-specific payload.
+  message-specific payload. A Device Station event does not necessarily belong
+  to a Copilot session, so `sessionId` is optional.
 - **`senderId` and `senderName` identify the source** for attribution in the UI.
 - **`ts` records the sender timestamp** in epoch milliseconds.
 
 ## Event catalog
 
+These are common session events, not the complete schema. Use
+[`shared/messages.d.ts`](../shared/messages.d.ts) for every subtype, optional field,
+and payload definition.
+
 | eventType | eventSubtype | `msg{}` contents |
 |---|---|---|
 | `stream` | `assistant_message` | `{ content, messageId }` |
 | `stream` | `assistant_delta` | `{ content, messageId }` |
+| `stream` | `intent` | `{ text, thinking }` |
 | `stream` | `tool_start` | `{ toolCallId, toolName, args }` |
 | `stream` | `tool_complete` | `{ toolCallId, toolName, success, resultPreview }` |
 | `stream` | `log` | `{ level, message }` |
 | `stream` | `activity` | `{ busy }` |
 | `stream` | `user_message` | `{ text, origin, id }` |
-| `prompt` | `prompt` | `{ text, attachments? }` |
+| `prompt` | `prompt` | `{ text, attachments?, delivery? }` |
 | `approval` | `request` | `{ requestId, toolName, toolArgs, options }` |
+| `approval` | `complete` | `{ requestId, decision? }` |
 | `decision` | `approval_decision` | `{ requestId, optionId, raw? }` |
 | `elicitation` | `request` | `{ requestId, message, mode, requestedSchema, toolCallId, url }` |
 | `elicitation` | `complete` | `{ requestId, action }` |
@@ -62,6 +69,31 @@ Design principles:
 | `control` | `history` | `{ items, nextCursor, hasMore, since }` |
 | `control` | `state_request` | `{}` |
 | `control` | `state_snapshot` | `{ busy, abortable, mode, latestTurnIndex, approvals, elicitations }` |
+
+## Device Station events
+
+The device channel handles laptop discovery and session launch coordination
+separately from each Copilot session's stream:
+
+| Task | Control subtypes |
+| --- | --- |
+| Liveness and supported features | `device_heartbeat` |
+| Registered project choices | `project_list_request`, `project_list` |
+| Resumable sessions | `session_list_request`, `session_list` |
+| Launch or resume work | `spawn_session`, `resume_session`, `spawn_pairing`, `spawn_result`, `launch_status` |
+| Join a session offered by the laptop | `session_offers`, `session_claimed` |
+| Request current health | `device_monitor_start`, `device_monitor_stop`, `device_snapshot` |
+| Remove device trust | `forget_device` |
+
+Health monitoring is capability-negotiated with `device-monitor-v1`. Its snapshot
+schema is separate from the session's `state_snapshot`: one describes the laptop,
+the other describes a Copilot session. See the shared declarations for monitoring
+IDs, sequence numbers, system metrics, application summaries, and issue fields.
+
+The phone's device event log includes `device_snapshot`, but it is not a lossless
+wire capture: consecutive heartbeat/snapshot messages of the same subtype and
+direction are coalesced, and retention is bounded. Device and session logs use
+separate channels; see [the diagnostic guide](https://aasis21.github.io/weft/#diagnostics).
 
 ## Pairing bootstrap
 

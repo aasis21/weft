@@ -48,10 +48,45 @@ test("all fragment targets, local assets, and repository reference links exist",
       assert.ok(existsSync(resolve(root, target.split("/blob/main/")[1])), `Missing reference: ${target}`);
     }
   }
-  for (const id of ["install", "advanced", "what", "action", "architecture", "commands"]) {
+  for (const id of [
+    "install", "advanced", "what", "action", "architecture", "commands",
+    "quickstart", "install-laptop", "start-station", "connect-phone",
+    "reconnect", "recovery", "pairing-lifetime", "revoke-pairing",
+    "projects", "session-controls", "single-session", "supabase", "devtunnel",
+    "self-hosting", "versions", "command-not-found", "scan-failed", "offline",
+    "stalled-session", "notifications", "report-problem", "uninstall", "limitations",
+    "source-install", "workspace-map", "handshake", "event-envelope", "runtime-modes",
+  ]) {
     assert.ok(ids.includes(id), `Preserve legacy anchor #${id}`);
   }
-  for (const image of document.querySelectorAll("img")) assert.ok(image.alt.trim());
+  for (const image of document.querySelectorAll("img")) {
+    assert.ok(image.alt.trim());
+    assert.ok(Number(image.getAttribute("width")) > 0 && Number(image.getAttribute("height")) > 0,
+      "Reserve image dimensions so lazy loading cannot shift later deep links");
+  }
+});
+
+test("the handbook follows reader tasks in the same order as its navigation", () => {
+  const sections = [
+    "overview", "requirements", "quickstart", "sessions", "projects", "device-health",
+    "updates", "pairing", "troubleshooting", "security", "commands", "transports",
+    "development", "protocol", "guides",
+  ];
+  assert.deepEqual([...document.querySelectorAll("main > section")].map((section) => section.id), sections);
+  assert.deepEqual([...document.querySelectorAll('nav[aria-label="Documentation"] a')]
+    .map((link) => link.hash.slice(1)), sections);
+  for (const id of sections.filter((id) => !["overview", "guides"].includes(id))) {
+    assert.ok(document.querySelector(`#guides a[href="#${id}"]`), `Directory needs #${id}`);
+  }
+  const quickstart = document.querySelector("#quickstart").textContent;
+  for (const cue of ["Outcome:", "You should see:", "You are connected when:"]) {
+    assert.ok(quickstart.includes(cue), `Quickstart needs an explicit success cue: ${cue}`);
+  }
+  assert.ok(document.querySelector('#troubleshooting a[href="#diagnostics"]'));
+  assert.ok(document.querySelector('#pairing a[href="#recovery"]'));
+  assert.ok(document.querySelector("#connection-commands"));
+  assert.ok(document.querySelector("#project-commands"));
+  assert.ok(document.querySelector("#maintenance-commands"));
 });
 
 test("handbook includes operating-system setup, recovery, limitations, and all technical guides", () => {
@@ -66,6 +101,24 @@ test("handbook includes operating-system setup, recovery, limitations, and all t
     assert.ok(document.querySelector(`#guides a[href="https://github.com/aasis21/weft/blob/main/docs/${guide}.md"]`));
     assert.match(readFileSync(resolve(docs, `${guide}.md`), "utf8"), /https:\/\/aasis21\.github\.io\/weft\/#/);
   }
+});
+
+test("device guidance distinguishes usable actions, planned cards, and bounded diagnostics", () => {
+  const sessions = document.querySelector("#sessions").textContent;
+  for (const label of ["Start Copilot", "Resume Copilot", "Default", "Allow all",
+    "Active Copilot sessions", "Inactive Copilot sessions", "Coming soon"]) {
+    assert.ok(sessions.includes(label), `Document the current UI label: ${label}`);
+  }
+  const health = document.querySelector("#device-health").textContent;
+  for (const topic of ["Uptime", "Windows", "background", "Show all"]) {
+    assert.ok(health.includes(topic), `Explain health availability: ${topic}`);
+  }
+  const diagnostics = document.querySelector("#diagnostics").parentElement.textContent;
+  assert.ok(diagnostics.includes("control.device_snapshot"));
+  assert.ok(diagnostics.includes("100 recent entries"));
+  assert.ok(diagnostics.includes("75 per device or session channel"));
+  assert.doesNotMatch(diagnostics, /snapshot.{0,60}(?:omitted|excluded)/i);
+  assert.ok(document.querySelector("#projects").textContent.includes("Copilot workspaces"));
 });
 
 test("documentation runs locally without remote scripts, styles, fonts, or Markdown fetching", () => {

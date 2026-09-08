@@ -27,10 +27,15 @@ Install the current hosted release:
 weft update
 ```
 
-The updater stages and validates the complete bundle set against the published SHA-256
-release manifest before replacing the installed release as one transaction. It does not remove or overwrite
-`~/.weft/` configuration, registered projects, logs, or persistent pairing material.
-Restart Copilot CLI or Device Station after updating.
+The updater stages and validates the code bundle set against the published SHA-256
+release manifest before replacing those bundles transactionally. It then updates the
+usage skill against its manifest checksum. It does not remove or overwrite `~/.weft/`
+configuration, registered projects, logs, or persistent pairing material.
+Restart Copilot CLI or Device Station after updating; an already-running process does
+not switch to the downloaded code automatically.
+
+An ordinary update does not require fresh pairing. Do not use `weft clean-install`
+to update: that command deletes configuration and pairing data as well as code.
 
 ## Compatibility check
 
@@ -46,4 +51,7 @@ diagnostic signal, not a guarantee that the protocol is incompatible.
 - Hosted release manifest: <https://useweft.netlify.app/release-manifest.json>
 - Source repository: <https://github.com/aasis21/weft>
 
-GitHub release archives and the release manifest are published from version tags.
+The hosted release manifest describes the bundles currently available to `weft update`.
+A commit on `main`, a GitHub release archive, and the hosted deployment are distinct:
+code is available to installed clients only after the hosted release is published.
+The documentation site on GitHub Pages is deployed separately from the web app.

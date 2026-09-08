@@ -1,6 +1,7 @@
 # Advanced use
 
 [Documentation handbook](https://aasis21.github.io/weft/#sessions) ·
+[Projects](https://aasis21.github.io/weft/#projects) ·
 [Command reference](https://aasis21.github.io/weft/#commands)
 
 The default onboarding path is intentionally short:
@@ -19,7 +20,25 @@ session. This pairing uses a fresh channel and key and ends with the session. Us
 `/weft supabase` or `/weft devtunnel` only when you need a per-session transport override.
 
 For normal use, prefer `weft start`: one Device Station can reconnect a phone and launch
-or resume sessions across registered projects.
+or resume sessions across registered projects. These are separate connection scopes:
+the device log shows Device Station traffic, while each session has its own log.
+See [diagnostic scope and retention](https://aasis21.github.io/weft/#diagnostics).
+
+## Register and maintain projects
+
+A project is a named existing directory on the laptop, not a copy uploaded to the phone.
+The device dashboard groups these registrations under **Copilot workspaces**; the CLI
+continues to use `project` in its commands.
+Use `weft add-project <name> <path> --default` to register it, quoting paths with spaces.
+Run the same command with the same name to replace a moved folder's registration.
+
+`weft list-projects` shows the saved choices; `weft set-default <name>` changes the
+default. `weft remove-project <name>` removes only the registration, not its files.
+In the device menu, **Refresh projects** reloads choices on the phone.
+
+Registration is a launch convenience, not a security sandbox. See the
+[project walkthrough](https://aasis21.github.io/weft/#projects) for platform-specific
+examples.
 
 ## Pairing lifetime
 
@@ -48,7 +67,7 @@ as timing, sizes, IP addresses, and channel identifiers.
 
 | Transport | When to use it | Command |
 |---|---|---|
-| Hosted Supabase relay (default) | Fastest setup; no relay account or key entry. | `weft set-transport supabase` |
+| Configured Supabase relay (hosted by default) | Fastest setup; use the URL/key already saved by the installer. | `weft set-transport supabase` |
 | Visual Studio Dev Tunnel | You want to operate the relay under your own account. | `weft set-transport devtunnel` |
 
 With the dev-tunnel transport, `weft start` can provision and manage the relay for its own
@@ -57,6 +76,9 @@ lifetime. To keep a shared relay running across station restarts, or to use `/we
 
 For a self-hosted Supabase project, RLS, and operator guidance, see
 [`hosting.md`](hosting.md).
+Changing the transport choice does not overwrite saved Supabase connection details.
+Restart the station and scan its new QR when changing relay settings so the phone
+uses the intended connection.
 
 ## Commands
 

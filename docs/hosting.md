@@ -2,9 +2,9 @@
 
 [Documentation handbook: transports and hosting](https://aasis21.github.io/weft/#transports)
 
-Weft's relay is a Supabase Realtime Broadcast channel. The **code** is open source
-(Apache-2.0); operating a **relay** is a separate concern. This page covers both the
-public instance and self-hosting.
+Weft supports Supabase Realtime Broadcast and a shared relay exposed through
+Microsoft Dev Tunnel. Both carry encrypted traffic between the paired endpoints.
+The **code** is open source (Apache-2.0); operating a **relay** is a separate concern.
 
 Most users do not need this guide. Install Weft, run `weft start`, and scan the QR to
 use the configured hosted relay. Continue here only to operate or select a relay.
@@ -20,7 +20,7 @@ use the configured hosted relay. Continue here only to operate or select a relay
 So you can fork Weft and run your own relay freely, but using *someone else's* relay
 requires *their* permission. Open code ≠ a seat on someone's infrastructure bill.
 
-## Option A — use a public instance (if offered)
+## Option A — use the hosted Supabase relay
 
 The installer configures the hosted relay, and the phone reads its connection
 details from the pairing QR. No Weft account is needed. The operator may rate-limit
@@ -31,7 +31,7 @@ decrypt your session. The infrastructure provider may process ordinary connectio
 metadata and operational logs. Use is subject to [`../TERMS.md`](../TERMS.md) and
 [`../PRIVACY.md`](../PRIVACY.md).
 
-## Option B — self-host (recommended for privacy / control)
+## Option B — operate your own Supabase project
 
 You need a Supabase project with Realtime enabled and quotas appropriate to your usage.
 
@@ -48,6 +48,7 @@ You need a Supabase project with Realtime enabled and quotas appropriate to your
 
 Use only the client-safe anon/publishable key, never a service-role key: the phone
 receives this configuration in the QR. Restart the station after changing relay settings.
+Scan the newly printed QR so the phone learns the new relay descriptor.
 
 Because every payload is end-to-end encrypted, the relay (yours or anyone's) is
 untrusted infrastructure: it routes ciphertext and stores no session content. Depending
@@ -84,6 +85,18 @@ pass `-Transport` / `-SupabaseUrl` / `-SupabaseKey`) ever writes them.
 > as that terminal stays open and survives station restarts. If no relay is running, `/weft`
 > fails fast with an error pointing at that command.
 > See [`setup.md`](./setup.md#pairing-with-the-devtunnel-transport).
+
+## Option C — use Microsoft Dev Tunnel
+
+Install the `devtunnel` CLI, select `weft set-transport devtunnel`, and run
+`weft start`. The station reuses a healthy relay or provisions one and prompts for
+login when needed. For `/weft` inside Copilot, start the shared relay separately
+with `weft devtunnel start` and keep its owning terminal open.
+
+Use `weft devtunnel status` to inspect the shared relay. `weft devtunnel stop`
+disrupts all connections using it. See the
+[lifecycle procedure](./setup.md#pairing-with-the-devtunnel-transport) for ownership,
+reconnection, and station-managed provisioning.
 
 ## Operating a public instance
 

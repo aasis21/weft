@@ -42,214 +42,264 @@
       <details class="navigation" id="navigation" open>
         <summary>Documentation menu <span aria-hidden="true">+</span></summary>
         <nav aria-label="Documentation">
-          <p class="nav-group">Get started</p>
-          <a href="#overview">Overview</a>
-          <a href="#requirements">Requirements</a>
+          <p class="nav-group">Start here</p>
+          <a href="#overview">Using this guide</a>
+          <a href="#requirements">Before you install</a>
           <a href="#quickstart">Quickstart</a>
-          <a href="#pairing">Pairing &amp; recovery</a>
-          <p class="nav-group">Use Weft</p>
-          <a href="#sessions">Projects &amp; sessions</a>
+          <p class="nav-group">Everyday use</p>
+          <a href="#sessions">Start &amp; resume work</a>
+          <a href="#projects">Manage workspaces</a>
+          <a href="#device-health">Read device health</a>
+          <a href="#updates">Keep Weft updated</a>
+          <p class="nav-group">Connection &amp; safety</p>
+          <a href="#pairing">Reconnect or replace a phone</a>
+          <a href="#troubleshooting">Find &amp; fix a problem</a>
+          <a href="#security">Privacy &amp; local data</a>
+          <p class="nav-group">Reference &amp; development</p>
           <a href="#commands">Command reference</a>
-          <a href="#transports">Transports &amp; hosting</a>
-          <a href="#updates">Releases &amp; updates</a>
-          <p class="nav-group">Understand &amp; troubleshoot</p>
-          <a href="#troubleshooting">Troubleshooting</a>
-          <a href="#security">Security &amp; privacy</a>
-          <a href="#development">Developer setup</a>
-          <a href="#protocol">Protocol reference</a>
-          <a href="#guides">All guides</a>
+          <a href="#transports">Choose or host a relay</a>
+          <a href="#development">Build &amp; develop</a>
+          <a href="#protocol">Protocol concepts</a>
+          <a href="#guides">Guide directory</a>
         </nav>
       </details>
-      <p class="sidebar-note">A handbook for your laptop<br>and your paired phone.</p>
+      <p class="sidebar-note">Commands run on your laptop.<br>Session controls live on your phone.</p>
     </aside>
 
     <main id="main" tabindex="-1">
       <section id="overview" aria-labelledby="page-title">
-        <p class="eyebrow">Weft documentation</p>
-        <h1 id="page-title">From your terminal<br>to your phone.</h1>
-        <p class="lead">Install Weft, connect a phone, and work with GitHub Copilot CLI sessions running on your laptop.</p>
-        <p>The <strong>Device Station</strong> runs on the laptop. The <strong>web app</strong> runs on your phone. Weft relays prompts, session activity, and native permission requests between them over an end-to-end encrypted connection.</p>
+        <p class="eyebrow">Setup &amp; everyday use</p>
+        <h1 id="page-title">Weft documentation</h1>
+        <p class="lead">Everything you need to use GitHub Copilot CLI from your phone, with the work still running on your laptop.</p>
         <div class="guide-grid">
-          <a class="guide-card" href="#quickstart"><span class="card-label">First time here</span><strong>Install and pair <span aria-hidden="true">&#8594;</span></strong><span>Three steps, with commands for each OS.</span></a>
-          <a class="guide-card" href="#troubleshooting"><span class="card-label">Already installed</span><strong>Get connected again <span aria-hidden="true">&#8594;</span></strong><span>Recover pairing, check versions, and diagnose the relay.</span></a>
+          <a class="guide-card" href="#quickstart"><span class="card-label">First connection</span><strong>Install and pair <span aria-hidden="true">&#8594;</span></strong><span>Prepare the laptop, start Weft, and scan from your phone.</span></a>
+          <a class="guide-card" href="#troubleshooting"><span class="card-label">Something is wrong</span><strong>Find the right fix <span aria-hidden="true">&#8594;</span></strong><span>Choose your symptom before resetting or reinstalling anything.</span></a>
         </div>
-        <div class="callout"><p><strong>Looking for the app?</strong> Open <a href="https://useweft.netlify.app">useweft.netlify.app</a> for the product homepage and phone experience. This site is the documentation; it does not connect to your sessions.</p></div>
+        <p><strong>Already connected?</strong> Go to <a href="#sessions">everyday session controls</a>, <a href="#device-health">device health</a>, or <a href="#commands">command reference</a>. Contributing to Weft? Start with <a href="#development">the developer workflow</a>.</p>
+        <p class="note">This is the documentation, not the connected app. Open <a href="https://useweft.netlify.app">the Weft web app</a> to pair or work with a session.</p>
       </section>
 
       <section id="requirements" aria-labelledby="requirements-title">
-        <h2 id="requirements-title"><a class="heading-link" href="#requirements">Requirements</a></h2>
+        <h2 id="requirements-title"><a class="heading-link" href="#requirements">Before you install</a></h2>
+        <p>Weft has three parts. The <strong>Device Station</strong> is the <code>weft start</code> process on your laptop. The <strong>web app</strong> is the phone interface. A <strong>relay</strong> connects them over the internet; session traffic is encrypted between the paired endpoints.</p>
         <dl class="facts">
-          <div><dt>Laptop</dt><dd>Windows with PowerShell, or macOS / Linux with a shell and <code>curl</code>. Install and sign in to <a href="https://github.com/github/copilot-cli">GitHub Copilot CLI</a> with an account that can use it. Confirm <code>copilot</code> runs in your terminal.</dd></div>
-          <div><dt>Runtime</dt><dd>Node.js 20 or newer available on your laptop. The prebuilt installer needs no repository clone or local npm build. Development from source also requires npm.</dd></div>
-          <div><dt>Phone</dt><dd>A current browser with JavaScript, Web Crypto, and browser storage. Open the HTTPS web app and allow camera access to scan. Manual paste is available on keyboard-and-mouse devices, not touch-only phones.</dd></div>
-          <div><dt>Connection</dt><dd>Both devices must reach the chosen relay. They do not have to share Wi-Fi. Keep the laptop awake and the Device Station terminal open.</dd></div>
-          <div><dt>Optional</dt><dd>Install the PWA through your browser for a home-screen shortcut. A Microsoft Dev Tunnel requires the <code>devtunnel</code> CLI and an account; self-hosted Supabase requires your own project.</dd></div>
+          <div><dt>Laptop</dt><dd>Windows with PowerShell, or macOS / Linux with Bash and <code>curl</code>. Install <strong>Node.js 20 or newer</strong> and <a href="https://github.com/github/copilot-cli">GitHub Copilot CLI</a>. Sign in to Copilot with an account that can use it.</dd></div>
+          <div><dt>Phone</dt><dd>A current browser with JavaScript, Web Crypto, and browser storage. Allow camera access when you scan a QR. No Weft account or app-store download is required.</dd></div>
+          <div><dt>Network</dt><dd>Both devices must reach the relay. Different Wi-Fi networks or phone mobile data are fine. Keep the laptop awake and the Device Station terminal open while working remotely.</dd></div>
         </dl>
-        <p class="note">The hosted PWA is the supported phone distribution. Weft does not currently publish an Android APK. Android Studio is needed only for developing the native shell.</p>
+        <p>You do not need to clone this repository, build Weft, create a Supabase account, or set up a dev tunnel for the default installation. Those are <a href="#development">developer</a> and <a href="#transports">relay-operator</a> tasks.</p>
+        <p class="note">Weft is not remote desktop software. It connects to Copilot sessions; it does not provide a general-purpose file browser or interactive terminal. The hosted PWA is the supported phone distribution. Weft does not currently publish an Android APK.</p>
       </section>
 
       <section id="quickstart" aria-labelledby="quickstart-title">
         <span class="legacy-anchor" id="install"></span>
         <h2 id="quickstart-title"><a class="heading-link" href="#quickstart">Quickstart</a></h2>
-        <p>Run the commands on your <strong>laptop</strong>, then open the app on your <strong>phone</strong>. The installer configures the hosted Supabase relay; no relay account or key entry is needed.</p>
+        <p><strong>Outcome:</strong> your phone can see the laptop in Weft and start a Copilot session. Run shell commands on the laptop, not in the phone's chat composer.</p>
+        <p>First, open <code>copilot</code> on the laptop and complete sign-in. Confirm it can start a session, then return to your normal shell. If Copilot does not work locally, fix that before pairing Weft.</p>
         <h3 id="install-laptop"><a class="heading-link" href="#install-laptop">1. Install on your laptop</a></h3>
-        <p>These commands download and execute an installer. Review the <a href="https://useweft.netlify.app/install.ps1">PowerShell installer</a> or <a href="https://useweft.netlify.app/install.sh">shell installer</a> first if your environment requires it.</p>
+        <p>Choose your operating system. These commands download and execute the installer; review the <a href="https://useweft.netlify.app/install.ps1">PowerShell script</a> or <a href="https://useweft.netlify.app/install.sh">Bash script</a> first if your environment requires it.</p>
         <div class="code-example"><div class="code-label">Windows &middot; PowerShell</div><pre tabindex="0" role="region" aria-label="Windows install command"><code>irm https://useweft.netlify.app/install.ps1 | iex</code></pre></div>
-        <div class="code-example"><div class="code-label">macOS &middot; Terminal</div><pre tabindex="0" role="region" aria-label="macOS install command"><code>curl -fsSL https://useweft.netlify.app/install.sh | bash</code></pre></div>
-        <div class="code-example"><div class="code-label">Linux &middot; shell</div><pre tabindex="0" role="region" aria-label="Linux install command"><code>curl -fsSL https://useweft.netlify.app/install.sh | bash</code></pre></div>
-        <p>The installer puts code in <code>~/.copilot/extensions/weft/</code> and the usage skill in <code>~/.copilot/skills/weft-how-to-use/</code>. Your configuration and pairing material live separately in <code>~/.weft/</code>. On Windows, <code>~</code> means your user profile directory.</p>
+        <div class="code-example"><div class="code-label">macOS or Linux &middot; terminal</div><pre tabindex="0" role="region" aria-label="macOS or Linux install command"><code>curl -fsSL https://useweft.netlify.app/install.sh | bash</code></pre></div>
+        <p>The default installer configures the hosted Supabase relay. Your phone learns its connection details from the QR; there are no relay keys to type into the app.</p>
         <h3 id="start-station"><a class="heading-link" href="#start-station">2. Start the Device Station</a></h3>
         <div class="code-example"><div class="code-label">All platforms &middot; laptop terminal</div><pre tabindex="0" role="region" aria-label="Start the station"><code>weft start</code></pre></div>
-        <p>Leave this terminal open. The station prints a pairing QR. If <code>weft</code> is not found, open a new terminal after installation and see <a href="#troubleshooting">troubleshooting</a>.</p>
+        <p><strong>You should see:</strong> a Device Station status and pairing QR. Leave this terminal open. If <code>weft</code> is not found, open a new terminal and follow <a href="#command-not-found">the command-not-found steps</a>.</p>
         <h3 id="connect-phone"><a class="heading-link" href="#connect-phone">3. Pair from your phone</a></h3>
         <ol>
           <li>Open <a href="https://useweft.netlify.app">useweft.netlify.app</a> and choose <strong>Scan QR to pair</strong>.</li>
-          <li>Allow camera access and scan the laptop QR. If scanning is unavailable, check the browser's camera permissions. Keep the QR and its text payload private.</li>
-          <li>Select the connected device, then start or resume a session. <a href="#projects">Register a project</a> if you want to choose a working directory.</li>
+          <li>Allow camera access and scan the laptop QR. Keep the QR and its text payload private.</li>
+          <li>Select the connected laptop. In <strong>Quick actions</strong>, choose <strong>Start Copilot</strong> to launch a session; <a href="#projects">register a project</a> to make a working directory available in the picker.</li>
         </ol>
-        <p>Use the browser's <strong>Install app</strong> or <strong>Add to Home Screen</strong> action for an app-like experience. You can also <a href="https://useweft.netlify.app/app.html">read the app installation instructions</a>.</p>
-        <div class="callout"><p><strong>Pairing a replacement phone?</strong> If a phone was already trusted, or browser/app storage was cleared, stop the old station and run <a href="#recovery"><code>weft start --new-device</code></a> instead.</p></div>
-      </section>
-
-      <section id="pairing" aria-labelledby="pairing-title">
-        <h2 id="pairing-title"><a class="heading-link" href="#pairing">Pairing &amp; recovery</a></h2>
-        <p>A pairing QR grants access to your laptop's Weft connection. The unclaimed grant expires after <strong>10 minutes</strong> and binds to the first successfully paired phone key. Keep it private, including any copied text version.</p>
-        <h3 id="reconnect"><a class="heading-link" href="#reconnect">Reconnect the same phone</a></h3>
-        <p>Device Station pairing is <strong>persistent by default</strong>. Run <code>weft start</code> again and reopen the app in the same browser profile or installed PWA. An already-paired phone can reconnect after the QR's initial grant has expired because it retains its trusted identity.</p>
-        <p>A QR that has already been claimed is not an invitation for a second phone. Browser data deletion, a different browser profile, or switching to another app installation can mean the phone no longer has its original key.</p>
-        <h3 id="recovery"><a class="heading-link" href="#recovery">New phone or cleared browser storage</a></h3>
-        <ol>
-          <li>Stop the running Device Station with <kbd>Ctrl</kbd> + <kbd>C</kbd>.</li>
-          <li>Start it with the explicit replacement option:</li>
-        </ol>
-        <div class="code-example"><div class="code-label">Laptop terminal</div><pre tabindex="0" role="region" aria-label="Replace the phone pairing"><code>weft start --new-device</code></pre></div>
-        <p>Scan the fresh QR from the new phone or browser. This replaces the previously trusted phone identity; <strong>the old pairing will no longer reconnect</strong>. It does not restore a transcript deleted from phone storage.</p>
-        <p><code>weft start --rotate-pairing</code> is an alias for <code>--new-device</code>. With ephemeral pairing enabled, each start already uses a fresh identity.</p>
-        <h3 id="pairing-lifetime"><a class="heading-link" href="#pairing-lifetime">Choose the pairing lifetime</a></h3>
-        <div class="table-wrap" tabindex="0" role="region" aria-label="Pairing modes">
-          <table><thead><tr><th scope="col">Mode</th><th scope="col">Command</th><th scope="col">Behavior</th></tr></thead><tbody>
-            <tr><th scope="row">Persistent</th><td><code>weft set-pairing persistent</code></td><td>Reuse station identity across restarts. This is the default.</td></tr>
-            <tr><th scope="row">Ephemeral</th><td><code>weft set-pairing ephemeral</code></td><td>A fresh channel and key each start; scan again each time.</td></tr>
-          </tbody></table>
-        </div>
-        <p>Mode changes apply to Device Station starts. A <code>/weft</code> pairing inside Copilot is always per-session.</p>
-        <h3 id="revoke-pairing"><a class="heading-link" href="#revoke-pairing">Lost phone or exposed QR</a></h3>
-        <p>Stop the station, run <code>weft rotate-pairing</code> to invalidate its persistent identity, then run <code>weft start</code> and pair again. Alternatively, <code>weft start --new-device</code> rotates and starts in one command. Stop any old running station first so it cannot continue using its in-memory identity. For a per-session <code>/weft</code> connection, end the old session and establish a new pairing.</p>
-        <p class="source-link">Technical detail: <a href="https://github.com/aasis21/weft/blob/main/docs/pairing.md">pairing handshake reference on GitHub</a>.</p>
+        <p><strong>You are connected when:</strong> the laptop shows online in the app and the session thread opens. Send a small prompt to confirm the round trip. Continue with <a href="#sessions">starting, resuming, and controlling work</a>.</p>
+        <p>For a home-screen shortcut, use the browser's <strong>Install app</strong> or <strong>Add to Home Screen</strong> action. Installation is optional; <a href="https://useweft.netlify.app/app.html">see the phone installation guide</a>.</p>
+        <div class="callout"><p><strong>This laptop already trusted a phone?</strong> Reuse <code>weft start</code> for the same browser identity. For a replacement phone or cleared storage, follow <a href="#recovery">replace the trusted phone</a> instead of reinstalling.</p></div>
       </section>
 
       <section id="sessions" aria-labelledby="sessions-title">
         <span class="legacy-anchor" id="advanced"></span>
         <span class="legacy-anchor" id="what"></span>
-        <h2 id="sessions-title"><a class="heading-link" href="#sessions">Projects &amp; sessions</a></h2>
-        <h3 id="projects"><a class="heading-link" href="#projects">Register a working directory</a></h3>
-        <p>Register directories that the phone may use when launching sessions. Choose an existing directory on the laptop; quote paths containing spaces.</p>
-        <div class="code-example"><div class="code-label">Windows &middot; example project path</div><pre tabindex="0" role="region" aria-label="Register a Windows project"><code>weft add-project my-app "C:\Projects\my-app" --default
-weft list-projects</code></pre></div>
-        <div class="code-example"><div class="code-label">macOS / Linux &middot; example project path</div><pre tabindex="0" role="region" aria-label="Register a macOS or Linux project"><code>weft add-project my-app "$HOME/projects/my-app" --default
-weft list-projects</code></pre></div>
-        <p>Use <code>weft set-default my-app</code> to change the default later. <code>weft set-name "Work laptop"</code> gives this station a recognizable device label. Removing a registered project removes the registration, not the project's files.</p>
+        <h2 id="sessions-title"><a class="heading-link" href="#sessions">Start &amp; resume work</a></h2>
+        <p>Keep <code>weft start</code> running on the laptop. The phone is a control surface for that laptop's Copilot work, not a separate place where your code executes.</p>
+        <h3 id="start-session"><a class="heading-link" href="#start-session">Start a new session</a></h3>
+        <ol>
+          <li>Open the connected laptop and choose <strong>Start Copilot</strong> under <strong>Quick actions</strong>.</li>
+          <li>Choose a working directory from the registered projects and review the launch's permission settings.</li>
+          <li>Confirm the launch and wait for its session thread to open. Send your prompt there.</li>
+        </ol>
+        <p>If your folder is missing, <a href="#projects">register it on the laptop</a> and refresh the project list. The phone does not create a missing laptop directory for you.</p>
+        <h3 id="resume-session"><a class="heading-link" href="#resume-session">Resume instead of starting over</a></h3>
+        <p>Choose <strong>Resume Copilot</strong> on the device. The <strong>Resume a session</strong> view loads available laptop sessions while connected. Choose a folder and session, review permissions, and confirm. Resume can include folders from the laptop's session history as well as registered projects.</p>
+        <p>If the phone already drives that session, the action opens it instead of starting a duplicate. If the laptop reports it is already attached elsewhere, review the warning before choosing <strong>Close it and resume anyway</strong>.</p>
+        <p>For a slow New or Resume launch, use its <strong>Try again</strong> action to reconnect to that launch. Repeatedly starting new launches can create duplicates.</p>
+        <h3 id="session-permissions"><a class="heading-link" href="#session-permissions">Choose permissions deliberately</a></h3>
+        <p>The launch form offers <strong>Default</strong> and <strong>Allow all</strong>. Default uses Copilot's normal permission behavior. <strong>Allow all lets tools, file paths, and URLs proceed without confirmation</strong>; enable it only when that level of access is intentional. These are permission choices, not interactive / plan / autopilot modes.</p>
         <h3 id="session-controls"><a class="heading-link" href="#session-controls">Work with a session</a></h3>
-        <p>Choose a device and project in the phone app to start a new session or resume an existing one. Send prompts, view streamed activity, and respond to the permission requests that Copilot presents. Pending approvals may block progress until you answer or the session ends.</p>
-        <p>The session controls can stop a turn or request <strong>interactive</strong>, <strong>plan</strong>, or <strong>autopilot</strong> mode. These rely on the capabilities of the laptop's Copilot host. Switching modes does not give Weft its own permission policy; review each requested action.</p>
-        <p>If a New or Resume launch is slow, use its <strong>Try again</strong> action to reconnect to that launch rather than repeatedly creating new sessions. Keep the laptop awake while using the phone.</p>
+        <dl class="facts">
+          <div><dt>Prompts</dt><dd>Send requests from the composer and follow streamed replies and tool activity in the thread.</dd></div>
+          <div><dt>Approvals</dt><dd>Read and respond to the permission requests Copilot surfaces. A pending request can block progress until it is answered or the session ends; do not assume unattended requests expire automatically.</dd></div>
+          <div><dt>Interrupt</dt><dd>Use the session's stop control to request that the current turn stop. Keep the laptop connection available while it processes the request.</dd></div>
+          <div><dt>Modes</dt><dd>Choose interactive, plan, or autopilot when supported by the Copilot host. A mode change is not a replacement for the session's permission policy.</dd></div>
+        </dl>
         <figure class="session-figure" id="action">
-          <a href="assets/session-transcript.webp"><img src="assets/session-transcript.webp" width="360" alt="Weft session transcript with an inline Copilot permission request." loading="lazy"></a>
-          <figcaption>Permission requests appear in the session thread. <a href="assets/session-transcript.webp">View full screenshot</a>; see also the <a href="assets/session-chat.webp">session view</a> and <a href="assets/landing-hero.webp">onboarding view</a>. Screens may vary by release.</figcaption>
+          <a href="assets/session-transcript.webp"><img src="assets/session-transcript.webp" width="824" height="1790" alt="Weft session transcript with an inline Copilot permission request." loading="lazy"></a>
+          <figcaption>A permission request in the session thread. Review the action before answering. <a href="assets/session-transcript.webp">View the full screenshot</a> or <a href="assets/session-chat.webp">another session view</a>.</figcaption>
         </figure>
         <h3 id="single-session"><a class="heading-link" href="#single-session">Mirror one existing Copilot session</a></h3>
-        <p>Instead of starting a Device Station, enter <code>/weft</code> <strong>inside an active Copilot CLI session</strong>. Scan its QR to connect only to that session. Its fresh channel and key end with the session. Use <code>/weft supabase</code> or <code>/weft devtunnel</code> for a per-session transport override.</p>
+        <p>Enter <code>/weft</code> <strong>inside an active Copilot CLI session</strong> to mirror that session rather than launching one from Device Station. Scan its QR. If a paired station advertises it under <strong>Offered sessions</strong>, you can join that offer without scanning another QR.</p>
+        <p>A direct session pairing has its own fresh channel and key and ends with the session. Use <code>/weft supabase</code> or <code>/weft devtunnel</code> only when choosing a per-session relay override.</p>
+        <h3 id="session-status"><a class="heading-link" href="#session-status">Find existing work</a></h3>
+        <p>The device view groups work under <strong>Active Copilot sessions</strong> and <strong>Inactive Copilot sessions</strong>. A saved transcript is not proof of a live connection. <strong>Archived</strong> means the phone is not keeping a live socket for that session; reopen it to reconnect. <strong>Offline</strong> indicates a connection problem; use the recovery banner above the session composer.</p>
+        <p class="note"><strong>Explore files</strong> and <strong>Open terminal</strong> are disabled cards labeled <strong>Coming soon</strong>. They do not currently provide file browsing or an interactive terminal.</p>
         <p class="source-link">More detail: <a href="https://github.com/aasis21/weft/blob/main/docs/advanced.md">advanced usage on GitHub</a>.</p>
       </section>
 
-      <section id="commands" aria-labelledby="commands-title">
-        <h2 id="commands-title"><a class="heading-link" href="#commands">Command reference</a></h2>
-        <p>Run <code>weft</code> commands in the laptop shell. Run slash commands only inside Copilot. Use <code>weft help</code> and <code>weft start --help</code> for your installed version's complete usage.</p>
-        <div class="table-wrap" tabindex="0" role="region" aria-label="Weft CLI command reference">
-          <table><thead><tr><th scope="col">Command</th><th scope="col">Purpose</th></tr></thead><tbody>
-            <tr><td><code>weft start</code></td><td>Start the Device Station and show a pairing QR.</td></tr>
-            <tr><td><code>weft start --new-device</code></td><td>Replace the trusted phone identity and start with a fresh QR. Disconnects the old pairing.</td></tr>
-            <tr><td><code>weft start --help</code></td><td>Show station options without starting it.</td></tr>
-            <tr><td><code>weft add-project &lt;name&gt; &lt;path&gt; [--default]</code></td><td>Register a directory, optionally as the default.</td></tr>
-            <tr><td><code>weft remove-project &lt;name&gt;</code></td><td>Remove a project registration.</td></tr>
-            <tr><td><code>weft list-projects</code></td><td>List registered projects and the default.</td></tr>
-            <tr><td><code>weft set-default &lt;name&gt;</code></td><td>Choose the default project.</td></tr>
-            <tr><td><code>weft set-name &lt;name&gt;</code></td><td>Set this laptop's display name.</td></tr>
-            <tr><td><code>weft show-name</code></td><td>Show the effective device name and its source.</td></tr>
-            <tr><td><code>weft set-transport &lt;supabase|devtunnel&gt;</code></td><td>Select the relay transport for subsequent starts.</td></tr>
-            <tr><td><code>weft set-transport clear</code></td><td>Remove the explicit transport selection.</td></tr>
-            <tr><td><code>weft show-transport</code></td><td>Show the effective transport and its source.</td></tr>
-            <tr><td><code>weft set-pairing &lt;persistent|ephemeral&gt;</code></td><td>Select the Device Station pairing lifetime.</td></tr>
-            <tr><td><code>weft rotate-pairing</code></td><td>Replace the stored persistent pairing identity.</td></tr>
-            <tr><td><code>weft devtunnel &lt;start|status|stop&gt;</code></td><td>Operate the shared dev-tunnel relay.</td></tr>
-            <tr><td><code>weft version</code></td><td>Print the installed version.</td></tr>
-            <tr><td><code>weft update --check</code></td><td>Check for a newer hosted release without installing.</td></tr>
-            <tr><td><code>weft update</code></td><td>Verify and install the hosted release, preserving local data.</td></tr>
-            <tr><td><code>weft install [--from &lt;dir&gt;] [--skill &lt;file&gt;]</code></td><td>Install local code bundles, optionally from a specified directory and skill file.</td></tr>
-            <tr><td><code>weft clean-install [--yes]</code></td><td><strong>Destructive:</strong> delete laptop code and <code>~/.weft/</code> data, then reinstall. <code>--yes</code> skips confirmation. Prefer update or pairing recovery instead.</td></tr>
-            <tr><td><code>weft help</code></td><td>Show the full installed CLI usage.</td></tr>
-          </tbody></table>
-        </div>
-        <p class="note">Angle brackets indicate a required value; square brackets indicate an optional argument. Do not type the brackets. For alternatives separated by <code>|</code>, choose one value.</p>
+      <section id="projects" aria-labelledby="projects-title">
+        <h2 id="projects-title"><a class="heading-link" href="#projects">Manage workspaces</a></h2>
+        <p>The device page calls registered folders <strong>Copilot workspaces</strong>; the CLI calls each registration a <strong>project</strong>. Both refer to a name and an existing folder on the laptop. Registration makes that folder available for starting work; it does not upload, copy, or create the folder.</p>
+        <h3 id="register-project"><a class="heading-link" href="#register-project">Add a working directory</a></h3>
+        <p>Replace the example path with your own. Quote paths containing spaces. <code>--default</code> makes this project the default choice.</p>
+        <div class="code-example"><div class="code-label">Windows &middot; laptop PowerShell</div><pre tabindex="0" role="region" aria-label="Register a Windows project"><code>weft add-project my-app "C:\Projects\my-app" --default
+weft list-projects</code></pre></div>
+        <div class="code-example"><div class="code-label">macOS or Linux &middot; laptop terminal</div><pre tabindex="0" role="region" aria-label="Register a macOS or Linux project"><code>weft add-project my-app "$HOME/projects/my-app" --default
+weft list-projects</code></pre></div>
+        <p><strong>You should see:</strong> the project in <code>weft list-projects</code>. In the phone's device menu, choose <strong>Refresh projects</strong> if the picker has not updated.</p>
+        <p>The <strong>Copilot workspaces</strong> card shows names, folder paths, and the default marker. It initially shows up to four folders; choose <strong>Show all workspaces</strong> to expand a longer list. To launch work, use <strong>Start Copilot</strong> and choose the folder there.</p>
+        <h3 id="project-defaults"><a class="heading-link" href="#project-defaults">Rename the device or change a project</a></h3>
+        <dl class="facts">
+          <div><dt>Default folder</dt><dd><code>weft set-default my-app</code> selects an already registered project.</dd></div>
+          <div><dt>Moved folder</dt><dd>Run <code>weft add-project</code> again with the same name and the new existing path. This replaces that registration.</dd></div>
+          <div><dt>Remove project</dt><dd><code>weft remove-project my-app</code> removes the registration, <strong>not the folder or its files</strong>.</dd></div>
+          <div><dt>Device name</dt><dd><code>weft set-name "Work laptop"</code> gives the laptop a recognizable label. Restart the station or mirrored session for the phone to see the new name.</dd></div>
+        </dl>
+        <p class="note">Projects are launch locations, not a security sandbox. Copilot's permissions and your organization policies still govern what a session may do.</p>
       </section>
 
-      <section id="transports" aria-labelledby="transports-title">
-        <h2 id="transports-title"><a class="heading-link" href="#transports">Transports &amp; hosting</a></h2>
-        <p>Both transports carry encrypted envelopes between the endpoints. Choosing a different relay changes who operates the infrastructure, not the need to trust and protect your laptop and phone.</p>
-        <h3 id="supabase"><a class="heading-link" href="#supabase">Hosted Supabase: the default</a></h3>
-        <p>The installer seeds hosted relay settings. Run <code>weft set-transport supabase</code> to select them again. You do not need to enter keys in the phone app: the relay URL and client-safe anon key travel in the QR.</p>
-        <h3 id="devtunnel"><a class="heading-link" href="#devtunnel">Microsoft Dev Tunnel</a></h3>
-        <div class="code-example"><div class="code-label">Laptop terminal &middot; devtunnel CLI required</div><pre tabindex="0" role="region" aria-label="Start with a dev tunnel"><code>weft set-transport devtunnel
-weft start</code></pre></div>
-        <p>The standalone station reuses a healthy relay or provisions one, prompting for devtunnel login when needed. It manages a relay it starts for its own lifetime. It does not shut down a relay owned by another terminal.</p>
-        <p>For a shared relay that survives individual station restarts, run this in a separate terminal and keep it open:</p>
-        <div class="code-example"><div class="code-label">Owning relay terminal</div><pre tabindex="0" role="region" aria-label="Start the shared relay"><code>weft devtunnel start</code></pre></div>
-        <p>Check it with <code>weft devtunnel status</code>. <code>weft devtunnel stop</code> stops the shared relay and disrupts connections using it. Unlike <code>weft start</code>, <code>/weft</code> never provisions a relay; start the relay first.</p>
-        <h3 id="self-hosting"><a class="heading-link" href="#self-hosting">Self-hosted Supabase</a></h3>
-        <ol>
-          <li>Create a Supabase project and enable Realtime Authorization.</li>
-          <li>Apply the repository's <a href="https://github.com/aasis21/weft/tree/main/supabase/migrations">Realtime RLS migrations</a>. Private-channel joins fail without the policies.</li>
-          <li>Set suitable quotas and rate limits. The current RLS policy gates the <code>private:weft:*</code> namespace, not individual users.</li>
-          <li>Configure <code>~/.weft/supabase.json</code> on the laptop with your project URL and client-safe anon key, then run <code>weft set-transport supabase</code> and restart the station.</li>
-        </ol>
-        <div class="code-example"><div class="code-label">~/.weft/supabase.json &middot; replace the placeholders</div><pre tabindex="0" role="region" aria-label="Supabase configuration example"><code>{
-  "url": "https://YOUR_PROJECT.supabase.co",
-  "anonKey": "YOUR_CLIENT_SAFE_ANON_KEY"
-}</code></pre></div>
-        <div class="callout warning"><p><strong>Never use a service-role key.</strong> The phone receives this configuration in the QR. Use only a client-safe anon/publishable key and apply RLS. Do not commit private credentials or pairing material.</p></div>
-        <p>The transport choice lives in <code>~/.weft/weft.config.json</code>; Supabase connection details live in <code>~/.weft/supabase.json</code>. Switching the transport does not erase those details. Runtime configuration is not read from a project <code>.env</code> file.</p>
-        <p class="source-link">Operator details: <a href="https://github.com/aasis21/weft/blob/main/docs/hosting.md">hosting guide</a> and <a href="https://github.com/aasis21/weft/blob/main/supabase/README.md">Supabase configuration</a> on GitHub.</p>
+      <section id="device-health" aria-labelledby="device-health-title">
+        <h2 id="device-health-title"><a class="heading-link" href="#device-health">Read device health</a></h2>
+        <p>Open a connected laptop in the device list. <strong>System health</strong> describes that laptop, not the phone or a single Copilot session. An online connection and a monitoring-capable Device Station are required.</p>
+        <h3 id="health-metrics"><a class="heading-link" href="#health-metrics">What the card tells you</a></h3>
+        <dl class="facts">
+          <div><dt>CPU</dt><dd>A sampled utilization percentage, not a history chart or a guarantee that Copilot is busy.</dd></div>
+          <div><dt>Memory</dt><dd>Used memory as a percentage and used / total bytes.</dd></div>
+          <div><dt>Disk</dt><dd>Used / total space for the monitored volume, not a sum across every attached disk.</dd></div>
+          <div><dt>Battery</dt><dd>Charge percentage and charging state when available. A missing battery tile is normal on a desktop or unsupported platform.</dd></div>
+          <div><dt>Uptime</dt><dd>How long the laptop has been running, not the age of the Copilot session.</dd></div>
+        </dl>
+        <p><strong>Running now</strong> initially shows up to five reported applications, with window counts and memory when available. Use <strong>Show all</strong> to expand a longer list. It is not a complete process inventory and does not expose window titles, document names, executable paths, or app-control actions.</p>
+        <h3 id="health-availability"><a class="heading-link" href="#health-availability">Freshness and missing details</a></h3>
+        <ul>
+          <li><strong>Updated just now</strong> means a snapshot arrived recently. <strong>Update delayed</strong> means the displayed sample is stale; do not read it as a current measurement.</li>
+          <li>Monitoring runs while the device view is active and the app is visible. It pauses when the view closes or the app goes into the background, then resumes when you return.</li>
+          <li>Available details depend on the laptop's OS and hardware. Application lists and battery collection currently use Windows APIs; their absence on macOS or Linux is not automatically a pairing failure.</li>
+          <li>If the card asks you to update, <a href="#updates">update and restart Device Station</a>. If the laptop is offline, <a href="#offline">restore the connection</a> first.</li>
+        </ul>
+        <p class="note">The live card is not a background monitoring service or a historical performance chart. Snapshot messages also appear in the bounded local diagnostic log; see <a href="#diagnostics">what the log contains</a>.</p>
       </section>
 
       <section id="updates" aria-labelledby="updates-title">
-        <h2 id="updates-title"><a class="heading-link" href="#updates">Releases &amp; updates</a></h2>
+        <h2 id="updates-title"><a class="heading-link" href="#updates">Keep Weft updated</a></h2>
+        <p>The laptop installation and phone web app update separately. An ordinary update does not require a clean installation or a new pairing.</p>
         <div class="code-example"><div class="code-label">Laptop terminal</div><pre tabindex="0" role="region" aria-label="Check and update Weft"><code>weft version
 weft update --check
 weft update</code></pre></div>
-        <p>The check is read-only. The updater stages the bundle set, verifies it against the published SHA-256 manifest, and replaces installed code and the usage skill. It preserves <code>~/.weft/</code> configuration, registered projects, logs, and persistent pairing material.</p>
-        <p><strong>Restart Copilot CLI or Device Station after updating.</strong> Web app updates arrive through the browser. Close and reopen the PWA if an older build is still active.</p>
+        <ol>
+          <li><strong>Check:</strong> <code>weft version</code> shows the installed version; <code>weft update --check</code> compares it with the hosted release without installing.</li>
+          <li><strong>Update the laptop:</strong> <code>weft update</code> downloads and verifies the code bundles and usage skill against the published SHA-256 manifest. It preserves configuration, projects, logs, and persistent pairing material under <code>~/.weft/</code>.</li>
+          <li><strong>Restart:</strong> stop and restart Device Station or Copilot CLI so the running process uses the new code.</li>
+          <li><strong>Refresh the phone:</strong> reload the web app, or close and reopen the installed PWA. Do not clear its storage just to refresh the UI.</li>
+        </ol>
         <h3 id="versions"><a class="heading-link" href="#versions">Compare phone and laptop versions</a></h3>
         <p>Open <strong>Settings &gt; About</strong> in the phone app for its build and the version reported by each paired laptop. A mismatch is a useful diagnostic signal, not proof that the protocol is incompatible. Update both ends before investigating further.</p>
         <p><a href="https://github.com/aasis21/weft/releases">GitHub releases</a> &middot; <a href="https://github.com/aasis21/weft/blob/main/CHANGELOG.md">Changelog</a> &middot; <a href="https://useweft.netlify.app/release-manifest.json">Hosted release manifest</a></p>
-        <p class="note">No official Android APK is currently distributed. Avoid debug, unversioned, or third-party APKs presented as official releases.</p>
+        <p class="note">A commit on GitHub is not necessarily the hosted release. Installed laptops update from the hosted manifest; the docs site and web app also have separate deployments.</p>
+      </section>
+
+      <section id="pairing" aria-labelledby="pairing-title">
+        <h2 id="pairing-title"><a class="heading-link" href="#pairing">Reconnect or replace a phone</a></h2>
+        <p>Weft trusts a browser's saved pairing identity, not the physical phone's name. A different browser or cleared site storage can make the <em>same phone</em> a new identity.</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Choose the right pairing action">
+          <table><thead><tr><th scope="col">Your situation</th><th scope="col">What to do</th></tr></thead><tbody>
+            <tr><th scope="row">Same phone and saved browser data</th><td><a href="#reconnect">Restart normally</a>; do not rotate the pairing.</td></tr>
+            <tr><th scope="row">New phone, different browser, or cleared storage</th><td><a href="#recovery">Replace the trusted phone</a> and scan the new QR.</td></tr>
+            <tr><th scope="row">Lost phone or exposed QR</th><td><a href="#revoke-pairing">Stop and revoke the old connection</a>.</td></tr>
+            <tr><th scope="row">Only the network or relay seems broken</th><td><a href="#offline">Check connectivity first</a>; deleting local data does not fix an unreachable relay.</td></tr>
+          </tbody></table>
+        </div>
+        <h3 id="reconnect"><a class="heading-link" href="#reconnect">Reconnect without pairing again</a></h3>
+        <p>Run <code>weft start</code> and reopen Weft in the same browser profile or installed PWA. Device Station pairing is <strong>persistent by default</strong>, so an already-paired phone can reconnect after the initial QR expires. Keep both devices online.</p>
+        <h3 id="recovery"><a class="heading-link" href="#recovery">Replace the trusted phone</a></h3>
+        <ol>
+          <li>Stop the old Device Station with <kbd>Ctrl</kbd> + <kbd>C</kbd>.</li>
+          <li>Run the command below on the laptop.</li>
+          <li>On the intended phone/browser, open the scanner and scan the newly printed QR.</li>
+        </ol>
+        <div class="code-example"><div class="code-label">Laptop terminal &middot; replaces existing phone trust</div><pre tabindex="0" role="region" aria-label="Replace the phone pairing"><code>weft start --new-device</code></pre></div>
+        <p><strong>Result:</strong> the previously trusted phone identity can no longer reconnect to the new station identity. This is not an additional-phone invitation, and it does not restore deleted phone-local history. <code>--rotate-pairing</code> is an alias for <code>--new-device</code>.</p>
+        <p class="note">An unclaimed QR grant expires after <strong>10 minutes</strong> and belongs to the first phone key that successfully claims it. Keep QR images and copied payloads private.</p>
+        <h3 id="revoke-pairing"><a class="heading-link" href="#revoke-pairing">Lost phone or exposed QR</a></h3>
+        <p>Stop the old station first, then run <code>weft rotate-pairing</code>. This replaces the stored identity without starting the station. When ready, run <code>weft start</code> and pair your intended phone. Rotating the file alone does not stop a process still holding the old keys.</p>
+        <p>For a direct <code>/weft</code> connection, end the old Copilot session. Device Station rotation is not a blanket revocation of separate session pairings.</p>
+        <h3 id="pairing-lifetime"><a class="heading-link" href="#pairing-lifetime">Optional: pair fresh on every start</a></h3>
+        <p><code>weft set-pairing ephemeral</code> makes subsequent station starts create a new channel and key, so you scan each time. Use <code>weft set-pairing persistent</code> for the normal reconnecting workflow. Direct <code>/weft</code> pairings are always per-session.</p>
+        <p class="source-link">For the exchange and key lifetimes, see the <a href="https://github.com/aasis21/weft/blob/main/docs/pairing.md">pairing protocol on GitHub</a>.</p>
       </section>
 
       <section id="troubleshooting" aria-labelledby="troubleshooting-title">
-        <h2 id="troubleshooting-title"><a class="heading-link" href="#troubleshooting">Troubleshooting</a></h2>
-        <p>Start with <code>weft version</code>, <code>weft update --check</code>, and <code>weft show-transport</code>. Keep the station open and the laptop awake. In the app, open <strong>Trouble connecting?</strong> and run the connectivity test.</p>
+        <h2 id="troubleshooting-title"><a class="heading-link" href="#troubleshooting">Find &amp; fix a problem</a></h2>
+        <p>Start with the symptom. Check the running station and connection before rotating a pairing or deleting data.</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Troubleshooting by symptom">
+          <table><thead><tr><th scope="col">What you see</th><th scope="col">Start here</th></tr></thead><tbody>
+            <tr><th scope="row">The shell cannot find <code>weft</code></th><td><a href="#command-not-found">Check installation and PATH</a>.</td></tr>
+            <tr><th scope="row">The camera does not open or the QR will not scan</th><td><a href="#scan-failed">Check the browser and QR</a>.</td></tr>
+            <tr><th scope="row">Laptop stays offline or reconnecting</th><td><a href="#offline">Check the station and relay</a>.</td></tr>
+            <tr><th scope="row">Same phone stopped working after clearing data</th><td><a href="#recovery">Replace the missing pairing identity</a>.</td></tr>
+            <tr><th scope="row">A launch is slow or a session is waiting</th><td><a href="#stalled-session">Check launch status and approvals</a>.</td></tr>
+            <tr><th scope="row">Health tiles are missing or delayed</th><td><a href="#device-health">Understand monitoring availability</a>.</td></tr>
+            <tr><th scope="row">The log does not show every event</th><td><a href="#diagnostics">Understand diagnostic scope and retention</a>.</td></tr>
+            <tr><th scope="row">No alert while the app is closed</th><td><a href="#notifications">Check notification limitations</a>.</td></tr>
+          </tbody></table>
+        </div>
         <h3 id="command-not-found"><a class="heading-link" href="#command-not-found">The terminal cannot find weft</a></h3>
-        <p>Open a new terminal after installing. Confirm Node.js is available with <code>node --version</code> and Copilot with <code>copilot --version</code>. Check that the installer completed successfully and follow its PATH instructions. Re-run the installer if code installation failed; do not delete <code>~/.weft/</code> as a first troubleshooting step.</p>
+        <ol>
+          <li>Open a new terminal after installing so it picks up PATH changes.</li>
+          <li>Confirm <code>node --version</code> and <code>copilot --version</code> work.</li>
+          <li>Read the installer's completion message and PATH instructions. Re-run it if code installation failed.</li>
+        </ol>
+        <p>Do not delete <code>~/.weft/</code>: it holds your configuration and pairing identity, not the missing executable's PATH entry.</p>
         <h3 id="scan-failed"><a class="heading-link" href="#scan-failed">The camera or QR scan does not work</a></h3>
         <p>Open the HTTPS app directly in a supported browser, not an embedded preview. Allow camera access in the browser/site settings and retry the scanner. On keyboard-and-mouse devices, you can use the paste-payload option instead. An unclaimed QR expires after 10 minutes. If the QR is expired or already claimed by a different phone identity, use <a href="#recovery">the new-device recovery flow</a>.</p>
         <h3 id="offline"><a class="heading-link" href="#offline">The phone stays offline or reconnecting</a></h3>
-        <p>Confirm the laptop is awake and <code>weft start</code> is still running. Verify the chosen transport with <code>weft show-transport</code>. For a dev tunnel, run <code>weft devtunnel status</code>. Inspect the station's printed error and the phone connectivity result; network policy can block HTTPS/WebSocket connections even when ordinary browsing works.</p>
-        <p>If you cleared browser data, switched browsers, or replaced the phone, refreshing an old QR will not restore the missing private key. Use <code>weft start --new-device</code> after stopping the old station.</p>
+        <ol>
+          <li>Keep the laptop awake and confirm the <code>weft start</code> terminal is still running.</li>
+          <li>Run <code>weft show-transport</code>. For Dev Tunnel, also run <code>weft devtunnel status</code>; Supabase does not require a local tunnel process.</li>
+          <li>Read the station error and use the phone's <strong>Trouble connecting?</strong> connectivity test. Network policy can block HTTPS/WebSocket traffic even when ordinary browsing works.</li>
+          <li>Compare versions using <code>weft update --check</code> and <a href="#versions">Settings &gt; About</a>. Restart after an update.</li>
+        </ol>
+        <p>If the browser lost its saved keys, refreshing an old QR cannot restore them. Follow <a href="#recovery">phone replacement</a>; otherwise preserve the existing pairing while diagnosing the connection.</p>
         <h3 id="stalled-session"><a class="heading-link" href="#stalled-session">A session or launch appears stuck</a></h3>
         <p>Check for a pending permission request in the phone thread or laptop terminal. Weft does not automatically approve it or add a decision timeout. For a slow New / Resume operation, use its <strong>Try again</strong> action rather than starting duplicates. If mode switching is unsupported by the Copilot host, switch in the terminal or update the host.</p>
         <h3 id="notifications"><a class="heading-link" href="#notifications">No notification while the app is closed</a></h3>
         <p>Notification permission and delivery depend on the browser and operating system. Do not rely on a backgrounded or killed app to wake for an approval. Reopen the app to inspect pending requests; keep the laptop terminal available when reliable attention is required.</p>
+        <h3 id="diagnostics"><a class="heading-link" href="#diagnostics">Understand the event log</a></h3>
+        <p><strong>No: the log is not a complete record of every event.</strong> It is a bounded diagnostic view of recent channel traffic, separate from your conversation transcript.</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Event-log scope and retention">
+          <table><thead><tr><th scope="col">View</th><th scope="col">What it shows</th></tr></thead><tbody>
+            <tr><th scope="row">Device event log</th><td>Open the laptop's overflow menu and choose <strong>Event log</strong>. This is Device Station traffic: project lists, launch coordination, monitoring requests, and device heartbeats. Copilot conversation events use separate session channels.</td></tr>
+            <tr><th scope="row">Session event log</th><td>The selected Copilot session's exchanged messages, such as prompts, streamed activity, and permission requests. It is not the laptop-wide device log.</td></tr>
+            <tr><th scope="row">Health snapshots</th><td><code>control.device_snapshot</code> appears alongside monitoring requests and device heartbeats. Consecutive events of the same heartbeat or snapshot subtype and direction are replaced by the latest one.</td></tr>
+            <tr><th scope="row">Retention</th><td>The device view keeps up to 100 recent entries in memory. Session logs keep up to 75; the shared persistence layer also saves/restores at most 75 per device or session channel. Old entries fall off and large payloads are compacted.</td></tr>
+          </tbody></table>
+        </div>
+        <p>Use event names and timestamps to follow a recent request/response. Expand an entry for its payload; use <strong>Identifiers</strong> in the device log for connection identifiers. This is troubleshooting context, not an exhaustive audit trail.</p>
+        <p class="note">Payloads can contain private content. Review and redact before sharing; compaction is not a promise that a raw log is safe to publish.</p>
         <h3 id="report-problem"><a class="heading-link" href="#report-problem">Report a problem safely</a></h3>
-        <p>Include phone OS/browser, laptop OS, Copilot and Weft versions, transport, reproduction steps, expected behavior, and sanitized connectivity diagnostics in a <a href="https://github.com/aasis21/weft/issues/new/choose">GitHub issue</a>.</p>
+        <p>Open a <a href="https://github.com/aasis21/weft/issues/new/choose">GitHub issue</a> with the smallest reproducible example. Include:</p>
+        <ul>
+          <li>Phone OS/browser, laptop OS, and the versions of Copilot and both Weft endpoints.</li>
+          <li>Transport, whether this is a new pairing or a reconnect, and whether browser storage changed.</li>
+          <li>Steps, expected result, actual result, and the approximate time of the failure.</li>
+          <li>Sanitized error text or a relevant event name, not a full raw log dump.</li>
+        </ul>
         <p><strong>Do not include QR payloads, pairing keys, tokens, private source, or transcripts.</strong> Use the <a href="https://github.com/aasis21/weft/blob/main/SECURITY.md">private security reporting instructions</a> for sensitive problems.</p>
         <h3 id="uninstall"><a class="heading-link" href="#uninstall">Remove Weft or local data</a></h3>
         <p>Remove <code>~/.copilot/extensions/weft/</code> and <code>~/.copilot/skills/weft-how-to-use/</code> to uninstall laptop code. Remove <code>~/.weft/</code> only if you also intend to delete configuration, registered projects, logs, and persistent pairing keys.</p>
@@ -257,11 +307,12 @@ weft update</code></pre></div>
       </section>
 
       <section id="security" aria-labelledby="security-title">
-        <h2 id="security-title"><a class="heading-link" href="#security">Security &amp; privacy</a></h2>
-        <p>Weft encrypts session traffic between the paired endpoints using ECDH (P-256), HKDF-SHA256, and AES-256-GCM. The relay forwards ciphertext and stores no session content or key escrow. <strong>This does not make the endpoints, the hosted web app, or all metadata untrusted or anonymous.</strong></p>
+        <h2 id="security-title"><a class="heading-link" href="#security">Privacy &amp; local data</a></h2>
+        <p><strong>Trust the phone as an interface to your laptop.</strong> A paired phone can send prompts and permission decisions to Copilot. Protect the QR, browser profile, and laptop; encryption does not make unsafe actions safe.</p>
+        <p>Weft uses ECDH (P-256), HKDF-SHA256, and AES-256-GCM to encrypt session traffic between the endpoints. The relay forwards ciphertext without session-content storage or key escrow. It can still observe connection metadata, and the phone must trust the code delivered by the web-app host.</p>
         <div class="table-wrap" tabindex="0" role="region" aria-label="Data storage and privacy boundaries">
           <table><thead><tr><th scope="col">Location</th><th scope="col">What it handles</th></tr></thead><tbody>
-            <tr><th scope="row">Phone / PWA</th><td>Plaintext session content, locally cached transcripts, device/session metadata, preferences, and pairing private keys. Protect access to the device and browser profile.</td></tr>
+            <tr><th scope="row">Phone / PWA</th><td>Plaintext session content, locally cached transcripts and diagnostic logs, device/session metadata, preferences, and pairing private keys. Diagnostic payloads can include device snapshots. Protect access to the device and browser profile.</td></tr>
             <tr><th scope="row">Laptop</th><td>Copilot session content and capabilities; installed Weft code; configuration, logs, and persistent identity under <code>~/.weft/</code>.</td></tr>
             <tr><th scope="row">Relay</th><td>Encrypted traffic. Providers can observe connection metadata such as IP addresses, timing, channel identifiers, traffic volume, and operational logs.</td></tr>
             <tr><th scope="row">Web hosting</th><td>The app provider delivers code trusted on the phone. The app loads Google Fonts, whose provider may receive request metadata. This documentation uses local assets and system fonts.</td></tr>
@@ -279,13 +330,92 @@ weft update</code></pre></div>
         <p class="source-link">Read the <a href="https://github.com/aasis21/weft/blob/main/docs/security.md">technical security model</a>, <a href="https://github.com/aasis21/weft/blob/main/PRIVACY.md">privacy notice</a>, <a href="https://github.com/aasis21/weft/blob/main/TERMS.md">hosted-service terms</a>, and <a href="https://github.com/aasis21/weft/blob/main/SECURITY.md">security reporting policy</a>.</p>
       </section>
 
+      <section id="commands" aria-labelledby="commands-title">
+        <h2 id="commands-title"><a class="heading-link" href="#commands">Command reference</a></h2>
+        <p>Run <code>weft</code> commands in your <strong>laptop shell</strong>. Run <code>/weft</code> only <strong>inside Copilot CLI</strong>. Neither belongs in the phone's prompt composer.</p>
+        <p class="note"><code>&lt;value&gt;</code> means required; <code>[option]</code> means optional. Replace placeholders without typing the brackets. For alternatives separated by <code>|</code>, choose one value.</p>
+        <h3 id="connection-commands"><a class="heading-link" href="#connection-commands">Connection &amp; pairing</a></h3>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Connection and pairing commands">
+          <table><thead><tr><th scope="col">Laptop shell command</th><th scope="col">Purpose</th></tr></thead><tbody>
+            <tr><td><code>weft start</code></td><td>Start Device Station; reuse persistent phone trust by default.</td></tr>
+            <tr><td><code>weft start --new-device</code></td><td>Replace phone trust and start with a fresh QR. Stop the old station first.</td></tr>
+            <tr><td><code>weft start --help</code></td><td>Show station options without starting.</td></tr>
+            <tr><td><code>weft set-pairing &lt;persistent|ephemeral&gt;</code></td><td>Choose whether subsequent station starts reuse the pairing identity.</td></tr>
+            <tr><td><code>weft rotate-pairing</code></td><td>Replace the stored identity without starting a station.</td></tr>
+          </tbody></table>
+        </div>
+        <p><strong>Inside Copilot:</strong> <code>/weft</code> mirrors the current session. <code>/weft supabase</code> and <code>/weft devtunnel</code> choose a relay for that session only. See <a href="#single-session">direct session pairing</a>.</p>
+        <h3 id="project-commands"><a class="heading-link" href="#project-commands">Projects &amp; device identity</a></h3>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Project and device commands">
+          <table><thead><tr><th scope="col">Laptop shell command</th><th scope="col">Purpose</th></tr></thead><tbody>
+            <tr><td><code>weft add-project &lt;name&gt; &lt;path&gt; [--default]</code></td><td>Add or replace a named registration for an existing folder.</td></tr>
+            <tr><td><code>weft list-projects</code></td><td>List registered folders and the default.</td></tr>
+            <tr><td><code>weft set-default &lt;name&gt;</code></td><td>Select an already registered project.</td></tr>
+            <tr><td><code>weft remove-project &lt;name&gt;</code></td><td>Remove a registration, not its files.</td></tr>
+            <tr><td><code>weft set-name &lt;name&gt;</code></td><td>Name the laptop. Restart its station/session to publish the new label.</td></tr>
+            <tr><td><code>weft show-name</code></td><td>Show the configured label or OS hostname.</td></tr>
+          </tbody></table>
+        </div>
+        <h3 id="maintenance-commands"><a class="heading-link" href="#maintenance-commands">Updates, relays &amp; installation</a></h3>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Maintenance and relay commands">
+          <table><thead><tr><th scope="col">Laptop shell command</th><th scope="col">Purpose</th></tr></thead><tbody>
+            <tr><td><code>weft version</code></td><td>Show the installed version.</td></tr>
+            <tr><td><code>weft update --check</code></td><td>Compare with the hosted version without installing.</td></tr>
+            <tr><td><code>weft update</code></td><td>Verify and install hosted code; preserve laptop configuration and pairing data.</td></tr>
+            <tr><td><code>weft show-transport</code></td><td>Show the configured relay and its configuration location.</td></tr>
+            <tr><td><code>weft set-transport &lt;supabase|devtunnel&gt;</code></td><td>Choose the relay for subsequent connections.</td></tr>
+            <tr><td><code>weft set-transport clear</code></td><td>Clear the choice, not the saved Supabase details. Select a transport again before pairing.</td></tr>
+            <tr><td><code>weft devtunnel &lt;start|status|stop&gt;</code></td><td>Operate the shared dev-tunnel relay. Stopping it disconnects its users.</td></tr>
+            <tr><td><code>weft install [--from &lt;dir&gt;] [--skill &lt;file&gt;]</code></td><td>Install code bundles and the usage skill; developer/source installation option.</td></tr>
+            <tr><td><code>weft clean-install [--yes]</code></td><td><strong>Destructive:</strong> delete installed code and <code>~/.weft/</code> data, then reinstall. <code>--yes</code> skips confirmation.</td></tr>
+            <tr><td><code>weft help</code></td><td>Show the installed CLI's complete usage.</td></tr>
+          </tbody></table>
+        </div>
+        <p class="note">Use <a href="#updates">update</a> for new code and <a href="#recovery">pairing recovery</a> for a new phone. A clean installation is not routine maintenance.</p>
+      </section>
+
+      <section id="transports" aria-labelledby="transports-title">
+        <h2 id="transports-title"><a class="heading-link" href="#transports">Choose or host a relay</a></h2>
+        <p>A relay carries encrypted traffic; it is not where Copilot executes or your transcript is backed up. Keep the default unless you have a reason to operate your own infrastructure.</p>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Relay choices">
+          <table><thead><tr><th scope="col">Choice</th><th scope="col">You need</th><th scope="col">Best fit</th></tr></thead><tbody>
+            <tr><th scope="row">Hosted Supabase</th><td>The default installation.</td><td>Normal use with the least setup.</td></tr>
+            <tr><th scope="row">Microsoft Dev Tunnel</th><td>The <code>devtunnel</code> CLI and a supported sign-in.</td><td>Operate a shared relay from your laptop.</td></tr>
+            <tr><th scope="row">Your Supabase project</th><td>A project, Realtime Authorization policies, quotas, and ongoing operations.</td><td>Control the relay infrastructure yourself.</td></tr>
+          </tbody></table>
+        </div>
+        <h3 id="supabase"><a class="heading-link" href="#supabase">Use the configured Supabase relay</a></h3>
+        <p><code>weft set-transport supabase</code> selects the connection details already saved by the installer. It does not create a Supabase project or replace a custom project's settings with hosted defaults.</p>
+        <p>The transport choice lives in <code>~/.weft/weft.config.json</code>; the URL and client-safe anon key live in <code>~/.weft/supabase.json</code>. These are separate from installed code. The transport is not configured through a project <code>.env</code> file.</p>
+        <h3 id="devtunnel"><a class="heading-link" href="#devtunnel">Use Microsoft Dev Tunnel</a></h3>
+        <div class="code-example"><div class="code-label">Laptop terminal &middot; devtunnel CLI required</div><pre tabindex="0" role="region" aria-label="Start with a dev tunnel"><code>weft set-transport devtunnel
+weft start</code></pre></div>
+        <p>Device Station reuses a healthy shared relay or provisions one, prompting for login when needed. It manages a relay it starts, but does not shut down one owned by another terminal.</p>
+        <p>For direct <code>/weft</code> pairing, or a relay that remains available across individual station restarts, run <code>weft devtunnel start</code> in a separate terminal and keep that terminal open. <code>/weft</code> does not provision the relay itself.</p>
+        <p>Use <code>weft devtunnel status</code> to inspect it. <code>weft devtunnel stop</code> stops the shared relay and disrupts connections using it.</p>
+        <h3 id="self-hosting"><a class="heading-link" href="#self-hosting">Use your own Supabase project</a></h3>
+        <ol>
+          <li>Create a Supabase project with Realtime Authorization enabled.</li>
+          <li>Apply the repository's <a href="https://github.com/aasis21/weft/tree/main/supabase/migrations">Realtime RLS migrations</a>. Private joins fail without these policies.</li>
+          <li>Set quotas and rate limits. The policy gates the <code>private:weft:*</code> namespace, not individual users or channels.</li>
+          <li>Write your project details to <code>~/.weft/supabase.json</code>, then choose <code>weft set-transport supabase</code>.</li>
+        </ol>
+        <div class="code-example"><div class="code-label">~/.weft/supabase.json &middot; replace the placeholders</div><pre tabindex="0" role="region" aria-label="Supabase configuration example"><code>{
+  "url": "https://YOUR_PROJECT.supabase.co",
+  "anonKey": "YOUR_CLIENT_SAFE_ANON_KEY"
+}</code></pre></div>
+        <div class="callout warning"><p><strong>Never use a service-role key.</strong> The phone receives these connection details in the QR. Use only a client-safe anon/publishable key, apply RLS, and keep private credentials out of source control.</p></div>
+        <p>After changing relay settings, stop and restart the station and scan its new QR so the phone learns the new connection details. Relay selection does not remove the need to protect both endpoints.</p>
+        <p class="source-link">Read the <a href="https://github.com/aasis21/weft/blob/main/docs/hosting.md">hosting guide</a> and <a href="https://github.com/aasis21/weft/blob/main/supabase/README.md">Supabase operator instructions</a> on GitHub.</p>
+      </section>
+
       <section id="development" aria-labelledby="development-title">
         <span class="legacy-anchor" id="architecture"></span>
-        <h2 id="development-title"><a class="heading-link" href="#development">Developer setup</a></h2>
+        <h2 id="development-title"><a class="heading-link" href="#development">Build &amp; develop</a></h2>
         <p>You do not need a source build for normal use. For development, clone the repository and use Node.js 20+ and npm. Shared contracts, the laptop extension, and the phone app are npm workspaces.</p>
         <div class="code-example"><div class="code-label">All platforms &middot; terminal</div><pre tabindex="0" role="region" aria-label="Build Weft from source"><code>git clone https://github.com/aasis21/weft.git
 cd weft
-npm install --workspaces --include-workspace-root
+npm ci --workspaces --include-workspace-root
 npm test -w @aasis21/weft-shared
 node extension/harness/harness.mjs --auto
 npm run build -w @aasis21/weft-extension
@@ -307,7 +437,7 @@ npm run dev</code></pre></div>
       </section>
 
       <section id="protocol" aria-labelledby="protocol-title">
-        <h2 id="protocol-title"><a class="heading-link" href="#protocol">Protocol reference</a></h2>
+        <h2 id="protocol-title"><a class="heading-link" href="#protocol">Protocol concepts</a></h2>
         <p>These concepts help when working on the extension or app. For exact fields and examples, follow the rendered source references below.</p>
         <h3 id="handshake"><a class="heading-link" href="#handshake">Pairing handshake</a></h3>
         <p>The QR includes the laptop public key, channel, relay descriptor, pairing grant, and expiry. The phone sends its public key and fresh nonce in <code>pair.hello</code>. The laptop returns a fresh <code>pair.challenge</code>. The phone proves possession of its private key and grant in encrypted <code>pair.proof</code>; the laptop validates that proof and returns an encrypted <code>pair.ack</code>.</p>
@@ -321,8 +451,14 @@ npm run dev</code></pre></div>
       </section>
 
       <section id="guides" aria-labelledby="guides-title">
-        <h2 id="guides-title"><a class="heading-link" href="#guides">All guides</a></h2>
-        <p>Use the handbook links to stay on this site. <strong>Source references</strong> open the repository's rendered Markdown on GitHub for additional technical detail; they are readable documents, not raw downloads.</p>
+        <h2 id="guides-title"><a class="heading-link" href="#guides">Guide directory</a></h2>
+        <p>The handbook is organized by task. Technical references open as rendered Markdown on GitHub when you need implementation or operator detail.</p>
+        <ul>
+          <li><strong>Get connected:</strong> <a href="#requirements">prerequisites</a>, <a href="#quickstart">quickstart</a>, and <a href="#projects">project registration</a>.</li>
+          <li><strong>Keep working:</strong> <a href="#sessions">session controls</a>, <a href="#device-health">device health</a>, and <a href="#updates">updates</a>.</li>
+          <li><strong>Recover safely:</strong> <a href="#pairing">phone trust</a>, <a href="#troubleshooting">symptom guide</a>, <a href="#diagnostics">event logs</a>, and <a href="#security">local data</a>.</li>
+          <li><strong>Go deeper:</strong> <a href="#commands">commands</a>, <a href="#transports">relays</a>, <a href="#development">development</a>, and <a href="#protocol">protocol concepts</a>.</li>
+        </ul>
         <div class="table-wrap" tabindex="0" role="region" aria-label="Documentation guide directory">
           <table><thead><tr><th scope="col">Guide</th><th scope="col">In this handbook</th><th scope="col">Source reference</th></tr></thead><tbody>
             <tr><th scope="row">Setup</th><td><a href="#quickstart">Install &amp; connect</a>; <a href="#development">develop locally</a></td><td><a href="https://github.com/aasis21/weft/blob/main/docs/setup.md">setup.md on GitHub</a></td></tr>

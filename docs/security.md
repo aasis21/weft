@@ -84,7 +84,7 @@ process. End an old per-session connection before establishing a new `/weft` ide
 
 | Location | Stored data |
 |---|---|
-| Phone / installed PWA | Session metadata, transcript history, preferences, device records, and local pairing private keys. Capacitor Preferences is used in the native app without mirroring those values into page-readable `localStorage`; browser storage is used by the PWA. |
+| Phone / installed PWA | Session metadata, cached transcripts and diagnostic event logs, preferences, device records, and local pairing private keys. Diagnostic payloads can include device health snapshots. Pairing storage uses Capacitor Preferences on native and browser storage in the PWA. |
 | Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, and persistent Device Station pairing identity under `~/.weft/`. A per-session `/weft` identity is ephemeral. |
 | Relay infrastructure | No session content, transcripts, or key escrow. It handles encrypted envelopes in transit. The infrastructure provider may retain ordinary operational metadata or logs such as IP addresses, timestamps, and channel identifiers. |
 
@@ -92,6 +92,12 @@ Removing a session from the phone deletes its locally cached transcript. Rotatin
 persistent pairing invalidates the old pairing identity; clearing browser/app data or
 removing `~/.weft/` deletes the corresponding local state. Closing a `copilot` terminal
 ends that live session and its ephemeral `/weft` key.
+
+Event logs are bounded local troubleshooting data, not an exhaustive audit trail or
+a health-history service. The device log includes snapshot messages, and adjacent
+repeated telemetry is coalesced. Review and redact payloads before sharing any log;
+payload compaction does not guarantee removal of private content. See
+[diagnostic scope and retention](https://aasis21.github.io/weft/#diagnostics).
 
 ## Endpoint and availability limitations
 
