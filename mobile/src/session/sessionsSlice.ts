@@ -1,6 +1,6 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { EVENT_TYPE, SUBTYPE } from '@aasis21/weft-shared';
-import type { EventEnvelope, HistoryMsg, SessionFolder, StoredSession } from '@aasis21/weft-shared';
+import type { DeviceSnapshotMsg, EventEnvelope, HistoryMsg, SessionFolder, StoredSession } from '@aasis21/weft-shared';
 import { EVENT_LOG_CAP } from '@/lib/eventLog';
 import type {
   ApprovalRequestMsg,
@@ -165,6 +165,7 @@ const sessionsSlice = createSlice({
         ...existing,
         ...incoming,
         projects: incoming.projects ?? existing?.projects ?? [],
+        capabilities: incoming.capabilities ?? existing?.capabilities,
         projectsLoading: incoming.projectsLoading ?? existing?.projectsLoading ?? false,
         connected: incoming.connected ?? existing?.connected ?? false,
         offers: incoming.offers ?? existing?.offers ?? [],
@@ -196,17 +197,69 @@ const sessionsSlice = createSlice({
     },
     deviceProjectsReceived(
       state,
-      action: PayloadAction<{ channelId: string; projects: ListenerDeviceState['projects']; deviceName?: string | null }>,
+      action: PayloadAction<{
+        channelId: string;
+        projects: ListenerDeviceState['projects'];
+        capabilities?: string[];
+        deviceName?: string | null;
+      }>,
     ) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) {
         device.projects = action.payload.projects;
+        device.capabilities = action.payload.capabilities ?? [];
         device.projectsLoading = false;
         device.connected = true;
         device.error = undefined;
         device.lastSeenAt = Date.now();
         if (action.payload.deviceName) device.name = action.payload.deviceName;
       }
+    },
+    deviceMonitoringStarted(
+      state,
+      action: PayloadAction<{ channelId: string; monitorId: string; startedAt: number }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) {
+        device.monitoring = {
+          monitorId: action.payload.monitorId,
+          startedAt: action.payload.startedAt,
+          latestSequence: -1,
+        };
+      }
+    },
+    deviceMonitoringStopped(state, action: PayloadAction<{ channelId: string; monitorId: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device?.monitoring?.monitorId === action.payload.monitorId) {
+        device.monitoring = undefined;
+      }
+    },
+    deviceMonitoringFailed(
+      state,
+      action: PayloadAction<{ channelId: string; monitorId: string; error: string }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device?.monitoring?.monitorId === action.payload.monitorId) {
+        device.monitoring.error = action.payload.error;
+      }
+    },
+    deviceSnapshotReceived(
+      state,
+      action: PayloadAction<{ channelId: string; snapshot: DeviceSnapshotMsg }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      const monitoring = device?.monitoring;
+      const snapshot = action.payload.snapshot;
+      if (
+        !monitoring ||
+        snapshot.monitorId !== monitoring.monitorId ||
+        snapshot.sequence <= monitoring.latestSequence
+      ) {
+        return;
+      }
+      monitoring.latestSequence = snapshot.sequence;
+      monitoring.snapshot = snapshot;
+      monitoring.error = undefined;
     },
     // The laptop's current set of in-session `/weft` offers (SESSION_OFFERS). Replaces the device's
     // whole `offers` list — the station always relays the full live set, never a delta — and doubles
@@ -524,6 +577,10 @@ export const {
   deviceDefaultSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceMonitoringStarted,
+  deviceMonitoringStopped,
+  deviceMonitoringFailed,
+  deviceSnapshotReceived,
   deviceSessionOffersReceived,
   deviceSessionsReceived,
   deviceSessionsLoadingSet,

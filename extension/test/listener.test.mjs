@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import {
+  DEVICE_CAPABILITY,
   EVENT_TYPE,
   SUBTYPE,
   SecureChannel,
@@ -19,6 +20,8 @@ import {
   resumeSession,
   projectListRequest,
   sessionClaimed,
+  deviceMonitorStart,
+  deviceMonitorStop,
 } from "@aasis21/weft-shared";
 import { createListener } from "../src/listener.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
@@ -53,7 +56,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, monitoringLimits, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -69,6 +72,8 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     channelId,
     deviceId: "test-device",
     heartbeatMs,
+    ...(telemetryApi ? { telemetryApi } : {}),
+    ...(monitoringLimits ? { monitoringLimits } : {}),
     projectsApi,
     ...(sessionsApi ? { sessionsApi } : {}),
     ...(attachedApi ? { attachedApi } : {}),
@@ -77,6 +82,7 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, onSessionOff
     connectionsHome,
     onSessionOffers,
     onSessionClaimed,
+    onControl,
     // Always hand the listener a descriptor. Without one, start() calls resolveTransport(), which
     // reads the REAL ~/.weft config and — on a devtunnel-configured machine — demands a live relay,
     // so the whole suite passed or failed depending on whether the developer happened to have
@@ -123,6 +129,7 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   assert.deepEqual(list.msg.projects, [{ name: "app", path: projectDir, isDefault: true }]);
   assert.ok(list.msg.deviceName);
   assert.equal(list.msg.deviceId, "test-device");
+  assert.deepEqual(list.msg.capabilities, [DEVICE_CAPABILITY.MONITOR_V1]);
   await listener.stop();
 });
 
@@ -163,6 +170,104 @@ test("emits DEVICE_HEARTBEAT on the configured interval, independent of PROJECT_
   const beat = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT);
   assert.equal(beat.msg.deviceId, "test-device");
   await listener.stop();
+});
+
+test("device monitor sends ordered snapshots, renews, and ignores a stale stop", async (t) => {
+  let captures = 0;
+  const controls = [];
+  const telemetryApi = {
+    collectDeviceSnapshot: async () => ({
+      capturedAt: ++captures,
+      system: { cpuPercent: captures },
+      apps: [],
+      observedAt: { system: captures, disk: null, battery: null, apps: null },
+      issues: [],
+    }),
+  };
+  const limits = {
+    minIntervalMs: 15,
+    maxIntervalMs: 50,
+    defaultIntervalMs: 20,
+    minLeaseMs: 40,
+    maxLeaseMs: 200,
+    defaultLeaseMs: 100,
+  };
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    heartbeatMs: 1_000,
+    telemetryApi,
+    monitoringLimits: limits,
+    onControl: ({ subtype }) => controls.push(subtype),
+  });
+  t.after(() => listener.stop());
+
+  await phoneChannel.send(deviceMonitorStart("monitor-1", 1, 100));
+  await waitFor(
+    () => messages.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT).length >= 2,
+    "periodic device snapshots",
+  );
+  await phoneChannel.send(deviceMonitorStart("monitor-1", 15, 100));
+  await phoneChannel.send(deviceMonitorStop("old-monitor"));
+  const before = messages.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT).length;
+  await waitFor(
+    () => messages.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT).length > before,
+    "snapshot after stale stop",
+  );
+
+  const snapshots = messages.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT);
+  assert.ok(snapshots.every((message) => message.msg.monitorId === "monitor-1"));
+  assert.deepEqual(snapshots.map((message) => message.msg.sequence), snapshots.map((_, index) => index + 1));
+  assert.ok(snapshots.every((message) => message.msg.effectiveIntervalMs === 15));
+
+  await phoneChannel.send(deviceMonitorStop("monitor-1"));
+  await waitFor(
+    () => controls.filter((subtype) => subtype === SUBTYPE.CONTROL.DEVICE_MONITOR_STOP).length >= 2,
+    "matching monitor stop",
+  );
+  const stoppedAt = captures;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(captures, stoppedAt);
+});
+
+test("device monitor lease expires without a stop and does not affect heartbeat", async (t) => {
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    heartbeatMs: 20,
+    telemetryApi: {
+      collectDeviceSnapshot: async () => ({
+        capturedAt: Date.now(),
+        system: {},
+        apps: [],
+        observedAt: {},
+        issues: [],
+      }),
+    },
+    monitoringLimits: {
+      minIntervalMs: 10,
+      maxIntervalMs: 50,
+      defaultIntervalMs: 10,
+      minLeaseMs: 35,
+      maxLeaseMs: 100,
+      defaultLeaseMs: 35,
+    },
+  });
+  t.after(() => listener.stop());
+
+  await phoneChannel.send(deviceMonitorStart("monitor-expiring", 10, 35));
+  await waitFor(
+    () => messages.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT).length >= 2,
+    "leased device snapshots",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const snapshotsAfterExpiry = messages.filter(
+    (message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT,
+  ).length;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(
+    messages.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT).length,
+    snapshotsAfterExpiry,
+  );
+  assert.ok(messages.some((message) => message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT));
 });
 
 test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok result", async () => {

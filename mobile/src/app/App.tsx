@@ -108,6 +108,12 @@ export default function App(): JSX.Element {
     setDeviceDetailsChannelId(channelId);
     window.history.pushState({ weftView: 'device-details', channelId } satisfies ModalHistoryState, '');
   }, []);
+  const startDeviceMonitoring = useCallback((channelId: string): void => {
+    sessionRuntime.startDeviceMonitoring(channelId);
+  }, []);
+  const stopDeviceMonitoring = useCallback((channelId: string): void => {
+    sessionRuntime.stopDeviceMonitoring(channelId);
+  }, []);
 
   const handlePair = useCallback(async (raw: string): Promise<void> => {
     const route = await sessionRuntime.addByQr(raw);
@@ -275,6 +281,8 @@ export default function App(): JSX.Element {
             sessions={snapshot.sessions}
             devices={snapshot.devices}
             onRefreshProjects={(id) => void sessionRuntime.refreshProjects(id)}
+            onStartMonitoring={startDeviceMonitoring}
+            onStopMonitoring={stopDeviceMonitoring}
             onResumeOnDevice={(id) => openStart(id, 'resume')}
             onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
             onForget={async (id) => {

@@ -3,6 +3,7 @@ import { existsSync, statSync, watch, mkdirSync } from "node:fs";
 import { hostname, homedir } from "node:os";
 import { randomInt } from "node:crypto";
 import {
+  DEVICE_CAPABILITY,
   EVENT_TYPE,
   PAIR_KIND,
   PAIRING_TTL_MS,
@@ -11,6 +12,7 @@ import {
   buildPairingPayload,
   createPairingGate,
   deviceHeartbeat,
+  deviceSnapshot,
   exportKeyPair,
   generateKeyPair,
   listenForPeers,
@@ -34,6 +36,7 @@ import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./
 import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { resolveVersion } from "./version.mjs";
+import { createDeviceTelemetryCollector } from "./deviceTelemetry.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
@@ -41,6 +44,12 @@ const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"
 // phone (not polling) can still tell the listener process is alive, not just that the transport
 // socket is up.
 const DEVICE_HEARTBEAT_MS = 120_000;
+const DEVICE_MONITOR_INTERVAL_MS = 10_000;
+const DEVICE_MONITOR_MIN_INTERVAL_MS = 5_000;
+const DEVICE_MONITOR_MAX_INTERVAL_MS = 60_000;
+const DEVICE_MONITOR_LEASE_MS = 45_000;
+const DEVICE_MONITOR_MIN_LEASE_MS = 15_000;
+const DEVICE_MONITOR_MAX_LEASE_MS = 120_000;
 
 // A machine-wide, cross-session view of "which phone is bound to which live Weft listener right
 // now", persisted at ~/.weft/connections.json (see registryFile.mjs — same atomic-write + pid
@@ -83,6 +92,8 @@ export function createListener({
   channelId = null,
   deviceId = null,
   heartbeatMs = DEVICE_HEARTBEAT_MS,
+  telemetryApi = createDeviceTelemetryCollector(),
+  monitoringLimits = {},
   spawnFn,
   projectsApi = projectsStore,
   // Pending in-session `/weft` offers registry (see pendingSessions.mjs) — injectable so tests can
@@ -150,6 +161,7 @@ export function createListener({
   let stopped = false;
   let started = false;
   let heartbeatTimer = null;
+  let activeMonitor = null;
   let pairingGrantTimer = null;
   // Pending `/weft` session offers relayed to the phone (see pendingSessions.mjs). `claimedOffers`
   // suppresses re-advertising a session the phone already adopted (until its file entry is gone);
@@ -279,6 +291,7 @@ export function createListener({
     if (pairingGrantTimer) clearTimeout(pairingGrantTimer);
     pairingGrantTimer = null;
     stopHeartbeat();
+    stopMonitoring();
     stopPendingWatch();
     stopLaunchWatch();
     try {
@@ -335,6 +348,7 @@ export function createListener({
 
     const hadPeer = boundPeerPub !== null;
     stopHeartbeat();
+    stopMonitoring();
     try {
       controlUnsub?.();
     } catch {
@@ -425,6 +439,115 @@ export function createListener({
     heartbeatTimer.unref?.();
   }
 
+  function stopMonitoring(monitorId = null) {
+    if (!activeMonitor || (monitorId && activeMonitor.id !== monitorId)) return false;
+    if (activeMonitor.intervalTimer) clearInterval(activeMonitor.intervalTimer);
+    if (activeMonitor.leaseTimer) clearTimeout(activeMonitor.leaseTimer);
+    activeMonitor = null;
+    return true;
+  }
+
+  function scheduleMonitorLease(monitor) {
+    if (monitor.leaseTimer) clearTimeout(monitor.leaseTimer);
+    monitor.leaseTimer = setTimeout(() => {
+      stopMonitoring(monitor.id);
+    }, Math.max(0, monitor.expiresAt - Date.now()));
+    monitor.leaseTimer.unref?.();
+  }
+
+  function scheduleMonitorInterval(monitor) {
+    if (monitor.intervalTimer) clearInterval(monitor.intervalTimer);
+    monitor.intervalTimer = setInterval(() => {
+      void sendDeviceSnapshot(monitor);
+    }, monitor.intervalMs);
+    monitor.intervalTimer.unref?.();
+  }
+
+  async function sendDeviceSnapshot(monitor) {
+    if (
+      stopped ||
+      !channel ||
+      activeMonitor !== monitor ||
+      monitor.collecting ||
+      Date.now() >= monitor.expiresAt
+    ) {
+      return;
+    }
+    monitor.collecting = true;
+    try {
+      let collected;
+      try {
+        collected = await telemetryApi.collectDeviceSnapshot();
+      } catch {
+        collected = {
+          capturedAt: Date.now(),
+          system: {},
+          apps: [],
+          observedAt: {},
+          issues: [{ component: "system", code: "unavailable" }],
+        };
+      }
+      if (stopped || !channel || activeMonitor !== monitor || Date.now() >= monitor.expiresAt) return;
+      monitor.sequence += 1;
+      await channel.send(deviceSnapshot({
+        ...collected,
+        monitorId: monitor.id,
+        sequence: monitor.sequence,
+        effectiveIntervalMs: monitor.intervalMs,
+        leaseExpiresAt: monitor.expiresAt,
+      }));
+    } catch {
+      // Best-effort telemetry: the next interval retries and lease expiry still cleans up.
+    } finally {
+      monitor.collecting = false;
+    }
+  }
+
+  function startMonitoring({ monitorId, intervalMs, leaseMs } = {}) {
+    const id = typeof monitorId === "string" ? monitorId.trim() : "";
+    if (!id) return;
+    const minIntervalMs = monitoringLimits.minIntervalMs ?? DEVICE_MONITOR_MIN_INTERVAL_MS;
+    const maxIntervalMs = monitoringLimits.maxIntervalMs ?? DEVICE_MONITOR_MAX_INTERVAL_MS;
+    const defaultIntervalMs = monitoringLimits.defaultIntervalMs ?? DEVICE_MONITOR_INTERVAL_MS;
+    const configuredMinLeaseMs = monitoringLimits.minLeaseMs ?? DEVICE_MONITOR_MIN_LEASE_MS;
+    const maxLeaseMs = monitoringLimits.maxLeaseMs ?? DEVICE_MONITOR_MAX_LEASE_MS;
+    const defaultLeaseMs = monitoringLimits.defaultLeaseMs ?? DEVICE_MONITOR_LEASE_MS;
+    const effectiveIntervalMs = Math.max(
+      minIntervalMs,
+      Math.min(maxIntervalMs, Number(intervalMs) || defaultIntervalMs),
+    );
+    const minLeaseMs = Math.max(configuredMinLeaseMs, effectiveIntervalMs * 2);
+    const effectiveLeaseMs = Math.max(
+      minLeaseMs,
+      Math.min(maxLeaseMs, Number(leaseMs) || defaultLeaseMs),
+    );
+
+    if (activeMonitor?.id === id) {
+      activeMonitor.expiresAt = Date.now() + effectiveLeaseMs;
+      scheduleMonitorLease(activeMonitor);
+      if (activeMonitor.intervalMs !== effectiveIntervalMs) {
+        activeMonitor.intervalMs = effectiveIntervalMs;
+        scheduleMonitorInterval(activeMonitor);
+      }
+      return;
+    }
+
+    stopMonitoring();
+    const monitor = {
+      id,
+      intervalMs: effectiveIntervalMs,
+      expiresAt: Date.now() + effectiveLeaseMs,
+      sequence: 0,
+      collecting: false,
+      intervalTimer: null,
+      leaseTimer: null,
+    };
+    activeMonitor = monitor;
+    scheduleMonitorLease(monitor);
+    scheduleMonitorInterval(monitor);
+    void sendDeviceSnapshot(monitor);
+  }
+
   async function bindPeer({ key, peer }) {
     if (stopped) return;
     if (boundPeerPub && peer.publicKeyB64 !== boundPeerPub) {
@@ -442,6 +565,7 @@ export function createListener({
     }
     if (channel) {
       stopHeartbeat();
+      stopMonitoring();
       try {
         controlUnsub?.();
       } catch {
@@ -502,7 +626,12 @@ export function createListener({
       path: p.path,
       isDefault: p.isDefault === true || p.default === true,
     }));
-    await channel.send(projectList(projects, listenerDeviceName, listenerDeviceId));
+    await channel.send(projectList(
+      projects,
+      listenerDeviceName,
+      listenerDeviceId,
+      [DEVICE_CAPABILITY.MONITOR_V1],
+    ));
   }
 
   // Relay the current set of in-session `/weft` offers to the paired phone. `force` bypasses the
@@ -685,6 +814,14 @@ export function createListener({
       await sendProjectList();
       await sendSessionOffers();
       await sendLaunchReplays({ force: true });
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.DEVICE_MONITOR_START) {
+      startMonitoring(envelope.msg ?? {});
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.DEVICE_MONITOR_STOP) {
+      stopMonitoring(envelope.msg?.monitorId);
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {

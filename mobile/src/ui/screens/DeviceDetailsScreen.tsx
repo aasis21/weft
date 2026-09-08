@@ -23,6 +23,7 @@ import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { transportIdentity } from '@aasis21/weft-shared';
+import { App as CapacitorApp } from '@capacitor/app';
 import { useNowTick } from '@/ui/hooks/useNowTick';
 
 interface DeviceDetailsScreenProps {
@@ -33,6 +34,8 @@ interface DeviceDetailsScreenProps {
   /** Every registered listener device, so the sidebar's "Devices" group stays visible here too. */
   devices: ListenerDeviceState[];
   onRefreshProjects(channelId: string): void;
+  onStartMonitoring(channelId: string): void;
+  onStopMonitoring(channelId: string): void;
   /** Open the start screen on its Resume tab for this device. The resumable-session list lives
    *  there, next to the folder picker and permission toggle it shares with starting a new one —
    *  this screen is device administration, not a second place to launch sessions from. */
@@ -74,12 +77,44 @@ function folderName(path: string | null | undefined): string | null {
   return parts.length > 0 ? (parts[parts.length - 1] ?? null) : null;
 }
 
+function percent(used: number | null, total: number | null): number | null {
+  if (used === null || total === null || total <= 0) return null;
+  return Math.max(0, Math.min(100, (used / total) * 100));
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value)}%`;
+}
+
+function formatBytes(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value) || value < 0) return null;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = value;
+  let unit = 0;
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024;
+    unit += 1;
+  }
+  return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
+}
+
+function formatUptime(seconds: number | null): string | null {
+  if (seconds === null || seconds < 0) return null;
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  if (days > 0) return `${days}d ${hours}h uptime`;
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  return `${hours}h ${minutes}m uptime`;
+}
+
 export function DeviceDetailsScreen({
   device,
   activeId,
   sessions,
   devices,
   onRefreshProjects,
+  onStartMonitoring,
+  onStopMonitoring,
   onResumeOnDevice,
   onSetDefault,
   onForget,
@@ -104,13 +139,14 @@ export function DeviceDetailsScreen({
   const [confirmForget, setConfirmForget] = useState(false);
   // #ui: the inactive bucket starts collapsed so the list opens on what's still running.
   const [inactiveOpen, setInactiveOpen] = useState(false);
+  const [allAppsOpen, setAllAppsOpen] = useState(false);
   // #ui: swipe-to-reveal row actions, mirroring WeftDrawer's session rows. One row at a time.
   const [swipedId, setSwipedId] = useState<string | null>(null);
   const touchRef = useRef<{ id: string; startX: number; startY: number; dx: number; swiping: boolean } | null>(null);
   const suppressClickRef = useRef(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const now = useNowTick();
+  const now = useNowTick(5_000);
   const status = deviceStatus(device);
   const lastSeen = formatLastSeen(device.lastSeenAt, now);
   const deviceKey = device.deviceId ?? device.channelId;
@@ -128,6 +164,28 @@ export function DeviceDetailsScreen({
   const tracked = new Set(sessions.map((s) => s.meta.channelId));
   const offers = (device.offers ?? []).filter((o) => o && o.channelId && !tracked.has(o.channelId));
   const online = device.connected;
+  const monitoringSupported = device.capabilities?.includes('device-monitor-v1') ?? false;
+  const snapshot = device.monitoring?.snapshot;
+  const system = snapshot?.system;
+  const memoryPercent = system ? percent(system.memoryUsedBytes, system.memoryTotalBytes) : null;
+  const diskPercent = system ? percent(system.diskUsedBytes, system.diskTotalBytes) : null;
+  const batteryPercent = system?.batteryPercent ?? null;
+  const effectiveInterval = snapshot?.effectiveIntervalMs ?? 10_000;
+  const snapshotStale = Boolean(
+    snapshot && now - snapshot.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
+  );
+  const visibleApps = snapshot?.apps ?? [];
+  const shownApps = allAppsOpen ? visibleApps : visibleApps.slice(0, 5);
+  const appsUnavailable = snapshot?.issues.some((issue) => issue.component === 'apps') ?? false;
+  const hasPartialSystemIssues =
+    snapshot?.issues.some((issue) => issue.component !== 'apps') ?? false;
+  const systemUnavailable = Boolean(
+    snapshot &&
+      system?.cpuPercent === null &&
+      memoryPercent === null &&
+      diskPercent === null &&
+      batteryPercent === null,
+  );
 
   const closeMenu = (returnFocus: boolean): void => {
     setMenuOpen(false);
@@ -155,6 +213,35 @@ export function DeviceDetailsScreen({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!monitoringSupported || !online) {
+      onStopMonitoring(device.channelId);
+      return;
+    }
+    let appActive = true;
+    let disposed = false;
+    let removeAppListener: (() => void) | undefined;
+    const syncMonitoring = (): void => {
+      if (!appActive || document.visibilityState === 'hidden') onStopMonitoring(device.channelId);
+      else onStartMonitoring(device.channelId);
+    };
+    syncMonitoring();
+    document.addEventListener('visibilitychange', syncMonitoring);
+    void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      appActive = isActive;
+      syncMonitoring();
+    }).then((handle) => {
+      if (disposed) void handle.remove();
+      else removeAppListener = () => void handle.remove();
+    });
+    return () => {
+      disposed = true;
+      removeAppListener?.();
+      document.removeEventListener('visibilitychange', syncMonitoring);
+      onStopMonitoring(device.channelId);
+    };
+  }, [device.channelId, monitoringSupported, online, onStartMonitoring, onStopMonitoring]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -375,6 +462,89 @@ export function DeviceDetailsScreen({
       <div className="session-join-inner">
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
+        <section className="device-monitor-summary" aria-label="Device health">
+          {!online ? (
+            <div className="device-monitor-state">
+              <strong>System health unavailable</strong>
+              <span>Monitoring resumes when this laptop reconnects.</span>
+            </div>
+          ) : device.capabilities === undefined ? (
+            <div className="device-monitor-state" role="status">
+              <strong>Checking Device Station capabilities…</strong>
+              <span>Waiting for this laptop to describe the features it supports.</span>
+            </div>
+          ) : !monitoringSupported ? (
+            <div className="device-monitor-state device-monitor-update">
+              <strong>Update Weft on this laptop</strong>
+              <span>Install the latest Device Station to see system health and running apps.</span>
+            </div>
+          ) : !snapshot ? (
+            <div className="device-monitor-state" role="status">
+              <strong>Checking system health…</strong>
+              <span>{device.monitoring?.error ?? 'Waiting for the first snapshot from this laptop.'}</span>
+            </div>
+          ) : (
+            <>
+              <div className="device-health-head">
+                <div>
+                  <strong>System health</strong>
+                  <span>
+                    {snapshotStale ? 'Update delayed' : `Updated ${formatLastSeen(snapshot.capturedAt, now) ?? 'just now'}`}
+                  </span>
+                </div>
+                {formatUptime(system?.uptimeSeconds ?? null) ? (
+                  <span className="device-uptime">{formatUptime(system?.uptimeSeconds ?? null)}</span>
+                ) : null}
+              </div>
+              <div className="device-metrics">
+                {system?.cpuPercent !== null && system?.cpuPercent !== undefined ? (
+                  <div className="device-metric">
+                    <span className="device-metric-name">CPU</span>
+                    <strong>{formatPercent(system.cpuPercent)}</strong>
+                    <span className="device-meter" aria-hidden="true"><i style={{ width: `${system.cpuPercent}%` }} /></span>
+                  </div>
+                ) : null}
+                {memoryPercent !== null ? (
+                  <div className="device-metric">
+                    <span className="device-metric-name">Memory</span>
+                    <strong>{formatPercent(memoryPercent)}</strong>
+                    <span className="device-metric-detail">
+                      {formatBytes(system?.memoryUsedBytes ?? null)} / {formatBytes(system?.memoryTotalBytes ?? null)}
+                    </span>
+                    <span className="device-meter" aria-hidden="true"><i style={{ width: `${memoryPercent}%` }} /></span>
+                  </div>
+                ) : null}
+                {diskPercent !== null ? (
+                  <div className="device-metric">
+                    <span className="device-metric-name">Disk</span>
+                    <strong>{formatPercent(diskPercent)}</strong>
+                    <span className="device-metric-detail">
+                      {formatBytes(system?.diskUsedBytes ?? null)} / {formatBytes(system?.diskTotalBytes ?? null)}
+                    </span>
+                    <span className="device-meter" aria-hidden="true"><i style={{ width: `${diskPercent}%` }} /></span>
+                  </div>
+                ) : null}
+                {batteryPercent !== null ? (
+                  <div className="device-metric">
+                    <span className="device-metric-name">Battery</span>
+                    <strong>{formatPercent(batteryPercent)}</strong>
+                    <span className="device-metric-detail">
+                      {system?.batteryCharging === true ? 'Charging' : system?.batteryCharging === false ? 'On battery' : ''}
+                    </span>
+                    <span className="device-meter" aria-hidden="true"><i style={{ width: `${batteryPercent}%` }} /></span>
+                  </div>
+                ) : null}
+              </div>
+              {systemUnavailable ? (
+                <p className="device-monitor-partial">System metrics are temporarily unavailable.</p>
+              ) : null}
+              {hasPartialSystemIssues && !systemUnavailable ? (
+                <p className="device-monitor-partial">Some system details are temporarily unavailable.</p>
+              ) : null}
+            </>
+          )}
+        </section>
+
         {/* Start and Resume are why you came here, so they sit directly under the header rather
             than buried at the bottom of a Projects card — the project list is context for them,
             not a step before them. */}
@@ -407,6 +577,39 @@ export function DeviceDetailsScreen({
             </span>
           </p>
         )}
+
+        {monitoringSupported && snapshot ? (
+          <section className="session-join-fallback device-running">
+            <div className="device-running-head">
+              <h3 className="device-section-label">Running now · {visibleApps.length} apps</h3>
+              {visibleApps.length > 5 ? (
+                <button type="button" onClick={() => setAllAppsOpen((open) => !open)}>
+                  {allAppsOpen ? 'Show less' : `Show all ${visibleApps.length}`}
+                </button>
+              ) : null}
+            </div>
+            {appsUnavailable ? (
+              <p className="device-card-sub">Running applications are temporarily unavailable.</p>
+            ) : visibleApps.length > 0 ? (
+              <ul className="device-running-list">
+                {shownApps.map((app) => {
+                  const details = [
+                    app.windowCount > 0 ? `${app.windowCount} window${app.windowCount === 1 ? '' : 's'}` : null,
+                    app.memoryBytes !== null ? formatBytes(app.memoryBytes) : null,
+                  ].filter((value): value is string => Boolean(value));
+                  return (
+                    <li key={app.id}>
+                      <span>{app.name}</span>
+                      {details.length > 0 ? <small>{details.join(' · ')}</small> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="device-card-sub">No visible applications are running.</p>
+            )}
+          </section>
+        ) : null}
 
         {offers.length > 0 ? (
           <section className="session-join-fallback device-offers">

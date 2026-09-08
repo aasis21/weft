@@ -1,10 +1,15 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { App } from '@capacitor/app';
 import { DeviceDetailsScreen } from '../DeviceDetailsScreen';
 import { emptyTimeline } from '@/lib/timeline';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
+
+beforeEach(() => {
+  vi.mocked(App.addListener).mockResolvedValue({ remove: vi.fn() });
+});
 
 /** A session spawned by the device under test (`spawnedFromDeviceId` matches its stable deviceId). */
 function makeSession(channelId: string, title: string, status: SessionView['status']): SessionView {
@@ -49,6 +54,8 @@ function renderDetails(overrides: Partial<ComponentProps<typeof DeviceDetailsScr
     sessions: [],
     devices: [],
     onRefreshProjects: vi.fn(),
+    onStartMonitoring: vi.fn(),
+    onStopMonitoring: vi.fn(),
     onResumeOnDevice: vi.fn(),
     onSetDefault: vi.fn().mockResolvedValue(undefined),
     onForget: vi.fn().mockResolvedValue(undefined),
@@ -96,7 +103,7 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     renderDetails({ device: makeDevice({ connected: false }) });
     expect(screen.queryByRole('button', { name: 'Start' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
-    expect(screen.getByText(/run/i).textContent).toMatch(/weft start/);
+    expect(screen.getByText(/weft start/i).textContent).toMatch(/weft start/);
   });
 });
 
@@ -162,5 +169,197 @@ describe('DeviceDetailsScreen session list separates what is running from what i
     const sessions = [makeSession('live-1', 'Running thing', 'live')];
     renderDetails({ sessions });
     expect(screen.getByText(/Live · weft ·/)).toBeTruthy();
+  });
+});
+
+describe('DeviceDetailsScreen monitoring', () => {
+  it('starts monitoring while visible and stops on cleanup', () => {
+    const onStartMonitoring = vi.fn();
+    const onStopMonitoring = vi.fn();
+    const view = renderDetails({
+      device: makeDevice({ capabilities: ['device-monitor-v1'] }),
+      onStartMonitoring,
+      onStopMonitoring,
+    });
+
+    expect(onStartMonitoring).toHaveBeenCalledWith('chan-1');
+    view.unmount();
+    expect(onStopMonitoring).toHaveBeenCalledWith('chan-1');
+  });
+
+  it('stops while the native app is backgrounded and resumes the same visible page', async () => {
+    let appStateListener: ((state: { isActive: boolean }) => void) | undefined;
+    vi.mocked(App.addListener).mockImplementationOnce((_eventName, listener) => {
+      appStateListener = listener as unknown as (state: { isActive: boolean }) => void;
+      return Promise.resolve({ remove: vi.fn() });
+    });
+    const onStartMonitoring = vi.fn();
+    const onStopMonitoring = vi.fn();
+    renderDetails({
+      device: makeDevice({ capabilities: ['device-monitor-v1'] }),
+      onStartMonitoring,
+      onStopMonitoring,
+    });
+    await act(async () => Promise.resolve());
+
+    act(() => appStateListener?.({ isActive: false }));
+    expect(onStopMonitoring).toHaveBeenCalledWith('chan-1');
+
+    act(() => appStateListener?.({ isActive: true }));
+    expect(onStartMonitoring).toHaveBeenCalledTimes(2);
+  });
+
+  it('gates monitoring behind the advertised capability', () => {
+    const onStartMonitoring = vi.fn();
+    renderDetails({ device: makeDevice({ capabilities: [] }), onStartMonitoring });
+
+    expect(onStartMonitoring).not.toHaveBeenCalled();
+    expect(screen.getByText(/update weft on this laptop/i)).toBeTruthy();
+  });
+
+  it('shows offline state before capability negotiation instead of claiming an update is required', () => {
+    renderDetails({ device: makeDevice({ connected: false, capabilities: undefined }) });
+
+    expect(screen.getByText(/system health unavailable/i)).toBeTruthy();
+    expect(screen.queryByText(/update weft on this laptop/i)).toBeNull();
+  });
+
+  it('renders percentage-first metrics without inventing an unavailable battery value', () => {
+    renderDetails({
+      device: makeDevice({
+        capabilities: ['device-monitor-v1'],
+        monitoring: {
+          monitorId: 'monitor-1',
+          startedAt: Date.now(),
+          latestSequence: 1,
+          snapshot: {
+            schemaVersion: 1,
+            monitorId: 'monitor-1',
+            sequence: 1,
+            capturedAt: Date.now(),
+            effectiveIntervalMs: 10_000,
+            leaseExpiresAt: Date.now() + 45_000,
+            system: {
+              cpuPercent: 18,
+              memoryUsedBytes: 10 * 1024 ** 3,
+              memoryTotalBytes: 16 * 1024 ** 3,
+              uptimeSeconds: 90_000,
+              diskUsedBytes: 70 * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+              batteryPercent: null,
+              batteryCharging: null,
+            },
+            apps: [],
+            observedAt: {
+              system: Date.now(),
+              disk: Date.now(),
+              battery: null,
+              apps: Date.now(),
+            },
+            issues: [],
+          },
+        },
+      }),
+    });
+
+    expect(screen.getByText('18%')).toBeTruthy();
+    expect(screen.getByText('63%')).toBeTruthy();
+    expect(screen.getByText('70%')).toBeTruthy();
+    expect(screen.queryByText(/battery/i)).toBeNull();
+  });
+
+  it('limits Running Now to five apps and expands without exposing window titles or controls', () => {
+    const apps = Array.from({ length: 7 }, (_, index) => ({
+      id: `app-${index + 1}`,
+      name: `App ${index + 1}`,
+      processCount: 1,
+      windowCount: index + 1,
+      memoryBytes: (index + 1) * 1024 ** 2,
+    }));
+    renderDetails({
+      device: makeDevice({
+        capabilities: ['device-monitor-v1'],
+        monitoring: {
+          monitorId: 'monitor-1',
+          startedAt: Date.now(),
+          latestSequence: 1,
+          snapshot: {
+            schemaVersion: 1,
+            monitorId: 'monitor-1',
+            sequence: 1,
+            capturedAt: Date.now(),
+            effectiveIntervalMs: 10_000,
+            leaseExpiresAt: Date.now() + 45_000,
+            system: {
+              cpuPercent: null,
+              memoryUsedBytes: null,
+              memoryTotalBytes: null,
+              uptimeSeconds: null,
+              diskUsedBytes: null,
+              diskTotalBytes: null,
+              batteryPercent: null,
+              batteryCharging: null,
+            },
+            apps,
+            observedAt: {
+              system: Date.now(),
+              disk: null,
+              battery: null,
+              apps: Date.now(),
+            },
+            issues: [],
+          },
+        },
+      }),
+    });
+
+    expect(screen.getByText('App 5')).toBeTruthy();
+    expect(screen.queryByText('App 6')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /show all 7/i }));
+    expect(screen.getByText('App 7')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /end task|focus|close app/i })).toBeNull();
+  });
+
+  it('marks old and partially unavailable snapshots without displaying zero placeholders', () => {
+    const capturedAt = Date.now() - 60_000;
+    renderDetails({
+      device: makeDevice({
+        capabilities: ['device-monitor-v1'],
+        monitoring: {
+          monitorId: 'monitor-1',
+          startedAt: capturedAt,
+          latestSequence: 1,
+          snapshot: {
+            schemaVersion: 1,
+            monitorId: 'monitor-1',
+            sequence: 1,
+            capturedAt,
+            effectiveIntervalMs: 10_000,
+            leaseExpiresAt: capturedAt + 45_000,
+            system: {
+              cpuPercent: null,
+              memoryUsedBytes: null,
+              memoryTotalBytes: null,
+              uptimeSeconds: null,
+              diskUsedBytes: null,
+              diskTotalBytes: null,
+              batteryPercent: null,
+              batteryCharging: null,
+            },
+            apps: [],
+            observedAt: { system: null, disk: null, battery: null, apps: null },
+            issues: [
+              { component: 'system', code: 'unavailable' },
+              { component: 'apps', code: 'timeout' },
+            ],
+          },
+        },
+      }),
+    });
+
+    expect(screen.getByText(/update delayed/i)).toBeTruthy();
+    expect(screen.getByText(/system metrics are temporarily unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/running applications are temporarily unavailable/i)).toBeTruthy();
+    expect(screen.queryByText('0%')).toBeNull();
   });
 });

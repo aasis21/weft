@@ -1,6 +1,7 @@
 import { MODES } from '@aasis21/weft-shared';
 import type {
   ApprovalRequestMsg,
+  DeviceSnapshotMsg,
   ElicitationRequestMsg,
   HistoryItem,
   ListenerProject,
@@ -80,6 +81,14 @@ export interface ChannelHistoryEntry {
   endedAt?: number;
 }
 
+export interface DeviceMonitoringState {
+  monitorId: string;
+  startedAt: number;
+  latestSequence: number;
+  snapshot?: DeviceSnapshotMsg;
+  error?: string;
+}
+
 export interface SessionMeta {
   channelId: string;
   sessionId?: string;
@@ -115,9 +124,13 @@ export interface SessionMeta {
 
 export interface ListenerDeviceState extends RegisteredDevice {
   projects: ListenerProject[];
+  /** Behaviors advertised by the current Device Station. Runtime-only and refreshed with PROJECT_LIST. */
+  capabilities?: string[];
   projectsLoading: boolean;
   connected: boolean;
   error?: string;
+  /** Current page-scoped telemetry lease and newest accepted snapshot. Runtime-only. */
+  monitoring?: DeviceMonitoringState;
   /** In-session `/weft` sessions this laptop is currently offering for one-tap adoption (the mirror
    *  of the "Start session" spawn flow). Each carries the offered session's own pairing payload, so
    *  tapping it pairs digitally — no QR scan. The station relays this list (SESSION_OFFERS) on bind

@@ -30,6 +30,10 @@ export const EVENT_TYPE = Object.freeze({
   PAIR: "pair", // both (plaintext, pre-key): the ECDH handshake (hello/ack)
 });
 
+export const DEVICE_CAPABILITY = Object.freeze({
+  MONITOR_V1: "device-monitor-v1",
+});
+
 /**
  * Fine-grained subtype, scoped UNDER its eventType (so the same subtype string may appear under
  * different types, e.g. `request` under both APPROVAL and ELICITATION). A message is uniquely
@@ -104,6 +108,9 @@ export const SUBTYPE = Object.freeze({
     // interval independent of PROJECT_LIST request/reply. Lets the phone detect a dead/hung listener
     // process even though the underlying transport still reports "connected" (see deviceHeartbeat()).
     DEVICE_HEARTBEAT: "device_heartbeat",
+    DEVICE_MONITOR_START: "device_monitor_start",
+    DEVICE_MONITOR_STOP: "device_monitor_stop",
+    DEVICE_SNAPSHOT: "device_snapshot",
     // phone -> ext: Voice Mode (#168) is on/off. While on, the extension prepends a directive to
     // each relayed prompt so the agent authors its reply for SPEECH (concise, no verbatim code).
     VOICE_MODE: "voice_mode",
@@ -336,11 +343,14 @@ export const projectListRequest = () =>
  * though its ephemeral pairing `channelId`/keypair are freshly minted every run (by design, for
  * forward secrecy — see docs/pairing.md). Never derived from or tied to any cryptographic key.
  */
-export const projectList = (projects, deviceName, deviceId) =>
+export const projectList = (projects, deviceName, deviceId, capabilities = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.PROJECT_LIST, {
     projects: Array.isArray(projects) ? projects : [],
     deviceName: deviceName ?? null,
     deviceId: deviceId ?? null,
+    ...(Array.isArray(capabilities)
+      ? { capabilities: capabilities.filter((value) => typeof value === "string" && value) }
+      : {}),
   });
 /**
  * Phone -> listener: spawn a new Copilot session. `requestId` correlates the reply; `projectName`
@@ -450,6 +460,65 @@ export const forgetDevice = () =>
  */
 export const deviceHeartbeat = (deviceId = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT, { deviceId: deviceId ?? null });
+
+export const deviceMonitorStart = (monitorId, intervalMs = null, leaseMs = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_MONITOR_START, {
+    monitorId: typeof monitorId === "string" ? monitorId : "",
+    ...(Number.isFinite(intervalMs) && intervalMs > 0 ? { intervalMs: Math.floor(intervalMs) } : {}),
+    ...(Number.isFinite(leaseMs) && leaseMs > 0 ? { leaseMs: Math.floor(leaseMs) } : {}),
+  });
+
+export const deviceMonitorStop = (monitorId) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_MONITOR_STOP, {
+    monitorId: typeof monitorId === "string" ? monitorId : "",
+  });
+
+export const deviceSnapshot = ({
+  monitorId,
+  sequence,
+  capturedAt,
+  effectiveIntervalMs,
+  leaseExpiresAt,
+  system = {},
+  apps,
+  observedAt = {},
+  issues,
+} = {}) => {
+  const numberOrNull = (value) => (Number.isFinite(value) ? value : null);
+  return envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_SNAPSHOT, {
+    schemaVersion: 1,
+    monitorId: typeof monitorId === "string" ? monitorId : "",
+    sequence: Number.isInteger(sequence) && sequence >= 0 ? sequence : 0,
+    capturedAt: Number.isFinite(capturedAt) ? capturedAt : now(),
+    effectiveIntervalMs: Number.isFinite(effectiveIntervalMs) ? effectiveIntervalMs : null,
+    leaseExpiresAt: Number.isFinite(leaseExpiresAt) ? leaseExpiresAt : null,
+    system: {
+      cpuPercent: numberOrNull(system.cpuPercent),
+      memoryUsedBytes: numberOrNull(system.memoryUsedBytes),
+      memoryTotalBytes: numberOrNull(system.memoryTotalBytes),
+      uptimeSeconds: numberOrNull(system.uptimeSeconds),
+      diskUsedBytes: numberOrNull(system.diskUsedBytes),
+      diskTotalBytes: numberOrNull(system.diskTotalBytes),
+      batteryPercent: numberOrNull(system.batteryPercent),
+      batteryCharging: typeof system.batteryCharging === "boolean" ? system.batteryCharging : null,
+    },
+    apps: (Array.isArray(apps) ? apps : []).filter(
+      (app) => app && typeof app.id === "string" && app.id && typeof app.name === "string" && app.name,
+    ),
+    observedAt: {
+      system: numberOrNull(observedAt.system),
+      disk: numberOrNull(observedAt.disk),
+      battery: numberOrNull(observedAt.battery),
+      apps: numberOrNull(observedAt.apps),
+    },
+    issues: (Array.isArray(issues) ? issues : []).filter(
+      (value) =>
+        value &&
+        ["system", "disk", "battery", "apps"].includes(value.component) &&
+        ["unavailable", "timeout"].includes(value.code),
+    ),
+  });
+};
 
 /**
  * Phone -> ext: Voice Mode is now on/off (#176). While on, the extension prepends a short

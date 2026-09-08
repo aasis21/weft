@@ -37,6 +37,9 @@ import {
   elicitationResponse,
   elicitationComplete,
   deviceHeartbeat,
+  deviceMonitorStart,
+  deviceMonitorStop,
+  deviceSnapshot,
   isValidEnvelope,
 } from "../messages.mjs";
 
@@ -195,6 +198,38 @@ test("deviceHeartbeat carries deviceId under msg, defaulting to null", () => {
   assertEnvelope(beat, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT);
   assert.equal(beat.msg.deviceId, "device-123");
   assert.equal(deviceHeartbeat().msg.deviceId, null);
+});
+
+test("device monitoring factories scope lifecycle and snapshots to one monitor", () => {
+  const start = deviceMonitorStart("monitor-1", 10_500.9, 45_500.2);
+  assertEnvelope(start, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_MONITOR_START);
+  assert.deepEqual(start.msg, {
+    monitorId: "monitor-1",
+    intervalMs: 10_500,
+    leaseMs: 45_500,
+  });
+
+  const stop = deviceMonitorStop("monitor-1");
+  assertEnvelope(stop, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_MONITOR_STOP);
+  assert.deepEqual(stop.msg, { monitorId: "monitor-1" });
+
+  const snapshot = deviceSnapshot({
+    monitorId: "monitor-1",
+    sequence: 3,
+    capturedAt: 123,
+    effectiveIntervalMs: 10_000,
+    leaseExpiresAt: 456,
+    system: { cpuPercent: 42 },
+    apps: [{ id: "code", name: "Visual Studio Code", processCount: 2, windowCount: 2, memoryBytes: 10 }],
+    observedAt: { system: 123, disk: 100, battery: 100, apps: 110 },
+    issues: [{ component: "battery", code: "unavailable" }],
+  });
+  assertEnvelope(snapshot, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_SNAPSHOT);
+  assert.equal(snapshot.msg.schemaVersion, 1);
+  assert.equal(snapshot.msg.monitorId, "monitor-1");
+  assert.equal(snapshot.msg.sequence, 3);
+  assert.equal(snapshot.msg.apps[0].id, "code");
+  assert.deepEqual(snapshot.msg.issues, [{ component: "battery", code: "unavailable" }]);
 });
 
 test("modeChange + interrupt", () => {

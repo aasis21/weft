@@ -10,6 +10,8 @@ import {
   parsePairingPayload,
   prompt,
   projectListRequest,
+  deviceMonitorStart,
+  deviceMonitorStop,
   stateRequest,
   spawnSession as spawnSessionMessage,
   sessionListRequest,
@@ -27,6 +29,7 @@ import type {
   ProjectListMsg,
   PromptAttachment,
   PromptDelivery,
+  DeviceSnapshotMsg,
   SessionListMsg,
   SessionMode,
   SessionOffersMsg,
@@ -108,6 +111,10 @@ import {
   deviceLastProjectSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceMonitoringFailed,
+  deviceMonitoringStarted,
+  deviceMonitoringStopped,
+  deviceSnapshotReceived,
   deviceSessionOffersReceived,
   deviceSessionsReceived,
   deviceSessionsLoadingSet,
@@ -195,6 +202,10 @@ function deviceReconnectBackoffMs(attempts: number, sinceLastSeenMs: number): nu
  *  in-flight request instead of each sending a duplicate. If the reply is dropped, the marker
  *  auto-clears after this window so refreshes can't wedge forever. */
 const PROJECT_LIST_INFLIGHT_MS = 8_000;
+const DEVICE_MONITOR_CAPABILITY = 'device-monitor-v1';
+const DEVICE_MONITOR_INTERVAL_MS = 10_000;
+const DEVICE_MONITOR_LEASE_MS = 45_000;
+const DEVICE_MONITOR_RENEW_MS = 30_000;
 /** Fail-safe window after a `session_list_request` is sent: if the async SESSION_LIST reply never
  *  arrives (wedged laptop), the "Resume a session" loading flag auto-clears after this window so the
  *  Load/Refresh button re-enables instead of spinning forever. */
@@ -264,6 +275,12 @@ interface PendingSpawn extends PendingOperation {
   /** Fires partway through a resume to say it is still working, so a long wait doesn't read as a
    *  hang. Cleared alongside `timer`. */
   slowTimer?: ReturnType<typeof setTimeout>;
+}
+
+interface DeviceMonitorLease {
+  monitorId: string;
+  expiresAt: number;
+  renewal: ReturnType<typeof setInterval>;
 }
 
 function clearSpawnTimers(pending: PendingSpawn): void {
@@ -350,6 +367,7 @@ export class SessionRuntime {
   /** Per-device fail-safe timers for an outstanding `project_list_request` (see
    *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
   private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly deviceMonitors = new Map<string, DeviceMonitorLease>();
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
@@ -1185,6 +1203,7 @@ export class SessionRuntime {
       deviceUpserted({
         ...stored,
         projects: prior?.projects ?? [],
+        capabilities: prior?.capabilities,
         projectsLoading: true,
         connected: true,
         events: prior?.events ?? (await loadEventLog(pairing.channelId).catch(() => [])),
@@ -1262,6 +1281,79 @@ export class SessionRuntime {
       this.clearProjectListInflight(channelId);
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not request projects.'), connected: false }),
+      );
+    }
+  }
+
+  startDeviceMonitoring(channelId: string): void {
+    const device = this.device(channelId);
+    if (!device?.capabilities?.includes(DEVICE_MONITOR_CAPABILITY)) return;
+
+    const existing = this.deviceMonitors.get(channelId);
+    if (existing && this.clock() < existing.expiresAt) {
+      void this.sendDeviceMonitorStart(channelId, existing.monitorId);
+      return;
+    }
+    if (existing) {
+      clearInterval(existing.renewal);
+      this.deviceMonitors.delete(channelId);
+    }
+    const monitorId = crypto.randomUUID();
+    const renewal = setInterval(() => {
+      this.startDeviceMonitoring(channelId);
+    }, DEVICE_MONITOR_RENEW_MS);
+    (renewal as { unref?: () => void }).unref?.();
+    this.deviceMonitors.set(channelId, {
+      monitorId,
+      expiresAt: this.clock() + DEVICE_MONITOR_LEASE_MS,
+      renewal,
+    });
+    this.store.dispatch(deviceMonitoringStarted({ channelId, monitorId, startedAt: this.clock() }));
+    void this.sendDeviceMonitorStart(channelId, monitorId);
+  }
+
+  stopDeviceMonitoring(channelId: string): void {
+    const lease = this.deviceMonitors.get(channelId);
+    if (!lease) return;
+    clearInterval(lease.renewal);
+    this.deviceMonitors.delete(channelId);
+    this.store.dispatch(deviceMonitoringStopped({ channelId, monitorId: lease.monitorId }));
+
+    const ctrl = this.listenerController(channelId);
+    if (!ctrl?.client) return;
+    const message = deviceMonitorStop(lease.monitorId);
+    this.recordDeviceEvent(channelId, 'out', message);
+    void ctrl.client.send(message).catch(() => {
+      // The station's lease is the cleanup fallback when a page-close stop cannot be delivered.
+    });
+  }
+
+  private async sendDeviceMonitorStart(channelId: string, monitorId: string): Promise<void> {
+    const lease = this.deviceMonitors.get(channelId);
+    if (lease?.monitorId !== monitorId) return;
+    await this.connectDevice(channelId);
+    const ctrl = this.listenerController(channelId);
+    if (!ctrl?.client || this.deviceMonitors.get(channelId)?.monitorId !== monitorId) {
+      this.store.dispatch(
+        deviceMonitoringFailed({ channelId, monitorId, error: 'Waiting for the laptop to reconnect.' }),
+      );
+      return;
+    }
+    const message = deviceMonitorStart(monitorId, DEVICE_MONITOR_INTERVAL_MS, DEVICE_MONITOR_LEASE_MS);
+    this.recordDeviceEvent(channelId, 'out', message);
+    try {
+      await ctrl.client.send(message);
+      const current = this.deviceMonitors.get(channelId);
+      if (current?.monitorId === monitorId) {
+        current.expiresAt = this.clock() + DEVICE_MONITOR_LEASE_MS;
+      }
+    } catch (err) {
+      this.store.dispatch(
+        deviceMonitoringFailed({
+          channelId,
+          monitorId,
+          error: errMessage(err, 'Could not start device monitoring.'),
+        }),
       );
     }
   }
@@ -1638,6 +1730,7 @@ export class SessionRuntime {
   }
 
   async forgetDevice(channelId: string): Promise<void> {
+    this.stopDeviceMonitoring(channelId);
     const ctrl = this.listenerController(channelId);
     if (ctrl?.client) {
       const message = forgetDeviceMessage();
@@ -1685,6 +1778,7 @@ export class SessionRuntime {
       const { removedChannelIds, merged } = await reconcileDeviceId(channelId, deviceId);
       this.store.dispatch(deviceReconciled({ channelId, removedChannelIds, merged }));
       for (const dead of removedChannelIds) {
+        this.stopDeviceMonitoring(dead);
         this.clearProjectListInflight(dead);
         this.listenerController(dead)?.dispose();
         this.listenerControllers.delete(dead);
@@ -1697,7 +1791,9 @@ export class SessionRuntime {
   private onListenerMessage(channelId: string, client: WeftClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
-    this.recordDeviceEvent(channelId, 'in', message);
+    if (message.eventSubtype !== SUBTYPE.CONTROL.DEVICE_SNAPSHOT) {
+      this.recordDeviceEvent(channelId, 'in', message);
+    }
     // Single inbound choke point: ANY control message is proof the laptop is alive right now, so
     // refresh "last seen" here — before the per-subtype branches — so SPAWN_PAIRING, SPAWN_RESULT
     // and any future control message keep the device fresh, not just the state-carrying subtypes.
@@ -1711,12 +1807,34 @@ export class SessionRuntime {
     if (message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST) {
       const msg = message.msg as ProjectListMsg;
       this.clearProjectListInflight(channelId);
-      this.store.dispatch(deviceProjectsReceived({ channelId, projects: msg.projects ?? [], deviceName: msg.deviceName }));
+      this.store.dispatch(
+        deviceProjectsReceived({
+          channelId,
+          projects: msg.projects ?? [],
+          capabilities: msg.capabilities ?? [],
+          deviceName: msg.deviceName,
+        }),
+      );
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
       // The listener's deviceId is stable across `weft start` restarts even though this
       // channelId is a fresh ephemeral pairing channel (forward secrecy). Fold any stale entry
       // for the same physical laptop into this one instead of leaving a dead duplicate around.
       if (msg.deviceId) void this.reconcileDevice(channelId, msg.deviceId);
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT) {
+      const snapshot = message.msg as DeviceSnapshotMsg;
+      if (
+        snapshot.schemaVersion !== 1 ||
+        typeof snapshot.monitorId !== 'string' ||
+        !Number.isInteger(snapshot.sequence) ||
+        snapshot.sequence < 0
+      ) {
+        return;
+      }
+      this.store.dispatch(
+        deviceSnapshotReceived({ channelId, snapshot }),
+      );
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
@@ -2596,6 +2714,8 @@ export class SessionRuntime {
     this.controllers.clear();
     for (const ctrl of this.listenerControllers.values()) ctrl.dispose();
     this.listenerControllers.clear();
+    for (const lease of this.deviceMonitors.values()) clearInterval(lease.renewal);
+    this.deviceMonitors.clear();
     for (const pending of this.pendingSpawns.values()) clearSpawnTimers(pending);
     this.pendingSpawns.clear();
     this.registry.disposeAll();

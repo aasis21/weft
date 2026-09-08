@@ -76,7 +76,12 @@ test("exportKeyPair -> importKeyPair round-trips a working ECDH identity", async
 test("spawn/project/forget factories build valid CONTROL envelopes", () => {
   const cases = [
     [projectListRequest(), SUBTYPE.CONTROL.PROJECT_LIST_REQUEST],
-    [projectList([{ name: "web", path: "/w", isDefault: true }], "MacBook"), SUBTYPE.CONTROL.PROJECT_LIST],
+    [projectList(
+      [{ name: "web", path: "/w", isDefault: true }],
+      "MacBook",
+      "device-1",
+      ["device-monitor-v1"],
+    ), SUBTYPE.CONTROL.PROJECT_LIST],
     [spawnSession("r1", "web", "allow-all", "brave-otter"), SUBTYPE.CONTROL.SPAWN_SESSION],
     [spawnPairing("r1", { v: 1, channelId: "c", pub: "p" }, "brave-otter", "web"), SUBTYPE.CONTROL.SPAWN_PAIRING],
     [spawnResult("r1", false, "no such project"), SUBTYPE.CONTROL.SPAWN_RESULT],
@@ -90,6 +95,10 @@ test("spawn/project/forget factories build valid CONTROL envelopes", () => {
   }
 
   assert.deepEqual(projectList(null).msg.projects, [], "projectList tolerates a nullish list");
+  assert.deepEqual(
+    projectList([], "MacBook", "device-1", ["device-monitor-v1", null]).msg.capabilities,
+    ["device-monitor-v1"],
+  );
   assert.equal(spawnSession("r2", "web").msg.mode, "default", "spawn mode defaults to 'default'");
   assert.equal(spawnResult("r3", true).msg.error, null);
 });

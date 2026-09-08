@@ -33,6 +33,10 @@ export const EVENT_TYPE: {
   readonly PAIR: "pair";
 };
 
+export const DEVICE_CAPABILITY: {
+  readonly MONITOR_V1: "device-monitor-v1";
+};
+
 export const SUBTYPE: {
   readonly STREAM: {
     readonly ASSISTANT_MESSAGE: "assistant_message";
@@ -73,6 +77,9 @@ export const SUBTYPE: {
     readonly LAUNCH_STATUS: "launch_status";
     readonly FORGET_DEVICE: "forget_device";
     readonly DEVICE_HEARTBEAT: "device_heartbeat";
+    readonly DEVICE_MONITOR_START: "device_monitor_start";
+    readonly DEVICE_MONITOR_STOP: "device_monitor_stop";
+    readonly DEVICE_SNAPSHOT: "device_snapshot";
     readonly VOICE_MODE: "voice_mode";
     readonly INVOKE_COMMAND: "invoke_command";
     readonly SESSION_OFFERS: "session_offers";
@@ -310,6 +317,8 @@ export interface ProjectListMsg {
   deviceName: string | null;
   /** Stable, non-secret device id persisted across `weft start` restarts, or null. */
   deviceId?: string | null;
+  /** Optional additive protocol features supported by this listener. */
+  capabilities?: string[];
 }
 export interface SpawnSessionMsg {
   requestId: string;
@@ -399,6 +408,53 @@ export type ForgetDeviceMsg = Record<string, never>;
 export interface DeviceHeartbeatMsg {
   deviceId: string | null;
 }
+export interface DeviceMonitorStartMsg {
+  monitorId: string;
+  intervalMs?: number;
+  leaseMs?: number;
+}
+export interface DeviceMonitorStopMsg {
+  monitorId: string;
+}
+export interface DeviceSystemSnapshot {
+  cpuPercent: number | null;
+  memoryUsedBytes: number | null;
+  memoryTotalBytes: number | null;
+  uptimeSeconds: number | null;
+  diskUsedBytes: number | null;
+  diskTotalBytes: number | null;
+  batteryPercent: number | null;
+  batteryCharging: boolean | null;
+}
+export interface RunningApplication {
+  id: string;
+  name: string;
+  processCount: number;
+  windowCount: number;
+  memoryBytes: number | null;
+}
+export interface DeviceSnapshotIssue {
+  component: "system" | "disk" | "battery" | "apps";
+  code: "unavailable" | "timeout";
+}
+export interface DeviceSnapshotObservedAt {
+  system: number | null;
+  disk: number | null;
+  battery: number | null;
+  apps: number | null;
+}
+export interface DeviceSnapshotMsg {
+  schemaVersion: 1;
+  monitorId: string;
+  sequence: number;
+  capturedAt: number;
+  effectiveIntervalMs: number | null;
+  leaseExpiresAt: number | null;
+  system: DeviceSystemSnapshot;
+  apps: RunningApplication[];
+  observedAt: DeviceSnapshotObservedAt;
+  issues: DeviceSnapshotIssue[];
+}
 export interface VoiceModeMsg {
   active: boolean;
 }
@@ -470,6 +526,9 @@ export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
 export type LaunchStatusMessage = Envelope<"control", "launch_status", LaunchStatusMsg>;
 export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
 export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHeartbeatMsg>;
+export type DeviceMonitorStart = Envelope<"control", "device_monitor_start", DeviceMonitorStartMsg>;
+export type DeviceMonitorStop = Envelope<"control", "device_monitor_stop", DeviceMonitorStopMsg>;
+export type DeviceSnapshot = Envelope<"control", "device_snapshot", DeviceSnapshotMsg>;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
 export type InvokeCommandMessage = Envelope<"control", "invoke_command", InvokeCommandMsg>;
 export type SessionOffersMessage = Envelope<"control", "session_offers", SessionOffersMsg>;
@@ -517,6 +576,9 @@ export type EventEnvelope =
   | LaunchStatusMessage
   | ForgetDevice
   | DeviceHeartbeat
+  | DeviceMonitorStart
+  | DeviceMonitorStop
+  | DeviceSnapshot
   | VoiceModeMessage
   | InvokeCommandMessage
   | SessionOffersMessage
@@ -610,7 +672,8 @@ export function projectListRequest(): ProjectListRequest;
 export function projectList(
   projects: ListenerProject[],
   deviceName?: string | null,
-  deviceId?: string | null
+  deviceId?: string | null,
+  capabilities?: string[] | null
 ): ProjectListMessage;
 export function spawnSession(
   requestId: string,
@@ -644,6 +707,13 @@ export function launchStatus(
 ): LaunchStatusMessage;
 export function forgetDevice(): ForgetDevice;
 export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
+export function deviceMonitorStart(
+  monitorId: string,
+  intervalMs?: number | null,
+  leaseMs?: number | null
+): DeviceMonitorStart;
+export function deviceMonitorStop(monitorId: string): DeviceMonitorStop;
+export function deviceSnapshot(snapshot: Omit<DeviceSnapshotMsg, "schemaVersion">): DeviceSnapshot;
 export function voiceMode(active: boolean): VoiceModeMessage;
 export function invokeCommand(name: string, input?: string): InvokeCommandMessage;
 export function sessionOffers(offers: SessionOffer[]): SessionOffersMessage;
