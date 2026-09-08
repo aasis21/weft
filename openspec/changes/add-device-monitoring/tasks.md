@@ -18,6 +18,7 @@
 - [x] 3.4 Render loading, partial-unavailable, stale, and laptop-update states without fabricated zero values
 - [x] 3.5 Add runtime and screen tests for capability gating, snapshot ordering, monitor lifecycle, and responsive presentation
 - [x] 3.6 Reduce Device Details density with a single-row action rail, lightweight Copilot workspace rows, and compact session rows
+- [x] 3.7 Unify Device Details sections around one width, surface, heading, metadata, row, and divider system
 
 ## 4. Validation
 

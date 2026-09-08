@@ -115,6 +115,11 @@ The mobile application SHALL display system statistics and running applications 
 ### Requirement: Device Details is optimized for mobile scanning
 Device Details SHALL present a compact system summary and a curated Running Now list without reproducing Task Manager's process table.
 
+#### Scenario: Device sections are visually consistent
+- **WHEN** the user scans System Health, Quick Actions, Running Now, Copilot workspaces, and Copilot sessions
+- **THEN** the sections use one content width, surface treatment, sentence-case heading hierarchy, trailing metadata style, row rhythm, and divider system
+- **AND** status color or icons vary only when they communicate a meaningful state or action
+
 #### Scenario: System metrics are available
 - **WHEN** the latest snapshot contains CPU, memory, disk, or battery information
 - **THEN** the screen displays percentage-first values with concise supporting details
@@ -131,7 +136,7 @@ Device Details SHALL present a compact system summary and a curated Running Now 
 #### Scenario: Registered launch folders are presented
 - **WHEN** the Device Station reports registered projects
 - **THEN** Device Details presents them as Copilot workspaces with names, restrained path context, default state, and an initial limit of three
-- **AND** longer lists can be expanded without adding redundant explanatory copy or count chrome
+- **AND** longer lists can be expanded without adding redundant explanatory copy
 
 #### Scenario: Monitoring events are inspected
 - **WHEN** the user opens the device event log

@@ -479,7 +479,7 @@ export function DeviceDetailsScreen({
       <div className="session-join-inner">
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
-        <section className="device-monitor-summary" aria-label="Device health">
+        <section className="device-monitor-summary device-panel" aria-label="Device health">
           {!online ? (
             <div className="device-monitor-state">
               <strong>System health unavailable</strong>
@@ -502,10 +502,10 @@ export function DeviceDetailsScreen({
             </div>
           ) : (
             <>
-              <div className="device-health-head">
+              <div className="device-section-head device-health-head">
                 <div>
-                  <strong>System health</strong>
-                  <span>
+                  <h3 className="device-section-label">System health</h3>
+                  <span className="device-section-meta">
                     {snapshotStale ? 'Update delayed' : `Updated ${formatLastSeen(snapshot.capturedAt, now) ?? 'just now'}`}
                   </span>
                 </div>
@@ -566,7 +566,7 @@ export function DeviceDetailsScreen({
           )}
         </section>
 
-        <section className="device-quick-actions" aria-labelledby="device-quick-actions-heading">
+        <section className="device-quick-actions device-panel" aria-labelledby="device-quick-actions-heading">
           <h3 id="device-quick-actions-heading" className="device-section-label">Quick actions</h3>
           <div className="device-action-grid">
             <button
@@ -620,14 +620,20 @@ export function DeviceDetailsScreen({
         ) : null}
 
         {monitoringSupported && snapshot ? (
-          <section className="session-join-fallback device-running">
-            <div className="device-running-head">
-              <h3 className="device-section-label">Running now · {visibleApps.length} apps</h3>
-              {visibleApps.length > 3 ? (
-                <button type="button" onClick={() => setAllAppsOpen((open) => !open)}>
-                  {allAppsOpen ? 'Show less' : `Show all ${visibleApps.length}`}
-                </button>
-              ) : null}
+          <section className="session-join-fallback device-running device-panel">
+            <div className="device-section-head device-running-head">
+              <h3 className="device-section-label">
+                Running now
+                <span className="sr-only">, {visibleApps.length} apps</span>
+              </h3>
+              <div className="device-section-tools">
+                <span className="device-section-count" aria-hidden="true">{visibleApps.length} apps</span>
+                {visibleApps.length > 3 ? (
+                  <button type="button" onClick={() => setAllAppsOpen((open) => !open)}>
+                    {allAppsOpen ? 'Show less' : `Show all ${visibleApps.length}`}
+                  </button>
+                ) : null}
+              </div>
             </div>
             {appsUnavailable ? (
               <p className="device-card-sub">Running applications are temporarily unavailable.</p>
@@ -653,8 +659,14 @@ export function DeviceDetailsScreen({
         ) : null}
 
         {offers.length > 0 ? (
-          <section className="session-join-fallback device-offers">
-            <h3>Offered sessions</h3>
+          <section className="session-join-fallback device-offers device-panel">
+            <div className="device-section-head">
+              <h3 className="device-section-label">
+                Offered sessions
+                <span className="sr-only">, {offers.length}</span>
+              </h3>
+              <span className="device-section-count" aria-hidden="true">{offers.length}</span>
+            </div>
             <p className="device-card-sub">
               Sessions this laptop opened with <code>/weft</code> — tap to join, no QR needed.
             </p>
@@ -680,8 +692,22 @@ export function DeviceDetailsScreen({
           </section>
         ) : null}
 
-        <section className="session-join-fallback device-workspaces">
-          <h3 className="device-section-label">Copilot workspaces</h3>
+        <section className="session-join-fallback device-workspaces device-panel">
+          <div className="device-section-head">
+            <h3 className="device-section-label">
+              Copilot workspaces
+              {!device.projectsLoading && device.projects.length > 0 ? (
+                <span className="sr-only">
+                  , {device.projects.length} {device.projects.length === 1 ? 'folder' : 'folders'}
+                </span>
+              ) : null}
+            </h3>
+            {!device.projectsLoading && device.projects.length > 0 ? (
+              <span className="device-section-count" aria-hidden="true">
+                {device.projects.length} {device.projects.length === 1 ? 'folder' : 'folders'}
+              </span>
+            ) : null}
+          </div>
           {device.projectsLoading ? (
             <p className="device-card-sub">{online ? 'Refreshing workspaces…' : 'Loading workspaces…'}</p>
           ) : device.projects.length > 0 ? (
@@ -725,10 +751,14 @@ export function DeviceDetailsScreen({
           )}
         </section>
 
-        <section className="session-join-fallback device-sessions">
-          <h3 className="device-section-label">
-            Active Copilot sessions{activeRows.length > 0 ? ` (${activeRows.length})` : ''}
-          </h3>
+        <section className="session-join-fallback device-sessions device-panel">
+          <div className="device-section-head">
+            <h3 className="device-section-label">
+              Active Copilot sessions
+              <span className="sr-only">, {activeRows.length}</span>
+            </h3>
+            <span className="device-section-count" aria-hidden="true">{activeRows.length}</span>
+          </div>
           {activeRows.length === 0 ? (
             <p className="device-card-sub">
               {rows.length === 0 ? 'No sessions started on this device yet.' : 'Nothing running right now.'}

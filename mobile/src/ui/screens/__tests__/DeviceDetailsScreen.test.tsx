@@ -170,7 +170,7 @@ describe('DeviceDetailsScreen session list separates what is running from what i
     expect(screen.getByText('Running thing')).toBeTruthy();
     expect(screen.queryByText('Old thing')).toBeNull();
 
-    expect(screen.getByText('Active Copilot sessions (1)')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Active Copilot sessions, 1' })).toBeTruthy();
     const toggle = screen.getByRole('button', { name: /inactive copilot sessions \(1\)/i });
     fireEvent.click(toggle);
     expect(screen.getByText('Old thing')).toBeTruthy();
@@ -192,7 +192,7 @@ describe('DeviceDetailsScreen workspaces', () => {
     }));
     renderDetails({ device: makeDevice({ projects }) });
 
-    expect(screen.getByRole('heading', { name: 'Copilot workspaces' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Copilot workspaces, 6 folders' })).toBeTruthy();
     expect(screen.queryByText('Folders registered on this laptop for starting sessions.')).toBeNull();
     expect(screen.getByText('Default')).toBeTruthy();
     expect(screen.getByText('C:\\work\\Workspace 1')).toBeTruthy();

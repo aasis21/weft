@@ -109,6 +109,11 @@ The collector returns nullable fields when the operating system cannot provide a
 
 ### Make Device Details glanceable rather than Task Manager-shaped
 
+The page uses one shared visual system. System Health remains the strongest summary, while every
+section below it uses the same bounded width, surface, heading typography, trailing metadata, row
+height, and divider treatment. Icons and status colors communicate meaning without giving each
+module its own card style.
+
 The page uses this hierarchy:
 
 ```text
@@ -119,25 +124,25 @@ The page uses this hierarchy:
 │ CPU 18%   Memory 62%   Disk 71%     │
 │ Uptime 2d 4h            Battery 81% │
 ├──────────────────────────────────────┤
-│ QUICK ACTIONS                        │
+│ Quick actions                         │
 │ Start · Resume · Explore [soon] · …  │
 ├──────────────────────────────────────┤
-│ RUNNING NOW · 3 APPS                 │
+│ Running now                  3 apps  │
 │ Visual Studio Code        3 windows  │
 │ Microsoft Edge            1.2 GB     │
 │ Terminal                  2 windows  │
 ├──────────────────────────────────────┤
-│ COPILOT WORKSPACES · 3               │
+│ Copilot workspaces         3 folders │
 │ 📁 ModernOrder                        │
 │    …\CLP\SC.CST.ModernOrder          │
 ├──────────────────────────────────────┤
-│ ACTIVE COPILOT SESSIONS               │
+│ Active Copilot sessions            2 │
 ├──────────────────────────────────────┤
-│ INACTIVE COPILOT SESSIONS             │
+│ Inactive Copilot sessions          4 │
 └──────────────────────────────────────┘
 ```
 
-The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Quick actions use one compact horizontal rail without secondary descriptions; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the three most relevant entries with a `Show all` affordance. Registered project folders are presented to users as Copilot workspaces, with readable names, restrained path context, a default marker, and an initial limit of three. The workspace section avoids redundant explanatory copy and count chrome. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
+The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Section names use sentence case at one size and weight; counts and freshness sit at the trailing edge in restrained secondary text. Quick actions use one compact horizontal rail without secondary descriptions; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the three most relevant entries with a `Show all` affordance. Registered project folders are presented to users as Copilot workspaces, with readable names, restrained path context, a default marker, and an initial limit of three. Running applications, workspaces, and sessions share flat rows and dividers inside their section surface rather than switching between bare lists, icon tiles, and filled cards. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
 
 Application relevance is ordered by foreground status when available, then aggregate memory. Multiple processes/windows are grouped into one row. Window titles, file names, browser tabs, executable paths, and application-control buttons are excluded from the MVP.
 
