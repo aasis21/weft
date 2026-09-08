@@ -79,6 +79,13 @@ function folderName(path: string | null | undefined): string | null {
   return parts.length > 0 ? (parts[parts.length - 1] ?? null) : null;
 }
 
+function compactPath(path: string): string {
+  const separator = path.includes('\\') ? '\\' : '/';
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  if (parts.length <= 3) return path;
+  return `…${separator}${parts.slice(-3).join(separator)}`;
+}
+
 function percent(used: number | null, total: number | null): number | null {
   if (used === null || total === null || total <= 0) return null;
   return Math.max(0, Math.min(100, (used / total) * 100));
@@ -142,6 +149,7 @@ export function DeviceDetailsScreen({
   // #ui: the inactive bucket starts collapsed so the list opens on what's still running.
   const [inactiveOpen, setInactiveOpen] = useState(false);
   const [allAppsOpen, setAllAppsOpen] = useState(false);
+  const [allProjectsOpen, setAllProjectsOpen] = useState(false);
   // #ui: swipe-to-reveal row actions, mirroring WeftDrawer's session rows. One row at a time.
   const [swipedId, setSwipedId] = useState<string | null>(null);
   const touchRef = useRef<{ id: string; startX: number; startY: number; dx: number; swiping: boolean } | null>(null);
@@ -179,6 +187,7 @@ export function DeviceDetailsScreen({
   );
   const visibleApps = snapshot?.apps ?? [];
   const shownApps = allAppsOpen ? visibleApps : visibleApps.slice(0, 5);
+  const shownProjects = allProjectsOpen ? device.projects : device.projects.slice(0, 4);
   const appsUnavailable = snapshot?.issues.some((issue) => issue.component === 'apps') ?? false;
   const hasPartialSystemIssues =
     snapshot?.issues.some((issue) => issue.component !== 'apps') ?? false;
@@ -217,6 +226,10 @@ export function DeviceDetailsScreen({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    setAllProjectsOpen(false);
+  }, [deviceKey]);
 
   useEffect(() => {
     if (!monitoringSupported || !online) {
@@ -655,21 +668,56 @@ export function DeviceDetailsScreen({
           </section>
         ) : null}
 
-        <section className="session-join-fallback device-card">
-          <h3 className="device-section-label">Projects</h3>
+        <section className="session-join-fallback device-workspaces">
+          <div className="device-workspaces-head">
+            <div>
+              <h3 className="device-section-label">Copilot workspaces</h3>
+              <p className="device-card-sub">Folders registered on this laptop for starting sessions.</p>
+            </div>
+            {!device.projectsLoading && device.projects.length > 0 ? (
+              <span className="device-workspace-count">{device.projects.length}</span>
+            ) : null}
+          </div>
           {device.projectsLoading ? (
-            <p className="device-card-sub">{online ? 'Refreshing projects…' : 'Loading projects…'}</p>
+            <p className="device-card-sub">{online ? 'Refreshing workspaces…' : 'Loading workspaces…'}</p>
           ) : device.projects.length > 0 ? (
-            <ul className="device-project-chips">
-              {device.projects.map((project) => (
-                <li key={project.path ?? project.name} className="device-project-chip" title={project.path ?? project.name}>
-                  <FolderGlyph />
-                  {project.name}
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="device-workspace-list">
+                {shownProjects.map((project) => (
+                  <li key={project.path ?? project.name} className="device-workspace-row">
+                    <span className="device-workspace-icon" aria-hidden="true"><FolderGlyph /></span>
+                    <span className="device-workspace-copy">
+                      <span className="device-workspace-name">
+                        <span className="device-workspace-title">{project.name}</span>
+                        {project.isDefault ? <span className="device-workspace-default">Default</span> : null}
+                      </span>
+                      <span className="device-workspace-path" title={project.path}>
+                        {compactPath(project.path)}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {device.projects.length > 4 ? (
+                <button
+                  type="button"
+                  className="device-workspaces-toggle"
+                  aria-expanded={allProjectsOpen}
+                  onClick={() => setAllProjectsOpen((open) => !open)}
+                >
+                  <ChevronGlyph />
+                  {allProjectsOpen ? 'Show fewer workspaces' : `Show all ${device.projects.length} workspaces`}
+                </button>
+              ) : null}
+            </>
           ) : (
-            <p className="device-card-sub">No projects received yet.</p>
+            <div className="device-workspaces-empty">
+              <span className="device-workspace-icon" aria-hidden="true"><FolderGlyph /></span>
+              <span>
+                <strong>No Copilot workspaces configured</strong>
+                <small>Add one on the laptop with <code>weft add-project</code>.</small>
+              </span>
+            </div>
           )}
         </section>
 

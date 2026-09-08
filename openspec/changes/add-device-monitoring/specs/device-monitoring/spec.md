@@ -128,6 +128,10 @@ Device Details SHALL present a compact system summary and a curated Running Now 
 - **THEN** Start Copilot, Resume Copilot, Explore Files, and Open Terminal use one consistent quick-action layout
 - **AND** actions without an implemented protocol are visibly unavailable rather than pretending to succeed
 
+#### Scenario: Registered launch folders are presented
+- **WHEN** the Device Station reports registered projects
+- **THEN** Device Details presents them as Copilot workspaces with names, compact paths, default state, and a bounded initial list
+
 #### Scenario: Monitoring events are inspected
 - **WHEN** the user opens the device event log
 - **THEN** device snapshot events are represented alongside other device-channel event types

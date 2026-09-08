@@ -128,13 +128,17 @@ The page uses this hierarchy:
 │ Microsoft Edge            1.2 GB     │
 │ Terminal                  2 windows  │
 ├──────────────────────────────────────┤
+│ COPILOT WORKSPACES · 3               │
+│ 📁 ModernOrder                        │
+│    …\CLP\SC.CST.ModernOrder          │
+├──────────────────────────────────────┤
 │ ACTIVE COPILOT SESSIONS               │
 ├──────────────────────────────────────┤
 │ INACTIVE COPILOT SESSIONS             │
 └──────────────────────────────────────┘
 ```
 
-The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Quick actions use a uniform two-column card grid; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the five most relevant entries with a `Show all` affordance. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
+The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Quick actions use a uniform two-column card grid; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the five most relevant entries with a `Show all` affordance. Registered project folders are presented to users as Copilot workspaces, with readable names, compact path context, a default marker, and controlled expansion for longer lists. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
 
 Application relevance is ordered by foreground status when available, then aggregate memory. Multiple processes/windows are grouped into one row. Window titles, file names, browser tabs, executable paths, and application-control buttons are excluded from the MVP.
 

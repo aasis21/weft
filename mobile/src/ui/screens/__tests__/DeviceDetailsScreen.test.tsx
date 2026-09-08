@@ -181,6 +181,56 @@ describe('DeviceDetailsScreen session list separates what is running from what i
   });
 });
 
+describe('DeviceDetailsScreen workspaces', () => {
+  it('shows readable workspace rows with path context, default state, and controlled expansion', () => {
+    const projects = Array.from({ length: 6 }, (_, index) => ({
+      name: `Workspace ${index + 1}`,
+      path: index === 1 ? '/Users/me/src/Workspace 2' : `C:\\work\\Workspace ${index + 1}`,
+      isDefault: index === 0,
+    }));
+    renderDetails({ device: makeDevice({ projects }) });
+
+    expect(screen.getByRole('heading', { name: 'Copilot workspaces' })).toBeTruthy();
+    expect(screen.getByText('Folders registered on this laptop for starting sessions.')).toBeTruthy();
+    expect(screen.getByText('Default')).toBeTruthy();
+    expect(screen.getByText('C:\\work\\Workspace 1')).toBeTruthy();
+    expect(screen.getByText('…/me/src/Workspace 2')).toBeTruthy();
+    expect(screen.getByText('Workspace 4')).toBeTruthy();
+    expect(screen.queryByText('Workspace 5')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /show all 6 workspaces/i }));
+    expect(screen.getByText('Workspace 6')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /show fewer workspaces/i })).toBeTruthy();
+  });
+
+  it('collapses an expanded workspace list when navigating to another device', () => {
+    const projects = Array.from({ length: 5 }, (_, index) => ({
+      name: `Workspace ${index + 1}`,
+      path: `C:\\work\\Workspace ${index + 1}`,
+    }));
+    const view = renderDetails({ device: makeDevice({ projects }) });
+    fireEvent.click(screen.getByRole('button', { name: /show all 5 workspaces/i }));
+    expect(screen.getByText('Workspace 5')).toBeTruthy();
+
+    view.rerender(
+      <DeviceDetailsScreen
+        {...view.props}
+        device={makeDevice({ channelId: 'chan-2', deviceId: 'device-2', projects })}
+      />,
+    );
+
+    expect(screen.queryByText('Workspace 5')).toBeNull();
+    expect(screen.getByRole('button', { name: /show all 5 workspaces/i })).toBeTruthy();
+  });
+
+  it('uses an actionable empty state instead of a missing-project placeholder', () => {
+    renderDetails({ device: makeDevice({ projects: [] }) });
+
+    expect(screen.getByText('No Copilot workspaces configured')).toBeTruthy();
+    expect(screen.getByText(/weft add-project/i)).toBeTruthy();
+  });
+});
+
 describe('DeviceDetailsScreen monitoring', () => {
   it('starts monitoring while visible and stops on cleanup', () => {
     const onStartMonitoring = vi.fn();
