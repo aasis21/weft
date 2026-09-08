@@ -22,8 +22,17 @@ import {
   sessionClaimed,
   deviceMonitorStart,
   deviceMonitorStop,
+  clipboardRead,
+  clipboardWrite,
+  keepAwakeStart,
+  keepAwakeStop,
+  keepAwakeStatusRequest,
+  KEEP_AWAKE_MIN_MS,
+  CLIPBOARD_MAX_BYTES,
 } from "@aasis21/weft-shared";
 import { createListener } from "../src/listener.mjs";
+import { createDeviceClipboard } from "../src/deviceClipboard.mjs";
+import { createDeviceKeepAwakeController } from "../src/deviceKeepAwake.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
 import { registerPendingSession } from "../src/pendingSessions.mjs";
 import { HEALTHY_WINDOW_MS } from "../src/attachedSessions.mjs";
@@ -56,7 +65,7 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, monitoringLimits, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, clipboardApi = { supported: false }, keepAwakeApi = { supported: false }, monitoringLimits, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -73,6 +82,8 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi
     deviceId: "test-device",
     heartbeatMs,
     ...(telemetryApi ? { telemetryApi } : {}),
+    clipboardApi,
+    keepAwakeApi,
     ...(monitoringLimits ? { monitoringLimits } : {}),
     projectsApi,
     ...(sessionsApi ? { sessionsApi } : {}),
@@ -118,6 +129,233 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi
   await waitFor(() => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST), "project list");
   return { listener, listenerKeys, channelId, phoneChannel, phoneKeys, messages, connectionsHome };
 }
+
+async function utilityReply(harness, message, subtype) {
+  const previous = harness.messages.length;
+  await harness.phoneChannel.send(message);
+  return waitFor(
+    () => harness.messages.slice(previous).find((item) => item.eventSubtype === subtype),
+    "correlated device utility reply",
+  );
+}
+
+test("device utility capabilities independently reflect injected platform support", async (t) => {
+  for (const clipboardPlatform of ["linux", "win32"]) {
+    for (const powerPlatform of ["linux", "win32"]) {
+      const h = await pairedHarness({
+        clipboardApi: createDeviceClipboard({ platform: clipboardPlatform }),
+        keepAwakeApi: createDeviceKeepAwakeController({ platform: powerPlatform }),
+      });
+      t.after(() => h.listener.stop());
+      const list = h.messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
+      assert.deepEqual(list.msg.capabilities, [
+        DEVICE_CAPABILITY.MONITOR_V1,
+        ...(clipboardPlatform === "win32" ? [DEVICE_CAPABILITY.CLIPBOARD_V1] : []),
+        ...(powerPlatform === "win32" ? [DEVICE_CAPABILITY.KEEP_AWAKE_V1] : []),
+      ]);
+      await h.listener.stop();
+    }
+  }
+});
+
+test("clipboard controls are explicit, correlated, bounded, and absent from host hooks and persistence", async (t) => {
+  const controls = [];
+  const logs = [];
+  const secret = "  私の-secret-$env:TOKEN\r\n";
+  let reads = 0;
+  let written;
+  const h = await pairedHarness({
+    clipboardApi: {
+      supported: true,
+      readText: async () => { reads++; return { code: "ok", text: secret }; },
+      writeText: async (text) => { written = text; return { code: "ok", text: secret }; },
+    },
+    onControl: (value) => controls.push(value),
+    log: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+  });
+  t.after(() => h.listener.stop());
+  assert.equal(reads, 0);
+  const read = await utilityReply(h, clipboardRead("read-1"), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.deepEqual(read.msg, { requestId: "read-1", operation: "read", code: "ok", text: secret });
+  const write = await utilityReply(h, clipboardWrite("write-1", secret), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.equal(written, secret);
+  assert.deepEqual(write.msg, { requestId: "write-1", operation: "write", code: "ok" });
+  assert.equal(reads, 1);
+
+  const oversized = { ...clipboardRead("large"), eventSubtype: SUBTYPE.CONTROL.CLIPBOARD_WRITE,
+    msg: { requestId: "large", text: "x".repeat(CLIPBOARD_MAX_BYTES + 1) } };
+  const rejected = await utilityReply(h, oversized, SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.equal(rejected.msg.code, "too-large");
+  assert.equal(written, secret);
+  const invalid = await utilityReply(h, clipboardRead(""), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.equal(invalid.msg.code, "invalid-request");
+  assert.equal(reads, 1);
+  await h.phoneChannel.send({ ...clipboardRead("ignored"), eventSubtype: secret, msg: { text: secret } });
+  await waitFor(() => controls.some((item) => item.subtype === null), "redacted unknown subtype");
+  assert.equal(JSON.stringify({ controls, logs }).includes("secret"), false);
+  assert.ok(controls.every((item) => Object.keys(item).join() === "subtype"));
+  assert.equal(readFileSync(join(h.connectionsHome, "connections.json"), "utf8").includes("secret"), false);
+});
+
+test("clipboard adapter errors and oversized reads are sanitized at the listener boundary", async (t) => {
+  const api = { supported: true, readText: async () => { throw new Error("private clipboard"); } };
+  const h = await pairedHarness({ clipboardApi: api });
+  t.after(() => h.listener.stop());
+  let result = await utilityReply(h, clipboardRead("error"), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.deepEqual(result.msg, { requestId: "error", operation: "read", code: "unavailable" });
+  api.readText = async () => ({ code: "private error", text: "private clipboard" });
+  result = await utilityReply(h, clipboardRead("raw"), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.equal(result.msg.code, "unavailable");
+  assert.equal("text" in result.msg, false);
+  api.readText = async () => ({ code: "ok", text: "x".repeat(CLIPBOARD_MAX_BYTES + 1) });
+  result = await utilityReply(h, clipboardRead("large"), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.equal(result.msg.code, "too-large");
+  assert.equal("text" in result.msg, false);
+});
+
+test("unsupported utilities return stable results without invoking platform operations", async (t) => {
+  const h = await pairedHarness({
+    clipboardApi: { supported: false, readText: () => assert.fail("unsupported read") },
+    keepAwakeApi: { supported: false, start: () => assert.fail("unsupported start") },
+  });
+  t.after(() => h.listener.stop());
+  const clipboard = await utilityReply(h, clipboardRead("read"), SUBTYPE.CONTROL.CLIPBOARD_RESULT);
+  assert.equal(clipboard.msg.code, "unsupported");
+  const power = await utilityReply(h, keepAwakeStart("start", "lease", 1), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  assert.equal(power.msg.code, "unsupported");
+  assert.equal(power.msg.active, false);
+});
+
+test("listener Keep Awake validates raw controls, returns current revisions, and pushes only expiry/failure", async (t) => {
+  let clock = 1_000;
+  let timer;
+  let callbacks;
+  let starts = 0;
+  let stops = 0;
+  const keepAwakeApi = createDeviceKeepAwakeController({
+    platform: "win32", now: () => clock,
+    setTimeoutFn: (callback) => { timer = callback; return 1; }, clearTimeoutFn: () => { timer = null; },
+    helperFactory: async (args) => {
+      callbacks = args;
+      starts++;
+      return { updateExpiry: async () => {}, stop: () => { stops++; } };
+    },
+  });
+  const h = await pairedHarness({ keepAwakeApi });
+  t.after(() => h.listener.stop());
+  let result = await utilityReply(h, {
+    ...keepAwakeStart("invalid", "lease", 1),
+    msg: { requestId: "invalid", leaseId: "lease", durationMs: "900000" },
+  }, SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  assert.equal(result.msg.code, "invalid-request");
+  assert.equal(starts, 0);
+  result = await utilityReply(h, keepAwakeStart("start", "lease", 1), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  assert.deepEqual(result.msg, {
+    requestId: "start", leaseId: "lease", active: true, expiresAt: 1_000 + KEEP_AWAKE_MIN_MS, revision: 1, code: "ok",
+  });
+  const mismatch = await utilityReply(h, keepAwakeStop("stale", "old-lease"), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  assert.equal(mismatch.msg.code, "lease-mismatch");
+  assert.equal(mismatch.msg.active, true);
+  assert.equal(mismatch.msg.revision, 1);
+  assert.equal(stops, 0);
+  const status = await utilityReply(h, keepAwakeStatusRequest("reopen"), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  assert.deepEqual(status.msg, { ...result.msg, requestId: "reopen" });
+  assert.equal(h.messages.some((item) => item.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_STATUS && item.msg.requestId === null), false);
+  clock += KEEP_AWAKE_MIN_MS;
+  timer();
+  const expired = await waitFor(() => h.messages.find((item) =>
+    item.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_STATUS && item.msg.requestId === null), "unsolicited expiry");
+  assert.equal(expired.msg.leaseId, "lease");
+  assert.equal(expired.msg.active, false);
+  assert.equal(expired.msg.revision, 2);
+  assert.equal(stops, 1);
+  await utilityReply(h, keepAwakeStart("again", "next", 1), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  callbacks.onFailure("private helper failure");
+  const failed = await waitFor(() => h.messages.find((item) =>
+    item.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_STATUS && item.msg.requestId === null && item.msg.code === "unavailable"),
+  "unsolicited helper failure");
+  assert.equal(failed.msg.leaseId, "next");
+  assert.equal(failed.msg.active, false);
+  assert.equal(failed.msg.revision, 4);
+  assert.equal(JSON.stringify(failed).includes("private"), false);
+});
+
+test("listener shutdown and forget dispose both utilities and suppress late clipboard/status completions", async (t) => {
+  for (const forget of [false, true]) {
+    let resolveRead;
+    let readStarted = false;
+    let clipboardShutdowns = 0;
+    let powerShutdowns = 0;
+    let unsubscribed = 0;
+    let notify;
+    const h = await pairedHarness({
+      clipboardApi: {
+        supported: true,
+        readText: () => { readStarted = true; return new Promise((resolve) => { resolveRead = resolve; }); },
+        shutdown: () => { clipboardShutdowns++; },
+      },
+      keepAwakeApi: {
+        supported: true,
+        onStatus: (callback) => { notify = callback; return () => { unsubscribed++; }; },
+        shutdown: () => { powerShutdowns++; throw new Error("private cleanup error"); },
+      },
+    });
+    t.after(() => h.listener.stop());
+    await h.phoneChannel.send(clipboardRead("late"));
+    await waitFor(() => readStarted, "clipboard started");
+    if (forget) {
+      await h.phoneChannel.send({ ...clipboardRead("forget"), eventSubtype: SUBTYPE.CONTROL.FORGET_DEVICE, msg: {} });
+      await waitFor(() => clipboardShutdowns === 1, "forget cleanup");
+    } else await h.listener.stop();
+    assert.equal(clipboardShutdowns, 1);
+    assert.equal(powerShutdowns, 1);
+    assert.equal(unsubscribed, 1);
+    resolveRead({ code: "ok", text: "late private clipboard" });
+    notify({ active: false, revision: 2, code: "unavailable" });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(h.messages.some((item) => [
+      SUBTYPE.CONTROL.CLIPBOARD_RESULT, SUBTYPE.CONTROL.KEEP_AWAKE_STATUS,
+    ].includes(item.eventSubtype)), false);
+  }
+});
+
+test("phone reconnect keeps its station lease but cannot receive an earlier channel's clipboard completion", async (t) => {
+  let resolveRead;
+  let started = false;
+  let spawns = 0;
+  const keepAwakeApi = createDeviceKeepAwakeController({
+    platform: "win32",
+    helperFactory: async () => { spawns++; return { stop() {}, updateExpiry: async () => {} }; },
+  });
+  const h = await pairedHarness({
+    keepAwakeApi,
+    clipboardApi: {
+      supported: true,
+      readText: () => { started = true; return new Promise((resolve) => { resolveRead = resolve; }); },
+    },
+  });
+  t.after(() => h.listener.stop());
+  const first = await utilityReply(h, keepAwakeStart("start", "lease", 1), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  await h.phoneChannel.send(clipboardRead("old-read"));
+  await waitFor(() => started, "pending clipboard read");
+  const { createLocalTransport } = await import("@aasis21/weft-shared");
+  const transport = createLocalTransport({ channelId: h.channelId });
+  const { key } = await sayHello({
+    transport, keyPair: h.phoneKeys, peerPublicKeyB64: h.listenerKeys.publicKeyB64, channelId: h.channelId,
+    deviceId: "phone-1", senderName: "Phone", waitForAck: true, timeoutMs: 1_000, retryMs: 20,
+  });
+  const phoneChannel = new SecureChannel({
+    transport, key, identity: { channelId: h.channelId, senderId: "phone", senderName: "Phone" },
+  });
+  const messages = [];
+  phoneChannel.onEvent(EVENT_TYPE.CONTROL, (message) => messages.push(message));
+  const status = await utilityReply({ phoneChannel, messages }, keepAwakeStatusRequest("reconnect"), SUBTYPE.CONTROL.KEEP_AWAKE_STATUS);
+  assert.deepEqual(status.msg, { ...first.msg, requestId: "reconnect" });
+  assert.equal(spawns, 1);
+  resolveRead({ code: "ok", text: "old private clipboard" });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal([...h.messages, ...messages].some((message) => message.eventSubtype === SUBTYPE.CONTROL.CLIPBOARD_RESULT), false);
+});
 
 test("emits PROJECT_LIST when the phone pairs", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "weft-listener-project-"));

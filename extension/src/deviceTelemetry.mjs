@@ -30,15 +30,36 @@ $ErrorActionPreference = 'Stop'
 
 const BATTERY_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
-$battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($null -eq $battery) {
-  'null'
-} else {
-  [pscustomobject]@{
-    percent = [double]$battery.EstimatedChargeRemaining
-    charging = $battery.BatteryStatus -in @(2, 6, 7, 8, 9)
-  } | ConvertTo-Json -Compress
+$result = @{ percent = $null; charging = $null; onAcPower = $null; batteryUnavailable = $false; powerUnavailable = $false }
+try {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class WeftPower {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct Status {
+    public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag;
+    public uint BatteryLifeTime, BatteryFullLifeTime;
+  }
+  [DllImport("kernel32.dll")]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  public static extern bool GetSystemPowerStatus(out Status status);
 }
+'@
+  $power = New-Object WeftPower+Status
+  if ([WeftPower]::GetSystemPowerStatus([ref]$power)) {
+    if ($power.ACLineStatus -eq 0) { $result.onAcPower = $false }
+    if ($power.ACLineStatus -eq 1) { $result.onAcPower = $true }
+  } else { $result.powerUnavailable = $true }
+} catch { $result.powerUnavailable = $true }
+try {
+  $battery = Get-CimInstance Win32_Battery -ErrorAction Stop | Select-Object -First 1
+  if ($null -ne $battery) {
+    if ($null -ne $battery.EstimatedChargeRemaining) { $result.percent = [double]$battery.EstimatedChargeRemaining }
+    if ($null -ne $battery.BatteryStatus) { $result.charging = $battery.BatteryStatus -in @(6, 7, 8, 9) }
+  }
+} catch { $result.batteryUnavailable = $true }
+$result | ConvertTo-Json -Compress
 `;
 
 const APP_NAMES = Object.freeze({
@@ -148,7 +169,7 @@ export function createDeviceTelemetryCollector({
     issueCode: null,
   };
   const batteryCache = {
-    value: { percent: null, charging: null },
+    value: { percent: null, charging: null, onAcPower: null },
     observedAt: null,
     attemptedAt: null,
     issueCode: null,
@@ -205,11 +226,19 @@ export function createDeviceTelemetryCollector({
     try {
       const battery = await runPowerShell(execFn, BATTERY_SCRIPT, powershellTimeoutMs);
       batteryCache.value = {
-        percent: Number.isFinite(Number(battery?.percent)) ? Number(battery.percent) : null,
-        charging: typeof battery?.charging === "boolean" ? battery.charging : null,
+        percent: battery?.batteryUnavailable === true
+          ? batteryCache.value.percent
+          : Number.isFinite(battery?.percent) ? Math.max(0, Math.min(100, battery.percent)) : null,
+        charging: battery?.batteryUnavailable === true
+          ? batteryCache.value.charging
+          : typeof battery?.charging === "boolean" ? battery.charging : null,
+        onAcPower: battery?.powerUnavailable === true
+          ? batteryCache.value.onAcPower
+          : typeof battery?.onAcPower === "boolean" ? battery.onAcPower : null,
       };
-      batteryCache.observedAt = capturedAt;
-      batteryCache.issueCode = null;
+      const partialFailure = battery?.batteryUnavailable === true || battery?.powerUnavailable === true;
+      if (!partialFailure) batteryCache.observedAt = capturedAt;
+      batteryCache.issueCode = partialFailure ? "unavailable" : null;
     } catch (error) {
       batteryCache.issueCode = issue("battery", error).code;
     }
@@ -258,6 +287,7 @@ export function createDeviceTelemetryCollector({
           diskTotalBytes: diskCache.value.totalBytes,
           batteryPercent: batteryCache.value.percent,
           batteryCharging: batteryCache.value.charging,
+          onAcPower: batteryCache.value.onAcPower,
         },
         apps: appsCache.value,
         observedAt: {

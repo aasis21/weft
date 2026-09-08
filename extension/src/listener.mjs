@@ -11,14 +11,18 @@ import {
   SecureChannel,
   buildPairingPayload,
   createPairingGate,
+  clipboardResult,
+  clipboardTextError,
   deviceHeartbeat,
   deviceSnapshot,
   exportKeyPair,
   generateKeyPair,
   listenForPeers,
+  keepAwakeStatus,
   launchStatus,
   projectList,
   randomChannelId,
+  normalizeKeepAwakeDuration,
   sessionList,
   sessionOffers,
   spawnPairing,
@@ -37,6 +41,8 @@ import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mj
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { resolveVersion } from "./version.mjs";
 import { createDeviceTelemetryCollector } from "./deviceTelemetry.mjs";
+import { createDeviceClipboard } from "./deviceClipboard.mjs";
+import { createDeviceKeepAwakeController, validUtilityId } from "./deviceKeepAwake.mjs";
 
 const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
 const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
@@ -50,6 +56,7 @@ const DEVICE_MONITOR_MAX_INTERVAL_MS = 60_000;
 const DEVICE_MONITOR_LEASE_MS = 45_000;
 const DEVICE_MONITOR_MIN_LEASE_MS = 15_000;
 const DEVICE_MONITOR_MAX_LEASE_MS = 120_000;
+const CONTROL_SUBTYPES = new Set(Object.values(SUBTYPE.CONTROL));
 
 // A machine-wide, cross-session view of "which phone is bound to which live Weft listener right
 // now", persisted at ~/.weft/connections.json (see registryFile.mjs — same atomic-write + pid
@@ -93,6 +100,8 @@ export function createListener({
   deviceId = null,
   heartbeatMs = DEVICE_HEARTBEAT_MS,
   telemetryApi = createDeviceTelemetryCollector(),
+  clipboardApi = createDeviceClipboard(),
+  keepAwakeApi = createDeviceKeepAwakeController(),
   monitoringLimits = {},
   spawnFn,
   projectsApi = projectsStore,
@@ -126,9 +135,7 @@ export function createListener({
   onSessionClaimed = null,
   onPairingPayloadChanged = null,
   pairingTtlMs = PAIRING_TTL_MS,
-  // Fired at the top of handleControl for every decrypted control message a bound phone sends
-  // (PROJECT_LIST_REQUEST, SPAWN_SESSION, SESSION_CLAIMED, FORGET_DEVICE) — lets a host (e.g. the
-  // station log) record incoming phone traffic without this module knowing anything about logging.
+  // Only a whitelisted subtype is exposed to diagnostics, never decrypted payloads or IDs.
   onControl = null,
 } = {}) {
   let listenerTransport = transport;
@@ -151,6 +158,7 @@ export function createListener({
   let pairingGate = null;
   let pairingStop = null;
   let controlUnsub = null;
+  let keepAwakeUnsub = null;
   let boundPeerPub = null;
   // The phone's own stable id (localStorage-backed, survives rescans and app restarts), captured
   // from its hello. A rescan mints a FRESH keypair, so the public key alone cannot tell "the same
@@ -185,6 +193,13 @@ export function createListener({
     if (started) return api;
     started = true;
     stopped = false;
+    try {
+      keepAwakeUnsub = keepAwakeApi?.onStatus?.((status) => {
+        void sendUtilityResult(channel, keepAwakeStatus(null, status));
+      });
+    } catch {
+      // Optional status notifications must not prevent station startup.
+    }
     // A remembered peer key authorizes only that already-paired phone to reconnect. A different
     // phone requires an explicit identity rotation and fresh QR.
     let trustedPeerPublicKeyB64 = null;
@@ -294,6 +309,11 @@ export function createListener({
     stopMonitoring();
     stopPendingWatch();
     stopLaunchWatch();
+    try { keepAwakeUnsub?.(); } catch { /* best-effort host cleanup */ }
+    keepAwakeUnsub = null;
+    const utilityShutdown = Promise.allSettled(
+      [clipboardApi, keepAwakeApi].map(async (utility) => { await utility?.shutdown?.(); }),
+    );
     try {
       controlUnsub?.();
     } catch {
@@ -324,6 +344,7 @@ export function createListener({
         // best-effort UI hook
       }
     }
+    await utilityShutdown;
   };
 
   /**
@@ -592,8 +613,9 @@ export function createListener({
         senderName: listenerDeviceName,
       },
     });
-    controlUnsub = channel.onEvent(EVENT_TYPE.CONTROL, (envelope) => {
-      void handleControl(envelope);
+    const boundChannel = channel;
+    controlUnsub = boundChannel.onEvent(EVENT_TYPE.CONTROL, (envelope) => {
+      void handleControl(envelope, boundChannel);
     });
     await sendProjectList();
     await sendSessionOffers({ force: true });
@@ -630,7 +652,11 @@ export function createListener({
       projects,
       listenerDeviceName,
       listenerDeviceId,
-      [DEVICE_CAPABILITY.MONITOR_V1],
+      [
+        DEVICE_CAPABILITY.MONITOR_V1,
+        ...(clipboardApi?.supported === true ? [DEVICE_CAPABILITY.CLIPBOARD_V1] : []),
+        ...(keepAwakeApi?.supported === true ? [DEVICE_CAPABILITY.KEEP_AWAKE_V1] : []),
+      ],
     ));
   }
 
@@ -803,12 +829,71 @@ export function createListener({
     }
   }
 
-  async function handleControl(envelope) {
-    if (stopped || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
+  async function sendUtilityResult(replyChannel, result) {
+    if (stopped || !replyChannel || replyChannel !== channel) return;
+    try { await replyChannel.send(result); } catch { /* transport errors never expose utility payloads */ }
+  }
+
+  async function handleClipboard(envelope, replyChannel) {
+    const operation = envelope.eventSubtype === SUBTYPE.CONTROL.CLIPBOARD_READ ? "read" : "write";
+    const { requestId, text } = envelope.msg ?? {};
+    let code = !validUtilityId(requestId) ? "invalid-request"
+      : operation === "write" ? clipboardTextError(text) : null;
+    let result;
+    if (!code && clipboardApi?.supported !== true) code = "unsupported";
+    if (!code) {
+      try {
+        result = operation === "read" ? await clipboardApi.readText() : await clipboardApi.writeText(text);
+      } catch (error) {
+        code = error?.code === "timeout" ? "timeout" : "unavailable";
+      }
+    }
+    await sendUtilityResult(replyChannel, clipboardResult(
+      validUtilityId(requestId) ? requestId : "", operation, code ?? result?.code, result?.text,
+    ));
+  }
+
+  async function handleKeepAwake(envelope, replyChannel) {
+    const { requestId, leaseId, durationMs } = envelope.msg ?? {};
+    const subtype = envelope.eventSubtype;
+    const invalid = !validUtilityId(requestId) ||
+      (subtype !== SUBTYPE.CONTROL.KEEP_AWAKE_STATUS_REQUEST && !validUtilityId(leaseId)) ||
+      (subtype === SUBTYPE.CONTROL.KEEP_AWAKE_START && normalizeKeepAwakeDuration(durationMs) === null);
+    let code = invalid ? "invalid-request" : keepAwakeApi?.supported !== true ? "unsupported" : null;
+    let status;
     try {
-      onControl?.({ subtype: envelope.eventSubtype ?? null });
+      if (code || subtype === SUBTYPE.CONTROL.KEEP_AWAKE_STATUS_REQUEST) status = await keepAwakeApi?.status?.();
+      else if (subtype === SUBTYPE.CONTROL.KEEP_AWAKE_START) status = await keepAwakeApi.start({ leaseId, durationMs });
+      else status = await keepAwakeApi.stop(leaseId);
+    } catch (error) {
+      code = error?.code === "timeout" ? "timeout" : "unavailable";
+    }
+    await sendUtilityResult(replyChannel, keepAwakeStatus(
+      validUtilityId(requestId) ? requestId : "", { ...status, ...(code ? { code } : {}) },
+    ));
+  }
+
+  async function handleControl(envelope, replyChannel) {
+    if (stopped || replyChannel !== channel || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
+    try {
+      onControl?.({ subtype: CONTROL_SUBTYPES.has(envelope.eventSubtype) ? envelope.eventSubtype : null });
     } catch {
       // best-effort UI/log hook
+    }
+    if (
+      envelope.eventSubtype === SUBTYPE.CONTROL.CLIPBOARD_READ ||
+      envelope.eventSubtype === SUBTYPE.CONTROL.CLIPBOARD_WRITE
+    ) {
+      await handleClipboard(envelope, replyChannel);
+      return;
+    }
+    if (
+      envelope.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_START ||
+      envelope.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_STOP ||
+      envelope.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_STATUS_REQUEST
+    ) {
+      await handleKeepAwake(envelope, replyChannel);
+      return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST_REQUEST) {
       await sendProjectList();

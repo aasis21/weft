@@ -40,6 +40,23 @@ export function PlayGlyph(): JSX.Element {
   );
 }
 
+export function ClipboardGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <rect x="8" y="3" width="8" height="4" rx="1" />
+      <path d="M8 5H5v16h14V5h-3M8 11h8M8 15h6" />
+    </StrokeIcon>
+  );
+}
+
+export function PowerGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <path d="M12 3v9M6.3 5.7a8 8 0 1 0 11.4 0" />
+    </StrokeIcon>
+  );
+}
+
 export function MoreHorizontalGlyph(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">

@@ -35,7 +35,17 @@ export const EVENT_TYPE: {
 
 export const DEVICE_CAPABILITY: {
   readonly MONITOR_V1: "device-monitor-v1";
+  readonly CLIPBOARD_V1: "device-clipboard-v1";
+  readonly KEEP_AWAKE_V1: "device-keep-awake-v1";
 };
+
+export type DeviceUtilityCode = "ok" | "invalid-request" | "too-large" | "unsupported" | "unavailable" | "timeout" | "lease-mismatch";
+export const DEVICE_UTILITY_CODES: readonly DeviceUtilityCode[];
+export const CLIPBOARD_MAX_BYTES: number;
+export const KEEP_AWAKE_MIN_MS: number;
+export const KEEP_AWAKE_MAX_MS: number;
+export function clipboardTextError(text: unknown): "invalid-request" | "too-large" | null;
+export function normalizeKeepAwakeDuration(durationMs: number): number | null;
 
 export const SUBTYPE: {
   readonly STREAM: {
@@ -80,6 +90,13 @@ export const SUBTYPE: {
     readonly DEVICE_MONITOR_START: "device_monitor_start";
     readonly DEVICE_MONITOR_STOP: "device_monitor_stop";
     readonly DEVICE_SNAPSHOT: "device_snapshot";
+    readonly CLIPBOARD_READ: "clipboard_read";
+    readonly CLIPBOARD_WRITE: "clipboard_write";
+    readonly CLIPBOARD_RESULT: "clipboard_result";
+    readonly KEEP_AWAKE_START: "keep_awake_start";
+    readonly KEEP_AWAKE_STOP: "keep_awake_stop";
+    readonly KEEP_AWAKE_STATUS_REQUEST: "keep_awake_status_request";
+    readonly KEEP_AWAKE_STATUS: "keep_awake_status";
     readonly VOICE_MODE: "voice_mode";
     readonly INVOKE_COMMAND: "invoke_command";
     readonly SESSION_OFFERS: "session_offers";
@@ -416,6 +433,28 @@ export interface DeviceMonitorStartMsg {
 export interface DeviceMonitorStopMsg {
   monitorId: string;
 }
+export interface ClipboardReadMsg { requestId: string; }
+export interface ClipboardWriteMsg { requestId: string; text: string; }
+export interface ClipboardResultMsg {
+  requestId: string;
+  operation: "read" | "write";
+  code: DeviceUtilityCode;
+  /** Present only for a successful explicit read. Never log or persist. */
+  text?: string;
+}
+export interface KeepAwakeStartMsg { requestId: string; leaseId: string; durationMs: number; }
+export interface KeepAwakeStopMsg { requestId: string; leaseId: string; }
+export interface KeepAwakeStatusRequestMsg { requestId: string; }
+export interface KeepAwakeStatusMsg {
+  /** Null for unsolicited expiry/failure status. */
+  requestId: string | null;
+  leaseId: string | null;
+  active: boolean;
+  expiresAt: number | null;
+  /** Station-local monotonic state revision, reset on reconnect. */
+  revision: number;
+  code: DeviceUtilityCode;
+}
 export interface DeviceSystemSnapshot {
   cpuPercent: number | null;
   memoryUsedBytes: number | null;
@@ -425,6 +464,8 @@ export interface DeviceSystemSnapshot {
   diskTotalBytes: number | null;
   batteryPercent: number | null;
   batteryCharging: boolean | null;
+  /** Omitted by older stations and caches. */
+  onAcPower?: boolean | null;
 }
 export interface RunningApplication {
   id: string;
@@ -529,6 +570,13 @@ export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHear
 export type DeviceMonitorStart = Envelope<"control", "device_monitor_start", DeviceMonitorStartMsg>;
 export type DeviceMonitorStop = Envelope<"control", "device_monitor_stop", DeviceMonitorStopMsg>;
 export type DeviceSnapshot = Envelope<"control", "device_snapshot", DeviceSnapshotMsg>;
+export type ClipboardRead = Envelope<"control", "clipboard_read", ClipboardReadMsg>;
+export type ClipboardWrite = Envelope<"control", "clipboard_write", ClipboardWriteMsg>;
+export type ClipboardResult = Envelope<"control", "clipboard_result", ClipboardResultMsg>;
+export type KeepAwakeStart = Envelope<"control", "keep_awake_start", KeepAwakeStartMsg>;
+export type KeepAwakeStop = Envelope<"control", "keep_awake_stop", KeepAwakeStopMsg>;
+export type KeepAwakeStatusRequest = Envelope<"control", "keep_awake_status_request", KeepAwakeStatusRequestMsg>;
+export type KeepAwakeStatus = Envelope<"control", "keep_awake_status", KeepAwakeStatusMsg>;
 export type VoiceModeMessage = Envelope<"control", "voice_mode", VoiceModeMsg>;
 export type InvokeCommandMessage = Envelope<"control", "invoke_command", InvokeCommandMsg>;
 export type SessionOffersMessage = Envelope<"control", "session_offers", SessionOffersMsg>;
@@ -579,6 +627,13 @@ export type EventEnvelope =
   | DeviceMonitorStart
   | DeviceMonitorStop
   | DeviceSnapshot
+  | ClipboardRead
+  | ClipboardWrite
+  | ClipboardResult
+  | KeepAwakeStart
+  | KeepAwakeStop
+  | KeepAwakeStatusRequest
+  | KeepAwakeStatus
   | VoiceModeMessage
   | InvokeCommandMessage
   | SessionOffersMessage
@@ -714,6 +769,13 @@ export function deviceMonitorStart(
 ): DeviceMonitorStart;
 export function deviceMonitorStop(monitorId: string): DeviceMonitorStop;
 export function deviceSnapshot(snapshot: Omit<DeviceSnapshotMsg, "schemaVersion">): DeviceSnapshot;
+export function clipboardRead(requestId: string): ClipboardRead;
+export function clipboardWrite(requestId: string, text: string): ClipboardWrite;
+export function clipboardResult(requestId: string, operation: "read" | "write", code: DeviceUtilityCode, text?: string): ClipboardResult;
+export function keepAwakeStart(requestId: string, leaseId: string, durationMs: number): KeepAwakeStart;
+export function keepAwakeStop(requestId: string, leaseId: string): KeepAwakeStop;
+export function keepAwakeStatusRequest(requestId: string): KeepAwakeStatusRequest;
+export function keepAwakeStatus(requestId: string | null, status?: Partial<Omit<KeepAwakeStatusMsg, "requestId">>): KeepAwakeStatus;
 export function voiceMode(active: boolean): VoiceModeMessage;
 export function invokeCommand(name: string, input?: string): InvokeCommandMessage;
 export function sessionOffers(offers: SessionOffer[]): SessionOffersMessage;

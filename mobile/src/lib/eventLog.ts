@@ -35,6 +35,12 @@ function keyFor(channelId: string): string {
   return `${PREFIX}${channelId}`;
 }
 
+export function redactClipboardEvent(event: DebugEvent): DebugEvent {
+  return event.eventType === 'control' && event.eventSubtype.startsWith('clipboard_')
+    ? { ...event, msg: { redacted: true } }
+    : event;
+}
+
 /**
  * Shallow-copy a payload for storage/display, replacing anything heavy (base64 attachment data) with
  * a short placeholder and clipping very long strings, so the log stays small and readable and can't
@@ -68,15 +74,16 @@ export function toDebugEvent(
   senderFallback: string,
 ): DebugEvent {
   const ts = typeof message.ts === 'number' ? message.ts : Date.now();
-  return {
+  return redactClipboardEvent({
     id: `${ts}.${dir}.${seq}`,
     dir,
     eventType: message.eventType,
     eventSubtype: message.eventSubtype,
     senderName: message.senderName ?? senderFallback,
     ts,
-    msg: compactMsg(message.msg),
-  };
+    msg: message.eventType === 'control' && message.eventSubtype.startsWith('clipboard_')
+      ? { redacted: true } : compactMsg(message.msg),
+  });
 }
 
 /** Restore a channel's persisted event log (bounded), or [] if none / unreadable. */
@@ -89,7 +96,7 @@ export async function loadEventLog(channelId: string): Promise<DebugEvent[]> {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Stored;
     if (!parsed || parsed.v !== VERSION || !Array.isArray(parsed.events)) return [];
-    return parsed.events.slice(-EVENT_LOG_CAP);
+    return parsed.events.slice(-EVENT_LOG_CAP).map(redactClipboardEvent);
   } catch {
     return [];
   }
@@ -102,7 +109,7 @@ export async function saveEventLog(channelId: string, events: DebugEvent[]): Pro
   const value = JSON.stringify({
     v: VERSION,
     savedAt: Date.now(),
-    events: events.slice(-EVENT_LOG_CAP),
+    events: events.slice(-EVENT_LOG_CAP).map(redactClipboardEvent),
   } satisfies Stored);
   try {
     globalThis.localStorage?.setItem(key, value);

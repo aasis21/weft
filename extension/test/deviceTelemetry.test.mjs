@@ -42,7 +42,7 @@ test("collector returns fresh system metrics and privacy-safe visible applicatio
               { id: "taskmgr", name: "Taskmgr", processCount: 1, windowCount: 1, memoryBytes: 50 },
             ]),
           }
-        : { stdout: JSON.stringify({ percent: 78, charging: true }) };
+        : { stdout: JSON.stringify({ percent: 78, charging: true, onAcPower: true }) };
     },
   });
 
@@ -53,6 +53,8 @@ test("collector returns fresh system metrics and privacy-safe visible applicatio
   assert.equal(snapshot.system.memoryUsedBytes, 750);
   assert.equal(snapshot.system.diskUsedBytes, 750);
   assert.equal(snapshot.system.batteryPercent, 78);
+  assert.equal(snapshot.system.onAcPower, true);
+  assert.equal(snapshot.system.uptimeSeconds, 3_600);
   assert.equal(cpuSampleMs, 500);
   assert.deepEqual(snapshot.apps.map((app) => app.name), ["Microsoft Edge", "Visual Studio Code"]);
   assert.equal("windowTitle" in snapshot.apps[0], false);
@@ -118,6 +120,7 @@ test("collector reports stable partial-failure codes and keeps available metrics
   assert.equal(snapshot.system.memoryUsedBytes, 750);
   assert.equal(snapshot.system.diskTotalBytes, null);
   assert.deepEqual(snapshot.apps, []);
+  assert.equal(snapshot.system.onAcPower, null);
   assert.deepEqual(snapshot.issues.toSorted((left, right) => left.component.localeCompare(right.component)), [
     { component: "apps", code: "timeout" },
     { component: "battery", code: "timeout" },
@@ -161,4 +164,80 @@ test("normalizeApps maps friendly names and excludes Task Manager", () => {
       memoryBytes: 100,
     }],
   );
+});
+
+test("power telemetry reads AC independently, including desktops and unknown battery values", async () => {
+  for (const power of [
+    { percent: null, charging: null, onAcPower: true },
+    { percent: 51, charging: false, onAcPower: false },
+    { percent: 90, charging: true, onAcPower: true },
+    { percent: null, charging: null, onAcPower: null },
+    { percent: "", charging: "false", onAcPower: 0 },
+  ]) {
+    const collector = createDeviceTelemetryCollector({
+      platform: "win32", osApi: fakeOs(), wait: async () => {},
+      statfsFn: async () => ({ bsize: 10, blocks: 100, bavail: 25 }),
+      execFn: async (_file, args, options) => {
+        if (args.at(-1).includes("Get-Process")) return { stdout: "[]" };
+        assert.ok(args.at(-1).includes("GetSystemPowerStatus"));
+        assert.ok(args.at(-1).includes("Win32_Battery"));
+        assert.ok(args.at(-1).includes("$null -ne $battery.EstimatedChargeRemaining"));
+        assert.equal(options.windowsHide, true);
+        assert.equal(options.timeout, 5_000);
+        return { stdout: JSON.stringify(power) };
+      },
+    });
+    const { system } = await collector.collectDeviceSnapshot();
+    assert.equal(system.batteryPercent, typeof power.percent === "number" ? power.percent : null);
+    assert.equal(system.batteryCharging, typeof power.charging === "boolean" ? power.charging : null);
+    assert.equal(system.onAcPower, typeof power.onAcPower === "boolean" ? power.onAcPower : null);
+    assert.equal(system.uptimeSeconds, 3_600);
+  }
+});
+
+test("power telemetry retains independent successful fields on partial battery/AC failures and uses the slow cache", async () => {
+  let clock = 1_000;
+  let powerCalls = 0;
+  let power = { percent: 60, charging: false, onAcPower: false };
+  const collector = createDeviceTelemetryCollector({
+    platform: "win32", now: () => clock, osApi: fakeOs(), wait: async () => {},
+    statfsFn: async () => ({ bsize: 10, blocks: 100, bavail: 25 }),
+    execFn: async (_file, args) => {
+      if (args.at(-1).includes("Get-Process")) return { stdout: "[]" };
+      powerCalls++;
+      return { stdout: JSON.stringify(power) };
+    },
+  });
+  const first = await collector.collectDeviceSnapshot();
+  clock += 60_000;
+  power = { batteryUnavailable: true, onAcPower: true };
+  const batteryFailed = await collector.collectDeviceSnapshot();
+  assert.equal(batteryFailed.system.batteryPercent, 60);
+  assert.equal(batteryFailed.system.onAcPower, true);
+  assert.equal(batteryFailed.observedAt.battery, first.observedAt.battery);
+  assert.deepEqual(batteryFailed.issues, [{ component: "battery", code: "unavailable" }]);
+  await collector.collectDeviceSnapshot();
+  assert.equal(powerCalls, 2);
+
+  clock += 60_000;
+  power = { percent: 80, charging: true, powerUnavailable: true };
+  const acFailed = await collector.collectDeviceSnapshot();
+  assert.equal(acFailed.system.batteryPercent, 80);
+  assert.equal(acFailed.system.onAcPower, true);
+  assert.deepEqual(acFailed.issues, [{ component: "battery", code: "unavailable" }]);
+});
+
+test("a failing battery provider does not hide independently observed desktop AC power", async () => {
+  const collector = createDeviceTelemetryCollector({
+    platform: "win32", osApi: fakeOs(), wait: async () => {},
+    statfsFn: async () => ({ bsize: 10, blocks: 100, bavail: 25 }),
+    execFn: async (_file, args) => ({
+      stdout: args.at(-1).includes("Get-Process") ? "[]" : '{"onAcPower":true,"batteryUnavailable":true}',
+    }),
+  });
+  const snapshot = await collector.collectDeviceSnapshot();
+  assert.equal(snapshot.system.onAcPower, true);
+  assert.equal(snapshot.system.batteryPercent, null);
+  assert.equal(snapshot.system.batteryCharging, null);
+  assert.deepEqual(snapshot.issues, [{ component: "battery", code: "unavailable" }]);
 });

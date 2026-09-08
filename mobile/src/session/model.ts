@@ -2,6 +2,8 @@ import { MODES } from '@aasis21/weft-shared';
 import type {
   ApprovalRequestMsg,
   DeviceSnapshotMsg,
+  DeviceUtilityCode,
+  KeepAwakeStatusMsg,
   ElicitationRequestMsg,
   HistoryItem,
   ListenerProject,
@@ -89,6 +91,21 @@ export interface DeviceMonitoringState {
   error?: string;
 }
 
+export interface DeviceClipboardState {
+  requestId?: string;
+  operation?: 'read' | 'write';
+  pending: boolean;
+  text?: string;
+  code?: DeviceUtilityCode;
+}
+
+export interface DeviceKeepAwakeState {
+  requestId?: string;
+  pending: boolean;
+  status?: KeepAwakeStatusMsg;
+  code?: DeviceUtilityCode;
+}
+
 export interface SessionMeta {
   channelId: string;
   sessionId?: string;
@@ -131,6 +148,10 @@ export interface ListenerDeviceState extends RegisteredDevice {
   error?: string;
   /** Current page-scoped telemetry lease and newest accepted snapshot. Runtime-only. */
   monitoring?: DeviceMonitoringState;
+  /** Exists only while the explicit clipboard sheet is open. Never persist or log text. */
+  clipboard?: DeviceClipboardState;
+  /** Authoritative station lease; closing its sheet does not stop it. Never persisted. */
+  keepAwake?: DeviceKeepAwakeState;
   /** In-session `/weft` sessions this laptop is currently offering for one-tap adoption (the mirror
    *  of the "Start session" spawn flow). Each carries the offered session's own pairing payload, so
    *  tapping it pairs digitally — no QR scan. The station relays this list (SESSION_OFFERS) on bind
