@@ -64,6 +64,8 @@ channel identifiers, timing, and traffic sizes) remain visible.
 | **Pairing race / impersonation** | the grant is proved inside ECDH-encrypted data and atomically binds to the first valid phone key; every connection requires a fresh laptop challenge and encrypted private-key proof | first valid claimant wins, so protect the QR until pairing completes |
 | Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
 | Lost/stolen phone | `/weft` keys die with the session; Device Station identities can be invalidated with `weft rotate-pairing` | a phone paired to a persistent Device Station can reconnect until its identity is rotated |
+| Clipboard exposes copied secrets | clipboard reads and writes require explicit user action, accept bounded plain text only, stay inside the encrypted channel, and are excluded from persistence and diagnostic logs | a trusted paired phone can read text currently placed on the laptop clipboard when the user explicitly requests it |
+| Keep Awake remains active unexpectedly | one station-owned lease is duration-capped, visibly expiring, explicitly stoppable, and cleared on expiry or Device Station shutdown without changing the Windows power plan | the laptop intentionally remains awake until the active lease ends |
 
 ### The QR is a bearer credential
 
@@ -102,7 +104,7 @@ without `--allow-terminal`; rotate pairing as well if the phone is no longer tru
 
 | Location | Stored data |
 |---|---|
-| Phone / installed PWA | Session metadata, cached transcripts and diagnostic event logs, preferences, device records, and local pairing private keys. Diagnostic payloads can include device health snapshots. Pairing storage uses Capacitor Preferences on native and browser storage in the PWA. |
+| Phone / installed PWA | Session metadata, cached transcripts and diagnostic event logs, preferences, device records, and local pairing private keys. Diagnostic payloads can include device health snapshots. Clipboard contents and Keep Awake operation state are runtime-only and are not persisted. Pairing storage uses Capacitor Preferences on native and browser storage in the PWA. |
 | Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, and persistent Device Station pairing identity under `~/.weft/`. A per-session `/weft` identity is ephemeral. |
 | Relay infrastructure | No session content, transcripts, or key escrow. It handles encrypted envelopes in transit. The infrastructure provider may retain ordinary operational metadata or logs such as IP addresses, timestamps, and channel identifiers. |
 
@@ -116,6 +118,11 @@ a health-history service. The device log includes snapshot messages, and adjacen
 repeated telemetry is coalesced. Review and redact payloads before sharing any log;
 payload compaction does not guarantee removal of private content. See
 [diagnostic scope and retention](https://aasis21.github.io/weft/#diagnostics).
+
+Clipboard commands are an exception to ordinary device-event diagnostics: Weft omits
+their text payloads rather than relying on later redaction. Clipboard text is limited
+to 64 KiB of UTF-8 data, is held only for the active operation, and is cleared when the
+mobile sheet closes.
 
 ## Endpoint and availability limitations
 

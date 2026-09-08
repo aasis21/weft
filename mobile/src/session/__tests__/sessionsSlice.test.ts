@@ -4,6 +4,8 @@ import { emptySession, type Session, type SessionMeta } from '../model';
 import sessionsReducer, {
   approvalDismissed,
   coldSet,
+  deviceReconciled,
+  devicesHydrated,
   envelopeReceived,
   readySet,
   sessionActivated,
@@ -27,6 +29,44 @@ function makeSession(id: string, meta: Partial<SessionMeta> = {}): Session {
 }
 
 describe('sessionsSlice', () => {
+  it('keeps a newer in-memory health cache when device reconciliation finishes late', () => {
+    const system = {
+      cpuPercent: 20,
+      memoryUsedBytes: 4,
+      memoryTotalBytes: 8,
+      uptimeSeconds: 60,
+      diskUsedBytes: 5,
+      diskTotalBytes: 10,
+      batteryPercent: null,
+      batteryCharging: null,
+    };
+    let state = sessionsReducer(undefined, devicesHydrated([{
+      channelId: 'listener-1',
+      pub: 'pub',
+      transport: { kind: 'local' },
+      publicKeyB64: 'phone-pub',
+      privateKeyJwk: { kty: 'EC' },
+      savedAt: 1,
+      projects: [],
+      projectsLoading: false,
+      connected: true,
+      events: [],
+      cachedHealth: { capturedAt: 2_000, effectiveIntervalMs: 10_000, system, issues: [] },
+    }]));
+
+    state = sessionsReducer(state, deviceReconciled({
+      channelId: 'listener-1',
+      removedChannelIds: [],
+      merged: {
+        deviceId: 'stable-1',
+        cachedHealth: { capturedAt: 1_000, effectiveIntervalMs: 10_000, system, issues: [] },
+      },
+    }));
+
+    expect(state.devices[0]!.deviceId).toBe('stable-1');
+    expect(state.devices[0]!.cachedHealth?.capturedAt).toBe(2_000);
+  });
+
   it('dismisses approval requests through the slice API', () => {
     let state = sessionsReducer(undefined, sessionAdded(makeSession('s1')));
     const req = B.stamp(B.approvalRequest('a1', 'shell', { cmd: 'pwd' }, [{ id: 'allow', label: 'Allow' }]), { ts: 10 });
@@ -243,4 +283,3 @@ describe('sessionsSlice', () => {
     expect(state.entities.keeper?.history.loading).toBe(false);
   });
 });
-

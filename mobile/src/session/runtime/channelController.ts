@@ -9,7 +9,9 @@ export type TimerName =
   | 'save' // coalesced transcript persist (PERSIST_THROTTLE_MS)
   | 'meta' // coalesced presence persist (META_PERSIST_THROTTLE_MS)
   | 'eventSave' // coalesced debug-log persist (PERSIST_THROTTLE_MS)
-  | 'deviceEventSave'; // coalesced device (listener) debug-log persist (PERSIST_THROTTLE_MS)
+  | 'deviceEventSave' // coalesced device (listener) debug-log persist (PERSIST_THROTTLE_MS)
+  | 'clipboard'
+  | 'keepAwake';
 
 type Handle = ReturnType<typeof setTimeout>;
 

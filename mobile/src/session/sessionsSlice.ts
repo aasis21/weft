@@ -1,7 +1,7 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { EVENT_TYPE, SUBTYPE } from '@aasis21/weft-shared';
-import type { DeviceSnapshotMsg, EventEnvelope, HistoryMsg, SessionFolder, StoredSession } from '@aasis21/weft-shared';
-import { EVENT_LOG_CAP } from '@/lib/eventLog';
+import { DEVICE_CAPABILITY, EVENT_TYPE, SUBTYPE, clipboardResult } from '@aasis21/weft-shared';
+import type { ClipboardResultMsg, DeviceSnapshotMsg, DeviceUtilityCode, EventEnvelope, HistoryMsg, KeepAwakeStatusMsg, SessionFolder, StoredSession } from '@aasis21/weft-shared';
+import { EVENT_LOG_CAP, redactClipboardEvent } from '@/lib/eventLog';
 import type {
   ApprovalRequestMsg,
   DebugEvent,
@@ -14,6 +14,7 @@ import type {
   SessionStatus,
   UserItem,
 } from './model';
+import type { DeviceHealthCache } from '@/lib/devices';
 import {
   applyEnvelope,
   appendNotice,
@@ -43,6 +44,7 @@ function isCollapsibleEvent(event: DebugEvent): boolean {
 /** Keep high-frequency liveness and telemetry visible without letting repeated samples crowd
  *  substantive control events out of the bounded log. */
 function appendEvent(list: DebugEvent[], event: DebugEvent, cap: number): DebugEvent[] {
+  event = redactClipboardEvent(event);
   const last = list[list.length - 1];
   if (last && isCollapsibleEvent(event) && last.eventSubtype === event.eventSubtype && last.dir === event.dir) {
     return [...list.slice(0, -1), event].slice(-cap);
@@ -211,11 +213,74 @@ const sessionsSlice = createSlice({
       if (device) {
         device.projects = action.payload.projects;
         device.capabilities = action.payload.capabilities ?? [];
+        if (!device.capabilities.includes(DEVICE_CAPABILITY.CLIPBOARD_V1)) device.clipboard = undefined;
+        if (!device.capabilities.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) device.keepAwake = undefined;
         device.projectsLoading = false;
         device.connected = true;
         device.error = undefined;
         device.lastSeenAt = Date.now();
         if (action.payload.deviceName) device.name = action.payload.deviceName;
+      }
+    },
+    deviceClipboardOpened(state, action: PayloadAction<string>) {
+      const device = state.devices.find((d) => d.channelId === action.payload);
+      if (device) device.clipboard = { pending: false };
+    },
+    deviceClipboardCleared(state, action: PayloadAction<string>) {
+      const device = state.devices.find((d) => d.channelId === action.payload);
+      if (device) device.clipboard = undefined;
+    },
+    deviceClipboardStarted(state, action: PayloadAction<{ channelId: string; requestId: string; operation: 'read' | 'write' }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device?.clipboard) device.clipboard = {
+        pending: true, requestId: action.payload.requestId, operation: action.payload.operation,
+      };
+    },
+    deviceClipboardResultReceived(state, action: PayloadAction<{ channelId: string; result: ClipboardResultMsg }>) {
+      const clipboard = state.devices.find((d) => d.channelId === action.payload.channelId)?.clipboard;
+      const result = action.payload.result;
+      if (!clipboard?.pending || clipboard.requestId !== result.requestId || clipboard.operation !== result.operation) return;
+      const safe = clipboardResult(result.requestId, result.operation, result.code, result.text).msg;
+      clipboard.pending = false;
+      clipboard.requestId = undefined;
+      clipboard.code = safe.code;
+      clipboard.text = safe.text;
+    },
+    deviceKeepAwakeStarted(state, action: PayloadAction<{ channelId: string; requestId: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.keepAwake = {
+        ...device.keepAwake, pending: true, requestId: action.payload.requestId, code: undefined,
+      };
+    },
+    deviceKeepAwakeFailed(state, action: PayloadAction<{ channelId: string; requestId: string; code: DeviceUtilityCode }>) {
+      const awake = state.devices.find((d) => d.channelId === action.payload.channelId)?.keepAwake;
+      if (awake?.requestId !== action.payload.requestId) return;
+      awake.pending = false;
+      awake.requestId = undefined;
+      awake.code = action.payload.code;
+    },
+    deviceKeepAwakeStatusReceived(state, action: PayloadAction<{ channelId: string; status: KeepAwakeStatusMsg }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      const status = action.payload.status;
+      if (!device?.connected || !device.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) return;
+      const awake = device.keepAwake;
+      if (status.requestId !== null && status.requestId !== awake?.requestId) return;
+      if (status.requestId === null && (!awake?.status || status.revision <= awake.status.revision)) return;
+      device.keepAwake ??= { pending: false };
+      if (status.requestId !== null) {
+        device.keepAwake.pending = false;
+        device.keepAwake.requestId = undefined;
+        device.keepAwake.code = status.code;
+      } else if (!device.keepAwake.pending) {
+        device.keepAwake.code = status.code;
+      }
+      if (!awake?.status || status.revision >= awake.status.revision) device.keepAwake.status = status;
+    },
+    deviceUtilitiesCleared(state, action: PayloadAction<string>) {
+      const device = state.devices.find((d) => d.channelId === action.payload);
+      if (device) {
+        device.clipboard = undefined;
+        device.keepAwake = undefined;
       }
     },
     deviceMonitoringStarted(
@@ -263,6 +328,13 @@ const sessionsSlice = createSlice({
       monitoring.latestSequence = snapshot.sequence;
       monitoring.snapshot = snapshot;
       monitoring.error = undefined;
+    },
+    deviceHealthCached(
+      state,
+      action: PayloadAction<{ channelId: string; cachedHealth: DeviceHealthCache }>,
+    ) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.cachedHealth = action.payload.cachedHealth;
     },
     // The laptop's current set of in-session `/weft` offers (SESSION_OFFERS). Replaces the device's
     // whole `offers` list — the station always relays the full live set, never a delta — and doubles
@@ -325,7 +397,17 @@ const sessionsSlice = createSlice({
         state.devices = state.devices.filter((d) => !removedChannelIds.includes(d.channelId));
       }
       const device = state.devices.find((d) => d.channelId === channelId);
-      if (device) Object.assign(device, merged);
+      if (device) {
+        const currentHealth = device.cachedHealth;
+        const mergedHealth = merged.cachedHealth;
+        Object.assign(device, merged);
+        if (
+          currentHealth &&
+          (!mergedHealth || currentHealth.capturedAt > mergedHealth.capturedAt)
+        ) {
+          device.cachedHealth = currentHealth;
+        }
+      }
       if (state.devices.length > 0 && !state.devices.some((d) => d.isDefault)) {
         state.devices[0].isDefault = true;
       }
@@ -335,6 +417,10 @@ const sessionsSlice = createSlice({
       if (device) {
         device.error = action.payload.error;
         if (action.payload.connected !== undefined) device.connected = action.payload.connected;
+        if (action.payload.connected === false) {
+          device.clipboard = undefined;
+          device.keepAwake = undefined;
+        }
         // NOTE: does NOT stamp lastSeenAt. This reducer fires for phone-side events (transport
         // socket open, optimistic attach, request/transport errors) that are NOT proof the laptop
         // sent anything. "Last seen" must only advance on genuine INBOUND messages from the laptop
@@ -580,10 +666,19 @@ export const {
   deviceDefaultSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceClipboardOpened,
+  deviceClipboardCleared,
+  deviceClipboardStarted,
+  deviceClipboardResultReceived,
+  deviceKeepAwakeStarted,
+  deviceKeepAwakeFailed,
+  deviceKeepAwakeStatusReceived,
+  deviceUtilitiesCleared,
   deviceMonitoringStarted,
   deviceMonitoringStopped,
   deviceMonitoringFailed,
   deviceSnapshotReceived,
+  deviceHealthCached,
   deviceSessionOffersReceived,
   deviceSessionsReceived,
   deviceSessionsLoadingSet,

@@ -1,7 +1,15 @@
-import type { TransportDescriptor } from '@aasis21/weft-shared';
+import type { DeviceSnapshotMsg, TransportDescriptor } from '@aasis21/weft-shared';
 import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 
 const DEVICES_KEY = 'weft.devices.v1';
+let mutationQueue: Promise<void> = Promise.resolve();
+
+export interface DeviceHealthCache {
+  capturedAt: number;
+  effectiveIntervalMs: number;
+  system: DeviceSnapshotMsg['system'];
+  issues: DeviceSnapshotMsg['issues'];
+}
 
 export interface RegisteredDevice {
   channelId: string;
@@ -38,6 +46,24 @@ export interface RegisteredDevice {
   /** The laptop's Weft version reported in its listener QR at pairing time. Optional — older
    *  laptops omit it. Surfaced on the phone's Settings page (Device details context). */
   appVersion?: string;
+  /** Last successful system-health sample. Applications are intentionally excluded because their
+   *  usage data remains runtime-only. */
+  cachedHealth?: DeviceHealthCache;
+}
+
+function normalizeCachedHealth(value: unknown): DeviceHealthCache | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const health = value as Partial<DeviceHealthCache>;
+  if (
+    typeof health.capturedAt !== 'number' ||
+    typeof health.effectiveIntervalMs !== 'number' ||
+    !health.system ||
+    typeof health.system !== 'object' ||
+    !Array.isArray(health.issues)
+  ) {
+    return undefined;
+  }
+  return health as DeviceHealthCache;
 }
 
 function isRegisteredDevice(value: unknown): value is RegisteredDevice {
@@ -65,7 +91,11 @@ function normalize(parsed: unknown): RegisteredDevice[] {
   const byChannel = new Map<string, RegisteredDevice>();
   for (const item of raw) {
     if (!isRegisteredDevice(item)) continue;
-    byChannel.set(item.channelId, { ...item, savedAt: item.savedAt || Date.now() });
+    byChannel.set(item.channelId, {
+      ...item,
+      cachedHealth: normalizeCachedHealth(item.cachedHealth),
+      savedAt: item.savedAt || Date.now(),
+    });
   }
   const list = [...byChannel.values()];
   if (list.length > 0 && !list.some((d) => d.isDefault)) list[0] = { ...list[0], isDefault: true };
@@ -89,43 +119,59 @@ async function write(list: RegisteredDevice[]): Promise<void> {
 }
 
 export async function loadDevices(): Promise<RegisteredDevice[]> {
+  await mutationQueue;
   return read();
 }
 
+function mutateDevices<T>(mutation: (list: RegisteredDevice[]) => Promise<[RegisteredDevice[], T]> | [RegisteredDevice[], T]): Promise<T> {
+  const operation = mutationQueue.then(async () => {
+    const [next, result] = await mutation(await read());
+    await write(next);
+    return result;
+  });
+  mutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
 export async function upsertDevice(device: RegisteredDevice): Promise<void> {
-  const list = await read();
-  const prior = list.find((d) => d.channelId === device.channelId);
-  const next = [
-    ...list.filter((d) => d.channelId !== device.channelId),
-    {
-      ...prior,
-      ...device,
-      isDefault: device.isDefault ?? prior?.isDefault ?? list.length === 0,
-    },
-  ];
-  await write(next);
+  await mutateDevices((list) => {
+    const prior = list.find((d) => d.channelId === device.channelId);
+    return [[
+      ...list.filter((d) => d.channelId !== device.channelId),
+      {
+        ...prior,
+        ...device,
+        isDefault: device.isDefault ?? prior?.isDefault ?? list.length === 0,
+      },
+    ], undefined];
+  });
 }
 
 export async function removeDevice(channelId: string): Promise<void> {
-  const list = (await read()).filter((d) => d.channelId !== channelId);
-  if (list.length > 0 && !list.some((d) => d.isDefault)) list[0] = { ...list[0], isDefault: true };
-  await write(list);
+  await mutateDevices((list) => {
+    const next = list.filter((d) => d.channelId !== channelId);
+    if (next.length > 0 && !next.some((d) => d.isDefault)) next[0] = { ...next[0], isDefault: true };
+    return [next, undefined];
+  });
 }
 
 export async function setDefaultDevice(channelId: string): Promise<void> {
-  const list = await read();
-  await write(list.map((d) => ({ ...d, isDefault: d.channelId === channelId })));
+  await mutateDevices((list) => [
+    list.map((d) => ({ ...d, isDefault: d.channelId === channelId })),
+    undefined,
+  ]);
 }
 
 export async function patchDevice(channelId: string, patch: Partial<Omit<RegisteredDevice, 'channelId'>>): Promise<void> {
-  const list = await read();
-  let changed = false;
-  const next = list.map((d) => {
-    if (d.channelId !== channelId) return d;
-    changed = true;
-    return { ...d, ...patch };
+  await mutateDevices((list) => {
+    let changed = false;
+    const next = list.map((d) => {
+      if (d.channelId !== channelId) return d;
+      changed = true;
+      return { ...d, ...patch };
+    });
+    return [changed ? next : list, undefined];
   });
-  if (changed) await write(next);
 }
 
 export interface ReconcileResult {
@@ -133,7 +179,10 @@ export interface ReconcileResult {
   removedChannelIds: string[];
   /** Fields folded into the surviving `channelId` entry (its own state plus anything inherited
    *  from the dropped duplicates: isDefault, lastProjectName, name). */
-  merged: Pick<RegisteredDevice, 'deviceId' | 'lastSeenAt' | 'isDefault' | 'lastProjectName' | 'name'>;
+  merged: Pick<
+    RegisteredDevice,
+    'deviceId' | 'lastSeenAt' | 'isDefault' | 'lastProjectName' | 'name' | 'cachedHealth'
+  >;
 }
 
 /**
@@ -146,26 +195,26 @@ export interface ReconcileResult {
  * session" never accumulates dead rows for a device that will never reconnect under its old id.
  */
 export async function reconcileDeviceId(channelId: string, deviceId: string, now = Date.now()): Promise<ReconcileResult> {
-  const list = await read();
-  const current = list.find((d) => d.channelId === channelId);
-  const stales = list.filter((d) => d.channelId !== channelId && d.deviceId === deviceId);
+  return mutateDevices((list) => {
+    const current = list.find((d) => d.channelId === channelId);
+    const stales = list.filter((d) => d.channelId !== channelId && d.deviceId === deviceId);
+    const cachedHealth = [current, ...stales]
+      .map((device) => device?.cachedHealth)
+      .filter((health): health is DeviceHealthCache => Boolean(health))
+      .sort((a, b) => b.capturedAt - a.capturedAt)[0];
 
-  const merged: ReconcileResult['merged'] = {
-    deviceId,
-    lastSeenAt: now,
-    isDefault: current?.isDefault || stales.some((d) => d.isDefault) || undefined,
-    lastProjectName: current?.lastProjectName ?? stales.find((d) => d.lastProjectName)?.lastProjectName,
-    name: current?.name ?? stales.find((d) => d.name)?.name,
-  };
-
-  if (stales.length === 0) {
-    if (current) await patchDevice(channelId, { deviceId, lastSeenAt: now });
-    return { removedChannelIds: [], merged };
-  }
-
-  const next = list
-    .filter((d) => d.channelId === channelId || !stales.some((s) => s.channelId === d.channelId))
-    .map((d) => (d.channelId === channelId ? { ...d, ...merged } : d));
-  await write(next);
-  return { removedChannelIds: stales.map((d) => d.channelId), merged };
+    const merged: ReconcileResult['merged'] = {
+      deviceId,
+      lastSeenAt: now,
+      isDefault: current?.isDefault || stales.some((d) => d.isDefault) || undefined,
+      lastProjectName: current?.lastProjectName ?? stales.find((d) => d.lastProjectName)?.lastProjectName,
+      name: current?.name ?? stales.find((d) => d.name)?.name,
+      cachedHealth,
+    };
+    const removedChannelIds = stales.map((d) => d.channelId);
+    const next = list
+      .filter((d) => d.channelId === channelId || !removedChannelIds.includes(d.channelId))
+      .map((d) => (d.channelId === channelId ? { ...d, ...merged } : d));
+    return [next, { removedChannelIds, merged }];
+  });
 }

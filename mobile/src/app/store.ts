@@ -19,6 +19,23 @@ export function makeStore(deps?: Partial<RuntimeDeps>) {
   };
   const store = configureStore({
     reducer: { sessions: sessionsReducer },
+    devTools: {
+      actionSanitizer: (action) => action.type.startsWith('sessions/deviceClipboard')
+        ? { ...action, payload: undefined } : action,
+      stateSanitizer: (state) => {
+        if (!state || typeof state !== 'object' || !('sessions' in state)) return state;
+        const sessions = state.sessions;
+        if (!sessions || typeof sessions !== 'object' || !('devices' in sessions) || !Array.isArray(sessions.devices)) return state;
+        return {
+          ...state,
+          sessions: {
+            ...sessions,
+            devices: sessions.devices.map((device: unknown) =>
+              device && typeof device === 'object' ? { ...device, clipboard: undefined } : device),
+          },
+        };
+      },
+    },
     middleware: (getDefault) =>
       // Envelopes carry non-serializable payloads (CryptoKey material, image blobs, arbitrary
       // tool args in the debug log), and timers live outside the store — so the serializable and

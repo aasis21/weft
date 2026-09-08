@@ -7,11 +7,13 @@ import {
   BackGlyph,
   BracesGlyph,
   ChevronGlyph,
+  ClipboardGlyph,
   DeviceAvatar,
   FolderGlyph,
   MoreHorizontalGlyph,
   PencilGlyph,
   PlayGlyph,
+  PowerGlyph,
   RefreshGlyph,
   ResumeGlyph,
   StarGlyph,
@@ -23,9 +25,10 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { deriveStatus } from '@/ui/sessions/sessionStatus';
-import { DEVICE_CAPABILITY, transportIdentity } from '@aasis21/weft-shared';
+import { DEVICE_CAPABILITY, transportIdentity, type DeviceSystemSnapshot } from '@aasis21/weft-shared';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { DeviceClipboardSheet, DeviceKeepAwakeSheet, keepAwakeRemaining } from './DeviceUtilitySheets';
 
 interface DeviceDetailsScreenProps {
   device: ListenerDeviceState;
@@ -37,6 +40,13 @@ interface DeviceDetailsScreenProps {
   onRefreshProjects(channelId: string): void;
   onStartMonitoring(channelId: string): void;
   onStopMonitoring(channelId: string): void;
+  onOpenDeviceClipboard(channelId: string): void;
+  onCloseDeviceClipboard(channelId: string): void;
+  onReadDeviceClipboard(channelId: string): void;
+  onWriteDeviceClipboard(channelId: string, text: string): void;
+  onRefreshDeviceKeepAwake(channelId: string): void;
+  onStartDeviceKeepAwake(channelId: string, durationMs: number): void;
+  onStopDeviceKeepAwake(channelId: string): void;
   /** Open the start screen on its Resume tab for this device. The resumable-session list lives
    *  there, next to the folder picker and permission toggle it shares with starting a new one —
    *  this screen is device administration, not a second place to launch sessions from. */
@@ -71,8 +81,7 @@ interface DeviceDetailsScreenProps {
  *
  * The header's trailing control is a "⋯" overflow (same menu vocabulary as the device tiles on
  * DevicesScreen) holding the administrative actions — refresh, make default, event log, forget.
- * User-facing device operations live in one quick-action grid. Start and Resume are available
- * today; future actions remain visibly unavailable until their device protocols exist.
+ * User-facing device operations live in one quick-action grid, with utilities capability-gated.
  */
 function folderName(path: string | null | undefined): string | null {
   if (!path) return null;
@@ -108,13 +117,27 @@ function formatBytes(value: number | null): string | null {
   return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
 }
 
-function formatUptime(seconds: number | null): string | null {
-  if (seconds === null || seconds < 0) return null;
-  const days = Math.floor(seconds / 86_400);
-  const hours = Math.floor((seconds % 86_400) / 3_600);
-  if (days > 0) return `${days}d ${hours}h`;
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  return `${hours}h ${minutes}m`;
+function PowerCard({ system, remainingAwake }: {
+  system: DeviceSystemSnapshot | undefined;
+  remainingAwake: string | null;
+}): JSX.Element {
+  const batteryPercent = system?.batteryPercent ?? null;
+  const source = batteryPercent !== null
+    ? system?.batteryCharging === true || system?.onAcPower === true
+      ? 'Charging'
+      : system?.onAcPower === false ? 'On battery' : null
+    : system?.onAcPower === true ? 'Plugged in' : system?.onAcPower === false ? 'On battery' : null;
+  return (
+    <div className="device-metric device-power-metric" role="group" aria-label="Power">
+      <span className="device-metric-name">Power</span>
+      {batteryPercent !== null ? <strong>{formatPercent(batteryPercent)}</strong> : system?.onAcPower === true ? <strong>AC</strong> : null}
+      {source ? <span className="device-metric-detail">{source}</span> : batteryPercent === null ? <span className="device-metric-detail">Power unavailable</span> : null}
+      {remainingAwake ? <span className="device-metric-detail device-awake-status">Keep Awake · {remainingAwake}</span> : null}
+      {batteryPercent !== null ? (
+        <span className="device-meter" aria-hidden="true"><i style={{ width: `${batteryPercent}%` }} /></span>
+      ) : null}
+    </div>
+  );
 }
 
 export function DeviceDetailsScreen({
@@ -125,6 +148,13 @@ export function DeviceDetailsScreen({
   onRefreshProjects,
   onStartMonitoring,
   onStopMonitoring,
+  onOpenDeviceClipboard,
+  onCloseDeviceClipboard,
+  onReadDeviceClipboard,
+  onWriteDeviceClipboard,
+  onRefreshDeviceKeepAwake,
+  onStartDeviceKeepAwake,
+  onStopDeviceKeepAwake,
   onResumeOnDevice,
   onSetDefault,
   onForget,
@@ -145,6 +175,7 @@ export function DeviceDetailsScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [utility, setUtility] = useState<{ kind: 'clipboard' | 'keep-awake'; channelId: string } | null>(null);
   // Forget is destructive and irreversible from here, so the menu item flips into a confirm state
   // in place rather than firing on first tap.
   const [confirmForget, setConfirmForget] = useState(false);
@@ -177,30 +208,36 @@ export function DeviceDetailsScreen({
   const offers = (device.offers ?? []).filter((o) => o && o.channelId && !tracked.has(o.channelId));
   const online = device.connected;
   const terminalSupported = device.capabilities?.includes(DEVICE_CAPABILITY.TERMINAL_V1) ?? false;
-  const monitoringSupported = device.capabilities?.includes('device-monitor-v1') ?? false;
+  const monitoringSupported = device.capabilities?.includes(DEVICE_CAPABILITY.MONITOR_V1) ?? false;
+  const clipboardSupported = device.capabilities?.includes(DEVICE_CAPABILITY.CLIPBOARD_V1) ?? false;
+  const keepAwakeSupported = device.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1) ?? false;
+  const remainingAwake = online && keepAwakeSupported ? keepAwakeRemaining(device.keepAwake?.status, now) : null;
+  const utilityUnavailable = !online ? 'Offline' : device.capabilities === undefined ? 'Checking support' : 'Update required';
   const snapshot = device.monitoring?.snapshot;
-  const system = snapshot?.system;
+  const cachedHealth = device.cachedHealth;
+  const health = snapshot ?? cachedHealth;
+  const usingCachedHealth = !snapshot && Boolean(cachedHealth);
+  const system = health?.system;
   const memoryPercent = system ? percent(system.memoryUsedBytes, system.memoryTotalBytes) : null;
   const diskPercent = system ? percent(system.diskUsedBytes, system.diskTotalBytes) : null;
   const batteryPercent = system?.batteryPercent ?? null;
-  const uptime = formatUptime(system?.uptimeSeconds ?? null);
-  const effectiveInterval = snapshot?.effectiveIntervalMs ?? 10_000;
+  const effectiveInterval = health?.effectiveIntervalMs ?? 10_000;
   const snapshotStale = Boolean(
-    snapshot && now - snapshot.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
+    health && now - health.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
   );
   const visibleApps = snapshot?.apps ?? [];
   const shownApps = allAppsOpen ? visibleApps : visibleApps.slice(0, 3);
   const shownProjects = allProjectsOpen ? device.projects : device.projects.slice(0, 3);
   const appsUnavailable = snapshot?.issues.some((issue) => issue.component === 'apps') ?? false;
   const hasPartialSystemIssues =
-    snapshot?.issues.some((issue) => issue.component !== 'apps') ?? false;
+    health?.issues.some((issue) => issue.component !== 'apps') ?? false;
   const systemUnavailable = Boolean(
-    snapshot &&
+    health &&
       system?.cpuPercent === null &&
       memoryPercent === null &&
       diskPercent === null &&
-      uptime === null &&
-      batteryPercent === null,
+      batteryPercent === null &&
+      typeof system?.onAcPower !== 'boolean',
   );
 
   const closeMenu = (returnFocus: boolean): void => {
@@ -233,6 +270,10 @@ export function DeviceDetailsScreen({
   useEffect(() => {
     setAllProjectsOpen(false);
   }, [deviceKey]);
+
+  useEffect(() => {
+    setUtility(null);
+  }, [device.channelId, online, clipboardSupported, keepAwakeSupported]);
 
   useEffect(() => {
     if (!monitoringSupported || !online) {
@@ -483,35 +524,24 @@ export function DeviceDetailsScreen({
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
         <section className="device-monitor-summary device-panel" aria-label="Device health">
-          {!online ? (
-            <div className="device-monitor-state">
-              <strong>System health unavailable</strong>
-              <span>Monitoring resumes when this laptop reconnects.</span>
-            </div>
-          ) : device.capabilities === undefined ? (
-            <div className="device-monitor-state" role="status">
-              <strong>Checking Device Station capabilities…</strong>
-              <span>Waiting for this laptop to describe the features it supports.</span>
-            </div>
-          ) : !monitoringSupported ? (
+          {online && device.capabilities !== undefined && !monitoringSupported ? (
             <div className="device-monitor-state device-monitor-update">
               <strong>Update Weft on this laptop</strong>
               <span>Install the latest Device Station to see system health and running apps.</span>
             </div>
-          ) : !snapshot ? (
-            <div className="device-monitor-state" role="status">
-              <strong>Checking system health…</strong>
-              <span>{device.monitoring?.error ?? 'Waiting for the first snapshot from this laptop.'}</span>
-            </div>
-          ) : (
+          ) : health ? (
             <>
               <div className="device-section-head device-health-head">
-                <div>
-                  <h3 className="device-section-label">System health</h3>
-                  <span className="device-section-meta">
-                    {snapshotStale ? 'Update delayed' : `Updated ${formatLastSeen(snapshot.capturedAt, now) ?? 'just now'}`}
-                  </span>
-                </div>
+                <h3 className="device-section-label">System health</h3>
+                <span className="device-section-meta">
+                  {usingCachedHealth
+                    ? online
+                      ? `Updating · saved ${formatLastSeen(health.capturedAt, now) ?? 'recently'}`
+                      : `Saved ${formatLastSeen(health.capturedAt, now) ?? 'recently'} · offline`
+                    : snapshotStale
+                      ? 'Update delayed'
+                      : `Updated ${formatLastSeen(health.capturedAt, now) ?? 'just now'}`}
+                </span>
               </div>
               <div className="device-metrics">
                 {system?.cpuPercent !== null && system?.cpuPercent !== undefined ? (
@@ -541,23 +571,7 @@ export function DeviceDetailsScreen({
                     <span className="device-meter" aria-hidden="true"><i style={{ width: `${diskPercent}%` }} /></span>
                   </div>
                 ) : null}
-                {uptime ? (
-                  <div className="device-metric device-metric-static">
-                    <span className="device-metric-name">Uptime</span>
-                    <strong>{uptime}</strong>
-                    <span className="device-metric-detail">Since last restart</span>
-                  </div>
-                ) : null}
-                {batteryPercent !== null ? (
-                  <div className="device-metric">
-                    <span className="device-metric-name">Battery</span>
-                    <strong>{formatPercent(batteryPercent)}</strong>
-                    <span className="device-metric-detail">
-                      {system?.batteryCharging === true ? 'Charging' : system?.batteryCharging === false ? 'On battery' : ''}
-                    </span>
-                    <span className="device-meter" aria-hidden="true"><i style={{ width: `${batteryPercent}%` }} /></span>
-                  </div>
-                ) : null}
+                <PowerCard system={system} remainingAwake={remainingAwake} />
               </div>
               {systemUnavailable ? (
                 <p className="device-monitor-partial">System metrics are temporarily unavailable.</p>
@@ -566,7 +580,25 @@ export function DeviceDetailsScreen({
                 <p className="device-monitor-partial">Some system details are temporarily unavailable.</p>
               ) : null}
             </>
+          ) : !online ? (
+            <div className="device-monitor-state">
+              <strong>System health unavailable</strong>
+              <span>Monitoring resumes when this laptop reconnects.</span>
+            </div>
+          ) : device.capabilities === undefined ? (
+            <div className="device-monitor-state" role="status">
+              <strong>Checking Device Station capabilities…</strong>
+              <span>Waiting for this laptop to describe the features it supports.</span>
+            </div>
+          ) : (
+            <div className="device-monitor-state" role="status">
+              <strong>Checking system health…</strong>
+              <span>{device.monitoring?.error ?? 'Waiting for the first snapshot from this laptop.'}</span>
+            </div>
           )}
+          {!health || (online && device.capabilities !== undefined && !monitoringSupported) ? (
+            <div className="device-metrics"><PowerCard system={undefined} remainingAwake={remainingAwake} /></div>
+          ) : null}
         </section>
 
         <section className="device-quick-actions device-panel" aria-labelledby="device-quick-actions-heading">
@@ -593,12 +625,32 @@ export function DeviceDetailsScreen({
             <button
               type="button"
               className="device-quick-action"
-              aria-label="Explore files (coming soon)"
-              disabled
+              aria-haspopup="dialog"
+              aria-describedby={!online || !clipboardSupported ? 'device-utility-support' : undefined}
+              disabled={!online || !clipboardSupported}
+              onClick={(event) => {
+                event.currentTarget.focus();
+                setUtility({ kind: 'clipboard', channelId: device.channelId });
+              }}
             >
-              <span className="device-action-icon" aria-hidden="true"><FolderGlyph /></span>
-              <strong>Explore files</strong>
-              <small className="device-action-status">Soon</small>
+              <span className="device-action-icon" aria-hidden="true"><ClipboardGlyph /></span>
+              <strong>Clipboard</strong>
+              {!online || !clipboardSupported ? <small className="device-action-status">{utilityUnavailable}</small> : device.clipboard?.pending ? <small className="device-action-status">Working…</small> : null}
+            </button>
+            <button
+              type="button"
+              className="device-quick-action"
+              aria-haspopup="dialog"
+              aria-describedby={!online || !keepAwakeSupported ? 'device-utility-support' : undefined}
+              disabled={!online || !keepAwakeSupported}
+              onClick={(event) => {
+                event.currentTarget.focus();
+                setUtility({ kind: 'keep-awake', channelId: device.channelId });
+              }}
+            >
+              <span className="device-action-icon" aria-hidden="true"><PowerGlyph /></span>
+              <strong>Keep Awake</strong>
+              <small className="device-action-status">{!online || !keepAwakeSupported ? utilityUnavailable : device.keepAwake?.pending ? 'Working…' : remainingAwake ?? 'System sleep'}</small>
             </button>
             <button
               type="button"
@@ -616,6 +668,11 @@ export function DeviceDetailsScreen({
           {!terminalSupported ? (
             <p id="terminal-enable-guidance" className="device-offline-note">
               Terminal access is unavailable. Update Weft on the laptop, then run <code>weft start --allow-terminal</code>.
+            </p>
+          ) : null}
+          {!online || !clipboardSupported || !keepAwakeSupported ? (
+            <p id="device-utility-support" className="device-utility-support">
+              {!online ? 'Reconnect this laptop to use device utilities.' : device.capabilities === undefined ? 'Checking utility support on this laptop…' : 'Update Weft on this laptop to enable unavailable utilities.'}
             </p>
           ) : null}
         </section>
@@ -861,6 +918,27 @@ export function DeviceDetailsScreen({
       ) : null}
 
       {settingsOpen ? <SettingsScreen onClose={() => setSettingsOpen(false)} laptopVersion={device.appVersion} onOpenDrawer={() => setDrawerOpen(true)} /> : null}
+      {utility?.channelId === device.channelId && online && utility.kind === 'clipboard' && clipboardSupported ? (
+        <DeviceClipboardSheet
+          key={device.channelId}
+          device={device}
+          onOpen={onOpenDeviceClipboard}
+          onClear={onCloseDeviceClipboard}
+          onRead={onReadDeviceClipboard}
+          onWrite={onWriteDeviceClipboard}
+          onClose={() => setUtility(null)}
+        />
+      ) : null}
+      {utility?.channelId === device.channelId && online && utility.kind === 'keep-awake' && keepAwakeSupported ? (
+        <DeviceKeepAwakeSheet
+          key={device.channelId}
+          device={device}
+          onRefresh={onRefreshDeviceKeepAwake}
+          onStart={onStartDeviceKeepAwake}
+          onStop={onStopDeviceKeepAwake}
+          onClose={() => setUtility(null)}
+        />
+      ) : null}
     </main>
   );
 }

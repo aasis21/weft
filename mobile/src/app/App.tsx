@@ -133,6 +133,27 @@ export default function App(): JSX.Element {
   const stopDeviceMonitoring = useCallback((channelId: string): void => {
     sessionRuntime.stopDeviceMonitoring(channelId);
   }, []);
+  const openDeviceClipboard = useCallback((channelId: string): void => {
+    sessionRuntime.openDeviceClipboard(channelId);
+  }, []);
+  const closeDeviceClipboard = useCallback((channelId: string): void => {
+    sessionRuntime.closeDeviceClipboard(channelId);
+  }, []);
+  const readDeviceClipboard = useCallback((channelId: string): void => {
+    sessionRuntime.readDeviceClipboard(channelId);
+  }, []);
+  const writeDeviceClipboard = useCallback((channelId: string, text: string): void => {
+    sessionRuntime.writeDeviceClipboard(channelId, text);
+  }, []);
+  const refreshDeviceKeepAwake = useCallback((channelId: string): void => {
+    sessionRuntime.refreshDeviceKeepAwake(channelId);
+  }, []);
+  const startDeviceKeepAwake = useCallback((channelId: string, durationMs: number): void => {
+    sessionRuntime.startDeviceKeepAwake(channelId, durationMs);
+  }, []);
+  const stopDeviceKeepAwake = useCallback((channelId: string): void => {
+    sessionRuntime.stopDeviceKeepAwake(channelId);
+  }, []);
 
   const handlePair = useCallback(async (raw: string): Promise<void> => {
     const route = await sessionRuntime.addByQr(raw);
@@ -320,6 +341,13 @@ export default function App(): JSX.Element {
             onStartMonitoring={startDeviceMonitoring}
             onOpenTerminal={openTerminal}
             onStopMonitoring={stopDeviceMonitoring}
+            onOpenDeviceClipboard={openDeviceClipboard}
+            onCloseDeviceClipboard={closeDeviceClipboard}
+            onReadDeviceClipboard={readDeviceClipboard}
+            onWriteDeviceClipboard={writeDeviceClipboard}
+            onRefreshDeviceKeepAwake={refreshDeviceKeepAwake}
+            onStartDeviceKeepAwake={startDeviceKeepAwake}
+            onStopDeviceKeepAwake={stopDeviceKeepAwake}
             onResumeOnDevice={(id) => openStart(id, 'resume')}
             onSetDefault={(id) => sessionRuntime.setDefaultDevice(id)}
             onForget={async (id) => {

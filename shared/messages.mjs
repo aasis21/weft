@@ -33,7 +33,28 @@ export const EVENT_TYPE = Object.freeze({
 export const DEVICE_CAPABILITY = Object.freeze({
   MONITOR_V1: "device-monitor-v1",
   TERMINAL_V1: "device-terminal-v1",
+  CLIPBOARD_V1: "device-clipboard-v1",
+  KEEP_AWAKE_V1: "device-keep-awake-v1",
 });
+
+export const CLIPBOARD_MAX_BYTES = 64 * 1024;
+export const KEEP_AWAKE_MIN_MS = 15 * 60 * 1000;
+export const KEEP_AWAKE_MAX_MS = 8 * 60 * 60 * 1000;
+export const DEVICE_UTILITY_CODES = Object.freeze([
+  "ok", "invalid-request", "too-large", "unsupported", "unavailable", "timeout", "lease-mismatch",
+]);
+
+/** Shared by both endpoints; never include the rejected text in errors. */
+export function clipboardTextError(text) {
+  if (typeof text !== "string") return "invalid-request";
+  return new TextEncoder().encode(text).byteLength > CLIPBOARD_MAX_BYTES ? "too-large" : null;
+}
+
+export function normalizeKeepAwakeDuration(durationMs) {
+  return Number.isFinite(durationMs) && durationMs > 0
+    ? Math.max(KEEP_AWAKE_MIN_MS, Math.min(KEEP_AWAKE_MAX_MS, Math.floor(durationMs)))
+    : null;
+}
 
 /**
  * Fine-grained subtype, scoped UNDER its eventType (so the same subtype string may appear under
@@ -116,6 +137,13 @@ export const SUBTYPE = Object.freeze({
     TERMINAL_STATE: "terminal_state",
     TERMINAL_OUTPUT: "terminal_output",
     TERMINAL_SNAPSHOT: "terminal_snapshot",
+    CLIPBOARD_READ: "clipboard_read",
+    CLIPBOARD_WRITE: "clipboard_write",
+    CLIPBOARD_RESULT: "clipboard_result",
+    KEEP_AWAKE_START: "keep_awake_start",
+    KEEP_AWAKE_STOP: "keep_awake_stop",
+    KEEP_AWAKE_STATUS_REQUEST: "keep_awake_status_request",
+    KEEP_AWAKE_STATUS: "keep_awake_status",
     // phone -> ext: Voice Mode (#168) is on/off. While on, the extension prepends a directive to
     // each relayed prompt so the agent authors its reply for SPEECH (concise, no verbatim code).
     VOICE_MODE: "voice_mode",
@@ -489,6 +517,57 @@ export const deviceMonitorStop = (monitorId) =>
     monitorId: typeof monitorId === "string" ? monitorId : "",
   });
 
+const requestIdOrEmpty = (value) => typeof value === "string" ? value : "";
+const utilityCode = (code) => DEVICE_UTILITY_CODES.includes(code) ? code : "unavailable";
+
+export const clipboardRead = (requestId) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CLIPBOARD_READ, { requestId: requestIdOrEmpty(requestId) });
+
+export const clipboardWrite = (requestId, text) => {
+  const error = clipboardTextError(text);
+  if (error) throw new RangeError(error);
+  return envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CLIPBOARD_WRITE, {
+    requestId: requestIdOrEmpty(requestId), text,
+  });
+};
+
+export const clipboardResult = (requestId, operation, code, text) => {
+  let safeCode = utilityCode(code);
+  const safeOperation = operation === "read" ? "read" : "write";
+  if (safeCode === "ok" && safeOperation === "read") safeCode = clipboardTextError(text) ?? "ok";
+  return envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CLIPBOARD_RESULT, {
+    requestId: requestIdOrEmpty(requestId),
+    operation: safeOperation,
+    code: safeCode,
+    ...(safeCode === "ok" && safeOperation === "read" ? { text } : {}),
+  });
+};
+
+export const keepAwakeStart = (requestId, leaseId, durationMs) => {
+  const duration = normalizeKeepAwakeDuration(durationMs);
+  if (duration === null) throw new RangeError("invalid-request");
+  return envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.KEEP_AWAKE_START, {
+    requestId: requestIdOrEmpty(requestId), leaseId: requestIdOrEmpty(leaseId), durationMs: duration,
+  });
+};
+export const keepAwakeStop = (requestId, leaseId) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.KEEP_AWAKE_STOP, {
+    requestId: requestIdOrEmpty(requestId), leaseId: requestIdOrEmpty(leaseId),
+  });
+export const keepAwakeStatusRequest = (requestId) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.KEEP_AWAKE_STATUS_REQUEST, {
+    requestId: requestIdOrEmpty(requestId),
+  });
+export const keepAwakeStatus = (requestId, { leaseId = null, active = false, expiresAt = null, revision = 0, code = "ok" } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.KEEP_AWAKE_STATUS, {
+    requestId: typeof requestId === "string" ? requestId : null,
+    leaseId: typeof leaseId === "string" ? leaseId : null,
+    active: active === true && typeof leaseId === "string" && Number.isFinite(expiresAt),
+    expiresAt: active === true && typeof leaseId === "string" && Number.isFinite(expiresAt) ? expiresAt : null,
+    revision: Number.isSafeInteger(revision) && revision >= 0 ? revision : 0,
+    code: utilityCode(code),
+  });
+
 export const deviceSnapshot = ({
   monitorId,
   sequence,
@@ -517,6 +596,7 @@ export const deviceSnapshot = ({
       diskTotalBytes: numberOrNull(system.diskTotalBytes),
       batteryPercent: numberOrNull(system.batteryPercent),
       batteryCharging: typeof system.batteryCharging === "boolean" ? system.batteryCharging : null,
+      onAcPower: typeof system.onAcPower === "boolean" ? system.onAcPower : null,
     },
     apps: (Array.isArray(apps) ? apps : []).filter(
       (app) => app && typeof app.id === "string" && app.id && typeof app.name === "string" && app.name,

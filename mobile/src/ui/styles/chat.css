@@ -2668,17 +2668,16 @@
   justify-content: space-between;
   gap: 12px;
 }
-.weft-session .device-health-head > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 .weft-session .device-section-meta,
 .weft-session .device-section-count {
   color: var(--fg-dim);
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
+}
+.weft-session .device-health-head .device-section-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .weft-session .device-section-tools {
   display: flex;
@@ -2733,12 +2732,6 @@
   max-width: 100%;
   border-radius: inherit;
   background: var(--accent);
-}
-.weft-session .device-metric-static {
-  align-content: start;
-}
-.weft-session .device-metric-static strong {
-  font-size: 16px;
 }
 .weft-session .device-monitor-partial { margin: 0; }
 .weft-session .device-running {
@@ -2929,8 +2922,7 @@
   font-size: 10.5px;
 }
 
-/* Keep all device-level actions in one short row. Actions without a protocol remain disabled and
-   explicitly marked as future work. */
+/* Keep capability-gated device actions in one short row. */
 .weft-session .device-quick-actions {
   display: flex;
   flex-direction: column;
@@ -2938,7 +2930,7 @@
 }
 .weft-session .device-action-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
   overflow: hidden;
   border-radius: 10px;
@@ -2988,7 +2980,106 @@
   line-height: 1;
   font-weight: 700;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
+
+.weft-session .device-power-metric .device-metric-detail {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.weft-session .device-awake-status { color: var(--success); }
+.weft-session .device-utility-support {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+.weft-session .device-utility-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: max(12px, env(safe-area-inset-top)) max(0px, env(safe-area-inset-right)) 0 max(0px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  backdrop-filter: blur(12px);
+}
+.weft-session .device-utility-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 560px);
+  min-width: 0;
+  max-height: 100%;
+  max-height: min(820px, calc(100dvh - max(12px, env(safe-area-inset-top))));
+  overflow: hidden;
+  border: 1px solid var(--bg-rule);
+  border-radius: 22px 22px 0 0;
+  background: var(--bg-elev);
+  color: var(--fg);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--fg) 22%, transparent);
+}
+.weft-session .device-utility-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--bg-rule);
+}
+.weft-session .device-utility-head h2 { margin: 0; font-size: 18px; }
+.weft-session .device-utility-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.weft-session .device-utility-body p { margin: 0; }
+.weft-session .device-utility-body small { color: var(--fg-dim); }
+.weft-session .device-utility-body textarea,
+.weft-session .device-utility-body select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+}
+.weft-session .device-utility-body textarea {
+  flex: 0 0 auto;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+.weft-session .device-utility-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.weft-session .device-utility-actions > button { flex: 1 1 160px; }
+.weft-session .device-utility-button {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.weft-session .device-utility-button.primary { background: var(--accent-soft); }
+.weft-session .device-utility-button:disabled { opacity: 0.6; cursor: default; }
+.weft-session .device-utility-button:focus-visible,
+.weft-session .device-utility-body :is(textarea, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.weft-session .device-utility-error { color: var(--error); }
 
 /* Offline replaces the button pair outright. The old UI disabled the buttons and explained why in
    a `title`, which never appears on touch. */

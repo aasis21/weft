@@ -85,12 +85,20 @@ separately from each Copilot session's stream:
 | Request current health | `device_monitor_start`, `device_monitor_stop`, `device_snapshot` |
 | Shared terminal lifecycle and input | `terminal_request`, `terminal_state` |
 | Private terminal output and reconnect screen | `terminal_output`, `terminal_snapshot` |
+| Transfer clipboard text explicitly | `clipboard_read`, `clipboard_write`, `clipboard_result` |
+| Control a temporary Keep Awake lease | `keep_awake_start`, `keep_awake_stop`, `keep_awake_status_request`, `keep_awake_status` |
 | Remove device trust | `forget_device` |
 
 Health monitoring is capability-negotiated with `device-monitor-v1`. Its snapshot
 schema is separate from the session's `state_snapshot`: one describes the laptop,
 the other describes a Copilot session. See the shared declarations for monitoring
 IDs, sequence numbers, system metrics, application summaries, and issue fields.
+
+Clipboard and Keep Awake are independently capability-negotiated with
+`device-clipboard-v1` and `device-keep-awake-v1`. Clipboard messages are correlated
+with request IDs and carry plain text only for the explicit operation that requested
+it. Keep Awake messages identify a bounded lease and its authoritative expiry.
+Clipboard payloads are deliberately omitted from the phone's device event log.
 
 The phone's device event log includes `device_snapshot`, but it is not a lossless
 wire capture: consecutive heartbeat/snapshot messages of the same subtype and

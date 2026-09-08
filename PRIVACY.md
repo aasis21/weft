@@ -12,6 +12,13 @@ The phone or installed PWA stores data locally so it can restore your workspace:
 - app and voice preferences;
 - pairing public keys and private keys.
 
+Device Details can explicitly transfer bounded plain text through the paired laptop's
+clipboard. Clipboard contents are held only in runtime memory for the active operation:
+they are not continuously synchronized, stored in Weft device records, or written to
+Weft diagnostic event logs. Closing the Clipboard sheet clears its text from the app.
+The laptop and phone operating systems may retain copied text according to their own
+clipboard-history settings and policies.
+
 The native app uses Capacitor Preferences. The PWA uses browser storage. Removing a
 session deletes its locally cached transcript; clearing the app's site data removes
 the PWA's local data.
@@ -62,6 +69,10 @@ request metadata such as your IP address and browser headers when those assets l
 - Clear the app's browser/site data to delete PWA-local data.
 - Remove `~/.weft/` to delete laptop-side configuration and persistent pairing material.
 - Run `weft rotate-pairing` if a persistent QR or paired phone may be compromised.
+- Use Clipboard only when you intend the paired phone to read or replace the laptop's
+  current plain-text clipboard value.
+- Stop an active Keep Awake lease from Device Details, or let its displayed duration
+  expire automatically. Keep Awake does not alter the persistent Windows power plan.
 
 See [`docs/security.md`](docs/security.md) for the threat model and
 [`SUPPORT.md`](SUPPORT.md) for cleanup and issue-reporting guidance.

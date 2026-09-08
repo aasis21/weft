@@ -12,6 +12,17 @@ import {
   projectListRequest,
   deviceMonitorStart,
   deviceMonitorStop,
+  DEVICE_CAPABILITY,
+  DEVICE_UTILITY_CODES,
+  clipboardRead,
+  clipboardWrite,
+  clipboardResult,
+  clipboardTextError,
+  keepAwakeStart,
+  keepAwakeStop,
+  keepAwakeStatusRequest,
+  keepAwakeStatus,
+  normalizeKeepAwakeDuration,
   stateRequest,
   spawnSession as spawnSessionMessage,
   sessionListRequest,
@@ -30,6 +41,7 @@ import type {
   PromptAttachment,
   PromptDelivery,
   DeviceSnapshotMsg,
+  DeviceUtilityCode,
   SessionListMsg,
   SessionMode,
   SessionOffersMsg,
@@ -63,6 +75,7 @@ import {
   setDefaultDevice as persistDefaultDevice,
   upsertDevice,
   type RegisteredDevice,
+  type DeviceHealthCache,
 } from '@/lib/devices';
 import { creativeName } from '@/lib/sessionNames';
 import type { StoredSession } from '@/lib/sessions';
@@ -111,9 +124,18 @@ import {
   deviceLastProjectSet,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
+  deviceClipboardOpened,
+  deviceClipboardCleared,
+  deviceClipboardStarted,
+  deviceClipboardResultReceived,
+  deviceKeepAwakeStarted,
+  deviceKeepAwakeFailed,
+  deviceKeepAwakeStatusReceived,
+  deviceUtilitiesCleared,
   deviceMonitoringFailed,
   deviceMonitoringStarted,
   deviceMonitoringStopped,
+  deviceHealthCached,
   deviceSnapshotReceived,
   deviceSessionOffersReceived,
   deviceSessionsReceived,
@@ -166,6 +188,7 @@ const RECONNECT_POLL_MS = 250;
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
 const DEVICE_OFFLINE_AFTER_MS = 180_000;
+const DEVICE_UTILITY_TIMEOUT_MS = 10_000;
 /** Base self-heal reconnect interval for an offline device in the watchdog, so a dead devtunnel/relay
  *  socket (which never re-opens on its own) gets re-established without an app foreground/restart, yet
  *  a genuinely-unreachable relay isn't hammered every tick. Matches the connect timeout (weftClient
@@ -207,6 +230,7 @@ const DEVICE_MONITOR_CAPABILITY = 'device-monitor-v1';
 const DEVICE_MONITOR_INTERVAL_MS = 10_000;
 const DEVICE_MONITOR_LEASE_MS = 45_000;
 const DEVICE_MONITOR_RENEW_MS = 30_000;
+const DEVICE_HEALTH_CACHE_WRITE_MS = 60_000;
 /** Fail-safe window after a `session_list_request` is sent: if the async SESSION_LIST reply never
  *  arrives (wedged laptop), the "Resume a session" loading flag auto-clears after this window so the
  *  Load/Refresh button re-enables instead of spinning forever. */
@@ -371,6 +395,9 @@ export class SessionRuntime {
   private readonly deviceMonitors = new Map<string, DeviceMonitorLease>();
   private readonly terminals = new Map<string, TerminalController>();
   private readonly demoDevices = new Map<string, string>();
+  /** Persist the first fresh sample of a visit immediately, then at most once a minute while the
+   *  page stays open. This keeps the cache useful without writing native Preferences every tick. */
+  private readonly deviceHealthCacheWrittenAt = new Map<string, number>();
   /** Per-session throttle stamps (ms) for the witnessed-liveness persist (#163). Runtime-level (not
    *  on the ChannelController) so the witness can keep advancing for cold/archived sessions too. */
   private readonly lastLivenessWriteAt = new Map<string, number>();
@@ -1280,6 +1307,7 @@ export class SessionRuntime {
       });
       this.attachListener(channelId, client);
     } catch (err) {
+      this.clearDeviceUtilities(channelId);
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not reach this listener device.'), connected: false }),
       );
@@ -1313,10 +1341,103 @@ export class SessionRuntime {
       await ctrl.client.send(message);
     } catch (err) {
       this.clearProjectListInflight(channelId);
+      this.clearDeviceUtilities(channelId);
       this.store.dispatch(
         deviceErrorSet({ channelId, error: errMessage(err, 'Could not request projects.'), connected: false }),
       );
     }
+  }
+
+  openDeviceClipboard(channelId: string): void {
+    this.closeDeviceClipboard(channelId);
+    if (this.device(channelId)) this.store.dispatch(deviceClipboardOpened(channelId));
+  }
+
+  closeDeviceClipboard(channelId: string): void {
+    this.listenerController(channelId)?.clear('clipboard');
+    this.store.dispatch(deviceClipboardCleared(channelId));
+  }
+
+  readDeviceClipboard(channelId: string): void {
+    this.sendDeviceClipboard(channelId, 'read');
+  }
+
+  writeDeviceClipboard(channelId: string, text: string): void {
+    this.sendDeviceClipboard(channelId, 'write', text);
+  }
+
+  private sendDeviceClipboard(channelId: string, operation: 'read' | 'write', text?: string): void {
+    const device = this.device(channelId);
+    if (!device?.clipboard || device.clipboard.pending) return;
+    const requestId = crypto.randomUUID();
+    this.store.dispatch(deviceClipboardStarted({ channelId, requestId, operation }));
+    const ctrl = this.listenerController(channelId);
+    const fail = (code: DeviceUtilityCode): void => {
+      if (this.device(channelId)?.clipboard?.requestId !== requestId) return;
+      ctrl?.clear('clipboard');
+      this.store.dispatch(deviceClipboardResultReceived({
+        channelId, result: clipboardResult(requestId, operation, code).msg,
+      }));
+    };
+    if (!device.capabilities?.includes(DEVICE_CAPABILITY.CLIPBOARD_V1)) return fail('unsupported');
+    if (!device.connected || !ctrl?.client) return fail('unavailable');
+    if (operation === 'write') {
+      const error = clipboardTextError(text);
+      if (error) return fail(error);
+    }
+    const message = operation === 'read'
+      ? clipboardRead(requestId)
+      : clipboardWrite(requestId, text ?? '');
+    this.recordDeviceEvent(channelId, 'out', message);
+    ctrl.arm('clipboard', () => fail('timeout'), DEVICE_UTILITY_TIMEOUT_MS);
+    void ctrl.client.send(message).catch(() => fail('unavailable'));
+  }
+
+  refreshDeviceKeepAwake(channelId: string): void {
+    this.sendDeviceKeepAwake(channelId, 'status');
+  }
+
+  startDeviceKeepAwake(channelId: string, durationMs: number): void {
+    this.sendDeviceKeepAwake(channelId, 'start', durationMs);
+  }
+
+  stopDeviceKeepAwake(channelId: string): void {
+    this.sendDeviceKeepAwake(channelId, 'stop');
+  }
+
+  private sendDeviceKeepAwake(channelId: string, operation: 'status' | 'start' | 'stop', durationMs?: number): void {
+    const device = this.device(channelId);
+    if (!device || device.keepAwake?.pending) return;
+    const requestId = crypto.randomUUID();
+    this.store.dispatch(deviceKeepAwakeStarted({ channelId, requestId }));
+    const ctrl = this.listenerController(channelId);
+    const fail = (code: DeviceUtilityCode): void => {
+      if (this.device(channelId)?.keepAwake?.requestId !== requestId) return;
+      ctrl?.clear('keepAwake');
+      this.store.dispatch(deviceKeepAwakeFailed({ channelId, requestId, code }));
+    };
+    if (!device.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) return fail('unsupported');
+    if (!device.connected || !ctrl?.client) return fail('unavailable');
+    const duration = normalizeKeepAwakeDuration(durationMs ?? NaN);
+    if (operation === 'start' && duration === null) return fail('invalid-request');
+    const status = device.keepAwake?.status;
+    const leaseId = status?.active ? status.leaseId : null;
+    if (operation === 'stop' && !leaseId) return fail('lease-mismatch');
+    const message = operation === 'status'
+      ? keepAwakeStatusRequest(requestId)
+      : operation === 'stop'
+        ? keepAwakeStop(requestId, leaseId ?? '')
+        : keepAwakeStart(requestId, leaseId ?? crypto.randomUUID(), duration ?? NaN);
+    this.recordDeviceEvent(channelId, 'out', message);
+    ctrl.arm('keepAwake', () => fail('timeout'), DEVICE_UTILITY_TIMEOUT_MS);
+    void ctrl.client.send(message).catch(() => fail('unavailable'));
+  }
+
+  private clearDeviceUtilities(channelId: string): void {
+    const ctrl = this.listenerController(channelId);
+    ctrl?.clear('clipboard');
+    ctrl?.clear('keepAwake');
+    this.store.dispatch(deviceUtilitiesCleared(channelId));
   }
 
   startDeviceMonitoring(channelId: string): void {
@@ -1351,6 +1472,7 @@ export class SessionRuntime {
     if (!lease) return;
     clearInterval(lease.renewal);
     this.deviceMonitors.delete(channelId);
+    this.deviceHealthCacheWrittenAt.delete(channelId);
     this.store.dispatch(deviceMonitoringStopped({ channelId, monitorId: lease.monitorId }));
 
     const ctrl = this.listenerController(channelId);
@@ -1766,6 +1888,7 @@ export class SessionRuntime {
   async forgetDevice(channelId: string): Promise<void> {
     this.terminals.get(channelId)?.dispose();
     this.terminals.delete(channelId);
+    this.clearDeviceUtilities(channelId);
     this.stopDeviceMonitoring(channelId);
     const ctrl = this.listenerController(channelId);
     if (ctrl?.client) {
@@ -1790,14 +1913,17 @@ export class SessionRuntime {
 
   private attachListener(channelId: string, client: WeftClient): void {
     const ctrl = this.ensureListenerController(channelId);
+    this.clearDeviceUtilities(channelId);
     const previous = ctrl.client;
     ctrl.detach();
     ctrl.client = client;
     if (previous && previous !== client) void previous.close().catch(() => {});
     const stopEvents = client.subscribe((message) => this.onListenerMessage(channelId, client, message));
     const stopStatus = client.onStatus((status) => {
+      if (status !== 'connected') this.clearDeviceUtilities(channelId);
       this.store.dispatch(deviceErrorSet({ channelId, connected: status === 'connected' }));
       this.terminals.get(channelId)?.setConnected(status === 'connected');
+      if (status === 'connected') void this.refreshProjects(channelId);
     });
     ctrl.unsubscribe = () => {
       stopEvents();
@@ -1818,6 +1944,7 @@ export class SessionRuntime {
       for (const dead of removedChannelIds) {
         this.terminals.get(dead)?.dispose();
         this.terminals.delete(dead);
+        this.clearDeviceUtilities(dead);
         this.stopDeviceMonitoring(dead);
         this.clearProjectListInflight(dead);
         this.listenerController(dead)?.dispose();
@@ -1847,9 +1974,39 @@ export class SessionRuntime {
       // the beat exists purely to keep an idle device from going stale between polls.
       return;
     }
+    if (message.eventSubtype === SUBTYPE.CONTROL.CLIPBOARD_RESULT) {
+      const result = message.msg;
+      const clipboard = this.device(channelId)?.clipboard;
+      if (!clipboard?.pending || result.requestId !== clipboard.requestId || result.operation !== clipboard.operation) return;
+      this.listenerController(channelId)?.clear('clipboard');
+      this.store.dispatch(deviceClipboardResultReceived({
+        channelId, result: clipboardResult(result.requestId, result.operation, result.code, result.text).msg,
+      }));
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.KEEP_AWAKE_STATUS) {
+      const status = message.msg;
+      if (
+        !Number.isSafeInteger(status.revision) || status.revision < 0 ||
+        typeof status.active !== 'boolean' ||
+        (status.requestId !== null && typeof status.requestId !== 'string') ||
+        (status.leaseId !== null && typeof status.leaseId !== 'string') ||
+        (status.active && (!status.leaseId || !Number.isFinite(status.expiresAt))) ||
+        !DEVICE_UTILITY_CODES.includes(status.code)
+      ) return;
+      if (status.requestId !== null && status.requestId === this.device(channelId)?.keepAwake?.requestId) {
+        this.listenerController(channelId)?.clear('keepAwake');
+      }
+      this.store.dispatch(deviceKeepAwakeStatusReceived({
+        channelId, status: keepAwakeStatus(status.requestId, status).msg,
+      }));
+      return;
+    }
     if (message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST) {
       const msg = message.msg as ProjectListMsg;
       this.clearProjectListInflight(channelId);
+      if (!msg.capabilities?.includes(DEVICE_CAPABILITY.CLIPBOARD_V1)) ctrl.clear('clipboard');
+      if (!msg.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) ctrl.clear('keepAwake');
       this.store.dispatch(
         deviceProjectsReceived({
           channelId,
@@ -1858,6 +2015,7 @@ export class SessionRuntime {
           deviceName: msg.deviceName,
         }),
       );
+      if (msg.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) this.refreshDeviceKeepAwake(channelId);
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
       // The listener's deviceId is stable across `weft start` restarts even though this
       // channelId is a fresh ephemeral pairing channel (forward secrecy). Fold any stale entry
@@ -1875,9 +2033,30 @@ export class SessionRuntime {
       ) {
         return;
       }
+      const monitoring = this.store.getState().sessions.devices
+        .find((device) => device.channelId === channelId)?.monitoring;
+      if (
+        !monitoring ||
+        snapshot.monitorId !== monitoring.monitorId ||
+        snapshot.sequence <= monitoring.latestSequence
+      ) {
+        return;
+      }
       this.store.dispatch(
         deviceSnapshotReceived({ channelId, snapshot }),
       );
+      const cachedHealth: DeviceHealthCache = {
+        capturedAt: snapshot.capturedAt,
+        effectiveIntervalMs: snapshot.effectiveIntervalMs ?? DEVICE_MONITOR_INTERVAL_MS,
+        system: snapshot.system,
+        issues: snapshot.issues.filter((issue) => issue.component !== 'apps'),
+      };
+      this.store.dispatch(deviceHealthCached({ channelId, cachedHealth }));
+      const lastCacheWrite = this.deviceHealthCacheWrittenAt.get(channelId);
+      if (lastCacheWrite === undefined || this.clock() - lastCacheWrite >= DEVICE_HEALTH_CACHE_WRITE_MS) {
+        this.deviceHealthCacheWrittenAt.set(channelId, this.clock());
+        void patchDevice(channelId, { cachedHealth });
+      }
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
@@ -2650,6 +2829,7 @@ export class SessionRuntime {
       // `weft` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
       for (const device of this.store.getState().sessions.devices) {
         if (device.connected && device.lastSeenAt && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {
+          this.clearDeviceUtilities(device.channelId);
           this.store.dispatch(deviceErrorSet({ channelId: device.channelId, connected: false }));
           this.terminals.get(device.channelId)?.setConnected(false);
         }
@@ -2716,6 +2896,9 @@ export class SessionRuntime {
         void this.connectDevice(device.channelId);
       } else {
         this.terminals.get(device.channelId)?.reattach();
+        if (device.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) {
+          this.refreshDeviceKeepAwake(device.channelId);
+        }
       }
     }
   };
@@ -2724,7 +2907,10 @@ export class SessionRuntime {
    *  `lastSubscribedAt` records the exact moment we stopped watching (the throttled per-tick writes
    *  may lag by up to LIVENESS_PERSIST_THROTTLE_MS). This keeps witnessed-silence honest across an
    *  app suspend, without waiting for the next foreground tick. */
-  private handleHide = (): void => {
+  private handleHide = (event?: Event): void => {
+    if (event?.type !== 'visibilitychange' || document.visibilityState === 'hidden') {
+      for (const device of this.store.getState().sessions.devices) this.closeDeviceClipboard(device.channelId);
+    }
     for (const channelId of [...this.warmLru]) {
       this.persistLiveness(channelId, /* flush */ true);
     }
@@ -2744,7 +2930,10 @@ export class SessionRuntime {
     }
     App.addListener('appStateChange', ({ isActive }) => {
       if (isActive) this.handleResume();
-      else this.handleHide();
+      else {
+        for (const device of this.store.getState().sessions.devices) this.closeDeviceClipboard(device.channelId);
+        this.handleHide();
+      }
     })
       .then((handle) => {
         this.resumeCleanups.push(() => handle.remove());
@@ -2758,6 +2947,7 @@ export class SessionRuntime {
   dispose(): void {
     for (const terminal of this.terminals.values()) terminal.dispose();
     this.terminals.clear();
+    for (const device of this.store.getState().sessions.devices) this.clearDeviceUtilities(device.channelId);
     if (this.watchdog !== null) {
       clearInterval(this.watchdog);
       this.watchdog = null;
@@ -2776,6 +2966,7 @@ export class SessionRuntime {
     this.listenerControllers.clear();
     for (const lease of this.deviceMonitors.values()) clearInterval(lease.renewal);
     this.deviceMonitors.clear();
+    this.deviceHealthCacheWrittenAt.clear();
     for (const pending of this.pendingSpawns.values()) clearSpawnTimers(pending);
     this.pendingSpawns.clear();
     this.registry.disposeAll();
