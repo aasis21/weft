@@ -116,10 +116,12 @@ The page uses this hierarchy:
 │ Devbox                     ● Online  │
 │ Windows · updated just now           │
 ├──────────────────────────────────────┤
-│ CPU 18%   Memory 62%   Battery 81%  │
-│ Disk 71%                            │
+│ CPU 18%   Memory 62%   Disk 71%     │
+│ Uptime 2d 4h            Battery 81% │
 ├──────────────────────────────────────┤
-│ Start Copilot  Resume  Explore Files│
+│ QUICK ACTIONS                        │
+│ Start Copilot       Resume Copilot  │
+│ Explore Files       Open Terminal   │
 ├──────────────────────────────────────┤
 │ RUNNING NOW · 5 APPS                 │
 │ Visual Studio Code        3 windows  │
@@ -132,7 +134,7 @@ The page uses this hierarchy:
 └──────────────────────────────────────┘
 ```
 
-The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Battery is hidden when unavailable. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the five most relevant entries with a `Show all` affordance. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
+The system area shows percentage-first values with small progress indicators; secondary text carries absolute values such as `9.8 / 16 GB`. Uptime is a full metric rather than header metadata. Battery is hidden when unavailable. Quick actions use a uniform two-column card grid; Start and Resume are active, while actions whose protocol is not implemented remain visibly marked as coming soon. Running Now shows only visible user applications, uses friendly names, and limits the initial list to the five most relevant entries with a `Show all` affordance. High CPU or memory may add a compact accent, but zero-value Task Manager columns are never rendered.
 
 Application relevance is ordered by foreground status when available, then aggregate memory. Multiple processes/windows are grouped into one row. Window titles, file names, browser tabs, executable paths, and application-control buttons are excluded from the MVP.
 

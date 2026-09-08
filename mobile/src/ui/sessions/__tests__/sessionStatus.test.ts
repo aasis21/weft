@@ -67,11 +67,11 @@ describe('deriveStatus (#163 single source of truth)', () => {
     });
   });
 
-  it('falls back to Initializing… for unknown/initializing (not Active)', () => {
+  it('keeps an initializing session in the Active group while its connection is established', () => {
     expect(deriveStatus(view({ status: 'initializing' }))).toEqual({
       label: 'Initializing…',
       tone: 'initializing',
-      active: false,
+      active: true,
     });
   });
 });

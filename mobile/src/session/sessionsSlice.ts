@@ -29,19 +29,22 @@ import {
 
 const DEVICE_EVENT_LOG_CAP = 100;
 
-function isHeartbeatEvent(event: DebugEvent): boolean {
+function isCollapsibleEvent(event: DebugEvent): boolean {
   return (
     event.eventType === EVENT_TYPE.CONTROL &&
-    (event.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT || event.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT)
+    (
+      event.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT ||
+      event.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT ||
+      event.eventSubtype === SUBTYPE.CONTROL.DEVICE_SNAPSHOT
+    )
   );
 }
 
-/** Appends `event` to `list`, but collapses a run of consecutive heartbeats (same subtype + dir)
- *  down to just the latest one — heartbeats are liveness noise, not history worth stacking up,
- *  yet still worth *seeing* (last-beat timestamp) rather than hiding entirely. */
+/** Keep high-frequency liveness and telemetry visible without letting repeated samples crowd
+ *  substantive control events out of the bounded log. */
 function appendEvent(list: DebugEvent[], event: DebugEvent, cap: number): DebugEvent[] {
   const last = list[list.length - 1];
-  if (last && isHeartbeatEvent(event) && last.eventSubtype === event.eventSubtype && last.dir === event.dir) {
+  if (last && isCollapsibleEvent(event) && last.eventSubtype === event.eventSubtype && last.dir === event.dir) {
     return [...list.slice(0, -1), event].slice(-cap);
   }
   return [...list, event].slice(-cap);

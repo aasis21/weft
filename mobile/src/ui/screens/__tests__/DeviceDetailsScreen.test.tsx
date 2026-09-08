@@ -84,11 +84,21 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     const onResumeOnDevice = vi.fn();
     renderDetails({ onStartOnDevice, onResumeOnDevice });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    fireEvent.click(screen.getByRole('button', { name: /start copilot/i }));
     expect(onStartOnDevice).toHaveBeenCalledWith('chan-1');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    fireEvent.click(screen.getByRole('button', { name: /resume copilot/i }));
     expect(onResumeOnDevice).toHaveBeenCalledWith('chan-1');
+  });
+
+  it('presents a uniform four-item quick-action grid without pretending future actions work', () => {
+    renderDetails();
+
+    expect(screen.getByRole('button', { name: /start copilot/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /resume copilot/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /explore files/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();
+    expect(screen.getAllByText('Coming soon')).toHaveLength(2);
   });
 
   it('no longer carries a resumable-session list or a bare permission toggle', () => {
@@ -97,12 +107,10 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     expect(screen.queryByRole('radio', { name: /allow all/i })).toBeNull();
   });
 
-  it('replaces the launch buttons with an inline reason when the device is offline', () => {
-    // These used to be rendered-but-disabled with the explanation hidden in a `title` tooltip,
-    // which a touch device never shows.
+  it('keeps the action layout visible but explains why laptop actions are disabled offline', () => {
     renderDetails({ device: makeDevice({ connected: false }) });
-    expect(screen.queryByRole('button', { name: 'Start' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    expect(screen.getByRole('button', { name: /start copilot/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /resume copilot/i })).toBeDisabled();
     expect(screen.getByText(/weft start/i).textContent).toMatch(/weft start/);
   });
 });
@@ -160,7 +168,8 @@ describe('DeviceDetailsScreen session list separates what is running from what i
     expect(screen.getByText('Running thing')).toBeTruthy();
     expect(screen.queryByText('Old thing')).toBeNull();
 
-    const toggle = screen.getByRole('button', { name: /inactive \(1\)/i });
+    expect(screen.getByText('Active Copilot sessions (1)')).toBeTruthy();
+    const toggle = screen.getByRole('button', { name: /inactive copilot sessions \(1\)/i });
     fireEvent.click(toggle);
     expect(screen.getByText('Old thing')).toBeTruthy();
   });
@@ -265,6 +274,8 @@ describe('DeviceDetailsScreen monitoring', () => {
     expect(screen.getByText('18%')).toBeTruthy();
     expect(screen.getByText('63%')).toBeTruthy();
     expect(screen.getByText('70%')).toBeTruthy();
+    expect(screen.getByText('1d 1h')).toBeTruthy();
+    expect(screen.getByText('Since last restart')).toBeTruthy();
     expect(screen.queryByText(/battery/i)).toBeNull();
   });
 
@@ -318,6 +329,48 @@ describe('DeviceDetailsScreen monitoring', () => {
     fireEvent.click(screen.getByRole('button', { name: /show all 7/i }));
     expect(screen.getByText('App 7')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /end task|focus|close app/i })).toBeNull();
+  });
+
+  it('treats uptime-only telemetry as available system health', () => {
+    renderDetails({
+      device: makeDevice({
+        capabilities: ['device-monitor-v1'],
+        monitoring: {
+          monitorId: 'monitor-1',
+          startedAt: Date.now(),
+          latestSequence: 1,
+          snapshot: {
+            schemaVersion: 1,
+            monitorId: 'monitor-1',
+            sequence: 1,
+            capturedAt: Date.now(),
+            effectiveIntervalMs: 10_000,
+            leaseExpiresAt: Date.now() + 45_000,
+            system: {
+              cpuPercent: null,
+              memoryUsedBytes: null,
+              memoryTotalBytes: null,
+              uptimeSeconds: 7_200,
+              diskUsedBytes: null,
+              diskTotalBytes: null,
+              batteryPercent: null,
+              batteryCharging: null,
+            },
+            apps: [],
+            observedAt: {
+              system: Date.now(),
+              disk: null,
+              battery: null,
+              apps: Date.now(),
+            },
+            issues: [],
+          },
+        },
+      }),
+    });
+
+    expect(screen.getByText('2h 0m')).toBeTruthy();
+    expect(screen.queryByText(/system metrics are temporarily unavailable/i)).toBeNull();
   });
 
   it('marks old and partially unavailable snapshots without displaying zero placeholders', () => {

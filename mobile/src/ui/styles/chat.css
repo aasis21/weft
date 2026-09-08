@@ -2673,7 +2673,6 @@
   flex-direction: column;
   gap: 2px;
 }
-.weft-session .device-uptime { white-space: nowrap; }
 .weft-session .device-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2721,6 +2720,12 @@
   max-width: 100%;
   border-radius: inherit;
   background: var(--accent);
+}
+.weft-session .device-metric-static {
+  align-content: start;
+}
+.weft-session .device-metric-static strong {
+  font-size: 16px;
 }
 .weft-session .device-monitor-partial { margin: 0; }
 .weft-session .device-running {
@@ -2777,10 +2782,9 @@
 }
 
 /* ---- Device details screen -------------------------------------------------------------------
-   The details page is a stack of cards: a breadcrumb back to the device list, an optional offers
-   strip, the device card (projects + the two actions you came here for), then the session list
-   split into Active and a collapsed Inactive bucket. Everything administrative lives in the
-   header's "⋯" menu instead of competing with Start/Resume for attention. */
+   The details page is a stack of cards: system health, quick actions, current applications,
+   projects, then Copilot sessions split into Active and a collapsed Inactive bucket. Everything
+   administrative lives in the header's "⋯" menu instead of competing with primary actions. */
 
 /* Shared heading for every card section on this screen, so "Projects", "Active" and "Offered
    sessions" all read at the same weight rather than each card inventing its own. */
@@ -2826,31 +2830,62 @@
 /* Nothing follows the chips inside the card any more, so their trailing gap is dead space. */
 .weft-session .device-project-chips:last-child { margin-bottom: 0; }
 
-/* Start and Resume are the whole point of the screen — equal-width, side by side, nothing else
-   in the row to dilute them. Lifted out of the Projects card so they read as the screen's action,
-   not as a footer to the project list. */
-.weft-session .device-actions-lead {
+/* Device-level actions share one compact card vocabulary. Actions without a protocol yet stay
+   visible but explicitly marked as coming soon instead of pretending to work. */
+.weft-session .device-quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.weft-session .device-action-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  flex-wrap: nowrap;
-  margin-bottom: 4px;
+  gap: 8px;
 }
-.weft-session .device-actions-lead > button { width: 100%; margin-top: 0; }
-.weft-session .device-card .device-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  flex-wrap: nowrap;
-}
-.weft-session .device-card .device-actions > button { width: 100%; margin-top: 0; }
-.weft-session .device-resume-btn {
-  display: inline-flex;
+.weft-session .device-quick-action {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 38px;
-  padding: 8px 14px;
+  gap: 9px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 10px 11px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 13px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.weft-session .device-quick-action:not(:disabled):active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--bg-rule));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
+}
+.weft-session .device-quick-action:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+.weft-session .device-quick-action .device-action-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--accent);
+}
+.weft-session .device-quick-action > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.weft-session .device-quick-action strong {
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.weft-session .device-quick-action small {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  line-height: 1.2;
 }
 
 /* Offline replaces the button pair outright. The old UI disabled the buttons and explained why in

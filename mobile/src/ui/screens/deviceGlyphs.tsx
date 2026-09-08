@@ -157,6 +157,17 @@ export function FolderGlyph(): JSX.Element {
   );
 }
 
+/** Terminal window used by the Device Details quick-action grid. */
+export function TerminalGlyph(): JSX.Element {
+  return (
+    <StrokeIcon>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m7 10 3 2-3 2" />
+      <path d="M12 15h5" />
+    </StrokeIcon>
+  );
+}
+
 /** Rename / edit affordance for a session row's swipe actions. */
 export function PencilGlyph(): JSX.Element {
   return (

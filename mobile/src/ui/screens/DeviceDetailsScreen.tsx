@@ -15,6 +15,7 @@ import {
   RefreshGlyph,
   ResumeGlyph,
   StarGlyph,
+  TerminalGlyph,
   TrashGlyph,
   WarningGlyph,
 } from '@/ui/screens/deviceGlyphs';
@@ -69,7 +70,8 @@ interface DeviceDetailsScreenProps {
  *
  * The header's trailing control is a "⋯" overflow (same menu vocabulary as the device tiles on
  * DevicesScreen) holding the administrative actions — refresh, make default, event log, forget.
- * Only the two things you actually came here to do, Start and Resume, stay as first-class buttons.
+ * User-facing device operations live in one quick-action grid. Start and Resume are available
+ * today; future actions remain visibly unavailable until their device protocols exist.
  */
 function folderName(path: string | null | undefined): string | null {
   if (!path) return null;
@@ -102,9 +104,9 @@ function formatUptime(seconds: number | null): string | null {
   if (seconds === null || seconds < 0) return null;
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3_600);
-  if (days > 0) return `${days}d ${hours}h uptime`;
+  if (days > 0) return `${days}d ${hours}h`;
   const minutes = Math.floor((seconds % 3_600) / 60);
-  return `${hours}h ${minutes}m uptime`;
+  return `${hours}h ${minutes}m`;
 }
 
 export function DeviceDetailsScreen({
@@ -170,6 +172,7 @@ export function DeviceDetailsScreen({
   const memoryPercent = system ? percent(system.memoryUsedBytes, system.memoryTotalBytes) : null;
   const diskPercent = system ? percent(system.diskUsedBytes, system.diskTotalBytes) : null;
   const batteryPercent = system?.batteryPercent ?? null;
+  const uptime = formatUptime(system?.uptimeSeconds ?? null);
   const effectiveInterval = snapshot?.effectiveIntervalMs ?? 10_000;
   const snapshotStale = Boolean(
     snapshot && now - snapshot.capturedAt > Math.max(effectiveInterval * 2 + 5_000, 25_000),
@@ -184,6 +187,7 @@ export function DeviceDetailsScreen({
       system?.cpuPercent === null &&
       memoryPercent === null &&
       diskPercent === null &&
+      uptime === null &&
       batteryPercent === null,
   );
 
@@ -492,9 +496,6 @@ export function DeviceDetailsScreen({
                     {snapshotStale ? 'Update delayed' : `Updated ${formatLastSeen(snapshot.capturedAt, now) ?? 'just now'}`}
                   </span>
                 </div>
-                {formatUptime(system?.uptimeSeconds ?? null) ? (
-                  <span className="device-uptime">{formatUptime(system?.uptimeSeconds ?? null)}</span>
-                ) : null}
               </div>
               <div className="device-metrics">
                 {system?.cpuPercent !== null && system?.cpuPercent !== undefined ? (
@@ -524,6 +525,13 @@ export function DeviceDetailsScreen({
                     <span className="device-meter" aria-hidden="true"><i style={{ width: `${diskPercent}%` }} /></span>
                   </div>
                 ) : null}
+                {uptime ? (
+                  <div className="device-metric device-metric-static">
+                    <span className="device-metric-name">Uptime</span>
+                    <strong>{uptime}</strong>
+                    <span className="device-metric-detail">Since last restart</span>
+                  </div>
+                ) : null}
                 {batteryPercent !== null ? (
                   <div className="device-metric">
                     <span className="device-metric-name">Battery</span>
@@ -545,38 +553,46 @@ export function DeviceDetailsScreen({
           )}
         </section>
 
-        {/* Start and Resume are why you came here, so they sit directly under the header rather
-            than buried at the bottom of a Projects card — the project list is context for them,
-            not a step before them. */}
-        {online ? (
-          <div className="device-actions device-actions-lead">
+        <section className="device-quick-actions" aria-labelledby="device-quick-actions-heading">
+          <h3 id="device-quick-actions-heading" className="device-section-label">Quick actions</h3>
+          <div className="device-action-grid">
             <button
               type="button"
-              className="session-primary-action device-start-btn"
+              className="device-quick-action"
+              disabled={!online}
               onClick={() => onStartOnDevice(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
-              Start
+              <span><strong>Start Copilot</strong><small>New session</small></span>
             </button>
             <button
               type="button"
-              className="session-secondary-action device-resume-btn"
+              className="device-quick-action"
+              disabled={!online}
               onClick={() => onResumeOnDevice(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><ResumeGlyph /></span>
-              Resume
+              <span><strong>Resume Copilot</strong><small>Recent session</small></span>
+            </button>
+            <button type="button" className="device-quick-action" disabled>
+              <span className="device-action-icon" aria-hidden="true"><FolderGlyph /></span>
+              <span><strong>Explore files</strong><small>Coming soon</small></span>
+            </button>
+            <button type="button" className="device-quick-action" disabled>
+              <span className="device-action-icon" aria-hidden="true"><TerminalGlyph /></span>
+              <span><strong>Open terminal</strong><small>Coming soon</small></span>
             </button>
           </div>
-        ) : (
-          // Offline: the old UI disabled both buttons and explained why in a `title` tooltip,
-          // which is invisible on touch. Say it inline instead.
+        </section>
+
+        {!online ? (
           <p className="device-offline-note">
             <span className="device-action-icon" aria-hidden="true"><WarningGlyph /></span>
             <span>
               Offline — run <code>weft start</code> on this laptop to start or resume sessions.
             </span>
           </p>
-        )}
+        ) : null}
 
         {monitoringSupported && snapshot ? (
           <section className="session-join-fallback device-running">
@@ -658,7 +674,9 @@ export function DeviceDetailsScreen({
         </section>
 
         <section className="session-join-fallback device-sessions">
-          <h3 className="device-section-label">Active{activeRows.length > 0 ? ` (${activeRows.length})` : ''}</h3>
+          <h3 className="device-section-label">
+            Active Copilot sessions{activeRows.length > 0 ? ` (${activeRows.length})` : ''}
+          </h3>
           {activeRows.length === 0 ? (
             <p className="device-card-sub">
               {rows.length === 0 ? 'No sessions started on this device yet.' : 'Nothing running right now.'}
@@ -676,7 +694,7 @@ export function DeviceDetailsScreen({
                 onClick={() => setInactiveOpen((v) => !v)}
               >
                 <ChevronGlyph />
-                Inactive ({inactiveRows.length})
+                Inactive Copilot sessions ({inactiveRows.length})
               </button>
               {inactiveOpen ? (
                 <ul className="device-sessions-list">{inactiveRows.map(renderSessionRow)}</ul>

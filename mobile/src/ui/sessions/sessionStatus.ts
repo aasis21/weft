@@ -92,6 +92,7 @@ export function deriveStatus(
     case 'connecting':
       return { label: 'Connecting…', tone: 'connecting', active: true };
     case 'initializing':
+      return { label: 'Initializing…', tone: 'initializing', active: true };
     default:
       return { label: 'Initializing…', tone: 'initializing', active: false };
   }

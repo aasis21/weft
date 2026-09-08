@@ -1791,9 +1791,7 @@ export class SessionRuntime {
   private onListenerMessage(channelId: string, client: WeftClient, message: EventEnvelope): void {
     const ctrl = this.listenerController(channelId);
     if (!ctrl || ctrl.client !== client || message.eventType !== EVENT_TYPE.CONTROL) return;
-    if (message.eventSubtype !== SUBTYPE.CONTROL.DEVICE_SNAPSHOT) {
-      this.recordDeviceEvent(channelId, 'in', message);
-    }
+    this.recordDeviceEvent(channelId, 'in', message);
     // Single inbound choke point: ANY control message is proof the laptop is alive right now, so
     // refresh "last seen" here — before the per-subtype branches — so SPAWN_PAIRING, SPAWN_RESULT
     // and any future control message keep the device fresh, not just the state-carrying subtypes.

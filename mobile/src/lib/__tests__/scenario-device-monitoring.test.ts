@@ -85,6 +85,11 @@ describe('scenario: device monitoring', () => {
     client.emit(snapshot(monitorId, 1));
     await h!.flush();
     expect(h!.snapshot().devices[0]!.monitoring?.snapshot?.sequence).toBe(2);
+    const snapshotEvents = h!.snapshot().devices[0]!.events.filter(
+      (event) => event.eventSubtype === 'device_snapshot',
+    );
+    expect(snapshotEvents).toHaveLength(1);
+    expect(snapshotEvents[0]!.msg).toMatchObject({ monitorId, sequence: 1 });
 
     await vi.advanceTimersByTimeAsync(30_000);
     expect(client.sentOfKind('control.device_monitor_start')).toHaveLength(3);

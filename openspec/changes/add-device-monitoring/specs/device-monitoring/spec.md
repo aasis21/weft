@@ -119,6 +119,20 @@ Device Details SHALL present a compact system summary and a curated Running Now 
 - **WHEN** the latest snapshot contains CPU, memory, disk, or battery information
 - **THEN** the screen displays percentage-first values with concise supporting details
 
+#### Scenario: Uptime is available
+- **WHEN** the latest snapshot contains system uptime
+- **THEN** the screen presents uptime as a peer system-health metric
+
+#### Scenario: Device actions are presented
+- **WHEN** the user views Device Details
+- **THEN** Start Copilot, Resume Copilot, Explore Files, and Open Terminal use one consistent quick-action layout
+- **AND** actions without an implemented protocol are visibly unavailable rather than pretending to succeed
+
+#### Scenario: Monitoring events are inspected
+- **WHEN** the user opens the device event log
+- **THEN** device snapshot events are represented alongside other device-channel event types
+- **AND** consecutive high-frequency snapshots may be coalesced to keep the bounded log useful
+
 #### Scenario: Running applications are available
 - **WHEN** the latest snapshot contains visible applications
 - **THEN** the screen displays friendly grouped application names, relevant window counts or memory, and initially limits the list to five entries
