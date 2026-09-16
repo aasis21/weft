@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { dirname, join, resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { startExtensionBootstrap } from "../src/extensionBootstrap.mjs";
 
-function createHarness({ sessionId = "session-a", env = {}, scope = {} } = {}) {
+function createHarness({
+  sessionId = "session-a",
+  env = {},
+  scope = {},
+  identityFileExists = () => true,
+} = {}) {
+  const processTarget = new EventEmitter();
   const calls = {
     configs: [],
     handlers: null,
@@ -14,6 +23,7 @@ function createHarness({ sessionId = "session-a", env = {}, scope = {} } = {}) {
     activeLoads: [],
     activeCalls: [],
     hostCloses: 0,
+    presenceWithdrawals: 0,
     logs: [],
     shutdownHandler: null,
   };
@@ -64,6 +74,8 @@ function createHarness({ sessionId = "session-a", env = {}, scope = {} } = {}) {
     session,
     env,
     scope,
+    identityFileExists,
+    processTarget,
     joinSession: async (config) => {
       calls.configs.push(config);
       return session;
@@ -74,6 +86,9 @@ function createHarness({ sessionId = "session-a", env = {}, scope = {} } = {}) {
       return {
         updatePresence({ state: next }) {
           calls.presence.push(next);
+        },
+        withdrawPresence() {
+          calls.presenceWithdrawals++;
         },
         async close() {
           calls.hostCloses++;
@@ -205,6 +220,45 @@ test("/clear discards active identity and the replacement session starts dormant
   assert.equal(second.calls.activeLoads.length, 0);
   assert.deepEqual(second.calls.presence, ["dormant"]);
   await secondBootstrap.close();
+});
+
+test("/clear stays dormant when Copilot reuses stale handoff environment in a new process", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-cleared-handoff-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const harness = createHarness({
+    identityFileExists: () => false,
+    env: {
+      WEFT_IDENTITY_FILE: join(dir, "removed-identity.json"),
+      WEFT_CHANNEL_ID: "stale-channel",
+    },
+  });
+
+  const bootstrap = await startExtensionBootstrap(harness);
+  assert.equal(harness.calls.activeLoads.length, 0);
+  assert.deepEqual(harness.calls.presence, ["dormant"]);
+  await bootstrap.close();
+});
+
+test("process exit synchronously withdraws presence", async () => {
+  const harness = createHarness();
+  await startExtensionBootstrap(harness);
+  harness.processTarget.emit("exit");
+  assert.equal(harness.calls.presenceWithdrawals, 1);
+});
+
+test("shutdown withdraws presence and closes the host even when active teardown fails", async () => {
+  const harness = createHarness();
+  const bootstrap = await startExtensionBootstrap(harness);
+  await harness.calls.configs[0].commands[0].handler({ args: "" });
+  harness.calls.activeLoads[0];
+  const runtime = bootstrap.activeRuntime;
+  runtime.shutdown = async () => {
+    throw new Error("teardown failed");
+  };
+
+  await assert.rejects(bootstrap.close(), /teardown failed/);
+  assert.equal(harness.calls.presenceWithdrawals, 1);
+  assert.equal(harness.calls.hostCloses, 1);
 });
 
 test("the dormant bundle excludes pairing crypto, QR, transport, relay, and diagnostics modules", async () => {

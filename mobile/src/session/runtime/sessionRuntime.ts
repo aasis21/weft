@@ -188,6 +188,8 @@ const HOST_CONFIRM_MS = 30_000;
  *  laptop to confirm. Coarse on purpose — nothing here is racing, and the wait is bounded by
  *  HOST_CONFIRM_MS either way. */
 const RECONNECT_POLL_MS = 250;
+const SESSION_RECONNECT_BASE_MS = 15_000;
+const SESSION_RECONNECT_MAX_MS = 5 * 60_000;
 // Device (listener) channel heartbeat cadence is 2min (extension/src/listener.mjs). Rule: allow the
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
@@ -223,6 +225,10 @@ function deviceReconnectBackoffMs(attempts: number, sinceLastSeenMs: number): nu
           ? 60_000
           : DEVICE_RECONNECT_BASE_MS;
   return Math.min(Math.max(exponential, stalenessFloor), DEVICE_RECONNECT_MAX_MS);
+}
+
+function sessionReconnectBackoffMs(attempts: number): number {
+  return Math.min(SESSION_RECONNECT_BASE_MS * 2 ** Math.min(attempts, 5), SESSION_RECONNECT_MAX_MS);
 }
 /** Fail-safe window after a `project_list_request` is sent: while a request is outstanding, extra
  *  refreshProjects triggers (boot auto-reconnect + watchdog self-heal + attachListener's trailing
@@ -405,6 +411,10 @@ export class SessionRuntime {
    *  Feeds the exponential half of deviceReconnectBackoffMs; reset to 0 on health, on app foreground,
    *  and on boot so a returning user always gets an immediate (attempt-0) reconnect. */
   private readonly deviceReconnectFails = new Map<string, number>();
+  /** A replacement laptop runtime can join the same relay room without disconnecting the phone's
+   * socket. Heartbeat silence must therefore drive a fresh pairing hello, with bounded retries. */
+  private readonly sessionReconnectAt = new Map<string, number>();
+  private readonly sessionReconnectFails = new Map<string, number>();
   /** Per-device fail-safe timers for an outstanding `project_list_request` (see
    *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
   private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
@@ -814,6 +824,8 @@ export class SessionRuntime {
     if (!ctrl) return;
     ctrl.clear('confirm');
     ctrl.connectingSince = null;
+    this.sessionReconnectAt.delete(channelId);
+    this.sessionReconnectFails.delete(channelId);
     if (wasLive) return;
     const s = this.session(channelId);
     if (!s) return;
@@ -2993,9 +3005,8 @@ export class SessionRuntime {
           this.coolDown(session.id);
           continue;
         }
-        if (status !== 'live' && status !== 'idle') continue;
-        if (!ctrl.client) continue;
-        if (beat && now - beat > OFFLINE_AFTER_MS) {
+        const heartbeatStale = beat != null && now - beat > OFFLINE_AFTER_MS;
+        if ((status === 'live' || status === 'idle') && heartbeatStale) {
           this.store.dispatch(
             statusSet({ id: session.id, status: 'error', error: 'Connection lost — reconnect to resume.' }),
           );
@@ -3003,6 +3014,21 @@ export class SessionRuntime {
         } else if (status === 'live' && beat && now - beat > IDLE_AFTER_MS) {
           this.store.dispatch(statusSet({ id: session.id, status: 'idle', error: undefined }));
           if (session.connection.busy) this.store.dispatch(busySet({ id: session.id, busy: false }));
+        }
+        const needsReconnect = heartbeatStale || status === 'error' || !ctrl.client;
+        const lastTry = this.sessionReconnectAt.get(session.id) ?? 0;
+        const failures = this.sessionReconnectFails.get(session.id) ?? 0;
+        const backoff = lastTry === 0 ? 0 : sessionReconnectBackoffMs(failures);
+        if (
+          needsReconnect &&
+          !ctrl.reconnecting &&
+          !session.connection.cold &&
+          session.connection.status !== 'ended' &&
+          now - lastTry >= backoff
+        ) {
+          this.sessionReconnectAt.set(session.id, now);
+          this.sessionReconnectFails.set(session.id, failures + 1);
+          void this.reconnect(session.id);
         }
       }
       // Device (listener) channels: flip the Online dot to Offline once its heartbeat/lastSeenAt

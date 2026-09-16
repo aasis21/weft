@@ -3,10 +3,10 @@
   One-line bootstrap installer for Weft (Windows / PowerShell).
 
 .DESCRIPTION
-  Downloads the prebuilt Weft Copilot CLI extension (+ its two standalone companion bundles:
-  relayServerProcess.mjs for the shared devtunnel relay, and weft.mjs — the "Device Station"
-  CLI you can run on any machine, extension or no extension) and drops them where `copilot`
-  auto-discovers extensions (~/.copilot/extensions/weft — CODE only). Also installs a
+  Downloads the prebuilt Weft Copilot CLI extension and every mandatory companion bundle
+  declared by the hosted release manifest, including the standalone `weft` Device Station
+  CLI, and drops them where `copilot` auto-discovers extensions
+  (~/.copilot/extensions/weft — CODE only). Also installs a
   "how to use Weft" skill to ~/.copilot/skills/weft-how-to-use/SKILL.md, the same way the extension goes
   to ~/.copilot/extensions/weft, so the agent can answer usage questions directly. All user
   config (projects, transport choice) lives separately in ~/.weft/weft.config.json, written via
@@ -190,7 +190,7 @@ try {
 }
 # $skillDir is referenced again in the Step 6 uninstall hint; keep it defined here.
 $skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
-Ok "extension.mjs, activeRuntime.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $InstallDir"
+Ok "Required release bundles -> $InstallDir"
 Ok 'Native PTY runtime installed for this Node.js architecture (no compiler required).'
 Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"
 

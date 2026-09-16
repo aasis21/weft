@@ -116,12 +116,14 @@ async function startHost(baseDir, index) {
   const host = await startRuntimeLifecycleHost({
     identity: createIdentity(index),
     handlers: {},
-    processStartedAt: 1,
   }, {
     baseDir,
     presenceOptions: {
       now: () => 1,
       capability: `capability-${index}`,
+    },
+    discoveryOptions: {
+      verify: async () => ({ live: true }),
     },
   });
   return { host, startupMs: performance.now() - startedAt };

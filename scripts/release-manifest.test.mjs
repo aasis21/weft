@@ -20,6 +20,8 @@ test("release manifest contains deterministic hashes and optional versioned APK 
     assert.equal(manifest.files["weft.mjs"].bytes, Buffer.byteLength("payload:weft.mjs"));
     assert.match(manifest.files["weft.mjs"].sha256, /^[a-f0-9]{64}$/);
     assert.equal(manifest.files["weft-1.2.3.apk"].bytes, 3);
+    assert.deepEqual(manifest.install.bundles, REQUIRED_RELEASE_FILES.filter((name) => name.endsWith(".mjs")));
+    assert.equal(manifest.install.skill, "weft-skill.md");
     assert.deepEqual(JSON.parse(readFileSync(output, "utf8")).files, manifest.files);
   } finally {
     rmSync(dir, { recursive: true, force: true });

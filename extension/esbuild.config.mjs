@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { readFileSync, rmSync } from "node:fs";
 import { packageNativeRuntime } from "../scripts/package-native-runtime.mjs";
 import { stageNativeRuntime } from "../scripts/native-runtime.mjs";
+import { RELEASE_BUNDLES } from "../scripts/release-layout.mjs";
 
 const outfile = "dist/extension.mjs";
 const activeRuntimeOutfile = "dist/activeRuntime.mjs";
@@ -62,14 +63,11 @@ await build({
 // never written to disk and the spawn dies with ERR_MODULE_NOT_FOUND. Built with the same
 // bundle:true/platform/format so they have zero dependency on files outside dist/ once installed.
 //
-// KEEP IN SYNC: every entry here must also appear in BUNDLE_NAMES in bin/weft.mjs (which is what
-// `weft install` / `weft update` actually download) and be copied by ship.ps1 / ship.sh.
-// extension/test/bundleEntrypoints.test.mjs enforces that — it scans src/ for sibling-path
-// constants and fails if any of them is missing from this list or from BUNDLE_NAMES.
-const SIBLING_ENTRYPOINTS = ["relayServerProcess.mjs", "devtunnelHostWatchdog.mjs"];
-for (const name of SIBLING_ENTRYPOINTS) {
+const siblingEntrypoints = RELEASE_BUNDLES.filter(({ name }) =>
+  !["extension.mjs", "activeRuntime.mjs", "weft.mjs"].includes(name));
+for (const { name, entryPoint } of siblingEntrypoints) {
   await build({
-    entryPoints: [`src/${name}`],
+    entryPoints: [entryPoint],
     outfile: `dist/${name}`,
     bundle: true,
     platform: "node",

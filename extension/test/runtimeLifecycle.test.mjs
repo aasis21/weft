@@ -28,6 +28,40 @@ test("the lifecycle facade publishes, proves, commands, updates, and removes one
       now: () => 200,
     },
   });
+
+  test("lifecycle startup prunes stale presence before publishing the new runtime", async (t) => {
+    const baseDir = mkdtempSync(join(tmpdir(), "weft-runtime-lifecycle-"));
+    t.after(() => rmSync(baseDir, { recursive: true, force: true }));
+    const { publishRuntimePresence } = await import("../src/runtimePresence.mjs");
+    const { createRuntimeIdentity } = await import("../src/runtimeIdentity.mjs");
+    const stale = await publishRuntimePresence({
+      identity: createRuntimeIdentity({
+        storeAuthority: "sha256:other",
+        sessionId: "stale-session",
+        runtimeInstanceId: "stale-runtime",
+      }, { scope: {} }),
+      endpoint: "stale-endpoint",
+      pid: 10,
+      processStartedAt: 100,
+    }, { baseDir });
+
+    const host = await startRuntimeLifecycleHost({
+      storeAuthority: "sha256:store",
+      sessionId: "session-a",
+      handlers: {},
+    }, {
+      baseDir,
+      identityOptions: { scope: {} },
+      discoveryOptions: {
+        verify: async ({ runtimeInstanceId }) => runtimeInstanceId === "stale-runtime"
+          ? { live: false, reason: "process-exited" }
+          : { live: true },
+      },
+    });
+    t.after(() => host.close());
+    const { statSync } = await import("node:fs");
+    assert.throws(() => statSync(stale.directory), { code: "ENOENT" });
+  });
   t.after(() => host.close());
 
   const discovery = await discoverRuntimeLifecycles({

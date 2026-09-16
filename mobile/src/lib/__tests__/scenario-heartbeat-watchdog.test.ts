@@ -4,6 +4,7 @@ vi.mock('@capacitor/app', () => ({
   App: { addListener: vi.fn().mockResolvedValue({ remove: vi.fn() }) },
 }));
 import { App } from '@capacitor/app';
+import { registry } from '@/test/helpers/fakeWeftClient';
 import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
 
@@ -23,7 +24,7 @@ describe('scenario: heartbeat watchdog', () => {
     vi.useRealTimers();
   });
 
-  it('advances the cursor, quiets stale live sessions, marks them offline, and revives on heartbeat', async () => {
+  it('re-handshakes when host replacement leaves the relay socket open but heartbeats stop', async () => {
     await h!.init();
     const { client } = await h!.pair('c1');
 
@@ -38,22 +39,23 @@ describe('scenario: heartbeat watchdog', () => {
     expect(h!.active()!.timeline.busy).toBe(false);
 
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(h!.active()).toMatchObject({
-      status: 'error',
-      error: 'Connection lost — reconnect to resume.',
-    });
+    await h!.flush();
+    const clients = registry.forChannel('c1');
+    expect(clients).toHaveLength(2);
+    const replacement = clients[1]!;
+    expect(replacement).not.toBe(client);
+    expect(h!.active()).toMatchObject({ status: 'connecting' });
 
-    client.emit(B.heartbeat(4, true));
+    replacement.emit(B.heartbeat(4, true));
     await h!.flush();
     expect(h!.active()).toMatchObject({ status: 'live' });
     expect(h!.active()!.timeline.busy).toBe(true);
     expect(h!.active()!.timeline.latestTurnIndex).toBe(4);
 
-    client.emit(B.heartbeat(5, null));
+    replacement.emit(B.heartbeat(5, null));
     await h!.flush();
     expect(h!.active()!.timeline.busy).toBe(true);
     expect(h!.active()!.timeline.latestTurnIndex).toBe(5);
   });
 });
-
 

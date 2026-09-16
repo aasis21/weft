@@ -9,7 +9,7 @@ try {
   npm run build -w @aasis21/weft-extension | Out-Null
 
   # Place the freshly-built code bundles + how-to-use skill via the CLI's own `weft install` — the
-  # single cross-platform implementation of code placement (dest dirs, the three-bundle list, the
+  # single cross-platform implementation of code placement (dest dirs, the release bundle set, the
   # weft.cmd shim), shared with the cloud installer (mobile/public/install.ps1) so none of that is
   # hand-duplicated here. `--from` points it at our local build output instead of the cloud
   # release. It deliberately does NOT touch ~/.weft or PATH — those are handled below / by the

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { startRuntimeLifecycleHost } from "./runtimeLifecycle.mjs";
 
 const BOOTSTRAP_STATE = Symbol.for("weft.extension-bootstrap.v1");
@@ -30,13 +31,17 @@ export async function startExtensionBootstrap({
   storePath = defaultStorePath(),
   env = process.env,
   scope = globalThis,
+  processTarget = process,
+  identityFileExists = existsSync,
   lifecycleOptions,
 } = {}) {
   if (typeof joinSession !== "function") throw new Error("joinSession is required");
 
   const identityFileEnv = env.WEFT_IDENTITY_FILE || "";
   const channelIdEnv = env.WEFT_CHANNEL_ID || "";
-  const explicitHandoff = Boolean(identityFileEnv || channelIdEnv);
+  // Copilot may preserve the original child environment across `/clear`. The identity file is the
+  // durable handoff authority, so a now-missing file means the clear intentionally revoked it.
+  const explicitHandoff = identityFileEnv ? identityFileExists(identityFileEnv) : Boolean(channelIdEnv);
   delete env.WEFT_IDENTITY_FILE;
   delete env.WEFT_CHANNEL_ID;
 
@@ -131,15 +136,28 @@ export async function startExtensionBootstrap({
     },
   }, lifecycleOptions);
 
+  const onProcessExit = () => {
+    lifecycleHost?.withdrawPresence?.();
+  };
+  processTarget.once?.("exit", onProcessExit);
+
   const close = async (reason = "session_end", { preserveIdentity = false } = {}) => {
     if (closing) return;
     closing = true;
-    if (activeRuntime) {
-      if (isClear(reason)) activeRuntime.discardHandoffIdentity();
-      await activeRuntime.shutdown(reason, { preserveIdentity });
+    lifecycleHost?.withdrawPresence?.();
+    processTarget.off?.("exit", onProcessExit);
+    try {
+      if (activeRuntime) {
+        if (isClear(reason)) activeRuntime.discardHandoffIdentity();
+        await activeRuntime.shutdown(reason, { preserveIdentity });
+      }
+    } finally {
+      try {
+        await lifecycleHost?.close();
+      } finally {
+        if (scope[BOOTSTRAP_STATE]?.close === close) delete scope[BOOTSTRAP_STATE];
+      }
     }
-    await lifecycleHost?.close();
-    if (scope[BOOTSTRAP_STATE]?.close === close) delete scope[BOOTSTRAP_STATE];
   };
 
   const state = {

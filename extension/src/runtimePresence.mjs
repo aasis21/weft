@@ -61,6 +61,14 @@ function writePresenceAtomic(file, presence) {
   privateMode(file, 0o600);
 }
 
+function ownsRuntimeDirectory(directory, capability) {
+  try {
+    return readFileSync(join(directory, "capability"), "utf8").trim() === capability;
+  } catch {
+    return false;
+  }
+}
+
 export function runtimesDirectory({ baseDir } = {}) {
   return join(weftHome(baseDir), "runtimes", "v1");
 }
@@ -137,6 +145,11 @@ export async function publishRuntimePresence(
       },
       update(patch = {}) {
         if (closed) throw new Error("runtime presence is closed");
+        if (!ownsRuntimeDirectory(finalDir, capability)) {
+          const error = new Error("runtime presence ownership was lost");
+          error.code = "ESTALE";
+          throw error;
+        }
         const next = validatePresence({
           ...current,
           ...patch,
@@ -159,7 +172,9 @@ export async function publishRuntimePresence(
       close({ remove = true } = {}) {
         if (closed) return;
         closed = true;
-        if (remove) rmSync(finalDir, { recursive: true, force: true });
+        if (remove && ownsRuntimeDirectory(finalDir, capability)) {
+          rmSync(finalDir, { recursive: true, force: true });
+        }
       },
     };
   } catch (error) {
@@ -211,14 +226,14 @@ export async function scanRuntimePresence(
       if (cleanup) rmSync(dir, { recursive: true, force: true });
       continue;
     }
-    if (storeAuthority && presence.storeAuthority !== storeAuthority) continue;
-    if (sessionId && presence.sessionId !== sessionId) continue;
     const processResult = await verify(presence);
     if (processResult?.live !== true) {
       rejected.push({ presence, reason: processResult?.reason ?? "process-unverifiable" });
       if (cleanup && processResult?.live === false) rmSync(dir, { recursive: true, force: true });
       continue;
     }
+    if (storeAuthority && presence.storeAuthority !== storeAuthority) continue;
+    if (sessionId && presence.sessionId !== sessionId) continue;
     if (probe) {
       try {
         const proof = await probe(presence);
@@ -242,6 +257,38 @@ export async function scanRuntimePresence(
       reason === "endpoint-unverifiable" ||
       reason === "endpoint-proof-failed"
     ));
+  const runtimeOwners = new Map();
+  for (const runtime of runtimes) {
+    const key = [
+      runtime.storeAuthority,
+      runtime.sessionId,
+      runtime.terminalInstanceId,
+      runtime.pid,
+      runtime.processStartedAt,
+    ].join("\0");
+    const current = runtimeOwners.get(key);
+    if (
+      !current ||
+      runtime.generation > current.generation ||
+      (runtime.generation === current.generation && runtime.updatedAt > current.updatedAt)
+    ) {
+      runtimeOwners.set(key, runtime);
+    }
+  }
+  for (let index = runtimes.length - 1; index >= 0; index -= 1) {
+    const runtime = runtimes[index];
+    const key = [
+      runtime.storeAuthority,
+      runtime.sessionId,
+      runtime.terminalInstanceId,
+      runtime.pid,
+      runtime.processStartedAt,
+    ].join("\0");
+    if (runtimeOwners.get(key) === runtime) continue;
+    runtimes.splice(index, 1);
+    rejected.push({ presence: runtime, reason: "superseded-generation" });
+    if (cleanup) rmSync(runtimeDirectory(runtime.runtimeInstanceId, { baseDir }), { recursive: true, force: true });
+  }
   const groups = new Map();
   for (const runtime of runtimes) {
     const key = `${runtime.storeAuthority}\0${runtime.sessionId}`;

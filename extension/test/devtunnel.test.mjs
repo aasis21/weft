@@ -41,7 +41,7 @@ async function withPublicProbe(fn) {
 }
 
 const FAKE_CLI_SCRIPT = `
-import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 function sleepSync(ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {}
@@ -52,6 +52,14 @@ const loggedIn = () =>
   Boolean(process.env.FAKE_DEVTUNNEL_LOGGED_IN) || Boolean(loginState && existsSync(loginState));
 const args = process.argv.slice(2);
 const [cmd] = args;
+const portsState = process.env.FAKE_DEVTUNNEL_PORTS_STATE || process.env.FAKE_DEVTUNNEL_PORTS_STATE_DEFAULT;
+const readPorts = () => {
+  if (!portsState || !existsSync(portsState)) return {};
+  return JSON.parse(readFileSync(portsState, "utf8"));
+};
+const writePorts = (value) => {
+  if (portsState) writeFileSync(portsState, JSON.stringify(value));
+};
 if (cmd === "--version") { console.log("fake 1.0"); process.exit(0); }
 if (args.join(" ") === "user show") {
   if (loggedIn()) { console.log("Logged in as fake@example.com using GitHub."); process.exit(0); }
@@ -79,11 +87,36 @@ if (cmd === "create" && args.includes("--json")) {
   process.exit(0);
 }
 if (cmd === "show") { process.exit(process.env.FAKE_DEVTUNNEL_SHOW_FAILS ? 1 : 0); }
-if (cmd === "port") { if (stageDelayMs) sleepSync(stageDelayMs); process.exit(0); }
+if (cmd === "port") {
+  if (stageDelayMs) sleepSync(stageDelayMs);
+  const operation = args[1];
+  const tunnelId = args[2];
+  const state = readPorts();
+  const ports = state[tunnelId] || [];
+  if (operation === "list") {
+    console.log(JSON.stringify({ ports: ports.map((portNumber) => ({ portNumber, protocol: "http" })) }));
+    process.exit(0);
+  }
+  const portIndex = args.indexOf("-p");
+  const port = Number(args[portIndex + 1]);
+  if (
+    operation === "create" &&
+    (process.env.FAKE_DEVTUNNEL_PORT_CREATE_FAILS ||
+      process.env.FAKE_DEVTUNNEL_PORT_CREATE_FAIL_ID === tunnelId)
+  ) process.exit(1);
+  if (operation === "create" && !ports.includes(port)) ports.push(port);
+  if (operation === "delete") state[tunnelId] = ports.filter((candidate) => candidate !== port);
+  else state[tunnelId] = ports;
+  writePorts(state);
+  if (process.env.FAKE_DEVTUNNEL_PORT_LOG) {
+    appendFileSync(process.env.FAKE_DEVTUNNEL_PORT_LOG, args.join(" ") + "\\n");
+  }
+  process.exit(0);
+}
 if (cmd === "access") { if (stageDelayMs) sleepSync(stageDelayMs); process.exit(0); }
 if (cmd === "delete") {
   if (process.env.FAKE_DEVTUNNEL_DELETE_LOG) {
-    appendFileSync(process.env.FAKE_DEVTUNNEL_DELETE_LOG, "1\\n");
+    appendFileSync(process.env.FAKE_DEVTUNNEL_DELETE_LOG, args[1] + "\\n");
   }
   console.log("Deleted: fake-tunnel-id");
   process.exit(0);
@@ -97,6 +130,10 @@ if (cmd === "host") {
   // different account. Fatal and unretryable: the CLI exits instead of printing a URL.
   if (process.env.FAKE_DEVTUNNEL_HOST_DENY_ID && args[1] === process.env.FAKE_DEVTUNNEL_HOST_DENY_ID) {
     console.error("Tunnel service error: Request not permitted. Unauthorized tunnel access: expected one or more of [host].");
+    process.exit(1);
+  }
+  if (process.env.FAKE_DEVTUNNEL_HOST_FAILS) {
+    console.error("simulated host failure");
     process.exit(1);
   }
   if (stageDelayMs) sleepSync(stageDelayMs);
@@ -131,13 +168,20 @@ function makeFakeCli(dir) {
 
 function makeFakeCliFromScript(dir, script) {
   const scriptPath = join(dir, "fake-devtunnel.mjs");
+  const portsStatePath = join(dir, "ports.json");
   writeFileSync(scriptPath, script);
   const isWindows = process.platform === "win32";
   const shimPath = join(dir, isWindows ? "devtunnel.cmd" : "devtunnel");
   if (isWindows) {
-    writeFileSync(shimPath, `@echo off\r\nnode "${scriptPath}" %*\r\n`);
+    writeFileSync(
+      shimPath,
+      `@echo off\r\nset "FAKE_DEVTUNNEL_PORTS_STATE_DEFAULT=${portsStatePath}"\r\nnode "${scriptPath}" %*\r\n`,
+    );
   } else {
-    writeFileSync(shimPath, `#!/bin/sh\nexec node "${scriptPath}" "$@"\n`);
+    writeFileSync(
+      shimPath,
+      `#!/bin/sh\nFAKE_DEVTUNNEL_PORTS_STATE_DEFAULT="${portsStatePath}" exec node "${scriptPath}" "$@"\n`,
+    );
     chmodSync(shimPath, 0o755);
   }
   return shimPath;
@@ -611,6 +655,38 @@ test("ensureDevTunnelRelay gives an actionable error after exhausting the max-wa
   }
 });
 
+test("failed fresh provisioning deletes the partially created cloud tunnel", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const deleteLog = join(dir, "delete-calls.log");
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_PORT_CREATE_FAILS = "1";
+    process.env.FAKE_DEVTUNNEL_DELETE_LOG = deleteLog;
+    process.env.WEFT_DEVTUNNEL_TIMEOUT_MS = "1000";
+    process.env.WEFT_DEVTUNNEL_MAX_WAIT_MS = "5000";
+    const { ensureDevTunnelRelay } = await freshModule();
+
+    await assert.rejects(
+      ensureDevTunnelRelay({ baseDir: homeDir }),
+      /relay failed to start/,
+    );
+    assert.match(readFileSync(deleteLog, "utf8"), /^fake-tunnel-id$/m);
+    assert.equal(existsSync(join(homeDir, "devtunnel.json")), false);
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_PORT_CREATE_FAILS;
+    delete process.env.FAKE_DEVTUNNEL_DELETE_LOG;
+    delete process.env.WEFT_DEVTUNNEL_TIMEOUT_MS;
+    delete process.env.WEFT_DEVTUNNEL_MAX_WAIT_MS;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
 test("persistent pairing: a remembered tunnel this identity can't host falls back to a fresh one", async () => {
   // `devtunnel show` only needs connect scope while `host` needs host scope, so a tunnel created
   // under a different sign-in stays visible but refuses to host — forever. The relay must notice
@@ -618,12 +694,14 @@ test("persistent pairing: a remembered tunnel this identity can't host falls bac
   const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
   const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
   const hostLog = join(dir, "host-calls.log");
+  const deleteLog = join(dir, "delete-calls.log");
   try {
     const bin = makeFakeCli(dir);
     process.env.WEFT_DEVTUNNEL_BIN = bin;
     process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
     process.env.FAKE_DEVTUNNEL_HOST_LOG = hostLog;
     process.env.FAKE_DEVTUNNEL_HOST_DENY_ID = "foreign-tunnel-id";
+    process.env.FAKE_DEVTUNNEL_DELETE_LOG = deleteLog;
     writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
     const registryPath = join(homeDir, "devtunnel.json");
     writeFileSync(
@@ -646,6 +724,7 @@ test("persistent pairing: a remembered tunnel this identity can't host falls bac
     assert.equal(hostCalls.length, 2, "host is attempted on the remembered tunnel, then the fresh one");
     assert.match(hostCalls[0], /foreign-tunnel-id/);
     assert.match(hostCalls[1], /fake-tunnel-id/);
+    assert.equal(readFileSync(deleteLog, "utf8").trim(), "foreign-tunnel-id");
 
     await forceKill(entry.pid);
     rmSync(registryPath, { force: true });
@@ -654,6 +733,45 @@ test("persistent pairing: a remembered tunnel this identity can't host falls bac
     delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
     delete process.env.FAKE_DEVTUNNEL_HOST_LOG;
     delete process.env.FAKE_DEVTUNNEL_HOST_DENY_ID;
+    delete process.env.FAKE_DEVTUNNEL_DELETE_LOG;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("persistent pairing: failed fallback provisioning deletes both abandoned tunnels", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const deleteLog = join(dir, "delete-calls.log");
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_HOST_DENY_ID = "foreign-tunnel-id";
+    process.env.FAKE_DEVTUNNEL_PORT_CREATE_FAIL_ID = "fake-tunnel-id";
+    process.env.FAKE_DEVTUNNEL_DELETE_LOG = deleteLog;
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
+    writeFileSync(
+      join(homeDir, "devtunnel.json"),
+      JSON.stringify({ tunnelId: "foreign-tunnel-id", relayPort: 51234, baseUrl: "wss://gone.usw2.devtunnels.ms", alive: false }),
+    );
+    const { ensureDevTunnelRelay } = await freshModule();
+
+    await assert.rejects(
+      ensureDevTunnelRelay({ baseDir: homeDir }),
+      /relay failed to start/,
+    );
+    assert.deepEqual(
+      readFileSync(deleteLog, "utf8").trim().split("\n"),
+      ["foreign-tunnel-id", "fake-tunnel-id"],
+    );
+    assert.equal(existsSync(join(homeDir, "devtunnel.json")), false);
+  } finally {
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_HOST_DENY_ID;
+    delete process.env.FAKE_DEVTUNNEL_PORT_CREATE_FAIL_ID;
+    delete process.env.FAKE_DEVTUNNEL_DELETE_LOG;
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
@@ -801,6 +919,146 @@ test("persistent pairing: a restart reuses the preserved tunnel (same identity, 
     rmSync(dir, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
+});
+
+test("persistent pairing: stale mappings are reconciled to exactly the relay port across retry and restart", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const portsState = join(dir, "explicit-ports.json");
+  const portLog = join(dir, "port-calls.log");
+  const registryPath = join(homeDir, "devtunnel.json");
+  const occupied = await startAcceptingServer();
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_PORTS_STATE = portsState;
+    process.env.FAKE_DEVTUNNEL_PORT_LOG = portLog;
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        tunnelId: "fake-tunnel-id",
+        relayPort: occupied.port,
+        baseUrl: `wss://fake-abc123-${occupied.port}.usw2.devtunnels.ms`,
+        alive: false,
+      }),
+    );
+    writeFileSync(
+      portsState,
+      JSON.stringify({ "fake-tunnel-id": [occupied.port, 41001, 41002, 41003, 41004] }),
+    );
+    const { ensureDevTunnelRelay, forceStopDevTunnel } = await freshModule();
+
+    await ensureDevTunnelRelay({ baseDir: homeDir });
+    await waitFor(() => JSON.parse(readFileSync(registryPath, "utf8")).alive === true, "first relay start");
+    const first = JSON.parse(readFileSync(registryPath, "utf8"));
+    assert.notEqual(first.relayPort, occupied.port, "occupied remembered port must be replaced");
+    assert.deepEqual(JSON.parse(readFileSync(portsState, "utf8"))["fake-tunnel-id"], [first.relayPort]);
+
+    await forceStopDevTunnel({ baseDir: homeDir });
+    await occupied.close();
+    await ensureDevTunnelRelay({ baseDir: homeDir });
+    await waitFor(() => JSON.parse(readFileSync(registryPath, "utf8")).alive === true, "relay restart");
+    const second = JSON.parse(readFileSync(registryPath, "utf8"));
+    assert.equal(second.relayPort, first.relayPort);
+    assert.deepEqual(JSON.parse(readFileSync(portsState, "utf8"))["fake-tunnel-id"], [second.relayPort]);
+    assert.match(readFileSync(portLog, "utf8"), /port delete fake-tunnel-id -p 41001/);
+
+    await forceKill(second.pid);
+    rmSync(registryPath, { force: true });
+  } finally {
+    if (existsSync(registryPath)) {
+      const entry = JSON.parse(readFileSync(registryPath, "utf8"));
+      if (entry.pid) await forceKill(entry.pid);
+    }
+    await occupied.close().catch(() => {});
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_PORTS_STATE;
+    delete process.env.FAKE_DEVTUNNEL_PORT_LOG;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("persistent pairing: a failed host attempt durably records the reconciled port", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const homeDir = mkdtempSync(join(tmpdir(), "weft-home-"));
+  const portsState = join(dir, "retry-ports.json");
+  const registryPath = join(homeDir, "devtunnel.json");
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_LOGGED_IN = "1";
+    process.env.FAKE_DEVTUNNEL_PORTS_STATE = portsState;
+    process.env.FAKE_DEVTUNNEL_HOST_FAILS = "1";
+    writeFileSync(join(homeDir, "weft.config.json"), JSON.stringify({ pairing: { persistent: true } }));
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        tunnelId: "fake-tunnel-id",
+        relayPort: 43001,
+        baseUrl: "wss://fake-abc123-43001.usw2.devtunnels.ms",
+        alive: false,
+      }),
+    );
+    writeFileSync(portsState, JSON.stringify({ "fake-tunnel-id": [43001, 43002, 43003] }));
+    const firstModule = await freshModule();
+
+    await assert.rejects(
+      firstModule.ensureDevTunnelRelay({ baseDir: homeDir }),
+      /relay failed to start/,
+    );
+    const failed = JSON.parse(readFileSync(registryPath, "utf8"));
+    assert.equal(failed.alive, false);
+    assert.deepEqual(JSON.parse(readFileSync(portsState, "utf8"))["fake-tunnel-id"], [failed.relayPort]);
+  } finally {
+    if (existsSync(registryPath)) {
+      const entry = JSON.parse(readFileSync(registryPath, "utf8"));
+      if (entry.pid) await forceKill(entry.pid);
+    }
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_LOGGED_IN;
+    delete process.env.FAKE_DEVTUNNEL_PORTS_STATE;
+    delete process.env.FAKE_DEVTUNNEL_HOST_FAILS;
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("port reconciliation fails closed when stale mappings cannot be removed", async () => {
+  const { reconcileTunnelPort } = await import("../src/relayServerProcess.mjs");
+  const calls = [];
+  await assert.rejects(
+    reconcileTunnelPort({
+      bin: "devtunnel",
+      tunnelId: "owned-tunnel",
+      relayPort: 5000,
+      runCommand: async (_bin, args) => {
+        calls.push(args);
+        if (args[1] === "list") {
+          return JSON.stringify({ ports: [{ portNumber: 4000, protocol: "http" }] });
+        }
+        throw new Error("delete denied");
+      },
+    }),
+    /delete denied/,
+  );
+  assert.deepEqual(calls[1], ["port", "delete", "owned-tunnel", "-p", "4000"]);
+});
+
+test("host URL selection prefers the current relay port and rejects ambiguous stale mappings", async () => {
+  const { selectTunnelBaseUrl } = await import("../src/relayServerProcess.mjs");
+  const output = [
+    "Hosting port 41001 at https://puzzled-chair-41001.usw2.devtunnels.ms/",
+    "Hosting port 52002 at https://puzzled-chair-52002.usw2.devtunnels.ms/",
+  ].join("\n");
+  assert.equal(
+    selectTunnelBaseUrl(output, 52002),
+    "wss://puzzled-chair-52002.usw2.devtunnels.ms",
+  );
+  assert.equal(selectTunnelBaseUrl(output, 63003), null);
 });
 
 

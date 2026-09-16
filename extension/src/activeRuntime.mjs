@@ -15,7 +15,11 @@ import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
 import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
 import { resolveVersion } from "./version.mjs";
 import { isStationRunning, registerPendingSession, removePendingSession } from "./pendingSessions.mjs";
-import { cleanupIdentityAfterPairing, readIdentityFile } from "./handoffIdentity.mjs";
+import {
+  cleanupIdentityAfterPairing,
+  persistHandoffController,
+  readIdentityFile,
+} from "./handoffIdentity.mjs";
 import { updateLaunchOperation } from "./launchOperations.mjs";
 
 export function activationControllerDecision({
@@ -557,6 +561,27 @@ async function attachForPeer(transport, { key, peer }) {
   currentHandshakeNonce = peer.handshakeNonce ?? null;
   currentPeerDeviceId = peer.deviceId ?? null;
   currentPeerName = peer.senderName ?? null;
+  if (durableLaunchHandoff) {
+    try {
+      persistHandoffController(identityFileEnv, {
+        trustedPeerPublicKeyB64: currentPeerPub,
+        controllerDeviceId: currentPeerDeviceId,
+        controllerName: currentPeerName,
+        operationId: launchOperationId,
+        operationOwnerToken: launchOperationOwnerToken,
+      });
+    } catch (error) {
+      appendSessionLog(
+        "handoff.recovery_persist_failed",
+        { error: error?.message ?? String(error) },
+        { level: "error" },
+      );
+      session.log?.(
+        `Weft: paired, but restart recovery could not be saved (${error?.message ?? error}).`,
+        { level: "warning", ephemeral: false },
+      );
+    }
+  }
   // The phone has adopted this session — it's no longer a "pending" offer, so withdraw it from the
   // station registry (and the station drops it from its advertised set on its own SESSION_CLAIMED
   // handling too; both are idempotent).

@@ -24,12 +24,18 @@ export async function startRuntimeLifecycleHost(
     processStartedAt,
     pid,
   },
-  { baseDir, identityOptions, presenceOptions, endpointOptions } = {},
+  { baseDir, identityOptions, presenceOptions, endpointOptions, discoveryOptions } = {},
 ) {
   const identity = suppliedIdentity ?? createRuntimeIdentity(
     { storePath, storeAuthority, sessionId },
     identityOptions,
   );
+  await scanRuntimePresence({
+    baseDir,
+    cleanup: true,
+    probe: null,
+    ...discoveryOptions,
+  });
   const endpoint = runtimeEndpointAddress(identity.runtimeInstanceId, { baseDir });
   const published = await publishRuntimePresence({
     identity,
@@ -53,6 +59,7 @@ export async function startRuntimeLifecycleHost(
     throw error;
   }
   let closed = false;
+  const withdrawPresence = () => published.close();
   return {
     identity,
     endpoint,
@@ -63,11 +70,12 @@ export async function startRuntimeLifecycleHost(
     updatePresence(patch) {
       return published.update(patch);
     },
+    withdrawPresence,
     async close() {
       if (closed) return;
       closed = true;
+      withdrawPresence();
       await endpointHost.close();
-      published.close();
     },
   };
 }

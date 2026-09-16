@@ -3,8 +3,9 @@
 #
 #   curl -fsSL https://useweft.netlify.app/install.sh | bash
 #
-# Downloads the prebuilt Weft Copilot CLI extension (+ the standalone `weft`
-# Device Station command) and drops them where `copilot` auto-discovers extensions
+# Downloads the prebuilt Weft Copilot CLI extension and every mandatory companion
+# bundle declared by the hosted release manifest (including the standalone `weft`
+# Device Station command), then drops them where `copilot` auto-discovers extensions
 # (~/.copilot/extensions/weft - CODE only). Also installs a "how to use Weft" skill to
 # ~/.copilot/skills/weft-how-to-use/SKILL.md, the same way the extension goes to
 # ~/.copilot/extensions/weft, so the agent can answer usage questions directly. All user
@@ -160,7 +161,7 @@ WEFT_INSTALL_BASE="$BASE" WEFT_INSTALL_DIR="$INSTALL_DIR" node "$BOOTSTRAP_TMP" 
 rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"
 trap - EXIT
 SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
-ok "extension.mjs, activeRuntime.mjs, relayServerProcess.mjs, devtunnelHostWatchdog.mjs, weft.mjs -> $INSTALL_DIR"
+ok "Required release bundles -> $INSTALL_DIR"
 case "$(node -p 'process.platform')" in
   darwin) ok "Native PTY runtime installed for this Node.js architecture (no compiler required)." ;;
   *) warn "Native terminal support is not distributed for this platform; ordinary Weft features remain available." ;;

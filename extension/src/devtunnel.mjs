@@ -93,6 +93,7 @@ export const STAGE_LABELS = {
   "creating-access": "setting anonymous access on the tunnel…",
   hosting: "hosting the tunnel (devtunnel host)…",
   "waiting-for-url": "waiting for the tunnel's public URL…",
+  failed: "devtunnel startup failed",
 };
 
 /** Human-readable label for a provisioning stage, or the raw stage string if unrecognized. */
@@ -510,6 +511,7 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
       return { baseUrl: entry.baseUrl, child };
     } catch (err) {
       if (childExited || attempt >= maxAttempts) {
+        const failure = readRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
         // Exhaust path: the child never published a healthy registry entry. Tear it (and any
         // half-provisioned cloud tunnel) down before throwing, otherwise the attached child
         // would keep our parent's event loop alive forever after the CLI already gave up.
@@ -518,6 +520,7 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
         throw new Error(
           childExited
             ? "the devtunnel relay failed to start.\n" +
+              (failure?.error ? `  • ${failure.error}\n` : "") +
               "  • Check your network connection (a corporate proxy/VPN can block the tunnel service).\n" +
               "  • Confirm the CLI works on its own:  devtunnel user show   then   devtunnel create\n" +
               "  • Then try again — `weft start` (or `weft devtunnel start`) reprovisions from scratch."
@@ -635,23 +638,40 @@ export async function forceStopDevTunnel({ baseDir } = {}) {
       } catch {
         // best-effort
       }
-      // SIGTERM is asynchronous on POSIX. Do not report the relay stopped while it may still own
-      // the preserved port; an immediate persistent restart must be able to bind that same port.
-      if (!(await waitForPidExit(entry.pid))) {
+    }
+    // Process teardown is asynchronous even after taskkill returns on some Windows systems. Do
+    // not publish the preserved record while the old relay may still own its port.
+    if (!(await waitForPidExit(entry.pid))) {
+      if (process.platform === "win32") {
+        try {
+          await execFileAsync("taskkill", ["/pid", String(entry.pid), "/t", "/f"]);
+        } catch {
+          // best-effort — process may have exited between the check and the retry.
+        }
+      } else {
         try {
           process.kill(entry.pid, "SIGKILL");
         } catch {
           // best-effort — process may have exited between the check and the signal.
         }
-        await waitForPidExit(entry.pid, 1_000);
       }
+      await waitForPidExit(entry.pid, 1_000);
+    }
+    if (isPidAlive(entry.pid)) {
+      throw new Error(`the devtunnel relay process ${entry.pid} did not stop`);
     }
   }
   // Persistent mode: keep the tunnel + its identity so the URL is stable across restarts.
-  if (isPersistentPairingEnabled({ baseDir }) && entry.tunnelId && entry.baseUrl) {
+  if (isPersistentPairingEnabled({ baseDir }) && entry.tunnelId) {
     writeRegistryAtomic(
       DEVTUNNEL_REGISTRY_FILE,
-      { relayPort: entry.relayPort, tunnelId: entry.tunnelId, baseUrl: entry.baseUrl, alive: false, stoppedAt: Date.now() },
+      {
+        relayPort: entry.relayPort,
+        tunnelId: entry.tunnelId,
+        ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
+        alive: false,
+        stoppedAt: Date.now(),
+      },
       { baseDir },
     );
     clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });

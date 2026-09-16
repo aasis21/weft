@@ -5,15 +5,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeNativeRuntime, NATIVE_TARGETS, nativeAssetName, nativeRuntimeDescriptor } from "./native-runtime.mjs";
+import { RELEASE_BUNDLE_NAMES, RELEASE_SKILL_NAME, releaseInstallDescriptor } from "./release-layout.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const REQUIRED_RELEASE_FILES = [
-  "extension.mjs",
-  "activeRuntime.mjs",
-  "relayServerProcess.mjs",
-  "devtunnelHostWatchdog.mjs",
-  "weft.mjs",
-  "weft-skill.md",
+  ...RELEASE_BUNDLE_NAMES,
+  RELEASE_SKILL_NAME,
   ...NATIVE_TARGETS.map(nativeAssetName),
 ];
 
@@ -43,6 +40,7 @@ export function generateReleaseManifest(directory, version) {
     version,
     generatedAt: new Date().toISOString(),
     files,
+    install: releaseInstallDescriptor(),
     nativeRuntime: nativeRuntimeDescriptor(),
   };
   const output = join(directory, "release-manifest.json");

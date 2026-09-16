@@ -28,8 +28,9 @@ import { enableStationLog, appendStationLog, stationLogPath } from "../src/stati
 import { resolveVersion } from "../src/version.mjs";
 import { parseStartOptions } from "../src/startOptions.mjs";
 import { attachTerminal } from "../src/terminalClient.mjs";
-import { NATIVE_TARGETS, stageNativeRuntime } from "../../scripts/native-runtime.mjs";
+import { NATIVE_TARGETS, requiredNativeFiles, stageNativeRuntime } from "../../scripts/native-runtime.mjs";
 import { commitStagedFiles } from "../../scripts/install-transaction.mjs";
+import { RELEASE_BUNDLE_NAMES, RELEASE_SKILL_NAME, validateInstallDescriptor } from "../../scripts/release-layout.mjs";
 
 const [, , command, ...args] = process.argv;
 
@@ -38,14 +39,6 @@ const [, , command, ...args] = process.argv;
 // this dir and ~/.weft, then re-runs the bootstrap installer. Both honor env overrides so they can
 // be exercised against a local mirror without touching a real install or the network.
 const INSTALL_BASE = (process.env.WEFT_INSTALL_BASE || "https://useweft.netlify.app").replace(/\/+$/, "");
-// The standalone code bundles esbuild emits and every install ships: the Copilot CLI extension,
-// the weft CLI itself, and the two children devtunnel.mjs spawns as siblings of whichever bundle
-// it was inlined into (the relay process and the tunnel-host watchdog). Miss one and the spawn
-// fails with ERR_MODULE_NOT_FOUND on installed machines only — the repo checkout still has the
-// source file, so it works in dev and breaks in prod. Declared up here (not next to its helpers)
-// so it's initialized before the top-level command dispatch can reach placeBundles — a later
-// `const` would be in the temporal dead zone.
-const BUNDLE_NAMES = ["extension.mjs", "activeRuntime.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
 function extensionInstallDir() {
   return process.env.WEFT_INSTALL_DIR || join(homedir(), ".copilot", "extensions", "weft");
 }
@@ -1180,6 +1173,40 @@ function expectedHash(manifest, name) {
   return sha256;
 }
 
+function releaseInstallFiles(manifest) {
+  if (!manifest.install) {
+    return validateInstallDescriptor({
+      schemaVersion: 1,
+      bundles: Object.keys(manifest.files ?? {}).filter((name) => name.endsWith(".mjs")),
+      skill: RELEASE_SKILL_NAME,
+    });
+  }
+  return validateInstallDescriptor(manifest.install);
+}
+
+function fileMatchesManifest(path, manifest, name) {
+  if (!existsSync(path)) return false;
+  return createHash("sha256").update(readFileSync(path)).digest("hex") === expectedHash(manifest, name).toLowerCase();
+}
+
+function installationRepairReasons(manifest) {
+  const { bundles, skill } = releaseInstallFiles(manifest);
+  const reasons = [];
+  for (const name of bundles) {
+    if (!fileMatchesManifest(join(extensionInstallDir(), name), manifest, name)) reasons.push(name);
+  }
+  if (!fileMatchesManifest(join(skillInstallDir(), "SKILL.md"), manifest, skill)) reasons.push("SKILL.md");
+  const target = `${process.platform}-${process.arch}`;
+  if (NATIVE_TARGETS.includes(target)) {
+    for (const name of requiredNativeFiles(target)) {
+      if (!existsSync(join(extensionInstallDir(), "node_modules", "node-pty", "prebuilds", target, name))) {
+        reasons.push(`node-pty/${name}`);
+      }
+    }
+  }
+  return reasons;
+}
+
 // On Windows, (re)create the `weft.cmd` PATH shim if it's missing so `weft` resolves to the just
 // -refreshed weft.mjs. No-op on POSIX (that shim lives in ~/.local/bin and is owned by the
 // bootstrap installer). Best-effort — never fails the caller.
@@ -1201,17 +1228,27 @@ function ensureWindowsShim(dir) {
 // for the live weft.mjs (Node doesn't lock its own running file). Shared by `install` and `update`
 // so the dest dir + file list live in exactly one place instead of being duplicated across the
 // PowerShell and bash installers.
-async function placeBundles({ fromDir } = {}) {
+async function placeRelease({ fromDir, skillFile } = {}) {
   const dir = extensionInstallDir();
   mkdirSync(dir, { recursive: true });
   const manifest = fromDir ? null : await loadReleaseManifest();
+  const install = manifest ? releaseInstallFiles(manifest) :
+    { bundles: [...RELEASE_BUNDLE_NAMES], skill: RELEASE_SKILL_NAME };
   const transactionId = `${process.pid}.${Date.now()}`;
-  const staged = BUNDLE_NAMES.map((name) => ({
+  const staged = install.bundles.map((name) => ({
     name,
     dest: join(dir, name),
     stage: join(dir, `.${name}.${transactionId}.stage`),
     backup: join(dir, `.${name}.${transactionId}.backup`),
   }));
+  const skillDir = skillInstallDir();
+  mkdirSync(skillDir, { recursive: true });
+  const skill = {
+    name: "SKILL.md",
+    dest: join(skillDir, "SKILL.md"),
+    stage: join(skillDir, `.SKILL.md.${transactionId}.stage`),
+    backup: join(skillDir, `.SKILL.md.${transactionId}.backup`),
+  };
   const native = NATIVE_TARGETS.includes(`${process.platform}-${process.arch}`) ? {
     name: "node-pty",
     dest: join(dir, "node_modules", "node-pty"),
@@ -1219,7 +1256,7 @@ async function placeBundles({ fromDir } = {}) {
     backup: join(dir, "node_modules", `.node-pty.${transactionId}.backup`),
     recursive: true,
   } : null;
-  const files = native ? [...staged, native] : staged;
+  const files = native ? [...staged, native, skill] : [...staged, skill];
   const lockPath = join(dir, ".install.lock");
   let lock;
   try { lock = openSync(lockPath, "wx"); }
@@ -1240,6 +1277,16 @@ async function placeBundles({ fromDir } = {}) {
         });
       }
     }
+    if (skillFile) {
+      if (!existsSync(skillFile)) throw new Error(`Missing skill file: ${skillFile}`);
+      copyFileSync(skillFile, skill.stage);
+    } else if (fromDir) {
+      throw new Error("A local install requires --skill <path>.");
+    } else {
+      await downloadTo(`${INSTALL_BASE}/${install.skill}`, skill.stage, {
+        expectedSha256: expectedHash(manifest, install.skill),
+      });
+    }
     if (native) {
       mkdirSync(join(dir, "node_modules"), { recursive: true });
       await stageNativeRuntime({ fromDir, manifest, base: INSTALL_BASE, stageDir: native.stage });
@@ -1259,25 +1306,6 @@ async function placeBundles({ fromDir } = {}) {
   return dir;
 }
 
-// Install the how-to-use skill next to the extension, from a local file (`fromFile`, dev scripts)
-// or the cloud release (default). Companion to placeBundles so the skill's dest + source URL are
-// defined once.
-async function installSkill({ fromFile } = {}) {
-  const dir = skillInstallDir();
-  mkdirSync(dir, { recursive: true });
-  const dest = join(dir, "SKILL.md");
-  if (fromFile) {
-    if (!existsSync(fromFile)) throw new Error(`Missing skill file: ${fromFile}`);
-    copyFileSync(fromFile, dest);
-  } else {
-    const manifest = await loadReleaseManifest();
-    await downloadTo(`${INSTALL_BASE}/weft-skill.md`, dest, {
-      expectedSha256: expectedHash(manifest, "weft-skill.md"),
-    });
-  }
-  console.log(`${c.green("✓")} SKILL.md`);
-}
-
 // `weft install`: the single, cross-platform implementation of Weft's CODE placement (bundles +
 // skill + Windows shim), shared by the dev `setup.*` scripts (via `--from <dist dir>`) and the
 // cloud `install.*` bootstrappers (default = download from the cloud release). It deliberately
@@ -1293,8 +1321,7 @@ async function install(cmdArgs) {
   printHeader("WEFT INSTALL");
   console.log(c.dim(fromDir ? `Source: ${resolve(fromDir)} ${c.dim("(local build)")}` : `Source: ${INSTALL_BASE}`));
   console.log(c.dim(`Target: ${extensionInstallDir()}\n`));
-  await placeBundles({ fromDir });
-  await installSkill({ fromFile: skillFile });
+  await placeRelease({ fromDir, skillFile });
   ensureWindowsShim(extensionInstallDir());
   console.log(`\n${c.green("Installed code.")} ${c.dim("(PATH + transport config are handled by the installer script.)")}`);
 }
@@ -1322,7 +1349,13 @@ async function update(cmdArgs = []) {
   if (cmdArgs.includes("--check")) {
     const order = compareVersions(current, manifest.version);
     if (order === 0) {
-      console.log(`${c.green("Up to date.")} Weft ${current} is the current hosted release.`);
+      const repairs = installationRepairReasons(manifest);
+      if (repairs.length) {
+        console.log(`${c.yellow("Repair required:")} Weft ${current} is current, but ${repairs.join(", ")} is missing or corrupt.`);
+        console.log("Run `weft update`, then restart Copilot CLI / the Device Station.");
+      } else {
+        console.log(`${c.green("Up to date.")} Weft ${current} is the current hosted release.`);
+      }
     } else if (order < 0) {
       console.log(`${c.yellow("Update available:")} ${current} → ${manifest.version}`);
       console.log("Run `weft update`, then restart Copilot CLI / the Device Station.");
@@ -1333,8 +1366,7 @@ async function update(cmdArgs = []) {
   }
   // An older updater may have installed this version's JavaScript without its native
   // assets. A non-check update must repair the full release even at the same version.
-  await placeBundles();
-  await installSkill();
+  await placeRelease();
   ensureWindowsShim(extensionInstallDir());
   console.log(`\n${c.green(`Updated to Weft ${manifest.version}.`)} ${c.dim("Your ~/.weft config was left untouched.")}`);
 }

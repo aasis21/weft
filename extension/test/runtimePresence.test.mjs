@@ -118,11 +118,41 @@ test("stale processes, PID reuse, and corrupt entries are rejected and cleaned",
       ? { live: false, reason: "process-exited" }
       : { live: false, reason: "pid-reused" },
   });
+
   assert.equal(result.status, "none");
   assert.deepEqual(result.rejected.map((item) => item.reason).sort(), ["corrupt", "pid-reused", "process-exited"]);
   assert.throws(() => statSync(exited.directory), { code: "ENOENT" });
   assert.throws(() => statSync(reused.directory), { code: "ENOENT" });
   assert.throws(() => statSync(join(runtimesDirectory({ baseDir }), "corrupt")), { code: "ENOENT" });
+});
+
+test("filtered discovery still prunes stale entries from other logical sessions", async (t) => {
+  const baseDir = fixture(t);
+  const stale = await publishRuntimePresence({
+    identity: identity({ runtimeInstanceId: "stale-other", sessionId: "session-b" }),
+    endpoint: "endpoint-b",
+    pid: 10,
+    processStartedAt: 100,
+  }, { baseDir });
+  const live = await publishRuntimePresence({
+    identity: identity({ runtimeInstanceId: "live-target" }),
+    endpoint: "endpoint-a",
+    pid: 11,
+    processStartedAt: 100,
+  }, { baseDir });
+  t.after(() => live.close());
+
+  const result = await scanRuntimePresence({
+    baseDir,
+    storeAuthority: "sha256:store",
+    sessionId: "session-a",
+    verify: async ({ pid }) => pid === 11
+      ? { live: true }
+      : { live: false, reason: "process-exited" },
+  });
+  assert.equal(result.status, "single");
+  assert.equal(result.runtimes[0].runtimeInstanceId, "live-target");
+  assert.throws(() => statSync(stale.directory), { code: "ENOENT" });
 });
 
 test("duplicate live writers fail closed while unverifiable ownership remains uncertain", async (t) => {
@@ -141,6 +171,7 @@ test("duplicate live writers fail closed while unverifiable ownership remains un
     first.close();
     second.close();
   });
+
   const conflict = await scanRuntimePresence({
     baseDir,
     storeAuthority: "sha256:store",
@@ -157,6 +188,33 @@ test("duplicate live writers fail closed while unverifiable ownership remains un
     verify: async () => ({ live: null, reason: "process-unverifiable" }),
   });
   assert.equal(uncertain.status, "uncertain");
+});
+
+test("discovery retains only the newest generation from the same process owner", async (t) => {
+  const baseDir = fixture(t);
+  const scope = {};
+  const first = await publishRuntimePresence({
+    identity: identity({ runtimeInstanceId: "generation-one" }, scope),
+    endpoint: "endpoint-1",
+    pid: 10,
+    processStartedAt: 100,
+  }, { baseDir, now: () => 200 });
+  const second = await publishRuntimePresence({
+    identity: identity({ runtimeInstanceId: "generation-two" }, scope),
+    endpoint: "endpoint-2",
+    pid: 10,
+    processStartedAt: 100,
+  }, { baseDir, now: () => 300 });
+  t.after(() => second.close());
+
+  const result = await scanRuntimePresence({
+    baseDir,
+    verify: async () => ({ live: true }),
+  });
+  assert.equal(result.status, "single");
+  assert.equal(result.runtimes[0].runtimeInstanceId, "generation-two");
+  assert.equal(result.rejected.find(({ reason }) => reason === "superseded-generation")?.presence.runtimeInstanceId, "generation-one");
+  assert.throws(() => statSync(first.directory), { code: "ENOENT" });
 });
 
 test("a verified live process with failed endpoint proof remains uncertain", async (t) => {
@@ -237,4 +295,25 @@ test("presence updates preserve immutable ownership fields", async (t) => {
   assert.equal(updated.generation, 1);
   assert.equal(updated.pid, process.pid);
   chmodSync(handle.directory, 0o700);
+});
+
+test("stale handles cannot update or delete a replacement runtime directory", async (t) => {
+  const baseDir = fixture(t);
+  const runtime = identity({ runtimeInstanceId: "reused-runtime-id" });
+  const stale = await publishRuntimePresence({
+    identity: runtime,
+    endpoint: "endpoint-old",
+    processStartedAt: 100,
+  }, { baseDir, capability: "old-capability" });
+  rmSync(stale.directory, { recursive: true, force: true });
+  const replacement = await publishRuntimePresence({
+    identity: runtime,
+    endpoint: "endpoint-new",
+    processStartedAt: 100,
+  }, { baseDir, capability: "new-capability" });
+  t.after(() => replacement.close());
+
+  assert.throws(() => stale.update({ state: "active" }), { code: "ESTALE" });
+  stale.close();
+  assert.equal(readFileSync(join(replacement.directory, "capability"), "utf8").trim(), "new-capability");
 });

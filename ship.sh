@@ -118,6 +118,7 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
     echo "no $skill_source - cannot publish a verifiable release without the how-to-use skill" >&2
     exit 1
   fi
+  node scripts/stage-release-payload.mjs extension/dist mobile/public "$skill_source"
 
   cyan "Generating release integrity manifest"
   node scripts/generate-release-manifest.mjs mobile/public >/dev/null

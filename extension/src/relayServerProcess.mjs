@@ -28,6 +28,69 @@ function publishStage(stage) {
   writeRegistryAtomic(DEVTUNNEL_STATUS_FILE, { pid: process.pid, stage, updatedAt: Date.now() }, { baseDir: process.env.WEFT_HOME });
 }
 
+function publishFailure(error) {
+  writeRegistryAtomic(
+    DEVTUNNEL_STATUS_FILE,
+    {
+      pid: process.pid,
+      stage: "failed",
+      error: error?.message ?? String(error),
+      updatedAt: Date.now(),
+    },
+    { baseDir: process.env.WEFT_HOME },
+  );
+}
+
+export function parseTunnelPorts(output) {
+  const parsed = JSON.parse(output);
+  const values = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.ports)
+      ? parsed.ports
+      : Array.isArray(parsed?.tunnelPorts)
+        ? parsed.tunnelPorts
+        : [];
+  return values.map((value) => ({
+    port: Number(value?.portNumber ?? value?.port),
+    protocol: String(value?.protocol ?? "").toLowerCase(),
+  })).filter(({ port }) => Number.isSafeInteger(port) && port > 0);
+}
+
+export async function reconcileTunnelPort({
+  bin,
+  tunnelId,
+  relayPort,
+  runCommand = run,
+}) {
+  const list = async () => parseTunnelPorts(
+    await runCommand(bin, ["port", "list", tunnelId, "--json"]),
+  );
+  const existing = await list();
+  for (const mapping of existing) {
+    if (mapping.port !== relayPort || (mapping.protocol && mapping.protocol !== "http")) {
+      await runCommand(bin, ["port", "delete", tunnelId, "-p", String(mapping.port)]);
+    }
+  }
+  if (!existing.some(({ port, protocol }) =>
+    port === relayPort && (!protocol || protocol === "http")
+  )) {
+    await runCommand(bin, ["port", "create", tunnelId, "-p", String(relayPort), "--protocol", "http"]);
+  }
+  const final = await list();
+  if (final.length !== 1 || final[0].port !== relayPort || (final[0].protocol && final[0].protocol !== "http")) {
+    throw new Error(`devtunnel port reconciliation failed for ${tunnelId}`);
+  }
+  return final[0];
+}
+
+export function selectTunnelBaseUrl(output, relayPort) {
+  const urls = [...String(output ?? "").matchAll(/https:\/\/\S+?\.devtunnels\.ms\/?/g)]
+    .map(([url]) => url.replace(/\/$/, ""));
+  const matching = urls.find((url) => new URL(url).hostname.includes(`-${relayPort}.`));
+  const selected = matching ?? (urls.length === 1 ? urls[0] : null);
+  return selected?.replace(/^https:/, "wss:") ?? null;
+}
+
 export async function main() {
   const baseDir = process.env.WEFT_HOME;
   publishStage("starting-relay");
@@ -80,6 +143,22 @@ export async function main() {
   let tunnelId = reuseTunnelId;
   let baseUrl;
   let host;
+  const publishDurableTunnelIntent = () => {
+    if (!persistent || !tunnelId) return;
+    writeRegistryAtomic(
+      DEVTUNNEL_REGISTRY_FILE,
+      {
+        relayPort: relay.port,
+        tunnelId,
+        ...(tunnelId === prior?.tunnelId && relay.port === prior?.relayPort && prior?.baseUrl
+          ? { baseUrl: prior.baseUrl }
+          : {}),
+        alive: false,
+        provisioningAt: Date.now(),
+      },
+      { baseDir },
+    );
+  };
 
   // Spawns `devtunnel host <id>` and resolves with the public wss:// URL it prints. Rejects as
   // soon as the host process exits (the CLI reports fatal problems — unauthorized, tunnel gone —
@@ -91,23 +170,35 @@ export async function main() {
     return await new Promise((resolve, reject) => {
       let buffer = "";
       let stderr = "";
+      let settled = false;
+      const finish = (error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        host.stdout.off("data", onData);
+        host.off("error", onError);
+        host.off("exit", onExit);
+        if (error) reject(error);
+        else resolve(value);
+      };
       const onData = (chunk) => {
         buffer += chunk.toString();
-        const match = buffer.match(/https:\/\/\S+\.devtunnels\.ms/);
-        if (match) {
-          host.stdout.off("data", onData);
-          resolve(match[0].replace(/^https:/, "wss:"));
-        }
+        const selected = selectTunnelBaseUrl(buffer, relay.port);
+        if (selected) finish(null, selected);
       };
+      const onError = (error) => finish(error);
+      const onExit = (code) =>
+        finish(new Error(`devtunnel host exited early (code ${code})${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
       host.stdout.on("data", onData);
       host.stderr?.on("data", (chunk) => {
         stderr += chunk.toString();
       });
-      host.once("error", reject);
-      host.once("exit", (code) =>
-        reject(new Error(`devtunnel host exited early (code ${code})${stderr.trim() ? `: ${stderr.trim()}` : ""}`)),
+      host.once("error", onError);
+      host.once("exit", onExit);
+      const timer = setTimeout(
+        () => finish(new Error("timed out waiting for devtunnel host")),
+        HOST_STARTUP_TIMEOUT_MS,
       );
-      setTimeout(() => reject(new Error("timed out waiting for devtunnel host")), HOST_STARTUP_TIMEOUT_MS);
     });
   };
 
@@ -118,6 +209,7 @@ export async function main() {
     publishStage("creating-tunnel");
     const createOut = await run(bin, ["create", "--json"]);
     const created = JSON.parse(createOut).tunnel.tunnelId;
+    tunnelId = created;
     publishStage("creating-port");
     await run(bin, ["port", "create", created, "-p", String(relay.port), "--protocol", "http"]);
     publishStage("creating-access");
@@ -125,26 +217,36 @@ export async function main() {
     return created;
   };
 
-  const teardown = async () => {
+  const deleteCloudTunnel = async (id) => {
+    if (!id) return;
+    try {
+      await run(bin, ["delete", id, "--force"]);
+    } catch {
+      // Best-effort cleanup: the service also expires abandoned tunnels.
+    }
+  };
+
+  const teardown = async ({ preserveTunnel = persistent } = {}) => {
+    const relayPort = relay.port;
     if (host) await killProcessTree(host);
     await relay.close().catch(() => {});
     // Persistent mode: KEEP the cloud tunnel and its identity so the next start reproduces the same
     // URL — just record that the relay is no longer alive (pid dropped) so pairing/status correctly
     // see it as down. Ephemeral mode: delete the tunnel and clear the registry, exactly as before.
-    if (persistent && tunnelId && baseUrl) {
+    if (preserveTunnel && tunnelId) {
       writeRegistryAtomic(
         DEVTUNNEL_REGISTRY_FILE,
-        { relayPort: relay.port, tunnelId, baseUrl, alive: false, stoppedAt: Date.now() },
+        {
+          relayPort,
+          tunnelId,
+          ...(baseUrl ? { baseUrl } : {}),
+          alive: false,
+          stoppedAt: Date.now(),
+        },
         { baseDir },
       );
     } else {
-      if (tunnelId) {
-        try {
-          await run(bin, ["delete", tunnelId, "--force"]);
-        } catch {
-          // best-effort — an orphaned tunnel just expires after 30 days.
-        }
-      }
+      await deleteCloudTunnel(tunnelId);
       clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
     }
     clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
@@ -152,24 +254,9 @@ export async function main() {
 
   try {
     if (reuseTunnelId) {
-      // Reuse the existing tunnel. Keep exactly ONE port mapping (the URL parser below grabs the
-      // first devtunnels.ms URL host emits, so a stale second port would make the extracted URL
-      // ambiguous): if our bound port differs from the remembered one, drop the stale mapping
-      // first. port/access create are idempotent — "already exists" is fine, so ignore failures.
-      if (relay.port !== desiredPort) {
-        publishStage("creating-port");
-        try {
-          await run(bin, ["port", "delete", tunnelId, "-p", String(desiredPort)]);
-        } catch {
-          // best-effort — the stale mapping may already be gone.
-        }
-      }
       publishStage("creating-port");
-      try {
-        await run(bin, ["port", "create", tunnelId, "-p", String(relay.port), "--protocol", "http"]);
-      } catch {
-        // already mapped — fine.
-      }
+      await reconcileTunnelPort({ bin, tunnelId, relayPort: relay.port });
+      publishDurableTunnelIntent();
       publishStage("creating-access");
       try {
         await run(bin, ["access", "create", tunnelId, "--anonymous", "--scopes", "connect"]);
@@ -178,10 +265,15 @@ export async function main() {
       }
     } else {
       tunnelId = await createFreshTunnel();
+      publishDurableTunnelIntent();
     }
-  } catch {
-    await relay.close().catch(() => {});
-    clearRegistry(DEVTUNNEL_STATUS_FILE, { baseDir });
+  } catch (error) {
+    if (!reuseTunnelId && tunnelId) {
+      await teardown({ preserveTunnel: false });
+    } else {
+      await relay.close().catch(() => {});
+    }
+    publishFailure(error);
     process.exitCode = 1;
     return;
   }
@@ -198,16 +290,30 @@ export async function main() {
     // phones re-scan) but the relay comes up, rather than hanging until the caller gives up.
     if (!reuseTunnelId) {
       await teardown();
+      publishFailure(hostErr);
       process.exitCode = 1;
       return;
     }
     if (host) await killProcessTree(host);
     host = null;
+    const abandonedTunnelId = tunnelId;
+    await deleteCloudTunnel(abandonedTunnelId);
+    if (tunnelId === abandonedTunnelId) tunnelId = null;
+    clearRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir });
     try {
       tunnelId = await createFreshTunnel();
+      publishDurableTunnelIntent();
+    } catch (error) {
+      await teardown({ preserveTunnel: false });
+      publishFailure(error);
+      process.exitCode = 1;
+      return;
+    }
+    try {
       baseUrl = await startHost(tunnelId);
-    } catch {
+    } catch (error) {
       await teardown();
+      publishFailure(error);
       process.exitCode = 1;
       return;
     }

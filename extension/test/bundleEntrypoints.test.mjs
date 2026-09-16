@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { RELEASE_BUNDLE_NAMES } from "../../scripts/release-layout.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const extensionRoot = path.resolve(here, "..");
@@ -41,16 +42,8 @@ test("every spawnable sibling under src/ is emitted by esbuild and shipped by th
     "found no sibling-file spawns at all — the detection regex has probably drifted from the source",
   );
 
-  const esbuildConfig = readFileSync(path.join(extensionRoot, "esbuild.config.mjs"), "utf8");
-  const weftCli = readFileSync(path.join(extensionRoot, "bin", "weft.mjs"), "utf8");
-
-  const entrypointsBlock = esbuildConfig.match(/const SIBLING_ENTRYPOINTS = \[([^\]]*)\]/)?.[1];
-  assert.ok(entrypointsBlock, "esbuild.config.mjs no longer declares SIBLING_ENTRYPOINTS");
-  const emitted = new Set([...entrypointsBlock.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]));
-
-  const bundleNamesBlock = weftCli.match(/const BUNDLE_NAMES = \[([^\]]*)\]/)?.[1];
-  assert.ok(bundleNamesBlock, "bin/weft.mjs no longer declares BUNDLE_NAMES");
-  const shipped = new Set([...bundleNamesBlock.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]));
+  const emitted = new Set(RELEASE_BUNDLE_NAMES);
+  const shipped = new Set(RELEASE_BUNDLE_NAMES);
 
   for (const [sibling, referencedBy] of siblings) {
     const where = referencedBy.join(", ");
@@ -61,33 +54,25 @@ test("every spawnable sibling under src/ is emitted by esbuild and shipped by th
     );
     assert.ok(
       shipped.has(sibling),
-      `src/${where} spawns "./${sibling}" but it is not in BUNDLE_NAMES in extension/bin/weft.mjs — ` +
-        `\`weft install\` / \`weft update\` would never download it.`,
+      `src/${where} spawns "./${sibling}" but it is not in the centralized release layout — ` +
+        "`weft install` / `weft update` would never download it.",
     );
   }
 });
 
-test("both ship scripts copy every bundle weft install downloads", () => {
-  const weftCli = readFileSync(path.join(extensionRoot, "bin", "weft.mjs"), "utf8");
-  const bundleNamesBlock = weftCli.match(/const BUNDLE_NAMES = \[([^\]]*)\]/)?.[1];
-  const shipped = [...bundleNamesBlock.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
-
+test("both ship scripts stage the centralized payload and verify its manifest", () => {
   const repoRoot = path.resolve(extensionRoot, "..");
   for (const script of ["ship.ps1", "ship.sh"]) {
     const text = readFileSync(path.join(repoRoot, script), "utf8");
-    for (const bundle of shipped) {
-      assert.ok(
-        text.includes(bundle),
-        `${script} never mentions ${bundle}, so a local \`-Install\` would leave it stale or absent`,
-      );
-    }
+    assert.match(text, /stage-release-payload\.mjs/);
+    assert.match(text, /generate-release-manifest\.mjs/);
+    assert.match(text, /verify-release-manifest\.mjs/);
   }
 });
 
 test("the active runtime is built and shipped beside the dormant bootstrap", () => {
   const esbuildConfig = readFileSync(path.join(extensionRoot, "esbuild.config.mjs"), "utf8");
-  const weftCli = readFileSync(path.join(extensionRoot, "bin", "weft.mjs"), "utf8");
   assert.match(esbuildConfig, /entryPoints:\s*\["src\/activeRuntime\.mjs"\]/);
   assert.match(esbuildConfig, /activeRuntimeOutfile\s*=\s*"dist\/activeRuntime\.mjs"/);
-  assert.match(weftCli, /BUNDLE_NAMES\s*=\s*\[[^\]]*"activeRuntime\.mjs"/);
+  assert.ok(RELEASE_BUNDLE_NAMES.includes("activeRuntime.mjs"));
 });

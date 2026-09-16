@@ -5,6 +5,19 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.19
+
+- Repairs incomplete same-version installs by downloading every mandatory bundle declared
+  by the hosted release manifest.
+- Keeps phone control connected across full Copilot extension process replacements by
+  restoring durable controller identity and re-authenticating after heartbeat loss.
+- Removes dead runtime-presence records without collapsing independent live sessions, and
+  fences stale lifecycle handles from deleting replacement state.
+- Reconciles preserved Dev Tunnels to the active relay port and cleans up abandoned or
+  partially provisioned cloud tunnels.
+
+## 0.2.18
+
 - Redesigned session activation so dormant Copilot sessions stay silent and lightweight,
   Device Station reuses already-running terminals without duplicate Resume processes, and
   lifecycle recovery, cancellation, and controller takeover remain single-writer safe.

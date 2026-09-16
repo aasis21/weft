@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
 import { spawnCopilotSession, writeIdentityFile } from "../src/spawn.mjs";
-import { cleanupIdentityAfterPairing, readIdentityFile } from "../src/handoffIdentity.mjs";
+import {
+  cleanupIdentityAfterPairing,
+  persistHandoffController,
+  readIdentityFile,
+} from "../src/handoffIdentity.mjs";
 
 const cleanupFiles = [];
 const cleanupDirs = [];
@@ -83,6 +87,37 @@ test("handoff identity preserves the one-time pairing grant for the spawned exte
   const restored = await readIdentityFile(file);
   assert.equal(restored.pairingToken, material.pairingToken);
   assert.equal(restored.pairingExpiresAt, material.pairingExpiresAt);
+});
+
+test("durable handoff persists the claimed phone identity for replacement processes", async () => {
+  const material = {
+    ...(await identity("chan-controller-recovery")),
+    operationId: "operation-a",
+    operationOwnerToken: "owner-a",
+  };
+  const file = writeIdentityFile(material);
+  cleanupFiles.push(file);
+
+  persistHandoffController(file, {
+    trustedPeerPublicKeyB64: "phone-public-key",
+    controllerDeviceId: "phone-a",
+    controllerName: "WebApp",
+    operationId: "operation-a",
+    operationOwnerToken: "owner-a",
+  });
+
+  const restored = await readIdentityFile(file);
+  assert.equal(restored.trustedPeerPublicKeyB64, "phone-public-key");
+  assert.equal(restored.controllerDeviceId, "phone-a");
+  assert.equal(restored.controllerName, "WebApp");
+  assert.throws(
+    () => persistHandoffController(file, {
+      trustedPeerPublicKeyB64: "other-phone",
+      operationId: "operation-a",
+      operationOwnerToken: "wrong-owner",
+    }),
+    /ownership changed/,
+  );
 });
 
 test("spawnCopilotSession builds argv/env for headless spawn without shell", async () => {

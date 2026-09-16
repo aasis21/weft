@@ -1,6 +1,6 @@
 {
   "name": "@aasis21/weft-extension",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "private": true,
   "type": "module",
   "description": "Weft Copilot CLI extension with a dormant bootstrap and lazy active runtime. Source in src/, bundled by esbuild with @github/copilot-sdk external.",
@@ -9,7 +9,7 @@
     "build": "node esbuild.config.mjs",
     "harness": "node harness/harness.mjs",
     "test:dormant-scale": "node harness/dormant-scale.mjs",
-    "test": "node --test"
+    "test": "node --test --test-concurrency=1"
   },
   "dependencies": {
     "@aasis21/weft-shared": "*",

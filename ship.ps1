@@ -170,6 +170,8 @@ try {
         } else {
             throw "no $skillSource - cannot publish a verifiable release without the how-to-use skill"
         }
+        node scripts/stage-release-payload.mjs extension/dist mobile/public $skillSource
+        if ($LASTEXITCODE -ne 0) { throw "release payload staging failed ($LASTEXITCODE)" }
 
         Step 'Generating release integrity manifest'
         node scripts/generate-release-manifest.mjs mobile/public | Out-Null

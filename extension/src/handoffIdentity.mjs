@@ -80,9 +80,67 @@ export async function readIdentityFile(file) {
     laptopKeys,
     pairingToken: typeof parsed.pairingToken === "string" ? parsed.pairingToken : null,
     pairingExpiresAt: Number.isSafeInteger(parsed.pairingExpiresAt) ? parsed.pairingExpiresAt : null,
+    trustedPeerPublicKeyB64:
+      typeof parsed.trustedPeerPublicKeyB64 === "string" ? parsed.trustedPeerPublicKeyB64 : null,
+    controllerDeviceId:
+      typeof parsed.controllerDeviceId === "string" ? parsed.controllerDeviceId : null,
+    controllerName:
+      typeof parsed.controllerName === "string" ? parsed.controllerName : null,
     operationId: typeof parsed.operationId === "string" ? parsed.operationId : null,
     operationOwnerToken: typeof parsed.operationOwnerToken === "string" ? parsed.operationOwnerToken : null,
   };
+}
+
+export function persistHandoffController(
+  file,
+  {
+    trustedPeerPublicKeyB64,
+    controllerDeviceId = null,
+    controllerName = null,
+    operationId = null,
+    operationOwnerToken = null,
+  },
+) {
+  if (!file || !trustedPeerPublicKeyB64) {
+    throw new Error("Weft handoff recovery requires an identity file and trusted phone key");
+  }
+  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  if (
+    (operationId && parsed.operationId !== operationId) ||
+    (operationOwnerToken && parsed.operationOwnerToken !== operationOwnerToken)
+  ) {
+    throw new Error("Weft handoff recovery identity ownership changed");
+  }
+  const next = {
+    ...parsed,
+    trustedPeerPublicKeyB64,
+    ...(controllerDeviceId ? { controllerDeviceId } : {}),
+    ...(controllerName ? { controllerName } : {}),
+  };
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  const fd = openSync(tmp, "wx", 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(next), "utf8");
+    closeSync(fd);
+    try {
+      chmodSync(tmp, 0o600);
+    } catch {
+      // Best-effort on Windows.
+    }
+    renameSync(tmp, file);
+  } catch (error) {
+    try {
+      closeSync(fd);
+    } catch {
+      // It may already have been closed after a successful write.
+    }
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // Best-effort cleanup of the temporary file.
+    }
+    throw error;
+  }
 }
 
 export function cleanupIdentityAfterPairing(file, { durable = false, force = false } = {}) {

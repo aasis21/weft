@@ -195,11 +195,12 @@ weft update --check
 weft update
 ```
 
-The check is read-only. The update verifies downloaded bundles against the published
-release manifest, replaces installed code and the Weft skill, and preserves `~/.weft/`
-configuration, registered projects, and persistent pairing material. Restart Copilot CLI
-or Device Station after updating. PWA updates arrive through the browser; close and reopen
-the installed PWA if a newly published version is not visible.
+The check is read-only and also reports mandatory files that need repair at the current
+version. The update uses the bundle set declared by the published release manifest,
+verifies every downloaded file, replaces installed code and the Weft skill transactionally,
+and preserves `~/.weft/` configuration, registered projects, and persistent pairing
+material. Restart Copilot CLI or Device Station after updating. PWA updates arrive through
+the browser; close and reopen the installed PWA if a newly published version is not visible.
 
 Notification behavior depends on the browser and operating system. Exercise permission
 prompts and background behavior on a real device; do not treat the local demo as proof of

@@ -109,7 +109,7 @@ uses the intended connection.
 | `weft set-transport clear` | Remove the explicit transport selection. |
 | `weft set-pairing <persistent\|ephemeral>` | Choose the Device Station pairing lifetime. |
 | `weft rotate-pairing` | Replace a persistent pairing identity and invalidate the old QR. |
-| `weft update --check` | Check for a newer hosted release. |
+| `weft update --check` | Check for a newer hosted release or missing/corrupt mandatory files. |
 | `weft version` | Show the installed version. |
 | `weft update` | Verify and install the current hosted release without deleting local data. |
 | `weft install [--from <dir>] [--skill <file>]` | Install local code bundles, optionally with a specified source and skill. |
