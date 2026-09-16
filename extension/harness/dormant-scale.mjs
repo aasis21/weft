@@ -127,9 +127,12 @@ async function startHost(baseDir, index) {
   return { host, startupMs: performance.now() - startedAt };
 }
 
-async function warmRuntime(baseDir) {
-  const { host } = await startHost(baseDir, "warmup");
-  await host.close();
+async function warmRuntime(baseDir, count) {
+  const hosts = [];
+  for (let index = 0; index < count; index++) {
+    hosts.push(await startHost(baseDir, `warmup-${index}`));
+  }
+  for (const item of hosts.reverse()) await item.host.close();
   await settle();
 }
 
@@ -147,7 +150,10 @@ async function runWorker(count) {
 
   const hosts = [];
   try {
-    await warmRuntime(baseDir);
+    // Node and libuv grow their allocators in page-sized chunks while endpoints are first
+    // created. Warm the same endpoint count and close it before taking the baseline so RSS
+    // measures retained dormant-session overhead, not one-time allocator expansion.
+    await warmRuntime(baseDir, count);
     const baselineResources = resourceCounts();
     const baselineHandles = osHandleCount();
     const baselineRemoteSockets = activeRemoteSocketCount();
@@ -318,7 +324,7 @@ export async function runDormantScaleHarness(counts = DEFAULT_COUNTS) {
     budget: {
       sessionCount: 20,
       maxIncrementalRssBytesExclusive: TWENTY_SESSION_RSS_BUDGET_BYTES,
-      excludes: "Node process baseline measured after module and endpoint warmup",
+      excludes: "Node process baseline measured after module and count-matched endpoint warmup",
     },
     platform: process.platform,
     node: process.version,
