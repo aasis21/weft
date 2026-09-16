@@ -216,7 +216,7 @@ export async function sendLifecycleCommand(
       reject(error);
     };
     socket.setTimeout(timeoutMs, () => fail(new Error("Lifecycle endpoint timed out")));
-    socket.on("connect", () => socket.end(request));
+    socket.on("connect", () => socket.write(request));
     socket.on("data", (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
       if (buffer.length > maxFrameBytes) fail(new Error("Lifecycle response exceeds its size limit"));
