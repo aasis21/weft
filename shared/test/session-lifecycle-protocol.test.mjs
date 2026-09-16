@@ -222,4 +222,16 @@ test("legacy launch replies project to monotonic lifecycle revisions and back", 
   assert.equal(projected[0].msg.operation, "resume");
   assert.equal(projected[0].msg.state, "failed");
   assert.equal(projected[1].msg.ok, false);
+
+  const activating = lifecycleStatusToLegacy(lifecycleStatus({
+    operationId: "op-activating",
+    state: "activating",
+    revision: 1,
+    target: { kind: "existing", storeAuthority: "copilot-cli", sessionId: "session-1" },
+  }));
+  assert.deepEqual(
+    activating.map((message) => message.eventSubtype),
+    [SUBTYPE.CONTROL.LAUNCH_STATUS],
+    "an in-progress activation must not be projected as a successful legacy spawn result",
+  );
 });

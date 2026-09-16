@@ -846,7 +846,6 @@ export function lifecycleStatusToLegacy(message) {
   if (status.state === "failed") {
     projected.push(spawnResult(status.operationId, false, status.failure?.message ?? status.failure?.code ?? null));
   } else if (
-    status.state === "activating" ||
     status.state === "launching" ||
     status.state === "pairing-ready" ||
     status.state === "pairing" ||

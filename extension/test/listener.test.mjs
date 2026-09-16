@@ -1167,12 +1167,20 @@ test("activation timeout fails closed and never falls through to Resume", async 
   await h.phoneChannel.send(resumeSession("open-timeout", "session-timeout"));
   const result = await waitFor(
     () => h.messages.find((message) =>
-      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT &&
-      message.msg.requestId === "open-timeout"),
+      message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS &&
+      message.msg.requestId === "open-timeout" &&
+      message.msg.state === "failed"),
     "activation timeout result",
+    3_000,
   );
-  assert.equal(result.msg.ok, false);
   assert.match(result.msg.error, /timed out|incomplete frame/);
+  assert.equal(
+    h.messages.some((message) =>
+      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT &&
+      message.msg.requestId === "open-timeout" &&
+      message.msg.ok === true),
+    false,
+  );
   assert.equal(spawnCalls, 0);
 });
 
