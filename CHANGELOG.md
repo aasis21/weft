@@ -5,6 +5,9 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+- Redesigned session activation so dormant Copilot sessions stay silent and lightweight,
+  Device Station reuses already-running terminals without duplicate Resume processes, and
+  lifecycle recovery, cancellation, and controller takeover remain single-writer safe.
 - Simplified onboarding around `install` → `weft start` → scan.
 - Added phone/laptop version mismatch and update guidance.
 - Added expiring, single-use pairing grants, nonce-bound handshakes, and authenticated
