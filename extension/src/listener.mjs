@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, statSync, watch, mkdirSync } from "node:fs";
-import { hostname, homedir } from "node:os";
-import { randomInt } from "node:crypto";
+import { watch, mkdirSync } from "node:fs";
+import { hostname } from "node:os";
 import {
   DEVICE_CAPABILITY,
   EVENT_TYPE,
@@ -15,7 +14,6 @@ import {
   clipboardTextError,
   deviceHeartbeat,
   deviceSnapshot,
-  exportKeyPair,
   generateKeyPair,
   listenForPeers,
   keepAwakeStatus,
@@ -25,11 +23,9 @@ import {
   normalizeKeepAwakeDuration,
   sessionList,
   sessionOffers,
-  spawnPairing,
   spawnResult,
 } from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransport } from "./transportFactory.mjs";
-import { spawnCopilotSession } from "./spawn.mjs";
 import * as projectsStore from "./projects.mjs";
 import * as pendingStore from "./pendingSessions.mjs";
 import * as sessionStore from "./store.mjs";
@@ -44,9 +40,18 @@ import { createDeviceTelemetryCollector } from "./deviceTelemetry.mjs";
 import { createTerminalHost } from "./terminalHost.mjs";
 import { createDeviceClipboard } from "./deviceClipboard.mjs";
 import { createDeviceKeepAwakeController, validUtilityId } from "./deviceKeepAwake.mjs";
+import {
+  createStationSessionCoordinator,
+  mergeSavedSessionsWithRuntimePresence,
+} from "./stationSessionCoordinator.mjs";
+import {
+  applyLegacyClaim,
+  coordinatorIntentFromLegacy,
+  legacyEnvelopesFromSnapshot,
+  lifecycleEnvelopeFromSnapshot,
+  lifecycleSnapshotFromLaunchRecord,
+} from "./sessionCompatibility.mjs";
 
-const ADJECTIVES = ["brave", "calm", "clever", "curious", "gentle", "quick", "sunny", "tidy"];
-const ANIMALS = ["otter", "fox", "heron", "panda", "lynx", "wren", "seal", "yak"];
 // Proactive DEVICE_HEARTBEAT cadence: independent of PROJECT_LIST_REQUEST/PROJECT_LIST, so an idle
 // phone (not polling) can still tell the listener process is alive, not just that the transport
 // socket is up.
@@ -118,6 +123,8 @@ export function createListener({
   // "already running" guard without spawning real CLI processes.
   attachedApi = attachedStore,
   launchApi = launchStore,
+  coordinator = null,
+  coordinatorFactory = createStationSessionCoordinator,
   log = console,
   // ~/.weft by default (see projects.mjs's weftHome()) — overridable so tests don't touch a real
   // user's Weft home when exercising the connections.json / pending-sessions.json registries.
@@ -185,12 +192,14 @@ export function createListener({
   let launchWatcher = null;
   let launchDebounce = null;
   const lastLaunchReplay = new Map();
+  const lifecycleOperationIds = new Set();
   // Persistent-pairing-only: true if a phone had EVER bound to this exact persisted
   // channelId/keypair as of the moment this run started (see pairingIdentity.mjs's
   // everConnected). Snapshotted before this run's own bindPeer can flip it, so a host UI (weft
   // start's status line) can tell "first scan ever" from "reconnecting a known phone" before
   // anything has connected THIS run. Stays null in ephemeral mode (no persisted state exists).
   let listenerEverConnectedBeforeThisRun = null;
+  let sessionCoordinator = coordinator;
   const terminalHost = terminalHostFactory({
     allowTerminal, projectsApi,
     send: async (message) => {
@@ -238,6 +247,16 @@ export function createListener({
     // re-resolving independently (which used to risk two separate devtunnel provisions).
     listenerTransportDescriptor ??= await resolveTransport();
     listenerTransport ??= createTransportFromDescriptor(listenerTransportDescriptor, { channelId: listenerChannelId });
+    sessionCoordinator ??= coordinatorFactory({
+      baseDir: connectionsHome,
+      sessionsApi,
+      projectsApi,
+      attachedApi,
+      pendingApi,
+      launchApi,
+      spawnFn,
+      getTransportDescriptor: () => listenerTransportDescriptor,
+    });
     pairingPayload = buildPairingPayload({
       channelId: listenerChannelId,
       publicKeyB64: listenerKeyPair.publicKeyB64,
@@ -258,6 +277,11 @@ export function createListener({
       await Promise.resolve(launchApi.pruneLaunchOperations?.({ baseDir: connectionsHome }));
     } catch {
       // Best-effort retention cleanup.
+    }
+    try {
+      await sessionCoordinator.reconcile();
+    } catch (error) {
+      log?.warn?.(`Weft Device Station: lifecycle recovery failed: ${error?.message ?? error}`);
     }
     startLaunchWatch();
     return api;
@@ -675,6 +699,7 @@ export function createListener({
         ...(terminalHost.supported ? [DEVICE_CAPABILITY.TERMINAL_V1] : []),
         ...(clipboardApi?.supported === true ? [DEVICE_CAPABILITY.CLIPBOARD_V1] : []),
         ...(keepAwakeApi?.supported === true ? [DEVICE_CAPABILITY.KEEP_AWAKE_V1] : []),
+        DEVICE_CAPABILITY.SESSION_ACTIVATION_V1,
       ],
     ));
   }
@@ -724,6 +749,15 @@ export function createListener({
       sessions = (await Promise.resolve(sessionsApi.listSessions({ limit, cwd }))) ?? [];
     } catch {
       sessions = [];
+    }
+    try {
+      sessions = await mergeSavedSessionsWithRuntimePresence(sessions, {
+        baseDir: connectionsHome,
+        sessionsApi,
+        storeAuthority: sessionCoordinator.storeAuthority,
+      });
+    } catch {
+      // Saved sessions remain available if runtime discovery is temporarily unavailable.
     }
     try {
       folders = (await Promise.resolve(sessionsApi.listSessionFolders?.())) ?? null;
@@ -815,19 +849,11 @@ export function createListener({
     if (!channel || stopped || !record?.requestId) return;
     const signature = `${record.state}:${record.updatedAt ?? 0}`;
     if (!force && lastLaunchReplay.get(record.requestId) === signature) return;
-    if (record.pairingPayload && record.state !== "accepted") {
-      await channel.send(
-        spawnPairing(record.requestId, record.pairingPayload, record.name ?? null, record.projectName ?? null),
-      );
-    }
-    if (record.state === "failed" || record.state === "abandoned" || record.state === "superseded") {
-      await channel.send(spawnResult(record.requestId, false, record.error || `Launch ${record.state}.`));
-    } else if (record.state !== "accepted") {
-      // Backward compatibility: ok:true means the launch was accepted/spawned, not that pairing
-      // has completed. LAUNCH_STATUS carries the precise ready/claimed lifecycle for new phones.
-      await channel.send(spawnResult(record.requestId, true));
-    }
-    await channel.send(launchStatus(record.requestId, record.state, launchApi.publicLaunchDetails(record)));
+    const snapshot = lifecycleSnapshotFromLaunchRecord(record);
+    const messages = lifecycleOperationIds.has(record.requestId)
+      ? [lifecycleEnvelopeFromSnapshot(snapshot)]
+      : legacyEnvelopesFromSnapshot(snapshot);
+    for (const message of messages.filter(Boolean)) await channel.send(message);
     lastLaunchReplay.set(record.requestId, signature);
   }
 
@@ -934,7 +960,7 @@ export function createListener({
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {
-      await handleSpawn(envelope.msg ?? {});
+      await handleLegacyOpen(envelope);
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST_REQUEST) {
@@ -942,27 +968,119 @@ export function createListener({
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {
-      await handleResume(envelope.msg ?? {});
+      await handleLegacyOpen(envelope);
       return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.OPEN_SESSION) {
+      await handleLifecycleOpen(envelope.msg ?? {});
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_STATUS_REQUEST) {
+      await sendLifecycleSnapshot(await sessionCoordinator.inspect(envelope.msg?.operationId));
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.TAKEOVER_CONFIRM) {
+      await sendLifecycleSnapshot(await sessionCoordinator.confirmTakeover(envelope.msg ?? {}));
+      return;
+    }
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_CANCEL) {
+      await sendLifecycleSnapshot(
+        await sessionCoordinator.cancel(envelope.msg?.operationId, envelope.msg?.revision),
+      );
+      return;
+    }
+
+    async function sendLifecycleSnapshot(snapshot) {
+      if (!snapshot || !channel || stopped) return;
+      await channel.send(lifecycleEnvelopeFromSnapshot(snapshot));
+    }
+
+    async function handleLifecycleOpen(intent) {
+      if (typeof intent?.operationId === "string" && intent.operationId) {
+        lifecycleOperationIds.add(intent.operationId);
+      }
+      try {
+        const snapshot = await sessionCoordinator.open({
+          ...intent,
+          requesterId: boundPeerDeviceId,
+        });
+        await sendLifecycleSnapshot(snapshot);
+      } catch (error) {
+        await sendLifecycleSnapshot({
+          operationId: intent?.operationId ?? "",
+          state: "failed",
+          revision: 0,
+          target: intent?.target,
+          failure: {
+            code: "internal-error",
+            message: error?.message ?? String(error),
+            actions: ["retry"],
+          },
+        });
+      }
+    }
+
+    async function handleLegacyOpen(envelope) {
+      const intent = coordinatorIntentFromLegacy(envelope, boundPeerDeviceId);
+      const id = intent?.operationId ?? envelope.msg?.requestId ?? `request-${Date.now()}`;
+      if (!intent) return;
+      try {
+        onSpawnRequest?.({
+          requestId: id,
+          ...(intent.target.kind === "existing"
+            ? { sessionId: intent.target.sessionId, resume: true }
+            : { projectName: intent.target.projectName }),
+          mode: intent.mode,
+          name: intent.name,
+        });
+      } catch {
+        // best-effort UI hook
+      }
+      try {
+        const snapshot = await sessionCoordinator.open(intent);
+        if (snapshot?.failure?.code === "operation-conflict") {
+          await channel?.send(spawnResult(id, false, snapshot.failure.message));
+          await channel?.send(launchStatus(id, "failed", {
+            operation: intent.target.kind === "existing" ? "resume" : "new",
+            sessionId: intent.target.sessionId,
+            projectName: intent.target.projectName,
+            error: snapshot.failure.message,
+          }));
+          return;
+        }
+        const record = launchApi.readLaunchOperation(id, { baseDir: connectionsHome });
+        if (record) await sendLaunchRecord(record, { force: true });
+        try {
+          onSpawnResult?.({
+            requestId: id,
+            ok: record?.state !== "failed" && record?.state !== "cancelled",
+            error: record?.failure?.message ?? record?.error ?? null,
+            ...(intent.target.kind === "existing"
+              ? { sessionId: intent.target.sessionId, resume: true }
+              : { projectName: intent.target.projectName, name: intent.name }),
+          });
+        } catch {
+          // best-effort UI hook
+        }
+      } catch (error) {
+        await channel?.send(spawnResult(id, false, error?.message ?? String(error)));
+      }
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_CLAIMED) {
       const claimedId = envelope.msg?.channelId;
       const requestId = envelope.msg?.requestId;
-      if (typeof requestId === "string" && requestId) {
-        try {
-          const claimed = await launchApi.markLaunchClaimed(requestId, { baseDir: connectionsHome });
-          if (claimed) await sendLaunchRecord(claimed, { force: true });
-        } catch {
-          // The spawned extension also records the claim; this station-side path is best-effort.
-        }
+      let claimed = null;
+      try {
+        claimed = await applyLegacyClaim(
+          { requestId, channelId: claimedId },
+          { launchApi, pendingApi, baseDir: connectionsHome },
+        );
+        if (claimed) await sendLaunchRecord(claimed, { force: true });
+      } catch {
+        // The spawned extension also records the claim; this adapter path is best-effort.
       }
       if (typeof claimedId === "string" && claimedId) {
         claimedOffers.add(claimedId);
-        try {
-          pendingApi.removePendingSession(claimedId, { baseDir: connectionsHome });
-        } catch {
-          // best-effort — the owning session also withdraws its own entry when the phone pairs.
-        }
         try {
           onSessionClaimed?.(claimedId);
         } catch {
@@ -975,288 +1093,6 @@ export function createListener({
     if (envelope.eventSubtype === SUBTYPE.CONTROL.FORGET_DEVICE) {
       await stop();
     }
-  }
-
-  async function handleSpawn({ requestId, projectName, mode = "default", name }) {
-    const id = requestId || `request-${Date.now()}`;
-    try {
-      onSpawnRequest?.({ requestId: id, projectName, mode, name });
-    } catch {
-      // best-effort UI hook
-    }
-    let operation;
-    try {
-      const begin = await launchApi.beginLaunchOperation(
-        { requestId: id, operation: "new", projectName, mode, name },
-        { baseDir: connectionsHome },
-      );
-      operation = begin.record;
-      if (begin.kind === "conflict") {
-        const error = "That requestId was already used with different launch fields.";
-        await channel?.send(spawnResult(id, false, error));
-        await channel?.send(launchStatus(id, "failed", { operation: "new", projectName, name, error }));
-        return;
-      }
-      if (begin.kind !== "created") {
-        await sendLaunchRecord(operation, { force: true });
-        return;
-      }
-      await sendLaunchRecord(operation, { force: true });
-      const project = await resolveProject(projectName);
-      const sessionName = cleanSessionName(name) || friendlyName();
-      const newChannelId = randomChannelId();
-      const newKeyPair = await generateKeyPair();
-      const { publicKeyB64, privateKeyJwk } = await exportKeyPair(newKeyPair);
-      const payload = buildPairingPayload({
-        channelId: newChannelId,
-        publicKeyB64,
-        transport: listenerTransportDescriptor ?? (await resolveTransport()),
-        kind: PAIR_KIND.SESSION,
-        appVersion: resolveVersion(),
-      });
-      operation = await launchApi.updateLaunchOperation(
-        id,
-        {
-          projectName: project.name,
-          name: sessionName,
-          pairingPayload: payload,
-          identityFile: launchApi.launchIdentityPath(id, { baseDir: connectionsHome }),
-        },
-        { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-      );
-      const result = await spawnCopilotSession({
-        project,
-        name: sessionName,
-        mode,
-        identity: {
-          channelId: newChannelId,
-          publicKeyB64,
-          privateKeyJwk,
-          pairingToken: payload.token,
-          pairingExpiresAt: payload.expiresAt,
-        },
-        operationId: id,
-        operationOwnerToken: operation.ownerToken,
-        baseDir: connectionsHome,
-        spawnFn,
-      });
-      if (!result.ok) {
-        const error = result.error || "Could not spawn Copilot";
-        operation = await launchApi.updateLaunchOperation(
-          id,
-          { state: "failed", error },
-          { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-        );
-        await sendLaunchRecord(operation, { force: true });
-        try {
-          onSpawnResult?.({ requestId: id, ok: false, error, name: sessionName, projectName: project.name });
-        } catch {
-          // best-effort UI hook
-        }
-        return;
-      }
-      operation = await launchApi.updateLaunchOperation(
-        id,
-        { state: "launched", pid: result.pid, identityFile: result.identityFile },
-        { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-      );
-      await sendLaunchRecord(operation, { force: true });
-      try {
-        onSpawnResult?.({ requestId: id, ok: true, name: sessionName, projectName: project.name });
-      } catch {
-        // best-effort UI hook
-      }
-    } catch (err) {
-      const error = err?.message ?? String(err);
-      if (operation?.ownerToken) {
-        operation = await launchApi.updateLaunchOperation(
-          id,
-          { state: "failed", error },
-          { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-        );
-      }
-      if (operation) await sendLaunchRecord(operation, { force: true });
-      else await channel?.send(spawnResult(id, false, error));
-      try {
-        onSpawnResult?.({ requestId: id, ok: false, error, projectName });
-      } catch {
-        // best-effort UI hook
-      }
-    }
-  }
-
-  // Resume an existing CLI session by id. Mirrors handleSpawn (mint identity → spawn → reply over
-  // SPAWN_PAIRING/SPAWN_RESULT so the phone pairs digitally), but spawns `copilot --resume=<id>` in
-  // the session's OWN cwd (read from the store) instead of a registered project. The cwd is
-  // re-validated here even though listSessions() already filtered dead ones, in case the folder
-  // vanished between listing and resuming.
-  async function handleResume({ requestId, sessionId, mode = "default", force = false }) {
-    const id = requestId || `request-${Date.now()}`;
-    const cleanSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
-    try {
-      onSpawnRequest?.({ requestId: id, sessionId: cleanSessionId, mode, resume: true });
-    } catch {
-      // best-effort UI hook
-    }
-    let operation;
-    const failResume = async (error) => {
-      if (operation?.ownerToken) {
-        operation = await launchApi.updateLaunchOperation(
-          id,
-          { state: "failed", error },
-          { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-        );
-      }
-      if (operation) await sendLaunchRecord(operation, { force: true });
-      else await channel?.send(spawnResult(id, false, error));
-      try {
-        onSpawnResult?.({ requestId: id, ok: false, error, sessionId: cleanSessionId, resume: true });
-      } catch {
-        // best-effort UI hook
-      }
-    };
-    try {
-      const begin = await launchApi.beginLaunchOperation(
-        { requestId: id, operation: "resume", sessionId: cleanSessionId, mode, force },
-        { baseDir: connectionsHome },
-      );
-      operation = begin.record;
-      if (begin.kind === "conflict") {
-        const error = "That requestId was already used with different launch fields.";
-        await channel?.send(spawnResult(id, false, error));
-        await channel?.send(launchStatus(id, "failed", { operation: "resume", sessionId: cleanSessionId, error }));
-        return;
-      }
-      if (begin.kind !== "created") {
-        await sendLaunchRecord(operation, { force: true });
-        return;
-      }
-      await sendLaunchRecord(operation, { force: true });
-      if (!cleanSessionId) {
-        await failResume("No session id to resume.");
-        return;
-      }
-      const cwd = await Promise.resolve(sessionsApi.readSessionCwd(cleanSessionId));
-      if (!cwd) {
-        await failResume("That session is no longer in the CLI session store.");
-        return;
-      }
-      if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
-        await failResume(`The session's folder no longer exists: ${cwd}`);
-        return;
-      }
-      // Don't fork a second `copilot --resume` onto a session that is already running and paired:
-      // both processes would write the same session-store entry. The phone catches the cases it can
-      // see, but it only knows sessions it holds a card for — a session paired to a DIFFERENT phone,
-      // or one whose card was deleted, is invisible to it and can only be caught here.
-      //
-      // Health controls the user-facing explanation, but liveness controls writer safety. Even a
-      // wedged attachment is still a live process touching this session store, so it must be
-      // explicitly terminated and confirmed gone before a replacement is spawned.
-      const attached = attachedApi.findAttachedSession(cleanSessionId, { baseDir: connectionsHome });
-      if (attached && !force) {
-        await failResume(
-          attached.healthy
-            ? "That session is already running on this laptop and connected to a phone. Resume again to close it and take it over."
-            : "That session still has a running Copilot writer. Use force takeover to close it before resuming.",
-        );
-        return;
-      }
-      if (attached && force) {
-        // Explicitly asked for. Close the old process rather than leaving it running alongside —
-        // two CLIs on one session store entry is the thing this whole guard exists to prevent.
-        const terminated = await attachedApi.terminateAttachedSession?.(cleanSessionId, {
-          baseDir: connectionsHome,
-          expectedPid: attached.pid,
-          expectedChannelId: attached.channelId,
-          // The user explicitly confirmed takeover because this writer stopped reporting healthy.
-          // PID + channel ownership checks still prevent terminating a different registry owner.
-          requireHealthy: false,
-        });
-        if (!terminated?.ok) {
-          await failResume(
-            terminated?.error ?? "Could not prove the prior Copilot process stopped; resume was cancelled for safety.",
-          );
-          return;
-        }
-        log?.info?.(`weft: closed the session already attached on pid ${attached.pid} before resuming.`);
-      }
-      const newChannelId = randomChannelId();
-      const newKeyPair = await generateKeyPair();
-      const { publicKeyB64, privateKeyJwk } = await exportKeyPair(newKeyPair);
-      const payload = buildPairingPayload({
-        channelId: newChannelId,
-        publicKeyB64,
-        transport: listenerTransportDescriptor ?? (await resolveTransport()),
-        kind: PAIR_KIND.SESSION,
-        appVersion: resolveVersion(),
-      });
-      operation = await launchApi.updateLaunchOperation(
-        id,
-        {
-          pairingPayload: payload,
-          identityFile: launchApi.launchIdentityPath(id, { baseDir: connectionsHome }),
-        },
-        { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-      );
-      const result = await spawnCopilotSession({
-        project: { name: "resume", path: cwd },
-        mode,
-        identity: {
-          channelId: newChannelId,
-          publicKeyB64,
-          privateKeyJwk,
-          pairingToken: payload.token,
-          pairingExpiresAt: payload.expiresAt,
-        },
-        resumeSessionId: cleanSessionId,
-        operationId: id,
-        operationOwnerToken: operation.ownerToken,
-        baseDir: connectionsHome,
-        spawnFn,
-      });
-      if (!result.ok) {
-        await failResume(result.error || "Could not resume Copilot");
-        return;
-      }
-      operation = await launchApi.updateLaunchOperation(
-        id,
-        { state: "launched", pid: result.pid, identityFile: result.identityFile },
-        { baseDir: connectionsHome, ownerToken: operation.ownerToken },
-      );
-      await sendLaunchRecord(operation, { force: true });
-      try {
-        onSpawnResult?.({ requestId: id, ok: true, sessionId: cleanSessionId, resume: true });
-      } catch {
-        // best-effort UI hook
-      }
-    } catch (err) {
-      await failResume(err?.message ?? String(err));
-    }
-  }
-
-  async function resolveProject(projectName) {
-    const projects = await Promise.resolve(projectsApi.listProjects());
-    const requested = cleanSessionName(projectName);
-    if (requested) {
-      const project = projects.find((p) => p.name === requested);
-      if (!project) throw new Error(`Unknown project: ${requested}`);
-      if (!existsSync(project.path) || !statSync(project.path).isDirectory()) {
-        throw new Error(`Project path is missing or not a directory: ${project.path}`);
-      }
-      return project;
-    }
-    const defaultProject = projects.find((p) => p.default === true || p.isDefault === true);
-    if (defaultProject) {
-      if (!existsSync(defaultProject.path) || !statSync(defaultProject.path).isDirectory()) {
-        throw new Error(`Project path is missing or not a directory: ${defaultProject.path}`);
-      }
-      return defaultProject;
-    }
-    // No project registered/selected as default yet (e.g. a fresh install with no
-    // `weft add-project` run) — rather than erroring out, fall back to the user's home
-    // directory so the phone can still spawn a working session immediately.
-    return { name: "home", path: homedir() };
   }
 
   const api = {
@@ -1298,15 +1134,4 @@ export function createListener({
     },
   };
   return api;
-}
-
-function cleanSessionName(name) {
-  const value = String(name ?? "").trim();
-  return value || null;
-}
-
-function friendlyName() {
-  const adjective = ADJECTIVES[randomInt(ADJECTIVES.length)];
-  const animal = ANIMALS[randomInt(ANIMALS.length)];
-  return `${adjective}-${animal}-${randomInt(1000, 9999)}`;
 }

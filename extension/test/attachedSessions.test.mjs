@@ -9,6 +9,7 @@ import {
   HEALTHY_WINDOW_MS,
   clearAttachedSession,
   findAttachedSession,
+  inspectAttachedSessionOwnership,
   listAttachedSessions,
   recordAttachedSession,
   terminateAttachedSession,
@@ -192,4 +193,31 @@ test("a session that died without cleaning up is pruned on read", () => {
 
   assert.equal(findAttachedSession("sid-1", { baseDir }), null, "the dead entry self-heals away");
   assert.equal(listAttachedSessions({ baseDir }).length, 1);
+});
+
+test("legacy ownership inspection preserves positive proof that a recorded writer exited", () => {
+  const baseDir = home();
+  recordPersisted({ sessionId: "sid-stopped", channelId: "chan-stopped" }, { baseDir });
+  const map = readRegistry(ATTACHED_SESSIONS_FILE, { baseDir });
+  map["sid-stopped"] = { ...map["sid-stopped"], pid: 0x7ffffffe };
+  writeRegistryAtomic(ATTACHED_SESSIONS_FILE, map, { baseDir });
+
+  assert.deepEqual(
+    inspectAttachedSessionOwnership("sid-stopped", { baseDir }),
+    {
+      state: "stopped",
+      writer: {
+        sessionId: "sid-stopped",
+        channelId: "chan-stopped",
+        cwd: null,
+        pid: 0x7ffffffe,
+        boundAt: map["sid-stopped"].boundAt,
+        lastHealthyAt: map["sid-stopped"].lastHealthyAt,
+      },
+    },
+  );
+  assert.deepEqual(
+    inspectAttachedSessionOwnership("never-recorded", { baseDir }),
+    { state: "unknown" },
+  );
 });

@@ -97,7 +97,7 @@ test("weft update --check reports a newer local development build without instal
 });
 
 test("weft update keeps the complete prior bundle set when a staged download fails integrity", async () => {
-  const bundleNames = ["extension.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
+  const bundleNames = ["extension.mjs", "activeRuntime.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
   const payloads = Object.fromEntries(bundleNames.map((name) => [name, `new:${name}`]));
   const files = Object.fromEntries(
     bundleNames.map((name) => [

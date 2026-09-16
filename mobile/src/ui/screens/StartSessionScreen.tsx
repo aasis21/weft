@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { SpawnMode } from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, SpawnMode } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
+import {
+  lifecycleFailureMessage,
+  requiresTakeoverConfirmation,
+  type SessionOpenIntent,
+} from '@/session/access/sessionAccess';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar, PlusGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
@@ -13,33 +18,20 @@ import { ALL_FOLDERS, filterStoredSessions, folderOptions, isFiltering } from '@
  *  folder, permissions — and differ only in what the folder step is choosing *within*. */
 export type StartMode = 'new' | 'resume';
 
-export interface ResumeRequest {
-  sessionId: string;
-  mode: SpawnMode;
-  title: string;
-  cwd: string;
-  /** Close a session the laptop reports as already attached, and resume anyway. Only ever set from
-   *  the second, confirmed tap — see the `blocked` state below. */
-  force?: boolean;
-}
-
 interface StartSessionScreenProps {
   hasSessions: boolean;
   devices: ListenerDeviceState[];
   /** Preselect a device (e.g. arriving from the "Start session" button on a DevicesScreen row)
    *  instead of defaulting to the top of the sorted list. */
-  initialChannelId?: string;
+  initialChannelId?: string | undefined;
   /** Open straight onto the Resume tab (arriving from "Resume a session" on a device). */
   initialMode?: StartMode;
   onConnectDevice(channelId: string): void;
-  onStart(channelId: string, opts: { projectName: string; mode: SpawnMode; name?: string }): Promise<void>;
+  onOpen(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
+  onConfirmTakeover(operationId: string): Promise<LifecycleStatusMsg>;
   /** On-demand pull of the device's recent resumable CLI sessions. Never automatic: the store is
    *  large and rewritten every turn, and the reply arrives asynchronously. */
   onRefreshSessions(channelId: string, cwd?: string | null): void;
-  /** Resume a past CLI session: spawn `copilot --resume=<id>` in its cwd and pair to it. */
-  onResume(channelId: string, req: ResumeRequest): Promise<void>;
-  /** Route to a session the phone is already driving, instead of resuming a second copy of it. */
-  onOpenSession(channelId: string): void;
   onScanListener(): void;
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
   onManageDevices?(): void;
@@ -54,22 +46,15 @@ interface StartSessionScreenProps {
   onGoHome(): void;
 }
 
-/** The laptop's refusal to fork a second CLI onto a live session (see extension/src/listener.mjs).
- *  Matched loosely on purpose — the point is to recognise the class of failure, not the wording. */
-function isAlreadyAttached(message: string): boolean {
-  return /already running/i.test(message);
-}
-
 export function StartSessionScreen({
   hasSessions,
   devices,
   initialChannelId,
   initialMode,
   onConnectDevice,
-  onStart,
+  onOpen,
+  onConfirmTakeover,
   onRefreshSessions,
-  onResume,
-  onOpenSession,
   onScanListener,
   onManageDevices,
   onCancel,
@@ -91,9 +76,7 @@ export function StartSessionScreen({
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The session the laptop refused to resume because it is already attached, held so the CTA can
-   *  offer the override rather than making the user find the row again. */
-  const [blocked, setBlocked] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState<LifecycleStatusMsg | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   /** Arriving with a device already chosen (the "Start session" / "Resume a session" buttons on a
    *  device row) means the device question is already answered, so step 1 opens collapsed to a
@@ -221,43 +204,68 @@ export function StartSessionScreen({
     setBlocked(null);
   };
 
+  const applyStatus = (status: LifecycleStatusMsg): boolean => {
+    if (requiresTakeoverConfirmation(status)) {
+      setError(lifecycleFailureMessage(status.failure));
+      setBlocked(status);
+      setBusy(false);
+      return false;
+    }
+    if (status.state !== 'failed') return true;
+    setError(lifecycleFailureMessage(status.failure));
+    setBlocked(null);
+    setBusy(false);
+    return false;
+  };
+
   const submitNew = async (): Promise<void> => {
     if (!selected || !selected.connected || !projectName) return;
     setBusy(true);
     setError(null);
     try {
-      await onStart(selected.channelId, { projectName, mode, name: name.trim() || undefined });
+      applyStatus(await onOpen({
+        deviceChannelId: selected.channelId,
+        target: { kind: 'new', projectName },
+        mode,
+        name: name.trim() || null,
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the session.');
       setBusy(false);
     }
   };
 
-  const submitResume = async (force = false): Promise<void> => {
+  const submitResume = async (): Promise<void> => {
     if (!selected || !selected.connected || !chosenSession) return;
-    // Already on the phone: open the card we have rather than asking the laptop for a second one.
-    if (chosenLive) {
-      onOpenSession(chosenLive.meta.channelId);
-      return;
-    }
     setBusy(true);
     setError(null);
     setBlocked(null);
     try {
-      await onResume(selected.channelId, {
-        sessionId: chosenSession.sessionId,
+      applyStatus(await onOpen({
+        deviceChannelId: selected.channelId,
+        target: {
+          kind: 'existing',
+          storeAuthority: null,
+          sessionId: chosenSession.sessionId,
+        },
         mode,
         title: chosenSession.title || chosenSession.cwd,
         cwd: chosenSession.cwd,
-        ...(force ? { force: true } : {}),
-      });
+      }));
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not resume the session.';
-      setError(message);
-      // The laptop is running this session and still healthy. Offering the override matters: if
-      // weft on the laptop has broken, resuming is the only way back, and refusing outright would
-      // leave no route at all.
-      if (!force && isAlreadyAttached(message)) setBlocked(chosenSession.sessionId);
+      setError(err instanceof Error ? err.message : 'Could not open the session.');
+      setBusy(false);
+    }
+  };
+
+  const submitTakeover = async (): Promise<void> => {
+    if (!blocked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      applyStatus(await onConfirmTakeover(blocked.operationId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not take over the session.');
       setBusy(false);
     }
   };
@@ -267,7 +275,9 @@ export function StartSessionScreen({
     ? 'No devices yet'
     : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'} · ${onlineCount} online`;
 
-  const forcing = blocked !== null && blocked === chosenSession?.sessionId;
+  const forcing =
+    blocked?.failure?.actions.includes('confirm-takeover') === true &&
+    blocked.challenge?.sessionId === chosenSession?.sessionId;
   const ctaDisabled = busy
     || !selected
     || !selected.connected
@@ -587,7 +597,7 @@ export function StartSessionScreen({
                 className="session-primary-action"
                 disabled={ctaDisabled}
                 title={selected && !selected.connected ? 'Device is offline — reconnect it to start a session.' : undefined}
-                onClick={() => void (resuming ? submitResume(forcing) : submitNew())}
+                onClick={() => void (resuming ? (forcing ? submitTakeover() : submitResume()) : submitNew())}
               >
                 {ctaLabel}
               </button>

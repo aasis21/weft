@@ -11,6 +11,24 @@
 5. If pairing fails, open **Trouble connecting?** in the app and run the connectivity
    test.
 
+## Session activation troubleshooting
+
+- **The phone cannot discover, start, resume, or activate sessions:** run `weft start`
+  and leave Device Station open. Phone automation is unavailable without Station.
+- **You only want the current terminal:** invoke `/weft` in that Copilot session and
+  scan its QR. This direct pairing does not require Device Station.
+- **Opening a running session starts another terminal:** update and restart Device
+  Station and Copilot CLI, then retry Open. A compatible live session should be
+  activated in place; do not manually start another Resume while ownership is uncertain.
+- **You ran `/clear`:** the old phone attachment is intentionally disconnected. The
+  replacement session is dormant; open it through Station or invoke `/weft` again.
+- **Another phone controls the session:** confirm takeover only if you intend to replace
+  it. For a responsive session, confirmed takeover disconnects the prior controller
+  immediately without restarting Copilot.
+- **Station restarted during Start/Open:** retry the same operation. Recovery state is
+  retained for three days, and Weft should reconcile the existing process rather than
+  launch a duplicate.
+
 ## Report a problem
 
 Use [GitHub Issues](https://github.com/aasis21/weft/issues/new/choose) for reproducible,

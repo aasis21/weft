@@ -110,6 +110,74 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.snapshot().devices).toHaveLength(0);
   });
 
+  it('uses lifecycle Open with a new Station and retains legacy Start for an old Station', async () => {
+    await h!.manager.addByQr(listenerQr('listener-matrix'));
+    await h!.flush();
+    const listener = registry.get('listener-matrix')!;
+
+    listener.emit(B.projectList(
+      [{ name: 'weft', path: 'C:\\Users\\akash\\weft', isDefault: true }],
+      'New Station',
+      'device-new',
+      [B.DEVICE_CAPABILITY.SESSION_ACTIVATION_V1],
+    ));
+    await h!.flush();
+
+    const tempId = await h!.manager.spawnSession('listener-matrix', {
+      projectName: 'weft',
+      mode: 'default',
+      operationId: 'matrix-open',
+    });
+    await h!.flush();
+
+    expect(listener.sentOfKind('control.open_session')).toEqual([
+      expect.objectContaining({
+        operationId: 'matrix-open',
+        target: { kind: 'new', projectName: 'weft' },
+      }),
+    ]);
+    expect(listener.sentOfKind('control.spawn_session')).toHaveLength(0);
+
+    const payload = {
+      v: 1 as const,
+      channelId: 'matrix-session',
+      pub: 'matrix-pub',
+      kind: 'session' as const,
+      transport: { kind: 'local' as const },
+    };
+    listener.emit(B.lifecycleStatus({
+      operationId: 'matrix-open',
+      state: 'pairing-ready',
+      revision: 1,
+      target: { kind: 'new', projectName: 'weft' },
+      action: 'start',
+      payload,
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+    await h!.flush();
+
+    expect(h!.byChannel(tempId)).toBeUndefined();
+    expect(h!.active()?.meta.channelId).toBe('matrix-session');
+
+    listener.emit(B.projectList(
+      [{ name: 'weft', path: 'C:\\Users\\akash\\weft', isDefault: true }],
+      'Old Station',
+      'device-new',
+      [],
+    ));
+    await h!.flush();
+    await h!.manager.spawnSession('listener-matrix', {
+      projectName: 'weft',
+      mode: 'default',
+      operationId: 'matrix-legacy',
+    });
+    await h!.flush();
+    expect(listener.sentOfKind('control.spawn_session').at(-1)).toMatchObject({
+      requestId: 'matrix-legacy',
+      projectName: 'weft',
+    });
+  });
+
   it('keeps a slow launch recoverable, retries the same operation, and accepts late pairing', async () => {
     await h!.manager.addByQr(listenerQr('listener-timeout'));
     await h!.flush();
@@ -209,5 +277,55 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.snapshot().activeId).toBe('pair-retry-session');
     expect(pairingIdentities).toHaveLength(2);
     expect(pairingIdentities[1]).toEqual(firstIdentity);
+  });
+
+  it('preserves the accepted operation and phone identity across an app reload', async () => {
+    await h!.manager.addByQr(listenerQr('listener-pair-reload'));
+    await h!.flush();
+    const listener = registry.get('listener-pair-reload')!;
+    const tempId = await h!.manager.spawnSession('listener-pair-reload', {
+      projectName: 'weft',
+      mode: 'default',
+      operationId: 'reload-operation',
+    });
+    await h!.flush();
+    const request = listener.sentOfKind('control.spawn_session')[0]!;
+    const payload = {
+      v: 1 as const,
+      channelId: 'pair-reload-session',
+      pub: 'pair-reload-pub',
+      kind: 'session' as const,
+      transport: { kind: 'local' as const },
+    };
+
+    failNextPairing();
+    listener.emit(B.launchStatus(request.requestId as string, 'ready', { payload, operation: 'new' }));
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 5; i += 1) await h!.flush();
+    const firstIdentity = pairingIdentities[0];
+    expect(firstIdentity).toBeDefined();
+    expect(h!.byChannel(tempId)?.status).toBe('error');
+    expect(await loadPendingOperations()).toEqual([
+      expect.objectContaining({
+        requestId: 'reload-operation',
+        stage: 'pairing-failed',
+        pairingPayload: payload,
+        phoneIdentity: firstIdentity,
+      }),
+    ]);
+
+    h!.dispose();
+    h = makeManager();
+    await h!.init();
+    for (let i = 0; i < 20 && !h!.byChannel('pair-reload-session'); i += 1) {
+      await h!.flush();
+    }
+
+    expect(pairingIdentities).toHaveLength(2);
+    expect(h!.active()).toMatchObject({
+      status: 'connecting',
+      meta: { channelId: 'pair-reload-session' },
+    });
+    expect(pairingIdentities.at(-1)).toEqual(firstIdentity);
   });
 });

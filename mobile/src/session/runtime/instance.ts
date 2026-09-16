@@ -1,4 +1,5 @@
 import { createSessionRuntime } from './sessionRuntime';
+import { RuntimeSessionAccess } from '@/session/access/sessionAccess';
 
 /**
  * The app-wide session runtime. One store, one transport registry, one watchdog for the whole
@@ -6,3 +7,4 @@ import { createSessionRuntime } from './sessionRuntime';
  * they build isolated runtimes via `createSessionRuntime()` so state can't bleed between cases.
  */
 export const sessionRuntime = createSessionRuntime();
+export const sessionAccess = new RuntimeSessionAccess(sessionRuntime);

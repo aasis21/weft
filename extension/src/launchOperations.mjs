@@ -21,11 +21,24 @@ import { isPidAlive } from "./registryFile.mjs";
 export const LAUNCH_OPERATIONS_DIR = "launch-operations";
 export const LAUNCH_IDENTITIES_DIR = "launch-identities";
 export const LAUNCH_RESERVATIONS_DIR = "launch-reservations";
-export const RESOLVED_TTL_MS = 24 * 60 * 60 * 1_000;
-export const UNRESOLVED_NEW_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+export const LIFECYCLE_RETENTION_MS = 3 * 24 * 60 * 60 * 1_000;
+export const RESOLVED_TTL_MS = LIFECYCLE_RETENTION_MS;
+export const UNRESOLVED_NEW_TTL_MS = LIFECYCLE_RETENTION_MS;
 
-const TERMINAL_STATES = new Set(["failed", "claimed", "abandoned", "superseded"]);
-const PROGRESS = Object.freeze({ accepted: 0, launched: 1, ready: 2, claimed: 3 });
+const TERMINAL_STATES = new Set(["open", "failed", "cancelled", "claimed", "abandoned", "superseded"]);
+const PROGRESS = Object.freeze({
+  accepted: 0,
+  reserved: 1,
+  reconnecting: 2,
+  activating: 2,
+  launching: 2,
+  launched: 3,
+  "pairing-ready": 4,
+  ready: 4,
+  pairing: 5,
+  open: 6,
+  claimed: 6,
+});
 
 function safeId(value) {
   return createHash("sha256").update(String(value)).digest("hex");
@@ -62,8 +75,8 @@ export function launchIdentityPath(requestId, { baseDir } = {}) {
   return join(launchIdentitiesDir({ baseDir }), `${safeId(requestId)}.json`);
 }
 
-function reservationPath(sessionId, baseDir) {
-  return join(reservationsDir(baseDir), `${safeId(sessionId)}.json`);
+function reservationPath(targetKey, baseDir) {
+  return join(reservationsDir(baseDir), `${safeId(targetKey)}.json`);
 }
 
 function lockPath(kind, key, baseDir) {
@@ -148,17 +161,34 @@ async function withEntryLock(kind, key, baseDir, fn) {
 
 function normalizedRequest(request) {
   const operation = request?.operation === "resume" ? "resume" : "new";
+  const storeAuthority =
+    operation === "resume" && typeof request?.storeAuthority === "string" && request.storeAuthority.trim()
+      ? request.storeAuthority.trim()
+      : null;
+  const sessionId =
+    operation === "resume" && typeof request?.sessionId === "string" ? request.sessionId.trim() : null;
+  const targetKey =
+    typeof request?.targetKey === "string" && request.targetKey.trim()
+      ? request.targetKey.trim()
+      : operation === "resume" && sessionId
+        ? `existing:${storeAuthority ?? "default"}:${sessionId}`
+        : null;
   return {
     operation,
     projectName: operation === "new" && typeof request?.projectName === "string" ? request.projectName.trim() : null,
-    sessionId: operation === "resume" && typeof request?.sessionId === "string" ? request.sessionId.trim() : null,
+    storeAuthority,
+    sessionId,
+    targetKey,
     mode: request?.mode === "allow-all" ? "allow-all" : "default",
     name: operation === "new" && typeof request?.name === "string" && request.name.trim() ? request.name.trim() : null,
     force: operation === "resume" && request?.force === true,
+    requesterId:
+      typeof request?.requesterId === "string" && request.requesterId.trim() ? request.requesterId.trim() : null,
+    takeoverRequested: operation === "resume" && request?.takeoverRequested === true,
   };
 }
 
-function fingerprint(request) {
+export function launchRequestFingerprint(request) {
   return createHash("sha256").update(JSON.stringify(normalizedRequest(request))).digest("hex");
 }
 
@@ -172,7 +202,7 @@ export async function beginLaunchOperation(request, { baseDir, now = Date.now() 
   const requestId = typeof request?.requestId === "string" ? request.requestId.trim() : "";
   if (!requestId) throw new Error("Launch requestId is required");
   const normalized = normalizedRequest(request);
-  const requestFingerprint = fingerprint(normalized);
+  const requestFingerprint = launchRequestFingerprint(normalized);
   return withEntryLock("request", requestId, baseDir, async () => {
     const existing = readLaunchOperation(requestId, { baseDir });
     if (existing) {
@@ -188,7 +218,20 @@ export async function beginLaunchOperation(request, { baseDir, now = Date.now() 
         fingerprint: requestFingerprint,
         ownerToken: randomUUID(),
         ...normalized,
+        target:
+          normalized.operation === "resume"
+            ? {
+                kind: "existing",
+                storeAuthority: normalized.storeAuthority ?? "default",
+                sessionId: normalized.sessionId,
+              }
+            : { kind: "new", projectName: normalized.projectName },
+        action: "undecided",
         state: "accepted",
+        revision: 0,
+        runtimeId: null,
+        identityRef: null,
+        failure: null,
         pairingPayload: null,
         identityFile: null,
         pid: null,
@@ -204,9 +247,9 @@ export async function beginLaunchOperation(request, { baseDir, now = Date.now() 
       return { kind: "created", record };
     };
 
-    if (normalized.operation !== "resume" || !normalized.sessionId) return create();
-    return withEntryLock("resume", normalized.sessionId, baseDir, async () => {
-      const file = reservationPath(normalized.sessionId, baseDir);
+    if (!normalized.targetKey) return create();
+    return withEntryLock("target", normalized.targetKey, baseDir, async () => {
+      const file = reservationPath(normalized.targetKey, baseDir);
       const reservation = readJson(file);
       if (reservation?.requestId && reservation.requestId !== requestId) {
         const owner = readLaunchOperation(reservation.requestId, { baseDir });
@@ -218,7 +261,20 @@ export async function beginLaunchOperation(request, { baseDir, now = Date.now() 
             fingerprint: requestFingerprint,
             ownerToken: randomUUID(),
             ...normalized,
+            target:
+              normalized.operation === "resume"
+                ? {
+                    kind: "existing",
+                    storeAuthority: normalized.storeAuthority ?? "default",
+                    sessionId: normalized.sessionId,
+                  }
+                : { kind: "new", projectName: normalized.projectName },
+            action: "undecided",
             state: "failed",
+            revision: 0,
+            runtimeId: null,
+            identityRef: null,
+            failure: { code: "target-reserved", message: error, retryable: true },
             pairingPayload: null,
             identityFile: null,
             pid: null,
@@ -234,7 +290,7 @@ export async function beginLaunchOperation(request, { baseDir, now = Date.now() 
           return { kind: "reserved", record: rejected, reservedBy: reservation.requestId };
         }
       }
-      writeJsonAtomic(file, { sessionId: normalized.sessionId, requestId, createdAt: now });
+      writeJsonAtomic(file, { targetKey: normalized.targetKey, requestId, createdAt: now });
       return create();
     });
   });
@@ -246,10 +302,10 @@ function nextState(current, requested) {
   return (PROGRESS[requested] ?? -1) >= (PROGRESS[current] ?? -1) ? requested : current;
 }
 
-async function releaseResumeReservation(record, baseDir) {
-  if (record?.operation !== "resume" || !record.sessionId) return;
-  await withEntryLock("resume", record.sessionId, baseDir, async () => {
-    const file = reservationPath(record.sessionId, baseDir);
+async function releaseTargetReservation(record, baseDir) {
+  if (!record?.targetKey) return;
+  await withEntryLock("target", record.targetKey, baseDir, async () => {
+    const file = reservationPath(record.targetKey, baseDir);
     const reservation = readJson(file);
     if (reservation?.requestId === record.requestId) {
       try {
@@ -264,12 +320,13 @@ async function releaseResumeReservation(record, baseDir) {
 export async function updateLaunchOperation(
   requestId,
   updates,
-  { baseDir, ownerToken, now = Date.now() } = {},
+  { baseDir, ownerToken, expectedRevision, now = Date.now() } = {},
 ) {
   const result = await withEntryLock("request", requestId, baseDir, async () => {
     const current = readLaunchOperation(requestId, { baseDir });
     if (!current) return null;
     if (ownerToken && current.ownerToken !== ownerToken) return null;
+    if (Number.isInteger(expectedRevision) && (current.revision ?? 0) !== expectedRevision) return current;
     const requestedState = updates?.state;
     if (requestedState && TERMINAL_STATES.has(current.state) && requestedState !== current.state) {
       return current;
@@ -281,7 +338,18 @@ export async function updateLaunchOperation(
       requestId: current.requestId,
       fingerprint: current.fingerprint,
       ownerToken: current.ownerToken,
+      target: current.target,
+      targetKey: current.targetKey,
+      action:
+        current.action &&
+        current.action !== "undecided" &&
+        updates?.action &&
+        updates.action !== current.action &&
+        updates.action !== "takeover"
+          ? current.action
+          : (updates?.action ?? current.action ?? "undecided"),
       state,
+      revision: (current.revision ?? 0) + 1,
       updatedAt: now,
     };
     if (state === "launched" && !next.launchedAt) next.launchedAt = now;
@@ -291,10 +359,12 @@ export async function updateLaunchOperation(
     }
     if (state === "claimed" && !next.claimedAt) next.claimedAt = now;
     if (state === "failed" && !next.failedAt) next.failedAt = now;
+    if (state === "cancelled" && !next.cancelledAt) next.cancelledAt = now;
+    if (state === "open" && !next.openedAt) next.openedAt = now;
     writeJsonAtomic(launchOperationPath(requestId, { baseDir }), next);
     return next;
   });
-  if (result && TERMINAL_STATES.has(result.state)) await releaseResumeReservation(result, baseDir);
+  if (result && TERMINAL_STATES.has(result.state)) await releaseTargetReservation(result, baseDir);
   return result;
 }
 
@@ -318,6 +388,8 @@ export function publicLaunchDetails(record) {
   return {
     ...(record.pairingPayload ? { payload: record.pairingPayload } : {}),
     ...(record.operation ? { operation: record.operation } : {}),
+    ...(record.action ? { action: record.action } : {}),
+    ...(Number.isInteger(record.revision) ? { revision: record.revision } : {}),
     ...(record.projectName ? { projectName: record.projectName } : {}),
     ...(record.sessionId ? { sessionId: record.sessionId } : {}),
     ...(record.name ? { name: record.name } : {}),
@@ -336,9 +408,16 @@ export async function pruneLaunchOperations(
     resolvedTtlMs = RESOLVED_TTL_MS,
     unresolvedNewTtlMs = UNRESOLVED_NEW_TTL_MS,
     isProcessAlive = isPidAlive,
+    isLiveRuntimeReference = () => false,
+    isIdentityReferenced = () => false,
   } = {},
 ) {
   const records = listLaunchOperations({ baseDir });
+  const unresolved = records.filter((record) => !TERMINAL_STATES.has(record.state));
+  const referencedRuntimeIds = new Set(unresolved.map((record) => record.runtimeId).filter(Boolean));
+  const referencedIdentities = new Set(
+    unresolved.flatMap((record) => [record.identityRef, record.identityFile]).filter(Boolean),
+  );
   for (const record of records) {
     const age = now - (record.updatedAt ?? record.createdAt ?? now);
     if (!TERMINAL_STATES.has(record.state)) {
@@ -354,6 +433,19 @@ export async function pruneLaunchOperations(
     }
     if (age <= resolvedTtlMs) continue;
     if (Number.isInteger(record.pid) && record.pid > 0 && isProcessAlive(record.pid)) continue;
+    if (
+      record.runtimeId &&
+      (referencedRuntimeIds.has(record.runtimeId) || await isLiveRuntimeReference(record))
+    ) {
+      continue;
+    }
+    if (
+      (record.identityRef && referencedIdentities.has(record.identityRef)) ||
+      (record.identityFile && referencedIdentities.has(record.identityFile)) ||
+      await isIdentityReferenced(record)
+    ) {
+      continue;
+    }
     await withEntryLock("request", record.requestId, baseDir, async () => {
       const latest = readLaunchOperation(record.requestId, { baseDir });
       if (!latest || !TERMINAL_STATES.has(latest.state)) return;
@@ -362,14 +454,39 @@ export async function pruneLaunchOperations(
       } catch {
         // Best-effort.
       }
-      if (latest.identityFile && existsSync(latest.identityFile)) {
+      for (const identityFile of new Set([latest.identityRef, latest.identityFile].filter(Boolean))) {
+        if (!existsSync(identityFile)) continue;
         try {
-          rmSync(latest.identityFile, { force: true });
+          rmSync(identityFile, { force: true });
         } catch {
           // Best-effort.
         }
       }
     });
+  }
+
+  const retainedIdentityFiles = new Set(
+    listLaunchOperations({ baseDir })
+      .flatMap((record) => [record.identityRef, record.identityFile])
+      .filter(Boolean),
+  );
+  for (const name of readdirSync(launchIdentitiesDir({ baseDir }))) {
+    if (!name.endsWith(".json")) continue;
+    const file = join(launchIdentitiesDir({ baseDir }), name);
+    if (retainedIdentityFiles.has(file)) continue;
+    let age;
+    try {
+      age = now - statSync(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (age <= resolvedTtlMs) continue;
+    if (await isIdentityReferenced({ identityRef: file, identityFile: file })) continue;
+    try {
+      rmSync(file, { force: true });
+    } catch {
+      // Best-effort.
+    }
   }
 }
 

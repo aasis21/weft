@@ -6,6 +6,7 @@ import { packageNativeRuntime } from "../scripts/package-native-runtime.mjs";
 import { stageNativeRuntime } from "../scripts/native-runtime.mjs";
 
 const outfile = "dist/extension.mjs";
+const activeRuntimeOutfile = "dist/activeRuntime.mjs";
 
 // Bake the repo-root VERSION into every bundle so the installed extension/CLI report the right
 // version with zero runtime file reads (see src/version.mjs). `define` replaces the bare
@@ -22,11 +23,32 @@ await build({
   format: "esm",
   sourcemap: true,
   define,
-  external: ["@github/copilot-sdk", "@github/copilot-sdk/extension", "node-pty"],
+  external: [
+    "@github/copilot-sdk",
+    "@github/copilot-sdk/extension",
+    "node-pty",
+    "./activeRuntime.mjs",
+  ],
   // Bundled CommonJS deps (qrcode, supabase transitive deps) call require("fs").
   // In ESM output esbuild's shim throws "Dynamic require of ... is not supported"
   // because `require` is undefined. Re-create a real require from import.meta.url
   // so those built-in requires resolve at runtime.
+  banner: {
+    js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
+  },
+  logLevel: "info",
+});
+
+await build({
+  entryPoints: ["src/activeRuntime.mjs"],
+  outfile: activeRuntimeOutfile,
+  bundle: true,
+  platform: "node",
+  target: "node20",
+  format: "esm",
+  sourcemap: true,
+  define,
+  external: ["node-pty"],
   banner: {
     js: "import { createRequire as __weftCreateRequire } from 'node:module'; const require = __weftCreateRequire(import.meta.url);",
   },
@@ -113,3 +135,5 @@ try {
     process.exit(1);
   }
 }
+await import(pathToFileURL(activeRuntimeOutfile).href);
+console.log("[verify] active runtime bundle loads without activating");

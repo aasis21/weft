@@ -9,6 +9,22 @@ The **code** is open source (Apache-2.0); operating a **relay** is a separate co
 Most users do not need this guide. Install Weft, run `weft start`, and scan the QR to
 use the configured hosted relay. Continue here only to operate or select a relay.
 
+## Control plane and session traffic
+
+Device Station is the required machine-wide bridge for phone-driven discovery, Start,
+Open/Resume, and dormant-session activation. `/weft` is an explicit direct pairing for
+one current Copilot session and does not require Station.
+
+Before activation, each compatible extension writes only a small user-local presence
+record and listens on one Windows named pipe or Unix-domain socket. It performs no relay
+lookup, remote connection, cryptography, QR generation, logging, diagnostics,
+polling, heartbeat, retry timer, or other timer. Files provide discovery and recovery;
+the local endpoint provides authenticated live lifecycle commands. Neither is a relay.
+
+After pairing, application traffic flows directly between the phone and Copilot session
+over the selected encrypted Supabase or Dev Tunnel transport. Device Station and the
+local lifecycle endpoint are not in the active phone traffic path.
+
 ## Two separate things
 
 - **The code license** (Apache-2.0) governs the source: anyone may use, modify, and

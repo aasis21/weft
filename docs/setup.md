@@ -47,7 +47,7 @@ npm test -w @aasis21/weft-shared
 node extension/harness/harness.mjs --auto
 
 # 3. Bundle the extension (esbuild; @github/copilot-sdk left external)
-npm run build -w @aasis21/weft-extension   # -> extension/dist/extension.mjs
+npm run build -w @aasis21/weft-extension   # -> dormant extension.mjs + lazy activeRuntime.mjs
 
 # 4. Build the mobile app (Vite production build)
 npm run build -w @aasis21/weft-mobile
@@ -77,7 +77,8 @@ application payloads travel over AES-256-GCM.
 The source installer writes code into your personal Copilot extensions directory.
 Review it before running it in a managed environment.
 
-**1. Install the extension** (builds + copies the single bundled `extension.mjs` into
+**1. Install the extension** (builds + copies the dormant `extension.mjs` bootstrap and lazy
+`activeRuntime.mjs` into
 `~/.copilot/extensions/weft/`, where the CLI auto-discovers it — that directory holds
 installed **code only**):
 
@@ -123,12 +124,24 @@ Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and
 code. The phone can then start or resume Copilot sessions in registered projects.
 For a source-built phone UI, use your HTTPS development deployment instead.
 
+Device Station must remain running for phone-driven project/session discovery, Start,
+Open/Resume, and activation of dormant sessions. If the selected Copilot session is
+already open, Station uses its user-local lifecycle endpoint to activate that exact
+terminal process; it does not launch a second `copilot --resume`.
+
+To pair only the current terminal, invoke `/weft` inside that Copilot session and scan
+its QR. This is an explicit direct-session path and does not require Device Station.
+After either path pairs, active prompts, events, approvals, streaming, and terminal data
+flow directly between the phone and session over the encrypted relay, bypassing Station
+and the local lifecycle endpoint.
+
 Keep the same browser identity when testing reconnection. If its storage has been
 cleared, stop the station and follow
 [phone replacement](https://aasis21.github.io/weft/#recovery). Do not reset pairing
 as a substitute for diagnosing a relay problem.
 
-To mirror one existing Copilot session, run `/weft` inside that session instead.
+After `/clear`, the replacement Copilot session starts dormant and must be activated
+again through Device Station or a new `/weft` QR.
 See [advanced usage](./advanced.md) for per-session transport overrides.
 
 > The web app is a static build of `mobile/dist`; the docs site is the separate

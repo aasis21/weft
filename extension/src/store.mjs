@@ -263,6 +263,31 @@ export async function readSessionCwd(sessionId, dbPath = DB_PATH) {
   }
 }
 
+export async function readSession(sessionId, dbPath = DB_PATH) {
+  if (!sessionId) return null;
+  try {
+    const db = await openDb(dbPath);
+    try {
+      const row = db
+        .prepare("SELECT id, cwd, repository, branch, summary, updated_at FROM sessions WHERE id = ?")
+        .get(sessionId);
+      if (!row?.id || !row.cwd) return null;
+      return {
+        sessionId: row.id,
+        title: (row.summary || "").trim() || basename(row.cwd) || row.cwd,
+        cwd: row.cwd,
+        repository: (row.repository || "").trim() || null,
+        branch: (row.branch || "").trim() || null,
+        updatedAt: parseTs(row.updated_at),
+      };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** CLI stores `timestamp` as ISO-8601 text; normalize to epoch ms (0 if unparseable). */
 function parseTs(raw) {
   if (raw == null) return 0;

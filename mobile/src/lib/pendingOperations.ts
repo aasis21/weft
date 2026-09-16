@@ -1,4 +1,4 @@
-import type { PairingPayload, SpawnMode } from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, PairingPayload, SpawnMode } from '@aasis21/weft-shared';
 import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 
 const PENDING_OPERATIONS_KEY = 'weft.pendingOperations.v1';
@@ -30,6 +30,7 @@ export interface PendingOperation {
   name?: string;
   mode: SpawnMode;
   sessionId?: string;
+  storeAuthority?: string | null;
   cwd?: string;
   title?: string;
   force?: boolean;
@@ -37,6 +38,7 @@ export interface PendingOperation {
   stage: PendingOperationStage;
   pairingPayload?: PairingPayload;
   phoneIdentity?: PendingPhoneIdentity;
+  lifecycleStatus?: LifecycleStatusMsg;
 }
 
 function isPendingOperation(value: unknown): value is PendingOperation {

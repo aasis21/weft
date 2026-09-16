@@ -55,6 +55,7 @@ jobs:
           npm run build -w @aasis21/weft-extension
           mkdir -p release
           cp extension/dist/extension.mjs release/
+          cp extension/dist/activeRuntime.mjs release/
           cp extension/dist/relayServerProcess.mjs release/
           cp extension/dist/devtunnelHostWatchdog.mjs release/
           cp extension/dist/weft.mjs release/

@@ -28,6 +28,8 @@ import {
   keepAwakeStart,
   keepAwakeStop,
   keepAwakeStatusRequest,
+  openSession,
+  lifecycleCancel,
   KEEP_AWAKE_MIN_MS,
   CLIPBOARD_MAX_BYTES,
 } from "@aasis21/weft-shared";
@@ -37,7 +39,17 @@ import { createDeviceKeepAwakeController } from "../src/deviceKeepAwake.mjs";
 import { readRegistry } from "../src/registryFile.mjs";
 import { registerPendingSession } from "../src/pendingSessions.mjs";
 import { HEALTHY_WINDOW_MS } from "../src/attachedSessions.mjs";
-import { readLaunchOperation, updateLaunchOperation } from "../src/launchOperations.mjs";
+import {
+  beginLaunchOperation,
+  readLaunchOperation,
+  updateLaunchOperation,
+} from "../src/launchOperations.mjs";
+import { startRuntimeLifecycleHost } from "../src/runtimeLifecycle.mjs";
+import { deriveStoreAuthority } from "../src/runtimeIdentity.mjs";
+import {
+  createStationSessionCoordinator,
+  defaultSessionStorePath,
+} from "../src/stationSessionCoordinator.mjs";
 
 let dirs = [];
 let identityFiles = [];
@@ -66,7 +78,59 @@ const waitFor = async (predicate, message = "condition", timeoutMs = 1200) => {
   assert.fail(`Timed out waiting for ${message}`);
 };
 
-async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, clipboardApi = { supported: false }, keepAwakeApi = { supported: false }, monitoringLimits, allowTerminal, terminalHostFactory, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
+function stoppedOwnershipApi(sessionId = null) {
+  return {
+    inspectAttachedSessionOwnership(candidate) {
+      return !sessionId || candidate === sessionId
+        ? { state: "stopped", writer: { sessionId: candidate, pid: 999_999 } }
+        : { state: "unknown" };
+    },
+    findAttachedSession: () => null,
+    terminateAttachedSession: async () => ({ ok: false, error: "No live writer." }),
+  };
+}
+
+test("listener forwards the cancel revision to the coordinator", async () => {
+  const calls = [];
+  const coordinator = {
+    storeAuthority: "cli",
+    reconcile: async () => [],
+    inspect: async () => null,
+    confirmTakeover: async () => null,
+    open: async () => null,
+    cancel: async (operationId, revision) => {
+      calls.push({ operationId, revision });
+      return {
+        operationId,
+        fingerprint: "fingerprint",
+        state: "cancelled",
+        revision: revision + 1,
+        failure: { code: "cancelled", actions: [] },
+      };
+    },
+  };
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    coordinator,
+  });
+
+  try {
+    await phoneChannel.send(lifecycleCancel("cancel-op", 7));
+    await waitFor(() => calls.length === 1, "cancel forwarding");
+    assert.deepEqual(calls[0], { operationId: "cancel-op", revision: 7 });
+    const status = await waitFor(
+      () => messages.find((message) =>
+        message.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_STATUS &&
+        message.msg.operationId === "cancel-op"),
+      "cancel acknowledgement",
+    );
+    assert.equal(status.msg.revision, 8);
+  } finally {
+    await listener.stop();
+  }
+});
+
+async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi, clipboardApi = { supported: false }, keepAwakeApi = { supported: false }, monitoringLimits, allowTerminal, terminalHostFactory, onControl, onSessionOffers, onSessionClaimed, sessionsApi, attachedApi, coordinator, coordinatorFactory, transportDescriptor, onDeviceConnected, onDeviceDisconnected, connectionsHome: suppliedConnectionsHome } = {}) {
   const { createLocalTransport } = await import("@aasis21/weft-shared");
   const listenerKeys = await generateKeyPair();
   const channelId = `chan-${Math.random().toString(16).slice(2)}`;
@@ -91,6 +155,8 @@ async function pairedHarness({ projects, spawnFn, log, heartbeatMs, telemetryApi
     projectsApi,
     ...(sessionsApi ? { sessionsApi } : {}),
     ...(attachedApi ? { attachedApi } : {}),
+    ...(coordinator ? { coordinator } : {}),
+    ...(coordinatorFactory ? { coordinatorFactory } : {}),
     spawnFn,
     log,
     connectionsHome,
@@ -155,6 +221,7 @@ test("device utility capabilities independently reflect injected platform suppor
         DEVICE_CAPABILITY.MONITOR_V1,
         ...(clipboardPlatform === "win32" ? [DEVICE_CAPABILITY.CLIPBOARD_V1] : []),
         ...(powerPlatform === "win32" ? [DEVICE_CAPABILITY.KEEP_AWAKE_V1] : []),
+        DEVICE_CAPABILITY.SESSION_ACTIVATION_V1,
       ]);
       await h.listener.stop();
     }
@@ -371,7 +438,10 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   assert.deepEqual(list.msg.projects, [{ name: "app", path: projectDir, isDefault: true }]);
   assert.ok(list.msg.deviceName);
   assert.equal(list.msg.deviceId, "test-device");
-  assert.deepEqual(list.msg.capabilities, [DEVICE_CAPABILITY.MONITOR_V1]);
+  assert.deepEqual(list.msg.capabilities, [
+    DEVICE_CAPABILITY.MONITOR_V1,
+    DEVICE_CAPABILITY.SESSION_ACTIVATION_V1,
+  ]);
   await listener.stop();
 });
 
@@ -595,6 +665,13 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
   const result = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT);
   assert.equal(result.msg.requestId, "req-1");
   assert.equal(result.msg.ok, true);
+  assert.equal(
+    messages.some((m) =>
+      m.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_STATUS &&
+      m.msg.operationId === "req-1"),
+    false,
+    "legacy requests receive only downgrade-compatible replies",
+  );
   await listener.stop();
 });
 
@@ -730,6 +807,56 @@ test("a restarted station replays a durable launch and never respawns it", async
   await second.listener.stop();
 });
 
+test("Station restart locates child presence, queries endpoint status, and resumes the same operation", async (t) => {
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-runtime-recovery-"));
+  connectionsHomes.push(connectionsHome);
+  const now = Date.now();
+  const begun = await beginLaunchOperation(
+    { requestId: "recover-child", operation: "new", projectName: "app" },
+    { baseDir: connectionsHome, now },
+  );
+  const payload = { v: 1, channelId: "recover-channel", pub: "recover-public", transport: { kind: "local" } };
+  await updateLaunchOperation(
+    "recover-child",
+    { action: "start", state: "launching", pairingPayload: payload },
+    { baseDir: connectionsHome, ownerToken: begun.record.ownerToken, now: now + 1 },
+  );
+  const host = await startRuntimeLifecycleHost({
+    storeAuthority: deriveStoreAuthority(defaultSessionStorePath()),
+    sessionId: "recovered-session",
+    handlers: {
+      status: async () => ({
+        operationId: "recover-child",
+        state: "pairing-ready",
+        pairingPayload: payload,
+      }),
+    },
+  }, { baseDir: connectionsHome });
+  t.after(() => host.close());
+  let spawnCalls = 0;
+  const h = await pairedHarness({
+    connectionsHome,
+    projects: [{ name: "app", path: process.cwd(), default: true }],
+    sessionsApi: { listSessions: () => [], readSessionCwd: () => null },
+    spawnFn() {
+      spawnCalls += 1;
+      throw new Error("recovery must not spawn again");
+    },
+  });
+  t.after(() => h.listener.stop());
+
+  const recovered = readLaunchOperation("recover-child", { baseDir: connectionsHome });
+  assert.equal(recovered.state, "pairing-ready");
+  assert.equal(recovered.runtimeId, host.identity.runtimeInstanceId);
+  await waitFor(
+    () => h.messages.find((message) =>
+      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING &&
+      message.msg.requestId === "recover-child"),
+    "recovered pairing replay",
+  );
+  assert.equal(spawnCalls, 0);
+});
+
 test("late extension readiness is relayed as LAUNCH_STATUS", async () => {
   delete process.env.WT_SESSION;
   delete process.env.TERM_PROGRAM;
@@ -744,7 +871,7 @@ test("late extension readiness is relayed as LAUNCH_STATUS", async () => {
     },
   });
   await phoneChannel.send(spawnSession("req-ready", "app", "default", "ready"));
-  await waitFor(() => readLaunchOperation("req-ready", { baseDir: connectionsHome })?.state === "launched", "launched ledger");
+  await waitFor(() => readLaunchOperation("req-ready", { baseDir: connectionsHome })?.state === "launching", "launching ledger");
   const record = readLaunchOperation("req-ready", { baseDir: connectionsHome });
   await updateLaunchOperation(
     "req-ready",
@@ -902,6 +1029,7 @@ test("RESUME_SESSION spawns `copilot --resume=<id>` in the session's cwd and pai
   const { listener, phoneChannel, messages } = await pairedHarness({
     projects: [],
     sessionsApi,
+    attachedApi: stoppedOwnershipApi("sid-42"),
     spawnFn(command, args, options) {
       spawnCalls.push({ command, args, options });
       identityFiles.push(options.env.WEFT_IDENTITY_FILE);
@@ -930,6 +1058,157 @@ test("RESUME_SESSION spawns `copilot --resume=<id>` in the session's cwd and pai
   await listener.stop();
 });
 
+test("an already-open Session A is activated in place and causes zero spawn calls", async (t) => {
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-live-open-"));
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-live-cwd-"));
+  connectionsHomes.push(connectionsHome);
+  dirs.push(sessionCwd);
+  const storeAuthority = deriveStoreAuthority(defaultSessionStorePath());
+  let activations = 0;
+  const payload = { v: 1, channelId: "live-a", pub: "public-a", transport: { kind: "local" } };
+  const host = await startRuntimeLifecycleHost({
+    storeAuthority,
+    sessionId: "session-a",
+    handlers: {
+      activate: async () => {
+        activations += 1;
+        return { state: "pairing-ready", pairingPayload: payload };
+      },
+      status: async () => ({ state: "pairing-ready", pairingPayload: payload }),
+    },
+  }, { baseDir: connectionsHome });
+  t.after(() => host.close());
+  let spawnCalls = 0;
+  const h = await pairedHarness({
+    connectionsHome,
+    sessionsApi: {
+      listSessions: () => [{
+        sessionId: "session-a", title: "Session A", cwd: sessionCwd,
+        repository: null, branch: null, updatedAt: 1,
+      }],
+      readSession: () => ({
+        sessionId: "session-a", title: "Session A", cwd: sessionCwd,
+        repository: null, branch: null, updatedAt: 1,
+      }),
+    },
+    spawnFn() {
+      spawnCalls += 1;
+      throw new Error("must not spawn an already-open session");
+    },
+  });
+  t.after(() => h.listener.stop());
+
+  await h.phoneChannel.send(openSession("open-live-a", {
+    kind: "existing",
+    storeAuthority,
+    sessionId: "session-a",
+  }));
+  const status = await waitFor(
+    () => h.messages.find((message) =>
+      message.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_STATUS &&
+      message.msg.operationId === "open-live-a" &&
+      message.msg.state === "pairing-ready"),
+    "live runtime pairing",
+  );
+  assert.equal(status.msg.state, "pairing-ready");
+  assert.deepEqual(status.msg.payload, payload);
+  assert.equal(
+    h.messages.some((message) =>
+      (
+        message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING ||
+        message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT ||
+        message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS
+      ) &&
+      message.msg.requestId === "open-live-a"),
+    false,
+    "lifecycle requests are not dual-written to legacy messages",
+  );
+  assert.equal(activations, 1);
+  assert.equal(spawnCalls, 0);
+});
+
+test("activation timeout fails closed and never falls through to Resume", async (t) => {
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-live-timeout-"));
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-live-timeout-cwd-"));
+  connectionsHomes.push(connectionsHome);
+  dirs.push(sessionCwd);
+  const storeAuthority = deriveStoreAuthority(defaultSessionStorePath());
+  const host = await startRuntimeLifecycleHost({
+    storeAuthority,
+    sessionId: "session-timeout",
+    handlers: {
+      activate: () => new Promise(() => {}),
+      status: async () => ({ state: "dormant" }),
+    },
+  }, { baseDir: connectionsHome });
+  t.after(() => host.close());
+  let spawnCalls = 0;
+  const coordinatorFactory = (options) => createStationSessionCoordinator({
+    ...options,
+    timeoutMs: 300,
+  });
+  const h = await pairedHarness({
+    connectionsHome,
+    coordinatorFactory,
+    sessionsApi: {
+      listSessions: () => [],
+      readSession: () => ({
+        sessionId: "session-timeout", title: "Timeout", cwd: sessionCwd,
+        repository: null, branch: null, updatedAt: 1,
+      }),
+    },
+    spawnFn() {
+      spawnCalls += 1;
+      throw new Error("activation timeout must not resume");
+    },
+  });
+  t.after(() => h.listener.stop());
+
+  await h.phoneChannel.send(resumeSession("open-timeout", "session-timeout"));
+  const result = await waitFor(
+    () => h.messages.find((message) =>
+      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT &&
+      message.msg.requestId === "open-timeout"),
+    "activation timeout result",
+  );
+  assert.equal(result.msg.ok, false);
+  assert.match(result.msg.error, /timed out|incomplete frame/);
+  assert.equal(spawnCalls, 0);
+});
+
+test("session discovery merges a verified live runtime missing from the saved page", async (t) => {
+  const connectionsHome = mkdtempSync(join(tmpdir(), "weft-live-catalog-"));
+  const sessionCwd = mkdtempSync(join(tmpdir(), "weft-live-catalog-cwd-"));
+  connectionsHomes.push(connectionsHome);
+  dirs.push(sessionCwd);
+  const host = await startRuntimeLifecycleHost({
+    storeAuthority: deriveStoreAuthority(defaultSessionStorePath()),
+    sessionId: "session-live-catalog",
+    handlers: { status: async () => ({ state: "dormant" }) },
+  }, { baseDir: connectionsHome });
+  t.after(() => host.close());
+  const h = await pairedHarness({
+    connectionsHome,
+    sessionsApi: {
+      listSessions: () => [],
+      readSession: (sessionId) => sessionId === "session-live-catalog"
+        ? {
+            sessionId, title: "Live catalog session", cwd: sessionCwd,
+            repository: "weft", branch: "main", updatedAt: 10,
+          }
+        : null,
+    },
+  });
+  t.after(() => h.listener.stop());
+
+  await h.phoneChannel.send(sessionListRequest(50));
+  const list = await waitFor(
+    () => h.messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
+    "merged session list",
+  );
+  assert.equal(list.msg.sessions.some((session) => session.sessionId === "session-live-catalog"), true);
+});
+
 test("a second requestId cannot resume the same unresolved session", async () => {
   delete process.env.WT_SESSION;
   delete process.env.TERM_PROGRAM;
@@ -940,6 +1219,7 @@ test("a second requestId cannot resume the same unresolved session", async () =>
   const { listener, phoneChannel, messages } = await pairedHarness({
     projects: [],
     sessionsApi: { listSessions: () => [], readSessionCwd: () => sessionCwd },
+    attachedApi: stoppedOwnershipApi("sid-reserved"),
     spawnFn(_command, _args, options) {
       spawnCount += 1;
       identityFiles.push(options.env.WEFT_IDENTITY_FILE);
@@ -998,6 +1278,9 @@ async function resumeGuardHarness(attached, { terminateResult = { ok: true } } =
     projects: [],
     sessionsApi: { listSessions: () => [], readSessionCwd: (id) => (id === "sid-live" ? sessionCwd : null) },
     attachedApi: {
+      inspectAttachedSessionOwnership: () => attached
+        ? { state: "writer", writer: attached }
+        : { state: "stopped", writer: { sessionId: "sid-live", pid: 999_999 } },
       findAttachedSession: () => attached,
       terminateAttachedSession: async (...args) => {
         resumeGuardHarness.lastTerminateArgs = args;

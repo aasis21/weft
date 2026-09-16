@@ -10,10 +10,28 @@ Confidentiality and integrity live on the paired endpoints.
 
 | Component | Trusted with plaintext? | Notes |
 |---|---|---|
-| Extension (laptop) | yes | runs as a child of `copilot`; holds one ECDH private key |
+| Extension (laptop) | yes, when active | a dormant extension has no pairing key or remote connection; activation loads the runtime that holds the session key |
+| Device Station | yes for machine lifecycle and its own device channel | required for phone automation, but not in the active phone-to-session traffic path |
 | Mobile app (phone) | yes | holds the other ECDH private key |
 | Supabase Realtime | **no** | sees only `{ iv, ciphertext, ts }` envelopes + a channel name |
 | Network / ISP | **no** | TLS to Supabase + E2E payload encryption |
+
+## Dormant activation and local control
+
+A dormant extension publishes one bounded presence record and listens on one
+user-local lifecycle endpoint. It performs no transport lookup, remote network access,
+pairing cryptography, QR generation, logging, diagnostics, polling, heartbeat,
+retry timer, or other timer.
+
+The filesystem record supports discovery and crash recovery. A separate capability
+file and the Windows named pipe or Unix-domain socket authorize live probe, activate,
+status, controller-replacement, and quiesce commands. Requests must prove the private
+capability plus the session, runtime, and generation identities; Station closes each
+temporary connection after the command.
+
+After pairing, prompts, events, approvals, streaming, and terminal traffic bypass
+Station and the lifecycle endpoint and travel directly between the phone and active
+session over the encrypted relay.
 
 ## Cryptography
 
@@ -62,6 +80,8 @@ channel identifiers, timing, and traffic sizes) remain visible.
 | Message tampering / replay | GCM authentication plus encrypted stream ids and monotonic sequence numbers reject modified, duplicate, stale-stream, and non-monotonic envelopes | a relay can still delay or drop traffic |
 | **QR shoulder-surf / screenshot** | QR bearer grant expires after 10 minutes and is invalid after its first successful claim | someone who copies a fresh QR can still race the intended phone during that window |
 | **Pairing race / impersonation** | the grant is proved inside ECDH-encrypted data and atomically binds to the first valid phone key; every connection requires a fresh laptop challenge and encrypted private-key proof | first valid claimant wins, so protect the QR until pairing completes |
+| **Stale local presence or PID reuse** | Station verifies session/runtime generation, PID, operating-system process start time, endpoint proof, and the private capability before lifecycle actions | uncertain ownership fails closed and may require closing the stale terminal manually |
+| **Controller takeover** | a different phone receives a challenge and requires explicit confirmation; a responsive runtime immediately revokes the prior controller and rotates pairing without restarting Copilot | the previous phone is disconnected immediately after confirmation |
 | Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
 | Lost/stolen phone | `/weft` keys die with the session; Device Station identities can be invalidated with `weft rotate-pairing` | a phone paired to a persistent Device Station can reconnect until its identity is rotated |
 | Clipboard exposes copied secrets | clipboard reads and writes require explicit user action, accept bounded plain text only, stay inside the encrypted channel, and are excluded from persistence and diagnostic logs | a trusted paired phone can read text currently placed on the laptop clipboard when the user explicitly requests it |
@@ -107,13 +127,17 @@ rather than silently bypassing an opt-out.
 | Location | Stored data |
 |---|---|
 | Phone / installed PWA | Session metadata, cached transcripts and diagnostic event logs, preferences, device records, and local pairing private keys. Diagnostic payloads can include device health snapshots. Clipboard contents and Keep Awake operation state are runtime-only and are not persisted. Pairing storage uses Capacitor Preferences on native and browser storage in the PWA. |
-| Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, and persistent Device Station pairing identity under `~/.weft/`. A per-session `/weft` identity is ephemeral. |
+| Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, persistent Device Station pairing identity, runtime presence/capabilities, lifecycle operations, and recovery identity references under `~/.weft/`. A per-session `/weft` identity is ephemeral. Completed operations and unclaimed recovery identities expire after three days unless a live runtime or unresolved operation still references them. |
 | Relay infrastructure | No session content, transcripts, or key escrow. It handles encrypted envelopes in transit. The infrastructure provider may retain ordinary operational metadata or logs such as IP addresses, timestamps, and channel identifiers. |
 
 Removing a session from the phone deletes its locally cached transcript. Rotating a
 persistent pairing invalidates the old pairing identity; clearing browser/app data or
 removing `~/.weft/` deletes the corresponding local state. Closing a `copilot` terminal
 ends that live session and its ephemeral `/weft` key.
+
+Running `/clear` also ends the current phone attachment and does not transfer its
+identity to the replacement conversation. The replacement session starts dormant and
+requires fresh activation.
 
 Event logs are bounded local troubleshooting data, not an exhaustive audit trail or
 a health-history service. The device log includes snapshot messages, and adjacent

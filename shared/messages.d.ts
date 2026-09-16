@@ -38,8 +38,12 @@ export const DEVICE_CAPABILITY: {
   readonly TERMINAL_V1: "device-terminal-v1";
   readonly CLIPBOARD_V1: "device-clipboard-v1";
   readonly KEEP_AWAKE_V1: "device-keep-awake-v1";
+  readonly SESSION_ACTIVATION_V1: "session-activation-v1";
 };
 
+export const SESSION_ACTIVATION_CAPABILITY: "session-activation-v1";
+export const LIFECYCLE_RETENTION_MS: number;
+export const LIFECYCLE_MESSAGE_MAX_BYTES: number;
 export type DeviceUtilityCode = "ok" | "invalid-request" | "too-large" | "unsupported" | "unavailable" | "timeout" | "lease-mismatch";
 export const DEVICE_UTILITY_CODES: readonly DeviceUtilityCode[];
 export const CLIPBOARD_MAX_BYTES: number;
@@ -83,6 +87,11 @@ export const SUBTYPE: {
     readonly SESSION_LIST_REQUEST: "session_list_request";
     readonly SESSION_LIST: "session_list";
     readonly RESUME_SESSION: "resume_session";
+    readonly OPEN_SESSION: "open_session";
+    readonly LIFECYCLE_STATUS_REQUEST: "lifecycle_status_request";
+    readonly LIFECYCLE_STATUS: "lifecycle_status";
+    readonly TAKEOVER_CONFIRM: "takeover_confirm";
+    readonly LIFECYCLE_CANCEL: "lifecycle_cancel";
     readonly SPAWN_PAIRING: "spawn_pairing";
     readonly SPAWN_RESULT: "spawn_result";
     readonly LAUNCH_STATUS: "launch_status";
@@ -325,6 +334,121 @@ export interface PairAckMsg {
 
 // ---- payload shapes: phone-launched sessions (#156) ------------------------
 export type SpawnMode = "default" | "allow-all";
+export type LifecycleState =
+  | "accepted"
+  | "locating"
+  | "reserved"
+  | "activating"
+  | "launching"
+  | "pairing-ready"
+  | "pairing"
+  | "open"
+  | "failed"
+  | "cancelled";
+export type LifecycleAction =
+  | "retry"
+  | "confirm-takeover"
+  | "cancel"
+  | "choose-session"
+  | "choose-directory"
+  | "update-peer";
+export type LifecycleFailureCode =
+  | "invalid-request"
+  | "unsupported"
+  | "operation-conflict"
+  | "operation-stale"
+  | "target-reserved"
+  | "writer-conflict"
+  | "controller-conflict"
+  | "capability-rejected"
+  | "project-not-found"
+  | "session-not-found"
+  | "directory-not-found"
+  | "ownership-unknown"
+  | "runtime-unavailable"
+  | "activation-failed"
+  | "identity-failed"
+  | "launch-failed"
+  | "launch-outcome-unknown"
+  | "launch-not-recoverable"
+  | "pairing-failed"
+  | "takeover-stale"
+  | "takeover-failed"
+  | "cancelled"
+  | "timeout"
+  | "internal-error";
+export type LifecycleOperationAction =
+  | "undecided"
+  | "reconnect"
+  | "activate"
+  | "resume"
+  | "start"
+  | "takeover";
+export const LIFECYCLE_STATES: readonly LifecycleState[];
+export const LIFECYCLE_ACTIONS: readonly LifecycleAction[];
+export const LIFECYCLE_FAILURE_CODES: readonly LifecycleFailureCode[];
+export interface NewSessionTarget {
+  kind: "new";
+  projectName: string;
+}
+export interface ExistingSessionTarget {
+  kind: "existing";
+  storeAuthority: string | null;
+  sessionId: string;
+}
+export type OpenTarget = NewSessionTarget | ExistingSessionTarget;
+export interface OpenIntentMsg {
+  operationId: string;
+  target: OpenTarget;
+  mode: SpawnMode;
+  name: string | null;
+  takeoverRequested: boolean;
+}
+export interface LifecycleStatusRequestMsg {
+  operationId: string;
+}
+export interface StructuredFailure {
+  code: LifecycleFailureCode;
+  actions: LifecycleAction[];
+  message?: string;
+  retryable?: boolean;
+}
+export interface TakeoverChallenge {
+  challengeId: string;
+  operationId: string;
+  revision: number;
+  storeAuthority: string | null;
+  sessionId: string;
+  runtimeInstanceId: string;
+  generation: number;
+  pid: number | null;
+  processStartedAt: number | null;
+  responsive: boolean;
+  controllerName?: string;
+}
+export interface LifecycleStatusMsg {
+  operationId: string;
+  fingerprint: string | null;
+  state: LifecycleState;
+  revision: number;
+  target?: OpenTarget;
+  action?: LifecycleOperationAction;
+  payload?: PairingPayload;
+  name?: string;
+  failure?: StructuredFailure;
+  challenge?: TakeoverChallenge;
+  createdAt?: number;
+  updatedAt?: number;
+}
+export interface TakeoverConfirmMsg {
+  operationId: string;
+  challengeId: string;
+  revision: number;
+}
+export interface LifecycleCancelMsg {
+  operationId: string;
+  revision?: number;
+}
 /** One registered project a `weft` listener can spawn a session in. */
 export interface ListenerProject {
   name: string;
@@ -607,6 +731,11 @@ export type SpawnSessionMessage = Envelope<"control", "spawn_session", SpawnSess
 export type SessionListRequest = Envelope<"control", "session_list_request", SessionListRequestMsg>;
 export type SessionListMessage = Envelope<"control", "session_list", SessionListMsg>;
 export type ResumeSessionMessage = Envelope<"control", "resume_session", ResumeSessionMsg>;
+export type OpenSessionMessage = Envelope<"control", "open_session", OpenIntentMsg>;
+export type LifecycleStatusRequest = Envelope<"control", "lifecycle_status_request", LifecycleStatusRequestMsg>;
+export type LifecycleStatusMessage = Envelope<"control", "lifecycle_status", LifecycleStatusMsg>;
+export type TakeoverConfirmMessage = Envelope<"control", "takeover_confirm", TakeoverConfirmMsg>;
+export type LifecycleCancelMessage = Envelope<"control", "lifecycle_cancel", LifecycleCancelMsg>;
 export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
 export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
 export type LaunchStatusMessage = Envelope<"control", "launch_status", LaunchStatusMsg>;
@@ -669,6 +798,11 @@ export type EventEnvelope =
   | SessionListRequest
   | SessionListMessage
   | ResumeSessionMessage
+  | OpenSessionMessage
+  | LifecycleStatusRequest
+  | LifecycleStatusMessage
+  | TakeoverConfirmMessage
+  | LifecycleCancelMessage
   | SpawnPairing
   | SpawnResult
   | LaunchStatusMessage
@@ -795,6 +929,44 @@ export function resumeSession(
   mode?: SpawnMode,
   force?: boolean
 ): ResumeSessionMessage;
+export function normalizeOpenIntent(intent?: Partial<OpenIntentMsg> & { target?: Partial<OpenTarget> }): OpenIntentMsg;
+export function openIntentFingerprint(intent: OpenIntentMsg | OpenSessionMessage): Promise<string>;
+export function openSession(
+  operationId: string,
+  target: OpenTarget,
+  options?: {
+    mode?: SpawnMode;
+    name?: string | null;
+    takeoverRequested?: boolean;
+  }
+): OpenSessionMessage;
+export function lifecycleStatusRequest(operationId: string): LifecycleStatusRequest;
+export function lifecycleStatus(
+  status: Partial<LifecycleStatusMsg> & Pick<LifecycleStatusMsg, "operationId" | "state">
+): LifecycleStatusMessage;
+export function takeoverConfirm(
+  operationId: string,
+  challengeId: string,
+  revision: number
+): TakeoverConfirmMessage;
+export function lifecycleCancel(operationId: string, revision?: number | null): LifecycleCancelMessage;
+export function openSessionFromLegacy(
+  message: SpawnSessionMessage | ResumeSessionMessage | EventEnvelope
+): OpenSessionMessage | null;
+export function openSessionToLegacy(
+  message: OpenIntentMsg | OpenSessionMessage
+): SpawnSessionMessage | ResumeSessionMessage | null;
+export function lifecycleStatusFromLegacy(
+  message: LaunchStatusMessage | SpawnPairing | SpawnResult | SessionClaimedMessage | EventEnvelope,
+  previous?: LifecycleStatusMsg | LifecycleStatusMessage | null
+): LifecycleStatusMessage | null;
+export function lifecycleStatusToLegacy(
+  message: LifecycleStatusMsg | LifecycleStatusMessage
+): Array<LaunchStatusMessage | SpawnPairing | SpawnResult>;
+export function latestLifecycleStatus<T extends LifecycleStatusMsg | LifecycleStatusMessage>(
+  current: T | null,
+  candidate: T | null
+): T | null;
 export function spawnPairing(
   requestId: string,
   payload: PairingPayload,

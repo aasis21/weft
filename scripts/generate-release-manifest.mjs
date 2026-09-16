@@ -9,6 +9,7 @@ import { decodeNativeRuntime, NATIVE_TARGETS, nativeAssetName, nativeRuntimeDesc
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const REQUIRED_RELEASE_FILES = [
   "extension.mjs",
+  "activeRuntime.mjs",
   "relayServerProcess.mjs",
   "devtunnelHostWatchdog.mjs",
   "weft.mjs",

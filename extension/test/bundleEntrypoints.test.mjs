@@ -83,3 +83,11 @@ test("both ship scripts copy every bundle weft install downloads", () => {
     }
   }
 });
+
+test("the active runtime is built and shipped beside the dormant bootstrap", () => {
+  const esbuildConfig = readFileSync(path.join(extensionRoot, "esbuild.config.mjs"), "utf8");
+  const weftCli = readFileSync(path.join(extensionRoot, "bin", "weft.mjs"), "utf8");
+  assert.match(esbuildConfig, /entryPoints:\s*\["src\/activeRuntime\.mjs"\]/);
+  assert.match(esbuildConfig, /activeRuntimeOutfile\s*=\s*"dist\/activeRuntime\.mjs"/);
+  assert.match(weftCli, /BUNDLE_NAMES\s*=\s*\[[^\]]*"activeRuntime\.mjs"/);
+});

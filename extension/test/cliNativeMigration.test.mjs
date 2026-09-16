@@ -24,7 +24,7 @@ test("same-version update repairs a legacy JavaScript-only installation", {
   const home = join(root, "home");
   mkdirSync(installDir);
   mkdirSync(home);
-  const bundleNames = ["extension.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
+  const bundleNames = ["extension.mjs", "activeRuntime.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
   const payloads = new Map(bundleNames.map((name) => [name, Buffer.from(`same-version:${name}`)]));
   payloads.set("weft-skill.md", Buffer.from("fixture skill"));
   for (const name of packageNativeRuntime(release)) payloads.set(name, readFileSync(join(release, name)));

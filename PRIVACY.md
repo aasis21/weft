@@ -25,8 +25,19 @@ the PWA's local data.
 
 The laptop stores installed code under `~/.copilot/extensions/weft/`. Configuration,
 registered projects, logs, relay settings, and persistent Device Station pairing
-material are stored under `~/.weft/`. A `/weft` pairing inside one Copilot session uses
-an ephemeral identity that ends with that session.
+material are stored under `~/.weft/`. The same user-private tree contains small runtime
+presence records, local endpoint capabilities, lifecycle operations, and recovery
+identity references. Completed operations and unclaimed recovery identities are removed
+after three days unless a live runtime or unresolved operation still references them.
+A `/weft` pairing inside one Copilot session uses an ephemeral identity that ends with
+that session.
+
+A dormant extension publishes local presence and holds one idle local named pipe or
+Unix-domain socket, but performs no remote/network access, cryptography, QR generation,
+logging, diagnostics, polling, heartbeat, retry timer, or other timer. The
+filesystem supports discovery and recovery; the endpoint carries temporary local
+lifecycle commands. After pairing, phone session traffic bypasses Device Station and
+the local endpoint and travels directly over the encrypted relay.
 
 ## Shared terminal
 
@@ -71,6 +82,8 @@ request metadata such as your IP address and browser headers when those assets l
 - Clear the app's browser/site data to delete PWA-local data.
 - Remove `~/.weft/` to delete laptop-side configuration and persistent pairing material.
 - Run `weft rotate-pairing` if a persistent QR or paired phone may be compromised.
+- Expect `/clear` to disconnect the current phone attachment; activate the replacement
+  Copilot session again through Device Station or `/weft`.
 - Use Clipboard only when you intend the paired phone to read or replace the laptop's
   current plain-text clipboard value.
 - Stop an active Keep Awake lease from Device Details, or let its displayed duration

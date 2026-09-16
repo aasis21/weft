@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import type { StoredSession } from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, StoredSession } from '@aasis21/weft-shared';
 import { StartSessionScreen } from '../StartSessionScreen';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
@@ -44,15 +44,26 @@ function makeDevice(overrides: Partial<ListenerDeviceState> = {}): ListenerDevic
 
 type Props = ComponentProps<typeof StartSessionScreen>;
 
+function lifecycleStatus(
+  overrides: Partial<LifecycleStatusMsg> = {},
+): LifecycleStatusMsg {
+  return {
+    operationId: 'open-1',
+    fingerprint: 'fingerprint-1',
+    state: 'launching',
+    revision: 1,
+    ...overrides,
+  };
+}
+
 function renderScreen(overrides: Partial<Props> = {}) {
   const props: Props = {
     hasSessions: false,
     devices: [makeDevice()],
     onConnectDevice: vi.fn(),
-    onStart: vi.fn().mockResolvedValue(undefined),
+    onOpen: vi.fn().mockResolvedValue(lifecycleStatus()),
+    onConfirmTakeover: vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' })),
     onRefreshSessions: vi.fn(),
-    onResume: vi.fn().mockResolvedValue(undefined),
-    onOpenSession: vi.fn(),
     onScanListener: vi.fn(),
     onCancel: vi.fn(),
     sessions: [],
@@ -322,16 +333,17 @@ describe('StartSessionScreen — the resumable list', () => {
   });
 
   it('resumes the session the filtered row points at, not the one at that index unfiltered', async () => {
-    const onResume = vi.fn().mockResolvedValue(undefined);
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onResume });
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
+    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onOpen });
 
     fireEvent.change(screen.getByLabelText(/search recent sessions/i), { target: { value: 'weft' } });
     fireEvent.click(screen.getByRole('radio', { name: /weft pairing/i }));
     fireEvent.click(cta());
 
     await waitFor(() =>
-      expect(onResume).toHaveBeenCalledWith('chan-1', {
-        sessionId: 'c',
+      expect(onOpen).toHaveBeenCalledWith({
+        deviceChannelId: 'chan-1',
+        target: { kind: 'existing', storeAuthority: null, sessionId: 'c' },
         mode: 'default',
         title: 'Weft pairing',
         cwd: '/home/me/weft',
@@ -340,8 +352,7 @@ describe('StartSessionScreen — the resumable list', () => {
   });
 
   it('opens a session the phone already holds instead of forking a second copy of it', () => {
-    const onOpenSession = vi.fn();
-    const onResume = vi.fn();
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({ state: 'open', action: 'reconnect' }));
     const live = {
       meta: { channelId: 'chan-live', sessionId: 'b', title: 'Add retries' },
       timeline: { busy: false },
@@ -350,43 +361,69 @@ describe('StartSessionScreen — the resumable list', () => {
       devices: [makeDevice({ sessions: stored, projects: [] })],
       sessions: [live],
       initialMode: 'resume',
-      onOpenSession,
-      onResume,
+      onOpen,
     });
 
     fireEvent.click(screen.getByRole('radio', { name: /add retries/i }));
     expect(cta().textContent).toMatch(/open add retries/i);
     fireEvent.click(cta());
 
-    expect(onOpenSession).toHaveBeenCalledWith('chan-live');
-    expect(onResume).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({
+      target: { kind: 'existing', storeAuthority: null, sessionId: 'b' },
+    }));
   });
 
   it('offers the override when the laptop refuses because the session is already attached', async () => {
-    // The laptop refuses to fork a second CLI onto a healthy attachment. But if weft over there has
-    // broken, resuming is the only route back — so the refusal has to be recoverable, and the retry
-    // has to be the user's own second, deliberate tap.
-    const onResume = vi
+    const onOpen = vi
       .fn()
-      .mockRejectedValueOnce(new Error('That session is already running on this laptop and connected to a phone.'))
-      .mockResolvedValueOnce(undefined);
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onResume });
+      .mockResolvedValue(lifecycleStatus({
+        state: 'activating',
+        failure: {
+          code: 'controller-conflict',
+          actions: ['confirm-takeover', 'cancel'],
+          message: 'That session is already running on this laptop and connected to a phone.',
+        },
+        challenge: {
+          challengeId: 'challenge-1',
+          operationId: 'open-1',
+          revision: 1,
+          storeAuthority: null,
+          sessionId: 'a',
+          runtimeInstanceId: 'runtime-1',
+          generation: 1,
+          pid: 42,
+          processStartedAt: 10,
+          responsive: true,
+        },
+      }));
+    const onConfirmTakeover = vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' }));
+    renderScreen({
+      devices: [makeDevice({ sessions: stored, projects: [] })],
+      initialMode: 'resume',
+      onOpen,
+      onConfirmTakeover,
+    });
 
     fireEvent.click(screen.getByRole('radio', { name: /fix the auth bug/i }));
     fireEvent.click(cta());
 
     await waitFor(() => expect(cta().textContent).toMatch(/close it and resume anyway/i));
     expect(screen.getByText(/already running/i)).toBeTruthy();
-    expect(onResume.mock.calls[0]?.[1]).not.toHaveProperty('force');
 
     fireEvent.click(cta());
-    await waitFor(() => expect(onResume).toHaveBeenCalledTimes(2));
-    expect(onResume.mock.calls[1]?.[1]).toMatchObject({ sessionId: 'a', force: true });
+    await waitFor(() => expect(onConfirmTakeover).toHaveBeenCalledWith('open-1'));
   });
 
   it('does not offer the override for an ordinary failure', async () => {
-    const onResume = vi.fn().mockRejectedValue(new Error("The session's folder no longer exists: /gone"));
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onResume });
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({
+      state: 'failed',
+      failure: {
+        code: 'directory-not-found',
+        actions: ['choose-directory', 'cancel'],
+        message: "The session's folder no longer exists: /gone",
+      },
+    }));
+    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onOpen });
 
     fireEvent.click(screen.getByRole('radio', { name: /fix the auth bug/i }));
     fireEvent.click(cta());

@@ -5,6 +5,25 @@
 How a phone attaches to a live `copilot` session and establishes an end-to-end
 encrypted channel without transmitting the resulting session encryption key.
 
+## Pairing entry points
+
+- Run `weft start` to pair a Device Station. The station must be running for the phone
+  to discover projects and sessions, start a session, open/resume stopped history, or
+  activate an already-open dormant terminal.
+- Invoke `/weft` inside a Copilot session to explicitly activate and pair that session
+  directly. Device Station is not required for this path.
+
+When Station opens a session that is already running, it activates that exact process
+through its local lifecycle endpoint instead of launching another `copilot --resume`.
+Station disconnects from the endpoint after the lifecycle command. Once pairing
+completes, phone session traffic uses the encrypted relay directly and bypasses both
+Station and the local endpoint.
+
+`/clear` disconnects the active phone attachment; the replacement Copilot session starts
+dormant and requires fresh Station activation or a new `/weft` QR. Completed lifecycle
+operations and unclaimed recovery identities remain available for recovery for three
+days unless a live runtime or unresolved operation still references them.
+
 ## Device Station recovery
 
 The Device Station persists its pairing identity by default. An already-paired
@@ -23,6 +42,10 @@ storage. `weft start --rotate-pairing` is an alias for the same option.
 For an exposed persistent identity, stop the station and run `weft rotate-pairing`
 before starting and pairing again. Stop a running station before rotating its
 stored identity so it cannot continue using the old identity in memory.
+
+If a different phone requests a session with a responsive controller, Weft requires
+explicit takeover confirmation. Confirmation immediately revokes the previous
+controller and pairs the new phone without restarting Copilot.
 
 ## Why a handshake is needed
 

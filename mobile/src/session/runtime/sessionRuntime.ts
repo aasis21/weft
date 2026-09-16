@@ -22,11 +22,14 @@ import {
   keepAwakeStop,
   keepAwakeStatusRequest,
   keepAwakeStatus,
+  lifecycleCancel as lifecycleCancelMessage,
   normalizeKeepAwakeDuration,
+  openSession as openSessionMessage,
   stateRequest,
   spawnSession as spawnSessionMessage,
   sessionListRequest,
   resumeSession as resumeSessionMessage,
+  takeoverConfirm as takeoverConfirmMessage,
   forgetDevice as forgetDeviceMessage,
   sessionClaimed as sessionClaimedMessage,
   voiceMode,
@@ -36,6 +39,7 @@ import {
 import type {
   EventEnvelope,
   LaunchStatusMsg,
+  LifecycleStatusMsg,
   PairingPayload,
   ProjectListMsg,
   PromptAttachment,
@@ -280,10 +284,12 @@ interface SpawnRequestOptions {
   projectName: string;
   mode: SpawnMode;
   name?: string;
+  operationId?: string;
 }
 
 interface ResumeRequestOptions {
   sessionId: string;
+  storeAuthority?: string | null;
   mode: SpawnMode;
   /** The tapped store session's title/cwd, used purely to label the Initializing card until the
    *  resumed CLI session re-reports its own title/cwd via session_meta once paired. */
@@ -292,6 +298,7 @@ interface ResumeRequestOptions {
   /** Close a session already attached on the laptop and resume anyway. Set only on the user's
    *  second, confirmed tap — see {@link resumeSessionMessage}. */
   force?: boolean;
+  operationId?: string;
 }
 
 interface PendingSpawn extends PendingOperation {
@@ -300,6 +307,13 @@ interface PendingSpawn extends PendingOperation {
   /** Fires partway through a resume to say it is still working, so a long wait doesn't read as a
    *  hang. Cleared alongside `timer`. */
   slowTimer?: ReturnType<typeof setTimeout>;
+}
+
+interface LifecycleWaiter {
+  afterRevision: number;
+  resolve(status: LifecycleStatusMsg): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface DeviceMonitorLease {
@@ -376,6 +390,8 @@ export class SessionRuntime {
   private readonly controllers = new Map<string, ChannelController>();
   private readonly listenerControllers = new Map<string, ChannelController>();
   private readonly pendingSpawns = new Map<string, PendingSpawn>();
+  private readonly lifecycleStatuses = new Map<string, LifecycleStatusMsg>();
+  private readonly lifecycleWaiters = new Map<string, Set<LifecycleWaiter>>();
   private warmLru: string[] = [];
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private initStarted = false;
@@ -421,6 +437,35 @@ export class SessionRuntime {
   // --- facade (useSyncExternalStore) ---------------------------------------------------------------
   subscribe = (listener: () => void): (() => void) => this.store.subscribe(listener);
   getSnapshot = (): ManagerSnapshot => selectManagerSnapshot(this.store.getState());
+  getLifecycleStatus = (operationId: string): LifecycleStatusMsg | null =>
+    this.lifecycleStatuses.get(operationId) ?? null;
+
+  async confirmLifecycleTakeover(
+    channelId: string,
+    operationId: string,
+    challengeId: string,
+    revision: number,
+  ): Promise<LifecycleStatusMsg> {
+    return this.sendLifecycleCommand(
+      channelId,
+      operationId,
+      revision,
+      takeoverConfirmMessage(operationId, challengeId, revision),
+    );
+  }
+
+  async cancelLifecycleOperation(
+    channelId: string,
+    operationId: string,
+    revision: number,
+  ): Promise<LifecycleStatusMsg> {
+    return this.sendLifecycleCommand(
+      channelId,
+      operationId,
+      revision,
+      lifecycleCancelMessage(operationId, revision),
+    );
+  }
 
   private activeId(): string | null {
     return this.store.getState().sessions.activeId;
@@ -595,6 +640,9 @@ export class SessionRuntime {
         slow: this.clock() - operation.createdAt >= RESUME_SLOW_MS,
       };
       this.pendingSpawns.set(operation.requestId, { ...operation });
+      if (operation.lifecycleStatus) {
+        this.lifecycleStatuses.set(operation.requestId, operation.lifecycleStatus);
+      }
       this.store.dispatch(sessionAdded(session));
     }
     if (!activeId && pendingOperations.length > 0) {
@@ -1558,8 +1606,25 @@ export class SessionRuntime {
     await this.connectDevice(pending.deviceId);
     const ctrl = this.listenerController(pending.deviceId);
     if (!ctrl?.client) throw new Error('Listener device is not connected.');
-    const message =
-      pending.kind === 'resume'
+    const device = this.device(pending.deviceId);
+    const lifecycleCapable = device?.capabilities?.includes(DEVICE_CAPABILITY.SESSION_ACTIVATION_V1);
+    const message = lifecycleCapable
+      ? openSessionMessage(
+          pending.requestId,
+          pending.kind === 'resume'
+            ? {
+                kind: 'existing',
+                storeAuthority: pending.storeAuthority ?? null,
+                sessionId: pending.sessionId ?? '',
+              }
+            : { kind: 'new', projectName: pending.projectName },
+          {
+            mode: pending.mode,
+            name: pending.name ?? null,
+            takeoverRequested: pending.force === true,
+          },
+        )
+      : pending.kind === 'resume'
         ? resumeSessionMessage(
             pending.requestId,
             pending.sessionId ?? '',
@@ -1576,6 +1641,44 @@ export class SessionRuntime {
     await ctrl.client.send(message);
     await this.setPendingStage(pending, 'delivered');
     this.armLaunchResponseTimer(pending);
+  }
+
+  private async sendLifecycleCommand(
+    channelId: string,
+    operationId: string,
+    afterRevision: number,
+    message: EventEnvelope,
+  ): Promise<LifecycleStatusMsg> {
+    await this.connectDevice(channelId);
+    const ctrl = this.listenerController(channelId);
+    if (!ctrl?.client) throw new Error('Listener device is not connected.');
+    const response = new Promise<LifecycleStatusMsg>((resolve, reject) => {
+      const waiter: LifecycleWaiter = {
+        afterRevision,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          this.lifecycleWaiters.get(operationId)?.delete(waiter);
+          reject(new Error('The laptop did not acknowledge the lifecycle command.'));
+        }, SPAWN_DELIVERY_TIMEOUT_MS),
+      };
+      const waiters = this.lifecycleWaiters.get(operationId) ?? new Set<LifecycleWaiter>();
+      waiters.add(waiter);
+      this.lifecycleWaiters.set(operationId, waiters);
+    });
+    this.recordDeviceEvent(channelId, 'out', message);
+    try {
+      await ctrl.client.send(message);
+    } catch (error) {
+      const waiters = this.lifecycleWaiters.get(operationId);
+      for (const waiter of waiters ?? []) {
+        clearTimeout(waiter.timer);
+        waiter.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+      this.lifecycleWaiters.delete(operationId);
+      throw error;
+    }
+    return response;
   }
 
   private async attemptPendingPair(requestId: string): Promise<void> {
@@ -1626,7 +1729,7 @@ export class SessionRuntime {
   async spawnSession(channelId: string, opts: SpawnRequestOptions): Promise<string> {
     const device = this.device(channelId);
     if (!device) throw new Error('Choose a registered listener device first.');
-    const requestId = `spawn-${crypto.randomUUID()}`;
+    const requestId = opts.operationId ?? `spawn-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.name?.trim() || opts.projectName;
     const createdAt = this.clock();
@@ -1775,7 +1878,7 @@ export class SessionRuntime {
       if (await this.reconnectAndConfirm(existingId)) return existingId;
     }
 
-    const requestId = `resume-${crypto.randomUUID()}`;
+    const requestId = opts.operationId ?? `resume-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.title?.trim() || (opts.cwd ? basename(opts.cwd) : '') || 'Resuming session';
     const createdAt = this.clock();
@@ -1816,6 +1919,7 @@ export class SessionRuntime {
       projectName: displayName,
       mode: opts.mode,
       sessionId: opts.sessionId,
+      storeAuthority: opts.storeAuthority ?? null,
       cwd: opts.cwd ?? undefined,
       title: displayName,
       force: opts.force === true,
@@ -2067,6 +2171,10 @@ export class SessionRuntime {
       void this.handleLaunchStatus(message.msg as LaunchStatusMsg);
       return;
     }
+    if (message.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_STATUS) {
+      void this.handleLifecycleStatus(message.msg as LifecycleStatusMsg);
+      return;
+    }
     if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS) {
       const msg = message.msg as SessionOffersMsg;
       const offers = (msg.offers ?? []).filter((o) => o && typeof o.channelId === 'string' && o.payload);
@@ -2136,6 +2244,79 @@ export class SessionRuntime {
         await this.failSpawn(
           msg.requestId,
           msg.error || `This ${pending.kind === 'resume' ? 'resume' : 'launch'} was ${msg.state}.`,
+        );
+    }
+  }
+
+  private async handleLifecycleStatus(msg: LifecycleStatusMsg): Promise<void> {
+    if (
+      typeof msg.operationId !== 'string' ||
+      !msg.operationId ||
+      !Number.isSafeInteger(msg.revision) ||
+      msg.revision < 0
+    ) return;
+    const previous = this.lifecycleStatuses.get(msg.operationId);
+    if (previous && msg.revision < previous.revision) return;
+    this.lifecycleStatuses.set(msg.operationId, msg);
+    const waiters = this.lifecycleWaiters.get(msg.operationId);
+    if (waiters) {
+      for (const waiter of [...waiters]) {
+        if (msg.revision > waiter.afterRevision || msg.failure?.code === 'operation-stale') {
+          clearTimeout(waiter.timer);
+          waiters.delete(waiter);
+          waiter.resolve(msg);
+        }
+      }
+      if (waiters.size === 0) this.lifecycleWaiters.delete(msg.operationId);
+    }
+    const pending = this.pendingSpawns.get(msg.operationId);
+    if (!pending) return;
+    pending.lifecycleStatus = msg;
+    await upsertPendingOperation(persistedPending(pending));
+    if (msg.name) pending.name = msg.name;
+    switch (msg.state) {
+      case 'accepted':
+      case 'locating':
+      case 'reserved':
+        await this.setPendingStage(pending, 'delivered');
+        return;
+      case 'activating':
+      case 'launching':
+        clearSpawnTimers(pending);
+        pending.timer = undefined;
+        await this.setPendingStage(pending, 'launched');
+        return;
+      case 'pairing-ready':
+      case 'pairing':
+        clearSpawnTimers(pending);
+        pending.timer = undefined;
+        pending.slowTimer = undefined;
+        if (msg.payload) pending.pairingPayload = msg.payload;
+        await this.setPendingStage(pending, msg.payload ? 'ready' : 'launched');
+        if (pending.pairingPayload) await this.attemptPendingPair(msg.operationId);
+        return;
+      case 'open':
+        clearSpawnTimers(pending);
+        if (msg.payload && !pending.pairingPayload) {
+          pending.pairingPayload = msg.payload;
+          await this.setPendingStage(pending, 'ready');
+          await this.attemptPendingPair(msg.operationId);
+          return;
+        }
+        this.pendingSpawns.delete(msg.operationId);
+        await removePendingOperation(msg.operationId);
+        this.store.dispatch(sessionRemoved(pending.tempId));
+        return;
+      case 'failed':
+        await this.failSpawn(
+          msg.operationId,
+          msg.failure?.message || 'The laptop could not open the session.',
+        );
+        return;
+      case 'cancelled':
+        await this.failSpawn(
+          msg.operationId,
+          msg.failure?.message || 'The session operation was cancelled.',
         );
     }
   }
@@ -2945,6 +3126,13 @@ export class SessionRuntime {
 
   /** Tear down every socket, timer, and listener. Called when the app (or a test harness) shuts down. */
   dispose(): void {
+    for (const waiters of this.lifecycleWaiters.values()) {
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(new Error('Session runtime disposed.'));
+      }
+    }
+    this.lifecycleWaiters.clear();
     for (const terminal of this.terminals.values()) terminal.dispose();
     this.terminals.clear();
     for (const device of this.store.getState().sessions.devices) this.clearDeviceUtilities(device.channelId);

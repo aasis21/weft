@@ -1,0 +1,812 @@
+// SPDX-License-Identifier: Apache-2.0
+import { basename } from "node:path";
+import QRCode from "qrcode";
+import {
+  SecureChannel,
+  generateKeyPair,
+  randomChannelId,
+  buildPairingPayload,
+  createPairingGate,
+  listenForPeers,
+} from "@aasis21/weft-shared";
+import { createTransportFromDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
+import { attachRelay, createPermissionRelay } from "./relay.mjs";
+import { resolveDevTunnelTransport, stopDevTunnel } from "./devtunnel.mjs";
+import { enableSessionLog, appendSessionLog } from "./sessionLog.mjs";
+import { resolveVersion } from "./version.mjs";
+import { isStationRunning, registerPendingSession, removePendingSession } from "./pendingSessions.mjs";
+import { cleanupIdentityAfterPairing, readIdentityFile } from "./handoffIdentity.mjs";
+import { updateLaunchOperation } from "./launchOperations.mjs";
+
+export function activationControllerDecision({
+  controllerDeviceId = null,
+  controllerPublicKey = null,
+  requesterId = null,
+  controllerName = null,
+} = {}) {
+  const hasController = Boolean(controllerDeviceId || controllerPublicKey);
+  if (!hasController) return { kind: "activate" };
+  if (requesterId && controllerDeviceId && requesterId === controllerDeviceId) {
+    return { kind: "current-controller" };
+  }
+  return { kind: "conflict", controllerName };
+}
+
+export function isAuthenticatedTakeoverConfirmation(value) {
+  return Boolean(
+    value &&
+    typeof value.operationId === "string" &&
+    value.operationId.trim() &&
+    typeof value.requesterId === "string" &&
+    value.requesterId.trim() &&
+    typeof value.challengeId === "string" &&
+    value.challengeId.trim() &&
+    Number.isSafeInteger(value.expectedRevision) &&
+    value.expectedRevision >= 0,
+  );
+}
+
+export async function createActiveRuntime({
+  session,
+  identityFileEnv = process.env.WEFT_IDENTITY_FILE || "",
+  channelIdEnv = process.env.WEFT_CHANNEL_ID || "",
+  reloadIdentity = null,
+} = {}) {
+if (!session) throw new Error("session is required");
+
+// Names accepted by `/weft <name>` — the sync-resolvable ones (config-backed) plus the async
+// "devtunnel" path (see switchTransport below). Kept separate from transportFactory's own
+// SUPPORTED_TRANSPORT_NAMES because devtunnel isn't a plain descriptor resolution: it needs to
+// look up the shared, machine-wide relay + tunnel that `weft devtunnel start` provisions.
+const WEFT_COMMAND_TRANSPORT_NAMES = [...SUPPORTED_TRANSPORT_NAMES, "devtunnel"];
+
+// Minimal ANSI styling for the pairing banner. The Copilot CLI forwards ANSI straight to the
+// terminal (the QR itself is rendered with ANSI escapes), so truecolor brand accents render in
+// any modern terminal. Honor NO_COLOR (https://no-color.org) and TERM=dumb — otherwise the
+// helpers just return the bare string, so the banner stays readable everywhere.
+const WEFT_COLOR = !process.env.NO_COLOR && process.env.TERM !== "dumb";
+const paint = (codes) => (s) => (WEFT_COLOR ? `\x1b[${codes}m${s}\x1b[0m` : `${s}`);
+const ui = {
+  brand: paint("1;38;2;198;242;78"), // bold signal-lime (#C6F24E) — Weft's primary
+  lime: paint("38;2;198;242;78"),
+  cyan: paint("38;2;63;224;206"), // secondary accent (#3FE0CE)
+  dim: paint("2"),
+};
+
+const handedOffIdentity = reloadIdentity ?? await loadIdentityFromFile(identityFileEnv);
+const identityFileWasPresent = Boolean(handedOffIdentity);
+const launchOperationId = handedOffIdentity?.operationId ?? null;
+const launchOperationOwnerToken = handedOffIdentity?.operationOwnerToken ?? null;
+const durableLaunchHandoff = Boolean(launchOperationId && launchOperationOwnerToken);
+// A spawn-from-phone hand-off is signalled purely by the env vars spawn.mjs sets on the child
+// (WEFT_IDENTITY_FILE / WEFT_CHANNEL_ID). If EITHER is present but the identity file failed to
+// load, the hand-off broke on the way in — most commonly because the terminal launcher
+// (wt.exe / Terminal.app / gnome-terminal) routed our command through an already-running
+// terminal broker that spawns children under its OWN stale environment, dropping the vars we
+// set. When that happens the phone has been told a channel/key this session will never answer
+// on, so it looks like "session started but phone never pairs". We surface it loudly below.
+const spawnHandoffExpected = Boolean(identityFileEnv || channelIdEnv);
+// Each Copilot session always gets its own fresh channel + keypair (forward-secret, and required
+// for the relay's 1-peer-per-channel binding — see listener.mjs's boundPeerPub / bindPeer). The
+// only exception is a same-session extension reload identity, which must be reused verbatim so
+// the phone recognizes it as a continuation of the same session, not a new one. `/clear` does
+// not transfer this identity; the replacement session starts dormant.
+// Persistent pairing (`weft set-pairing persistent`) is a `weft start`-only concept (see
+// listener.mjs) — it never applies here, since sharing one channel across multiple live Copilot
+// sessions would mean the relay ACKs/serves the phone's hello from more than one process at once.
+const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
+const channelId = handedOffIdentity?.channelId ?? (channelIdEnv || randomChannelId());
+process.stderr.write(
+  `Weft: startup pid=${process.pid} identity=${handedOffIdentity ? "handoff" : "generated"} channel=${channelId.slice(0, 8)} handoffFile=${identityFileEnv ? "set" : "unset"}\n`,
+);
+// Resolved once from the single ~/.weft/weft.config.json config file written by `weft
+// set-transport` (see transportFactory.mjs — there is no env var / .env fallback, so a
+// reinstall/rebuild of the extension can never silently override this), and stamped into the QR
+// below so the phone builds a matching transport at connect time, with no pre-baked config of its
+// own. An unconfigured transport fails fast at load with a clear, actionable error (telling the
+// user to run `weft set-transport`) rather than surfacing as a confusing retry-loop timeout later.
+// resolveTransport (not the plain resolveTransportDescriptor) so a persisted default of
+// "devtunnel" gets expanded via a probe of the machine-wide shared relay right here at boot —
+// see devtunnel.mjs's resolveDevTunnelTransport. That lookup is channel-agnostic (channelId is
+// applied at socket-construction time in createTransportFromDescriptor, mirroring how Supabase's
+// createSupabaseTransport takes channelId as a separate arg).
+// `let`, not `const` — `/weft <transport>` (see switchTransport) overrides this for just the
+// running session without touching the persisted device-wide default.
+//
+// A missing devtunnel relay (the user hasn't run `weft devtunnel start` yet) must NOT crash the
+// whole extension at load: that would take down the entire Copilot session over a Weft-only
+// feature. So this is caught here; a null transportDescriptor just means pairing isn't available
+// yet. The error is surfaced via session.log once `session` exists (see below
+// `if (transportSetupError)` block), and the user can retry any time with `/weft <name>`
+// (switchTransport already has its own try/catch).
+let transportDescriptor = null;
+let transportSetupError = null;
+try {
+  transportDescriptor = await resolveTransport();
+} catch (err) {
+  transportSetupError = err;
+}
+let pendingHandoffGrant =
+  handedOffIdentity?.pairingToken && handedOffIdentity?.pairingExpiresAt
+    ? {
+        pairingToken: handedOffIdentity.pairingToken,
+        expiresAt: handedOffIdentity.pairingExpiresAt,
+      }
+    : null;
+let pairingPayload = transportDescriptor ? buildCurrentPairingPayload() : null;
+let pairingGate = pairingPayload
+  ? createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+      trustedPeerPublicKeyB64: handedOffIdentity?.trustedPeerPublicKeyB64 ?? null,
+    })
+  : null;
+
+function buildCurrentPairingPayload() {
+  const grant = pendingHandoffGrant;
+  pendingHandoffGrant = null;
+  return buildPairingPayload({
+    channelId,
+    publicKeyB64: laptopKeys.publicKeyB64,
+    transport: transportDescriptor,
+    appVersion: resolveVersion(),
+    ...(grant ?? {}),
+  });
+}
+
+let relayHandle = null;
+let permissionRelay = null;
+let shuttingDown = false;
+let connecting = false;
+let reconnecting = false;
+// Persistent pairing state. `listenForPeers` keeps the laptop answering the claimed phone's hellos
+// for the whole session while the gate prevents the short-lived QR grant from enrolling another
+// key. We dedupe identical handshake attempts so retries only attach the relay once.
+let pairingStop = null;
+let activeTransport = null;
+let activeStatusStop = null;
+let currentPeerPub = null;
+let currentHandshakeNonce = null;
+let currentPeerDeviceId = handedOffIdentity?.controllerDeviceId ?? null;
+let currentPeerName = handedOffIdentity?.controllerName ?? null;
+let pairChain = Promise.resolve();
+let pairingGrantRefreshTimer = null;
+
+function schedulePairingGrantRefresh() {
+  if (!durableLaunchHandoff || !pairingPayload?.expiresAt || currentPeerPub || shuttingDown) return;
+  if (pairingGrantRefreshTimer) clearTimeout(pairingGrantRefreshTimer);
+  const delay = Math.max(0, pairingPayload.expiresAt - Date.now() + 50);
+  pairingGrantRefreshTimer = setTimeout(() => {
+    pairingGrantRefreshTimer = null;
+    void refreshDurablePairingGrant();
+  }, delay);
+  pairingGrantRefreshTimer.unref?.();
+}
+
+async function refreshDurablePairingGrant() {
+  if (!durableLaunchHandoff || currentPeerPub || shuttingDown) return;
+  pairingPayload = buildCurrentPairingPayload();
+  pairingGate = createPairingGate({
+    pairingToken: pairingPayload.token,
+    expiresAt: pairingPayload.expiresAt,
+  });
+  await updateLaunchOperation(
+    launchOperationId,
+    { pairingPayload },
+    { ownerToken: launchOperationOwnerToken },
+  );
+  await teardownRelay("pairing-grant-refresh");
+  await connectRelayWithRetry({ reconnect: true });
+  schedulePairingGrantRefresh();
+}
+
+// Show the full pairing walk-through (instructions + QR + status) and re-kick the relay listener
+// if it isn't currently live. Once a grant is claimed or expires, an explicit `/weft` invocation
+// rotates the bearer credential and listener rather than redisplaying an unusable QR.
+// `context.args` (the text after `/weft`, e.g. "supabase") optionally overrides the transport for
+// just this session — see switchTransport. No args (or blank) keeps this device's default.
+const showPairing = async (context) => {
+  const requested = context?.args?.trim();
+  if (requested && !(await switchTransport(requested))) return;
+  if (!transportDescriptor) {
+    session.log?.(
+      `Weft: no working transport yet (${transportSetupError?.message ?? "not configured"}). ` +
+        `Run \`/weft [${WEFT_COMMAND_TRANSPORT_NAMES.join("|")}]\` to pick one.`,
+      { level: "warning", ephemeral: false },
+    );
+    return;
+  }
+  const grantExpired = pairingPayload?.expiresAt && Date.now() >= pairingPayload.expiresAt;
+  if (pairingGate?.claimedPeerPublicKeyB64 || grantExpired) {
+    pairingPayload = buildCurrentPairingPayload();
+    pairingGate = createPairingGate({
+      pairingToken: pairingPayload.token,
+      expiresAt: pairingPayload.expiresAt,
+    });
+    await teardownRelay("pairing-refresh");
+  }
+  await logPairing(session, JSON.stringify(pairingPayload), { full: true });
+  appendSessionLog("pairing.shown", { transport: transportDescriptor.kind, channel: channelId?.slice(0, 8) });
+  if (!pairingStop && !shuttingDown) void connectRelayWithRetry();
+  // If a standalone Device Station is running, advertise THIS session to the phone already paired
+  // to it (the reverse of the phone-driven spawn flow) so it can be adopted with a tap instead of a
+  // QR scan. The station relays this offer over its own encrypted channel; the phone still does a
+  // full ECDH pairing to this session, so no secret leaves the process. Withdrawn once a phone pairs.
+  offerSessionToStationIfRunning();
+};
+
+// Registered only while a live station could relay it (best-effort, idempotent). Tracked so the
+// withdraw path skips a needless file write when we never offered.
+let hasOfferedToStation = false;
+
+function offerSessionToStationIfRunning() {
+  if (shuttingDown || !pairingPayload) return;
+  try {
+    if (!isStationRunning()) return;
+    const cwd = process.cwd();
+    registerPendingSession({ channelId, name: basename(cwd) || null, cwd, payload: pairingPayload });
+    hasOfferedToStation = true;
+    appendSessionLog("offer.registered", { channel: channelId?.slice(0, 8) });
+  } catch (err) {
+    appendSessionLog("offer.register_failed", { error: err?.message ?? String(err) }, { level: "warn" });
+  }
+}
+
+function withdrawSessionOffer() {
+  if (!hasOfferedToStation) return;
+  hasOfferedToStation = false;
+  try {
+    removePendingSession(channelId);
+    appendSessionLog("offer.withdrawn", { channel: channelId?.slice(0, 8) });
+  } catch {
+    // best-effort — a stale entry self-prunes via pid-liveness once this process exits.
+  }
+}
+
+// Rebuild transportDescriptor/pairingPayload for `name` and tear down any live relay so the next
+// connectRelayWithRetry() picks up the new transport. Returns false (after logging a clear error)
+// for an unknown/misconfigured name, leaving the current transport untouched. This only affects
+// the running session — it never writes to the persisted `weft set-transport` config.
+async function switchTransport(name) {
+  const normalized = name.trim().toLowerCase();
+  let descriptor;
+  try {
+    descriptor =
+      normalized === "devtunnel"
+        ? // Read-only lookup of the shared, machine-wide relay the user brought up with
+          // `weft devtunnel start` — no spawn, no wait. Throws with an actionable message if
+          // that command hasn't been run yet, which the catch below surfaces to the session log.
+          await resolveDevTunnelTransport()
+        : resolveTransportByName(normalized);
+  } catch (err) {
+    session.log?.(`Weft: ${err?.message ?? err}`, { level: "warning", ephemeral: false });
+    return false;
+  }
+  if (JSON.stringify(descriptor) === JSON.stringify(transportDescriptor)) {
+    session.log?.(`Weft: already using "${descriptor.kind}" for this session.`, { ephemeral: false });
+    return true;
+  }
+  transportDescriptor = descriptor;
+  transportSetupError = null;
+  pairingPayload = buildCurrentPairingPayload();
+  pairingGate = createPairingGate({
+    pairingToken: pairingPayload.token,
+    expiresAt: pairingPayload.expiresAt,
+  });
+  await teardownRelay("transport-switch");
+  appendSessionLog("transport.switched", { transport: descriptor.kind });
+  session.log?.(
+    `Weft: switched transport to "${descriptor.kind}" for this session only. Scan the fresh QR below.`,
+    { ephemeral: false },
+  );
+  return true;
+}
+
+// Open this session's durable diagnostic log (~/.weft/sessions/<sessionId>.log), the per-session
+// twin of `weft start`'s station.log. Every notable lifecycle event below also lands here so a
+// finished/crashed session can be diagnosed after its terminal is gone. Best-effort — never fatal.
+enableSessionLog({ sessionId: session.sessionId });
+appendSessionLog("session.loaded", {
+  sessionId: session.sessionId || "unknown-session",
+  transport: transportDescriptor?.kind ?? "unset",
+  channel: channelId?.slice(0, 8),
+  handoff: identityFileWasPresent,
+  spawnEnv: spawnHandoffExpected,
+  identityFileEnv: identityFileEnv ? "set" : "unset",
+  channelIdEnv: channelIdEnv ? "set" : "unset",
+});
+
+// Smoking gun for "phone spawned a session but it never pairs": the child was spawned from the
+// phone (env vars present) yet the identity file never loaded, so this session came up on a
+// different channel/key than the phone was told. Log it at error level and tell the user how to
+// recover (a manual QR re-pair sidesteps the broken hand-off entirely).
+if (spawnHandoffExpected && !identityFileWasPresent) {
+  appendSessionLog(
+    "spawn.handoff_lost",
+    {
+      identityFileEnv: identityFileEnv ? "set" : "unset",
+      channelIdEnv: channelIdEnv ? "set" : "unset",
+      channel: channelId?.slice(0, 8),
+    },
+    { level: "error" },
+  );
+  session.log?.(
+    "Weft: this session was spawned from your phone, but the pairing identity didn't reach it " +
+      "(the terminal launcher likely dropped the hand-off environment). The phone is waiting on a " +
+      "channel this session won't answer. Run `/weft` here to show a fresh QR and pair manually.",
+    { level: "warning", ephemeral: false },
+  );
+}
+
+if (transportSetupError) {
+  appendSessionLog("transport.setup_error", { error: transportSetupError.message }, { level: "warn" });
+  session.log?.(
+    `Weft: transport didn't come up at startup (${transportSetupError.message}). ` +
+      `Run \`/weft [${WEFT_COMMAND_TRANSPORT_NAMES.join("|")}]\` to configure/retry it.`,
+    { level: "warning", ephemeral: false },
+  );
+}
+
+// Subscribe the encrypted channel and KEEP listening for phone hellos for the whole session. A
+// transient Supabase subscribe failure (CHANNEL_ERROR) must not permanently kill pairing for a
+// walk-away tool, so retry the subscribe with capped exponential backoff using a FRESH transport
+// each attempt (a realtime channel is single-use after an error). Once subscribed, `listenForPeers`
+// answers authorized hellos — the first scan and reconnects from its claimed key — so pairing
+// self-heals without making the QR reusable by a second key.
+// `/weft` can re-kick this if all attempts gave up.
+async function connectRelayWithRetry({ reconnect = false } = {}) {
+  if (connecting || pairingStop || shuttingDown) return false;
+  if (!transportDescriptor && !identityFileWasPresent) return false;
+  connecting = true;
+  try {
+    const maxAttempts = positiveIntFromEnv("WEFT_CONNECT_MAX_ATTEMPTS", 6);
+    for (let attempt = 1; !shuttingDown; attempt++) {
+      // A phone-launched process must keep trying until it is actually reachable: the station has
+      // already accepted the durable operation and retries must not create another process. Manual
+      // `/weft` sessions retain the finite retry behavior above.
+      if (!transportDescriptor) {
+        try {
+          transportDescriptor = await resolveTransport();
+          transportSetupError = null;
+          pairingPayload = buildCurrentPairingPayload();
+          pairingGate = createPairingGate({
+            pairingToken: pairingPayload.token,
+            expiresAt: pairingPayload.expiresAt,
+          });
+        } catch (err) {
+          transportSetupError = err;
+          if (!identityFileWasPresent) return false;
+          await sleep(Math.min(1500 * 2 ** (attempt - 1), 15_000));
+          continue;
+        }
+      }
+      const transport = createTransportFromDescriptor(transportDescriptor, { channelId });
+      try {
+        const listener = await listenForPeers({
+          transport,
+          keyPair: laptopKeys,
+          connect: true,
+          channelId,
+          pairingGate,
+          onAck: ({ ok, error, peer }) => {
+            process.stderr.write(
+              `Weft: pairing ack ${ok ? "sent" : "failed"} pid=${process.pid} channel=${channelId.slice(0, 8)} peer=${peer.senderName ?? peer.deviceId ?? "unknown"}${error ? ` error=${error.message ?? error}` : ""}\n`,
+            );
+          },
+          onPeer: (info) => onPeerPaired(transport, info),
+        });
+        if (shuttingDown) {
+          listener.stop();
+          await closeQuietly(transport);
+          return false;
+        }
+        pairingStop = listener.stop;
+        activeTransport = transport;
+        activeStatusStop = transport.onStatus?.((status, detail) => {
+          if (status === "disconnected") requestReconnect(detail);
+        }) ?? null;
+        appendSessionLog(reconnect ? "pairing.reconnected" : "pairing.ready", { channel: channelId?.slice(0, 8) });
+        if (durableLaunchHandoff) {
+          await updateLaunchOperation(
+            launchOperationId,
+            { state: "ready", sessionId: session.sessionId || null, pid: process.pid },
+            { ownerToken: launchOperationOwnerToken },
+          );
+        }
+        session.log?.(
+          reconnect
+            ? "Weft: reconnected."
+            : "Weft: pairing channel ready; listening for phone hellos…",
+        );
+        return true;
+      } catch (err) {
+        await closeQuietly(transport);
+        if (shuttingDown) return false;
+        if (!identityFileWasPresent && attempt >= maxAttempts) {
+          appendSessionLog("pairing.subscribe_failed", { attempts: attempt, error: err?.message ?? String(err) }, { level: "error" });
+          process.stderr.write(
+            `Weft: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
+          );
+          session.log?.(
+            `Weft: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /weft to retry.`,
+            { level: "warning", ephemeral: false },
+          );
+          return false;
+        }
+        const backoffMs = Math.min(1500 * 2 ** (attempt - 1), 15_000);
+        session.log?.(
+          `Weft: pairing channel subscribe attempt ${attempt} failed (${err?.message ?? err}); retrying in ${Math.round(backoffMs / 1000)}s…`,
+          { level: "warning", ephemeral: false },
+        );
+        await sleep(backoffMs);
+      }
+    }
+  } finally {
+    connecting = false;
+  }
+  return false;
+}
+
+function requestReconnect(detail) {
+  if (shuttingDown || reconnecting) return;
+  reconnecting = true;
+  appendSessionLog("connection.lost", { reason: detail?.reason ?? detail ?? "unknown" }, { level: "warn" });
+  session.log?.("Weft: connection lost, reconnecting…", { level: "warning", ephemeral: false });
+  void reconnectRelay(detail).finally(() => {
+    reconnecting = false;
+  });
+}
+
+async function reconnectRelay() {
+  await teardownRelay("reconnect");
+  await connectRelayWithRetry({ reconnect: true });
+}
+
+// Shared shutdown of any live relay/listener/transport, used by both a dropped-connection
+// reconnect and a user-requested `/weft <transport>` switch — `reason` is only used for the
+// relay's own stop() bookkeeping/logging.
+async function teardownRelay(reason) {
+  const previousRelay = relayHandle;
+  const previousStop = pairingStop;
+  const previousTransport = activeTransport;
+  activeStatusStop?.();
+  activeStatusStop = null;
+  pairingStop = null;
+  activeTransport = null;
+  relayHandle = null;
+  permissionRelay = null;
+  currentPeerPub = null;
+  currentHandshakeNonce = null;
+  try {
+    previousStop?.();
+  } catch {
+    // best-effort; reconnect creates a fresh transport below.
+  }
+  if (previousRelay) {
+    try {
+      await previousRelay.stop(reason, { closeTransport: false });
+    } catch {
+      // best-effort; reconnect must continue.
+    }
+  }
+  await closeQuietly(previousTransport);
+}
+
+// (Re)attach the encrypted relay for a freshly-paired phone. Serialized through `pairChain` so a
+// phone re-broadcasting its hello can't trigger overlapping attaches, and idempotent per peer key:
+// a duplicate hello from the same phone is already ACKed by `listenForPeers`, so we just no-op.
+function onPeerPaired(transport, info) {
+  pairChain = pairChain.then(() => attachForPeer(transport, info)).catch((err) => {
+    appendSessionLog("pairing.repair_failed", { error: err?.message ?? String(err) }, { level: "warn" });
+    session.log?.(`Weft: re-pair failed: ${err?.message ?? err}`, {
+      level: "warning",
+      ephemeral: false,
+    });
+  });
+  return pairChain;
+}
+
+async function attachForPeer(transport, { key, peer }) {
+  if (shuttingDown || transport !== activeTransport) return;
+  if (
+    peer.publicKeyB64 === currentPeerPub &&
+    peer.handshakeNonce === currentHandshakeNonce &&
+    relayHandle
+  ) {
+    return;
+  }
+
+  const previous = relayHandle;
+  relayHandle = null;
+  currentPeerPub = null;
+  if (previous) {
+    // Tear down the old peer's relay but keep the shared transport open for this new phone.
+    try {
+      await previous.stop("repair", { closeTransport: false });
+    } catch {
+      // best-effort; a failed teardown must not block the new pairing.
+    }
+  }
+
+  const channel = new SecureChannel({
+    transport,
+    key,
+    identity: {
+      channelId,
+      sessionId: session.sessionId || "unknown-session",
+      senderId: "copilot",
+      senderName: "Copilot",
+    },
+  });
+  permissionRelay = createPermissionRelay({
+    channel,
+    logger: (message, options) => session.log?.(message, options),
+  });
+  // SupabaseTransport is subscribe-order independent (single catch-all broadcast listener +
+  // internal dispatch), so attachRelay may register SecureChannel handlers after the channel is
+  // already connected without losing events.
+  relayHandle = await attachRelay({
+    session,
+    channel,
+    channelId,
+    permissionRelay,
+    onConnectionLost: requestReconnect,
+  });
+  relayHandle.session = session;
+  currentPeerPub = peer.publicKeyB64;
+  currentHandshakeNonce = peer.handshakeNonce ?? null;
+  currentPeerDeviceId = peer.deviceId ?? null;
+  currentPeerName = peer.senderName ?? null;
+  // The phone has adopted this session — it's no longer a "pending" offer, so withdraw it from the
+  // station registry (and the station drops it from its advertised set on its own SESSION_CLAIMED
+  // handling too; both are idempotent).
+  withdrawSessionOffer();
+  if (durableLaunchHandoff) {
+    await updateLaunchOperation(
+      launchOperationId,
+      { state: "claimed", sessionId: session.sessionId || null, pid: process.pid },
+      { ownerToken: launchOperationOwnerToken },
+    );
+  }
+  consumeHandoffFile();
+  appendSessionLog("device.paired", { phone: peer.senderName ?? peer.deviceId ?? "unknown" });
+  session.log?.(
+    `${ui.lime("✓ Phone paired")} — ${peer.senderName ?? peer.deviceId ?? "your phone"} is now mirroring this session.`,
+  );
+}
+
+// Tear everything down once: stop the pairing listener, stop the relay (which announces the session
+// end + closes the shared transport), or just close the transport if no relay ever attached.
+async function shutdown(reason, { preserveIdentity = false } = {}) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (pairingGrantRefreshTimer) clearTimeout(pairingGrantRefreshTimer);
+  pairingGrantRefreshTimer = null;
+  if (!preserveIdentity && durableLaunchHandoff && !currentPeerPub) {
+    await updateLaunchOperation(
+      launchOperationId,
+      { state: "abandoned", error: `Spawned session ended before pairing (${reason ?? "session_end"}).` },
+      { ownerToken: launchOperationOwnerToken },
+    );
+  }
+  appendSessionLog("session.shutdown", { reason: reason ?? "session_end" });
+  withdrawSessionOffer();
+  activeStatusStop?.();
+  activeStatusStop = null;
+  pairingStop?.();
+  pairingStop = null;
+  if (relayHandle) {
+    try {
+      await relayHandle.stop(reason);
+    } catch {
+      // best-effort
+    }
+  } else {
+    await closeQuietly(activeTransport);
+  }
+  await stopDevTunnel().catch(() => {});
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    t.unref?.();
+  });
+}
+
+async function closeQuietly(transport) {
+  try {
+    await transport?.close?.();
+  } catch {
+    // best-effort cleanup of a failed transport
+  }
+}
+
+async function loadIdentityFromFile(file) {
+  if (!file) return null;
+  try {
+    return await readIdentityFile(file);
+  } catch (err) {
+    process.stderr.write(`Weft: could not load handed-off identity; using a fresh pairing: ${err?.message ?? err}\n`);
+    return null;
+  }
+}
+
+// A durable phone launch keeps its identity through extension/MCP reloads. The launch-operation
+// pruner removes it after the terminal operation has been resolved for three days. Legacy transient
+// handoffs have no durable cleanup owner, so remove those after their first successful pairing.
+let handoffFileConsumed = false;
+function consumeHandoffFile() {
+  if (handoffFileConsumed || !identityFileEnv) return;
+  handoffFileConsumed = true;
+  if (cleanupIdentityAfterPairing(identityFileEnv, { durable: durableLaunchHandoff })) {
+    appendSessionLog("handoff.file_cleaned", {});
+  } else if (durableLaunchHandoff) {
+    appendSessionLog("handoff.file_retained", { operationId: launchOperationId });
+  }
+}
+
+function positiveIntFromEnv(name, fallback) {
+  const raw = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+async function logPairing(session, payload, { full = false } = {}) {
+  const qr = (await QRCode.toString(payload, { type: "terminal", small: true })).replace(/\n+$/, "");
+  // Reflects whichever descriptor is actually active for THIS session — not just the env var —
+  // so a `/weft <name>` override (see switchTransport) shows correctly after a switch.
+  const transport = transportDescriptor.kind;
+  const channelShort = channelId.slice(0, 8);
+
+  // Session start prints a light banner — just the QR + one status line. `/weft` prints the full
+  // walk-through (value prop, numbered steps, manual-paste fallback, security footer).
+  const lines = full
+    ? [
+        `${ui.brand("WEFT")}  ${ui.dim("·  pair your phone")}`,
+        "",
+        ui.dim("Mirror this Copilot session on your phone — watch the live token"),
+        ui.dim("stream, read diffs, and approve tool runs from anywhere."),
+        "",
+        qr,
+        "",
+        `${ui.lime("1")}  Open the Weft app   ${ui.dim("·")}  ${ui.cyan("useweft.netlify.app")}`,
+        `${ui.lime("2")}  Tap ${ui.dim("“Scan QR to pair”")} and point it at the code above`,
+        `${ui.lime("3")}  Approve the link on your phone — it confirms right here`,
+        "",
+        ui.dim("Can’t scan? Tap “Paste a code” in the app and paste this:"),
+        // Fenced as a code block (not just ui.dim(payload)) so the CLI's own markdown renderer
+        // treats it as literal text: a bare "https://..." inside the raw JSON was otherwise being
+        // auto-hyperlinked (OSC 8) by the renderer's markdown autolink pass, splicing escape
+        // sequences into the middle of the string and corrupting the exact bytes the user must
+        // copy/paste into the phone app.
+        "```",
+        payload,
+        "```",
+        "",
+        // Only when a standalone `weft start` Device Station is live on this machine: this session is
+        // (about to be) advertised to the already-paired phone as a one-tap offer (see
+        // offerSessionToStationIfRunning), so surface that shortcut instead of implying QR is the only way in.
+        ...(isStationRunning()
+          ? [
+              ui.dim(
+                "Phone already paired to this laptop? This session is also waiting in the Weft app under this device — just tap it to join, no scan.",
+              ),
+              "",
+            ]
+          : []),
+        ui.dim(
+          `Relay ${transport} · Channel ${channelShort} · End-to-end encrypted (AES-256-GCM), keys live only this session`,
+        ),
+        "",
+        `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}`,
+      ]
+    : [
+        `${ui.brand("WEFT")}  ${ui.dim("·  scan to pair your phone")}`,
+        "",
+        qr,
+        "",
+        `${ui.cyan("›")} ${ui.dim("Waiting for your phone…")}   ${ui.dim("·")}   ${ui.dim("run")} ${ui.lime("/weft")} ${ui.dim("for setup steps")}`,
+      ];
+  session.log?.(lines.join("\n"), { level: "info", ephemeral: false });
+}
+
+async function activate({ showQr = false, context = null } = {}) {
+  const requesterId =
+    typeof context?.requesterId === "string" && context.requesterId.trim()
+      ? context.requesterId.trim()
+      : null;
+  const controllerDecision = activationControllerDecision({
+    controllerDeviceId: currentPeerDeviceId,
+    controllerPublicKey: currentPeerPub,
+    requesterId,
+    controllerName: currentPeerName,
+  });
+  if (!showQr && controllerDecision.kind === "conflict") {
+    return {
+      state: "controller-conflict",
+      controllerConflict: true,
+      controllerName: controllerDecision.controllerName,
+      sessionId: session.sessionId || null,
+      pid: process.pid,
+    };
+  }
+  if (!showQr && controllerDecision.kind === "current-controller") {
+    return {
+      state: "active",
+      requesterConfirmed: true,
+      pairingPayload,
+      sessionId: session.sessionId || null,
+      pid: process.pid,
+    };
+  }
+  if (showQr) {
+    await showPairing(context);
+  } else if (!pairingStop && !shuttingDown) {
+    void connectRelayWithRetry();
+  }
+  if (durableLaunchHandoff) schedulePairingGrantRefresh();
+  return {
+    state: pairingStop ? "pairing-ready" : "activating",
+    pairingPayload,
+    sessionId: session.sessionId || null,
+    pid: process.pid,
+  };
+}
+
+function status() {
+  return {
+    state: currentPeerPub ? "active" : pairingStop ? "pairing-ready" : "activating",
+    pairingPayload,
+    sessionId: session.sessionId || null,
+    pid: process.pid,
+  };
+}
+
+async function replaceController(confirmation) {
+  if (!isAuthenticatedTakeoverConfirmation(confirmation)) {
+    throw new Error("Authenticated takeover confirmation is required.");
+  }
+  currentPeerDeviceId = null;
+  currentPeerName = null;
+  pairingPayload = buildCurrentPairingPayload();
+  pairingGate = createPairingGate({
+    pairingToken: pairingPayload.token,
+    expiresAt: pairingPayload.expiresAt,
+  });
+  await teardownRelay("replace-controller");
+  await connectRelayWithRetry({ reconnect: true });
+  return status();
+}
+
+function getReloadIdentity() {
+  return {
+    channelId,
+    laptopKeys,
+    pairingToken: pairingPayload?.token ?? null,
+    pairingExpiresAt: pairingPayload?.expiresAt ?? null,
+    trustedPeerPublicKeyB64: currentPeerPub ?? pairingGate?.claimedPeerPublicKeyB64 ?? null,
+    controllerDeviceId: currentPeerDeviceId,
+    controllerName: currentPeerName,
+    operationId: launchOperationId,
+    operationOwnerToken: launchOperationOwnerToken,
+  };
+}
+
+return Object.freeze({
+  activate,
+  showPairing,
+  status,
+  replaceController,
+  quiesce: (reason = "quiesce") => shutdown(reason),
+  shutdown,
+  getReloadIdentity,
+  onPermissionRequest(request, invocation) {
+    if (!permissionRelay) return { kind: "user-not-available" };
+    return permissionRelay.onPermissionRequest(request, invocation);
+  },
+  discardHandoffIdentity() {
+    if (!identityFileEnv) return false;
+    return cleanupIdentityAfterPairing(identityFileEnv, { force: true });
+  },
+});
+}

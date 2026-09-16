@@ -68,6 +68,7 @@ resolve_site_url(){
 }
 
 ext_bundle="$root/extension/dist/extension.mjs"
+active_runtime_bundle="$root/extension/dist/activeRuntime.mjs"
 relay_bundle="$root/extension/dist/relayServerProcess.mjs"
 watchdog_bundle="$root/extension/dist/devtunnelHostWatchdog.mjs"
 weft_cli_bundle="$root/extension/dist/weft.mjs"
@@ -85,6 +86,8 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   npm run build -w @aasis21/weft-extension >/dev/null
   [ -f "$ext_bundle" ] || { echo "extension build did not produce $ext_bundle" >&2; exit 1; }
   ok "extension/dist/extension.mjs"
+  [ -f "$active_runtime_bundle" ] || { echo "extension build did not produce $active_runtime_bundle" >&2; exit 1; }
+  ok "extension/dist/activeRuntime.mjs"
   [ -f "$relay_bundle" ] || { echo "extension build did not produce $relay_bundle" >&2; exit 1; }
   ok "extension/dist/relayServerProcess.mjs  (spawned as an attached child by the shared devtunnel relay)"
   [ -f "$watchdog_bundle" ] || { echo "extension build did not produce $watchdog_bundle" >&2; exit 1; }
@@ -95,6 +98,8 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   cyan "Refreshing site bits (extension bundle -> mobile/public)"
   cp "$ext_bundle" "$public_bundle"
   ok "mobile/public/extension.mjs  (served as /extension.mjs by the installer)"
+  cp "$active_runtime_bundle" "$root/mobile/public/activeRuntime.mjs"
+  ok "mobile/public/activeRuntime.mjs  (loaded only after session activation)"
   cp "$relay_bundle" "$root/mobile/public/relayServerProcess.mjs"
   ok "mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)"
   cp "$watchdog_bundle" "$root/mobile/public/devtunnelHostWatchdog.mjs"
@@ -137,6 +142,7 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
 else
   info "skip-build: reusing existing extension/dist and mobile/dist"
   [ -f "$ext_bundle" ] || { echo "no $ext_bundle - run once without --skip-build first" >&2; exit 1; }
+  [ -f "$active_runtime_bundle" ] || { echo "no $active_runtime_bundle - run once without --skip-build first" >&2; exit 1; }
   [ -f "$relay_bundle" ] || { echo "no $relay_bundle - run once without --skip-build first" >&2; exit 1; }
   [ -f "$weft_cli_bundle" ] || { echo "no $weft_cli_bundle - run once without --skip-build first" >&2; exit 1; }
   [ -f "$dist_dir/index.html" ] || { echo "no $dist_dir - run once without --skip-build first" >&2; exit 1; }

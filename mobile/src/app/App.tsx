@@ -5,7 +5,11 @@ import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import type { StartMode } from '@/ui/screens/StartSessionScreen';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
-import { sessionRuntime } from '@/session/runtime/instance';
+import { sessionAccess, sessionRuntime } from '@/session/runtime/instance';
+import {
+  lifecycleFailureMessage,
+  requiresTakeoverConfirmation,
+} from '@/session/access/sessionAccess';
 
 const StartSessionScreen = lazy(() =>
   import('@/ui/screens/StartSessionScreen').then((module) => ({ default: module.StartSessionScreen })),
@@ -50,8 +54,14 @@ export default function App(): JSX.Element {
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const removeSession = useCallback((channelId: string): void => {
+    const operationId = snapshot.sessions.find((session) => session.meta.channelId === channelId)
+      ?.spawning?.requestId;
+    void (operationId ? sessionAccess.cancel(operationId) : sessionRuntime.remove(channelId));
+  }, [snapshot.sessions]);
+
   useEffect(() => {
-    void sessionRuntime.init();
+    void sessionRuntime.init().then(() => sessionAccess.init());
   }, []);
 
   // Devices / Device details have no dedicated in-page back button — the phone's own Back
@@ -240,7 +250,7 @@ export default function App(): JSX.Element {
           setAdding(false);
           openDevices();
         }}
-        onRemoveSession={(id) => void sessionRuntime.remove(id)}
+        onRemoveSession={removeSession}
         onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
         onGoHome={() => {
           setAdding(false);
@@ -297,7 +307,7 @@ export default function App(): JSX.Element {
           onAddSession={() => openJoin(false)}
           onStartSession={() => openStart()}
           onOpenDevices={openDevices}
-          onRemoveSession={(id) => void sessionRuntime.remove(id)}
+          onRemoveSession={removeSession}
           onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
           onGoHome={() => {
             closeDeviceScreens();
@@ -358,8 +368,11 @@ export default function App(): JSX.Element {
             onOpenDeviceDetails={(id) => openDeviceDetails(id)}
             onJoinOffer={(deviceId, offerChannelId) => {
               closeDeviceScreens();
-              void sessionRuntime.joinOfferedSession(deviceId, offerChannelId).catch((err) => {
-                setError(err instanceof Error ? err.message : 'Could not join the offered session.');
+              void sessionAccess.open({
+                deviceChannelId: deviceId,
+                target: { kind: 'offer', offerChannelId },
+              }).then((status) => {
+                if (status.state === 'failed') setError(lifecycleFailureMessage(status.failure));
               });
             }}
             onOpenSession={(id) => {
@@ -373,7 +386,7 @@ export default function App(): JSX.Element {
             onAddSession={() => openJoin(false)}
             onStartSession={() => openStart()}
             onOpenDevices={openDevices}
-            onRemoveSession={(id) => void sessionRuntime.remove(id)}
+            onRemoveSession={removeSession}
             onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
             onGoHome={() => {
               closeDeviceScreens();
@@ -401,25 +414,33 @@ export default function App(): JSX.Element {
           initialChannelId={startDeviceId}
           initialMode={startMode}
           onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
-          onStart={async (id, opts) => {
-            await sessionRuntime.spawnSession(id, opts);
-            setStarting(false);
-            setStartDeviceId(undefined);
-            setShowLanding(false);
+          onOpen={async (intent) => {
+            const status = await sessionAccess.open(intent);
+            if (
+              status.state !== 'failed' &&
+              status.state !== 'cancelled' &&
+              !requiresTakeoverConfirmation(status)
+            ) {
+              setStarting(false);
+              setStartDeviceId(undefined);
+              setShowLanding(false);
+            }
+            return status;
+          }}
+          onConfirmTakeover={async (operationId) => {
+            const status = await sessionAccess.confirmTakeover(operationId);
+            if (
+              status.state !== 'failed' &&
+              status.state !== 'cancelled' &&
+              !requiresTakeoverConfirmation(status)
+            ) {
+              setStarting(false);
+              setStartDeviceId(undefined);
+              setShowLanding(false);
+            }
+            return status;
           }}
           onRefreshSessions={(id, cwd) => void sessionRuntime.refreshSessions(id, cwd)}
-          onResume={async (id, req) => {
-            await sessionRuntime.resumeSession(id, req);
-            setStarting(false);
-            setStartDeviceId(undefined);
-            setShowLanding(false);
-          }}
-          onOpenSession={(id) => {
-            setStarting(false);
-            setStartDeviceId(undefined);
-            setShowLanding(false);
-            sessionRuntime.setActive(id);
-          }}
           onScanListener={() => openJoin(false)}
           onManageDevices={openDevices}
           onCancel={() => {
@@ -434,7 +455,7 @@ export default function App(): JSX.Element {
             setStartDeviceId(undefined);
             sessionRuntime.setActive(id);
           }}
-          onRemoveSession={(id) => void sessionRuntime.remove(id)}
+          onRemoveSession={removeSession}
           onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
           onGoHome={() => {
             setStarting(false);
@@ -499,13 +520,17 @@ export default function App(): JSX.Element {
         onStartOnDevice={(id) => openStart(id)}
         onOpenDeviceDetails={(id) => openDeviceDetails(id)}
         onVoiceModeChange={handleVoiceModeChange}
-        onRemoveSession={(id) => void sessionRuntime.remove(id)}
+        onRemoveSession={removeSession}
         onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
         onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
         onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
         onArchiveSession={(id) => sessionRuntime.archive(id)}
         onReconnect={(id) => void sessionRuntime.reconnect(id)}
-        onRetrySpawn={(id) => void sessionRuntime.retrySpawn(id)}
+        onRetrySpawn={(id) => {
+          const operationId = snapshot.sessions.find((session) => session.meta.channelId === id)
+            ?.spawning?.requestId;
+          if (operationId) void sessionAccess.retry(operationId);
+        }}
         onGoHome={() => {
           setError(null);
           setShowLanding(true);

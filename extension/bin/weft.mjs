@@ -45,7 +45,7 @@ const INSTALL_BASE = (process.env.WEFT_INSTALL_BASE || "https://useweft.netlify.
 // source file, so it works in dev and breaks in prod. Declared up here (not next to its helpers)
 // so it's initialized before the top-level command dispatch can reach placeBundles — a later
 // `const` would be in the temporal dead zone.
-const BUNDLE_NAMES = ["extension.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
+const BUNDLE_NAMES = ["extension.mjs", "activeRuntime.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
 function extensionInstallDir() {
   return process.env.WEFT_INSTALL_DIR || join(homedir(), ".copilot", "extensions", "weft");
 }

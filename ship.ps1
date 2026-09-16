@@ -107,6 +107,7 @@ function Resolve-SiteUrl([string]$SiteId) {
 
 try {
     $extBundle    = Join-Path $root 'extension\dist\extension.mjs'
+    $activeRuntimeBundle = Join-Path $root 'extension\dist\activeRuntime.mjs'
     $relayBundle  = Join-Path $root 'extension\dist\relayServerProcess.mjs'
     $watchdogBundle = Join-Path $root 'extension\dist\devtunnelHostWatchdog.mjs'
     $weftCliBundle = Join-Path $root 'extension\dist\weft.mjs'
@@ -132,6 +133,8 @@ try {
         npm run build -w '@aasis21/weft-extension' | Out-Null
         if (-not (Test-Path $extBundle)) { throw "extension build did not produce $extBundle" }
         Ok 'extension/dist/extension.mjs'
+        if (-not (Test-Path $activeRuntimeBundle)) { throw "extension build did not produce $activeRuntimeBundle" }
+        Ok 'extension/dist/activeRuntime.mjs'
         if (-not (Test-Path $relayBundle)) { throw "extension build did not produce $relayBundle" }
         Ok 'extension/dist/relayServerProcess.mjs  (spawned as an attached child by the shared devtunnel relay)'
         if (-not (Test-Path $watchdogBundle)) { throw "extension build did not produce $watchdogBundle" }
@@ -142,6 +145,9 @@ try {
         Step 'Refreshing site bits (extension bundle -> mobile/public)'
         Copy-Item $extBundle $publicBundle -Force
         Ok 'mobile/public/extension.mjs  (served as /extension.mjs by the installer)'
+        $publicActiveRuntimeBundle = Join-Path $root 'mobile\public\activeRuntime.mjs'
+        Copy-Item $activeRuntimeBundle $publicActiveRuntimeBundle -Force
+        Ok 'mobile/public/activeRuntime.mjs  (loaded only after session activation)'
         $publicRelayBundle = Join-Path $root 'mobile\public\relayServerProcess.mjs'
         Copy-Item $relayBundle $publicRelayBundle -Force
         Ok 'mobile/public/relayServerProcess.mjs  (served as /relayServerProcess.mjs by the installer)'
@@ -191,6 +197,7 @@ try {
     } else {
         Info 'SkipBuild: reusing existing extension/dist and mobile/dist'
         if (-not (Test-Path $extBundle)) { throw "no $extBundle - run once without -SkipBuild first" }
+        if (-not (Test-Path $activeRuntimeBundle)) { throw "no $activeRuntimeBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $relayBundle)) { throw "no $relayBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $watchdogBundle)) { throw "no $watchdogBundle - run once without -SkipBuild first" }
         if (-not (Test-Path $weftCliBundle)) { throw "no $weftCliBundle - run once without -SkipBuild first" }

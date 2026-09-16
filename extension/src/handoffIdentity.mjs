@@ -85,8 +85,8 @@ export async function readIdentityFile(file) {
   };
 }
 
-export function cleanupIdentityAfterPairing(file, { durable = false } = {}) {
-  if (!file || durable) return false;
+export function cleanupIdentityAfterPairing(file, { durable = false, force = false } = {}) {
+  if (!file || (durable && !force)) return false;
   try {
     unlinkSync(file);
     return true;

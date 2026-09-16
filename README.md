@@ -25,6 +25,10 @@ chat back up, from anywhere.
 > **Fastest path:** install Weft on your laptop, run `weft start`, then open
 > **<https://useweft.netlify.app>** on your phone and scan the QR.
 
+Phone-driven discovery, Start, and Open/Resume require a running **Device Station**.
+`/weft` is the separate, explicit path for pairing the phone directly with the current
+Copilot session; it does not require Device Station.
+
 ## What you can do
 
 Everything you'd do at the terminal — now from your phone:
@@ -43,7 +47,9 @@ Everything you'd do at the terminal — now from your phone:
   **interactive / plan / autopilot**, fire whitelisted slash commands (`/model`, `/compact`,
   `/clear`, `/autopilot`, …) that run on the laptop, or **Stop** a turn mid-run.
 - **Run a fleet** — one Device Station drives many projects and sessions; start a fresh chat or tap
-  into a running one, across multiple laptops with a default device.
+  into a running one, across multiple laptops with a default device. If the selected session is
+  already open in a terminal, Station activates that exact process instead of launching a second
+  `copilot --resume`.
 - **Recover slow launches safely** — New and Resume requests survive phone reloads and temporary
   Devbox outages; **Try again** reconnects to the same launch instead of silently opening duplicates.
 - **Use a shared terminal** — start Device Station with `weft start` on a supported Windows
@@ -130,6 +136,25 @@ point at your own Supabase project, or browse every CLI command, see
 
 ## Architecture
 
+### Session activation contract
+
+- Every dormant Copilot extension publishes one small user-local presence record and holds one
+  idle local lifecycle endpoint. It performs no remote/network access, pairing cryptography, QR
+  work, logging, diagnostics, polling, heartbeat, retry timer, or other timer.
+- Filesystem state provides discovery and crash recovery; the Windows named pipe or Unix-domain
+  socket provides authenticated live commands such as activate, status, controller replacement,
+  and quiesce. Station connects only for a command and then disconnects.
+- After pairing, prompts, events, approvals, streaming, and terminal traffic flow directly between
+  the phone and session over the encrypted relay. Active phone traffic does not pass through Device
+  Station or the local lifecycle endpoint.
+- `/clear` ends the current phone attachment. The replacement Copilot session starts dormant and
+  requires fresh activation through Station or `/weft`.
+- Completed lifecycle operations and unclaimed recovery identities are retained for three days,
+  unless still referenced by a live runtime or unresolved operation.
+- A confirmed takeover of a responsive runtime replaces the current phone controller immediately
+  without restarting Copilot. Restart-and-Resume is reserved for a separately confirmed,
+  revalidated unresponsive-owner flow.
+
 ```
 +------------------------------+        +------------------------------+        +-------------------------------+
 | Weft Mobile                  |        |   Supabase Realtime          |        |  Laptop terminal              |
@@ -174,7 +199,8 @@ Three layers, one monorepo:
 ## Runtime & packaging model
 
 - The extension is authored in `extension/src/` and bundled (esbuild) to a single
-  `extension/dist/extension.mjs`. `@github/copilot-sdk` is marked **external** (the CLI provides
+  `extension/dist/extension.mjs` plus the lazily imported `extension/dist/activeRuntime.mjs`.
+  `@github/copilot-sdk` is marked **external** (the CLI provides
   it at runtime); everything else (e.g. `@supabase/supabase-js`, `shared/`) is bundled in.
 - Install copies `extension/dist/` into `~/.copilot/extensions/weft/`, where Copilot CLI
   auto-discovers it (see `setup.*` / `install.*`) — that directory holds installed **code
@@ -195,7 +221,7 @@ Source builds require **Node.js 20 or newer**.
 npm install --workspaces --include-workspace-root  # resolve shared, extension, and mobile
 npm test -w @aasis21/weft-shared            # crypto + pairing + transport + message tests
 node extension/harness/harness.mjs --auto   # full relay loop vs a simulated phone (no Supabase)
-npm run build -w @aasis21/weft-extension    # bundle -> extension/dist/extension.mjs
+npm run build -w @aasis21/weft-extension    # bundles -> extension/dist/extension.mjs + activeRuntime.mjs
 npm run build -w @aasis21/weft-mobile       # Vite production build
 cd mobile && npm run dev                    # then pick "Demo / Simulator"
 ```

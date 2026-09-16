@@ -35,8 +35,12 @@ export const DEVICE_CAPABILITY = Object.freeze({
   TERMINAL_V1: "device-terminal-v1",
   CLIPBOARD_V1: "device-clipboard-v1",
   KEEP_AWAKE_V1: "device-keep-awake-v1",
+  SESSION_ACTIVATION_V1: "session-activation-v1",
 });
 
+export const SESSION_ACTIVATION_CAPABILITY = DEVICE_CAPABILITY.SESSION_ACTIVATION_V1;
+export const LIFECYCLE_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+export const LIFECYCLE_MESSAGE_MAX_BYTES = 64 * 1024;
 export const CLIPBOARD_MAX_BYTES = 64 * 1024;
 export const KEEP_AWAKE_MIN_MS = 15 * 60 * 1000;
 export const KEEP_AWAKE_MAX_MS = 8 * 60 * 60 * 1000;
@@ -117,6 +121,13 @@ export const SUBTYPE = Object.freeze({
     // that session's own cwd). Replies over the SAME SPAWN_PAIRING / SPAWN_RESULT path a fresh
     // spawn uses, so the phone pairs to the resumed session digitally (no QR).
     RESUME_SESSION: "resume_session",
+    // Additive session-activation-v1 lifecycle contract. Mixed-version peers can project these
+    // messages to and from the legacy spawn/resume/status messages below.
+    OPEN_SESSION: "open_session",
+    LIFECYCLE_STATUS_REQUEST: "lifecycle_status_request",
+    LIFECYCLE_STATUS: "lifecycle_status",
+    TAKEOVER_CONFIRM: "takeover_confirm",
+    LIFECYCLE_CANCEL: "lifecycle_cancel",
     // listener -> phone: the pre-minted pairing payload for a freshly spawned session.
     SPAWN_PAIRING: "spawn_pairing",
     // listener -> phone: terminal result of a spawn request (ok / failure reason).
@@ -176,14 +187,182 @@ export const LAUNCH_STATES = Object.freeze([
   "abandoned",
   "superseded",
 ]);
+export const LIFECYCLE_STATES = Object.freeze([
+  "accepted",
+  "locating",
+  "reserved",
+  "activating",
+  "launching",
+  "pairing-ready",
+  "pairing",
+  "open",
+  "failed",
+  "cancelled",
+]);
+export const LIFECYCLE_ACTIONS = Object.freeze([
+  "retry",
+  "confirm-takeover",
+  "cancel",
+  "choose-session",
+  "choose-directory",
+  "update-peer",
+]);
+export const LIFECYCLE_FAILURE_CODES = Object.freeze([
+  "invalid-request",
+  "unsupported",
+  "operation-conflict",
+  "operation-stale",
+  "target-reserved",
+  "writer-conflict",
+  "controller-conflict",
+  "capability-rejected",
+  "project-not-found",
+  "session-not-found",
+  "directory-not-found",
+  "ownership-unknown",
+  "runtime-unavailable",
+  "activation-failed",
+  "identity-failed",
+  "launch-failed",
+  "launch-outcome-unknown",
+  "launch-not-recoverable",
+  "pairing-failed",
+  "takeover-stale",
+  "takeover-failed",
+  "cancelled",
+  "timeout",
+  "internal-error",
+]);
 
 const now = () => Date.now();
+const textEncoder = new TextEncoder();
 
 /**
  * Build the type-agnostic part of an envelope. Identity (channelId/sessionId/senderId/senderName)
  * is stamped later by SecureChannel on send, so callers never pass it.
  */
 const envelope = (eventType, eventSubtype, msg = {}) => ({ eventType, eventSubtype, msg, ts: now() });
+
+function lifecycleEnvelope(eventSubtype, msg) {
+  const result = envelope(EVENT_TYPE.CONTROL, eventSubtype, msg);
+  if (textEncoder.encode(JSON.stringify(result)).byteLength > LIFECYCLE_MESSAGE_MAX_BYTES) {
+    throw new RangeError("too-large");
+  }
+  return result;
+}
+
+const nonEmptyString = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+const lifecycleRevision = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
+const lifecycleState = (value) => LIFECYCLE_STATES.includes(value) ? value : "failed";
+const lifecycleAction = (value) => LIFECYCLE_ACTIONS.includes(value) ? value : null;
+const lifecycleFailureCode = (value) =>
+  LIFECYCLE_FAILURE_CODES.includes(value) ? value : "internal-error";
+
+function normalizeOpenTarget(target) {
+  if (target?.kind === "existing") {
+    return {
+      kind: "existing",
+      storeAuthority: nonEmptyString(target.storeAuthority),
+      sessionId: nonEmptyString(target.sessionId) ?? "",
+    };
+  }
+  return {
+    kind: "new",
+    projectName: nonEmptyString(target?.projectName) ?? "",
+  };
+}
+
+export function normalizeOpenIntent(intent = {}) {
+  const target = normalizeOpenTarget(intent.target);
+  return {
+    operationId: nonEmptyString(intent.operationId) ?? "",
+    target,
+    mode: intent.mode === "allow-all" ? "allow-all" : "default",
+    name: target.kind === "new" ? nonEmptyString(intent.name) : null,
+    takeoverRequested: target.kind === "existing" && intent.takeoverRequested === true,
+  };
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export async function openIntentFingerprint(intent) {
+  const normalized = normalizeOpenIntent(intent?.msg ?? intent);
+  const material = canonicalJson({
+    target: normalized.target,
+    mode: normalized.mode,
+    name: normalized.name,
+    takeoverRequested: normalized.takeoverRequested,
+  });
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", textEncoder.encode(material));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeFailure(failure) {
+  if (!failure || typeof failure !== "object") return null;
+  return {
+    code: lifecycleFailureCode(failure.code),
+    actions: (Array.isArray(failure.actions) ? failure.actions : [])
+      .map(lifecycleAction)
+      .filter(Boolean),
+    ...(typeof failure.message === "string" && failure.message ? { message: failure.message } : {}),
+    ...(typeof failure.retryable === "boolean" ? { retryable: failure.retryable } : {}),
+  };
+}
+
+function normalizeTakeoverChallenge(challenge, operationId, revision) {
+  if (!challenge || typeof challenge !== "object") return null;
+  const challengeId = nonEmptyString(challenge.challengeId);
+  const sessionId = nonEmptyString(challenge.sessionId);
+  const runtimeInstanceId = nonEmptyString(challenge.runtimeInstanceId);
+  if (!challengeId || !sessionId || !runtimeInstanceId) return null;
+  return {
+    challengeId,
+    operationId,
+    revision,
+    storeAuthority: nonEmptyString(challenge.storeAuthority),
+    sessionId,
+    runtimeInstanceId,
+    generation: lifecycleRevision(challenge.generation),
+    pid: Number.isSafeInteger(challenge.pid) && challenge.pid > 0 ? challenge.pid : null,
+    processStartedAt: Number.isFinite(challenge.processStartedAt) ? challenge.processStartedAt : null,
+    responsive: challenge.responsive === true,
+    ...(typeof challenge.controllerName === "string" && challenge.controllerName
+      ? { controllerName: challenge.controllerName }
+      : {}),
+  };
+}
+
+function normalizedLifecycleStatus(status = {}) {
+  const operationId = nonEmptyString(status.operationId) ?? "";
+  const revision = lifecycleRevision(status.revision);
+  const target = status.target ? normalizeOpenTarget(status.target) : null;
+  const failure = normalizeFailure(status.failure);
+  const challenge = normalizeTakeoverChallenge(status.challenge, operationId, revision);
+  return {
+    operationId,
+    fingerprint: nonEmptyString(status.fingerprint),
+    state: lifecycleState(status.state),
+    revision,
+    ...(target ? { target } : {}),
+    ...(status.action === "reconnect" || status.action === "activate" || status.action === "resume" ||
+    status.action === "start" || status.action === "takeover" || status.action === "undecided"
+      ? { action: status.action }
+      : {}),
+    ...(status.payload ? { payload: status.payload } : {}),
+    ...(typeof status.name === "string" ? { name: status.name } : {}),
+    ...(failure ? { failure } : {}),
+    ...(challenge ? { challenge } : {}),
+    ...(Number.isFinite(status.createdAt) ? { createdAt: status.createdAt } : {}),
+    ...(Number.isFinite(status.updatedAt) ? { updatedAt: status.updatedAt } : {}),
+  };
+}
 
 // ---- factories (ext -> phone : stream) -------------------------------------
 export const assistantMessage = (content, messageId) =>
@@ -454,6 +633,241 @@ export const resumeSession = (requestId, sessionId, mode = "default", force = fa
     mode,
     force: Boolean(force),
   });
+
+/** Phone -> listener: request one generic, idempotent session open operation. */
+export const openSession = (operationId, target, options = {}) =>
+  lifecycleEnvelope(
+    SUBTYPE.CONTROL.OPEN_SESSION,
+    normalizeOpenIntent({ operationId, target, ...options }),
+  );
+
+/** Phone -> listener: inspect one previously accepted lifecycle operation. */
+export const lifecycleStatusRequest = (operationId) =>
+  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS_REQUEST, {
+    operationId: nonEmptyString(operationId) ?? "",
+  });
+
+/** Listener -> phone: a structured, revisioned lifecycle operation snapshot. */
+export const lifecycleStatus = (status) =>
+  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS, normalizedLifecycleStatus(status));
+
+/** Phone -> listener: confirm the exact takeover challenge and operation revision shown to the user. */
+export const takeoverConfirm = (operationId, challengeId, revision) =>
+  lifecycleEnvelope(SUBTYPE.CONTROL.TAKEOVER_CONFIRM, {
+    operationId: nonEmptyString(operationId) ?? "",
+    challengeId: nonEmptyString(challengeId) ?? "",
+    revision: lifecycleRevision(revision),
+  });
+
+/** Phone -> listener: cancel an operation if the supplied revision is still current. */
+export const lifecycleCancel = (operationId, revision = null) =>
+  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_CANCEL, {
+    operationId: nonEmptyString(operationId) ?? "",
+    ...(Number.isSafeInteger(revision) && revision >= 0 ? { revision } : {}),
+  });
+
+/** Convert a supported legacy Start/Resume envelope to the generic Open contract. */
+export function openSessionFromLegacy(message) {
+  if (message?.eventType !== EVENT_TYPE.CONTROL || !message.msg) return null;
+  if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {
+    return openSession(message.msg.requestId, {
+      kind: "new",
+      projectName: message.msg.projectName,
+    }, {
+      mode: message.msg.mode,
+      name: message.msg.name,
+    });
+  }
+  if (message.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {
+    return openSession(message.msg.requestId, {
+      kind: "existing",
+      storeAuthority: null,
+      sessionId: message.msg.sessionId,
+    }, {
+      mode: message.msg.mode,
+      takeoverRequested: message.msg.force === true,
+    });
+  }
+  return null;
+}
+
+/** Project a generic Open envelope to a legacy Start or Resume envelope for an older Station. */
+export function openSessionToLegacy(message) {
+  const intent = normalizeOpenIntent(message?.msg ?? message);
+  if (!intent.operationId) return null;
+  return intent.target.kind === "existing"
+    ? resumeSession(
+      intent.operationId,
+      intent.target.sessionId,
+      intent.mode,
+      intent.takeoverRequested,
+    )
+    : spawnSession(
+      intent.operationId,
+      intent.target.projectName,
+      intent.mode,
+      intent.name,
+    );
+}
+
+const LEGACY_TO_LIFECYCLE_STATE = Object.freeze({
+  accepted: "accepted",
+  launched: "launching",
+  ready: "pairing-ready",
+  claimed: "open",
+  failed: "failed",
+  abandoned: "cancelled",
+  superseded: "cancelled",
+});
+const LIFECYCLE_TO_LEGACY_STATE = Object.freeze({
+  accepted: "accepted",
+  locating: "accepted",
+  reserved: "accepted",
+  activating: "launched",
+  launching: "launched",
+  "pairing-ready": "ready",
+  pairing: "ready",
+  open: "claimed",
+  failed: "failed",
+  cancelled: "abandoned",
+});
+
+/** Convert one supported legacy launch reply to a structured lifecycle snapshot. */
+export function lifecycleStatusFromLegacy(message, previous = null) {
+  if (message?.eventType !== EVENT_TYPE.CONTROL || !message.msg) return null;
+  const operationId = nonEmptyString(message.msg.requestId);
+  if (!operationId) return null;
+  const previousStatus = previous?.msg ?? previous;
+  const revision = previousStatus?.operationId === operationId
+    ? lifecycleRevision(previousStatus.revision) + 1
+    : 0;
+  if (message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS) {
+    const operation = message.msg.operation;
+    const target = operation === "resume"
+      ? { kind: "existing", storeAuthority: null, sessionId: message.msg.sessionId }
+      : operation === "new"
+        ? { kind: "new", projectName: message.msg.projectName }
+        : null;
+    return lifecycleStatus({
+      operationId,
+      revision,
+      state: LEGACY_TO_LIFECYCLE_STATE[message.msg.state] ?? "failed",
+      ...(target ? { target } : {}),
+      ...(message.msg.payload ? { payload: message.msg.payload } : {}),
+      ...(typeof message.msg.name === "string" ? { name: message.msg.name } : {}),
+      ...(typeof message.msg.error === "string" && message.msg.error
+        ? {
+            failure: {
+              code: message.msg.state === "abandoned" ? "cancelled" : "launch-failed",
+              message: message.msg.error,
+              actions: message.msg.state === "failed" ? ["retry"] : [],
+            },
+          }
+        : {}),
+      createdAt: message.msg.createdAt,
+      updatedAt: message.msg.readyAt ?? message.msg.launchedAt ?? message.msg.createdAt,
+    });
+  }
+  if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
+    return lifecycleStatus({
+      operationId,
+      revision,
+      state: "pairing-ready",
+      payload: message.msg.payload,
+      name: message.msg.name,
+      target: message.msg.projectName
+        ? { kind: "new", projectName: message.msg.projectName }
+        : undefined,
+    });
+  }
+  if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
+    return lifecycleStatus({
+      operationId,
+      revision,
+      state: message.msg.ok ? "open" : "failed",
+      ...(!message.msg.ok
+        ? {
+            failure: {
+              code: "launch-failed",
+              ...(typeof message.msg.error === "string" && message.msg.error
+                ? { message: message.msg.error }
+                : {}),
+              actions: ["retry"],
+            },
+          }
+        : {}),
+    });
+  }
+  if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_CLAIMED) {
+    return lifecycleStatus({ operationId, revision, state: "open" });
+  }
+  return null;
+}
+
+/** Project a lifecycle snapshot to the legacy replies understood by older phones. */
+export function lifecycleStatusToLegacy(message) {
+  const status = normalizedLifecycleStatus(message?.msg ?? message);
+  if (!status.operationId) return [];
+  const target = status.target;
+  const operation = target?.kind === "existing" ? "resume" : target?.kind === "new" ? "new" : undefined;
+  const details = {
+    ...(operation ? { operation } : {}),
+    ...(target?.kind === "existing" ? { sessionId: target.sessionId } : {}),
+    ...(target?.kind === "new" ? { projectName: target.projectName } : {}),
+    ...(typeof status.name === "string" ? { name: status.name } : {}),
+    ...(status.payload ? { payload: status.payload } : {}),
+    ...(status.failure?.message ? { error: status.failure.message } : {}),
+    ...(Number.isFinite(status.createdAt) ? { createdAt: status.createdAt } : {}),
+    ...(Number.isFinite(status.updatedAt) ? { readyAt: status.updatedAt } : {}),
+  };
+  const projected = [
+    launchStatus(
+      status.operationId,
+      LIFECYCLE_TO_LEGACY_STATE[status.state] ?? "failed",
+      details,
+    ),
+  ];
+  if (
+    status.payload &&
+    (
+      status.state === "activating" ||
+      status.state === "launching" ||
+      status.state === "pairing-ready" ||
+      status.state === "pairing"
+    )
+  ) {
+    projected.push(spawnPairing(
+      status.operationId,
+      status.payload,
+      status.name ?? null,
+      target?.kind === "new" ? target.projectName : null,
+    ));
+  }
+  if (status.state === "failed") {
+    projected.push(spawnResult(status.operationId, false, status.failure?.message ?? status.failure?.code ?? null));
+  } else if (
+    status.state === "activating" ||
+    status.state === "launching" ||
+    status.state === "pairing-ready" ||
+    status.state === "pairing" ||
+    status.state === "open"
+  ) {
+    projected.push(spawnResult(status.operationId, true));
+  }
+  return projected;
+}
+
+/** Keep the latest snapshot for one operation; stale or duplicate revisions never replace it. */
+export function latestLifecycleStatus(current, candidate) {
+  const currentStatus = current?.msg ?? current;
+  const candidateStatus = candidate?.msg ?? candidate;
+  if (!candidateStatus || typeof candidateStatus !== "object") return current;
+  if (!currentStatus || typeof currentStatus !== "object") return candidate;
+  if (currentStatus.operationId !== candidateStatus.operationId) return candidate;
+  return lifecycleRevision(candidateStatus.revision) > lifecycleRevision(currentStatus.revision)
+    ? candidate
+    : current;
+}
 /**
  * Listener -> phone: the pre-minted pairing payload of a freshly spawned session, so the phone
  * pairs to it digitally (no QR). `payload` is a buildPairingPayload() result; `name`/`projectName`

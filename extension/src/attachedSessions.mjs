@@ -69,6 +69,27 @@ export function findAttachedSession(sessionId, { baseDir, now = Date.now() } = {
   return { ...entry, healthy: now - entry.lastHealthyAt < HEALTHY_WINDOW_MS };
 }
 
+export function inspectAttachedSessionOwnership(sessionId, { baseDir, now = Date.now() } = {}) {
+  if (!sessionId) return { state: "unknown" };
+  const entry = readRegistry(ATTACHED_FILE, { baseDir })?.[sessionId];
+  if (!entry || typeof entry !== "object" || !Number.isInteger(entry.pid) || entry.pid < 1) {
+    return { state: "unknown" };
+  }
+  const writer = {
+    sessionId,
+    channelId: typeof entry.channelId === "string" ? entry.channelId : null,
+    cwd: typeof entry.cwd === "string" ? entry.cwd : null,
+    pid: entry.pid,
+    boundAt: entry.boundAt ?? null,
+    lastHealthyAt: typeof entry.lastHealthyAt === "number" ? entry.lastHealthyAt : 0,
+  };
+  if (!isPidAlive(entry.pid)) return { state: "stopped", writer };
+  return {
+    state: "writer",
+    writer: { ...writer, healthy: now - writer.lastHealthyAt < HEALTHY_WINDOW_MS },
+  };
+}
+
 /**
  * Record (or refresh) THIS session's attachment. Called when a phone pairs and again on every
  * heartbeat — the refresh is the whole point, since a stamp that stops advancing is what tells the

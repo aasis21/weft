@@ -10,6 +10,7 @@
 //   - `historyItem()` / `historyPage()` conveniences for the backfill/catch-up scenarios.
 export {
   EVENT_TYPE,
+  DEVICE_CAPABILITY,
   SUBTYPE,
   MODES,
   mergeHistory,
@@ -44,6 +45,8 @@ export {
   spawnPairing,
   spawnResult,
   launchStatus,
+  lifecycleStatus,
+  openSession,
   sessionListRequest,
   sessionList,
   resumeSession,

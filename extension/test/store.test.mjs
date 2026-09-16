@@ -9,7 +9,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { listSessions, readHistory, readLatestTurnIndex, readSessionCwd, readSummary } from "../src/store.mjs";
+import {
+  listSessions,
+  readHistory,
+  readLatestTurnIndex,
+  readSession,
+  readSessionCwd,
+  readSummary,
+} from "../src/store.mjs";
 
 const SESSION = "sess-1";
 let dir;
@@ -23,14 +30,17 @@ before(async () => {
   dbPath = join(dir, "session-store.db");
   const db = new DatabaseSync(dbPath); // writable for setup
   db.exec(
-    "CREATE TABLE sessions (id TEXT PRIMARY KEY, summary TEXT, cwd TEXT);" +
+    "CREATE TABLE sessions (id TEXT PRIMARY KEY, summary TEXT, cwd TEXT, repository TEXT, branch TEXT, updated_at TEXT);" +
       "CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, " +
       "user_message TEXT, assistant_response TEXT, timestamp TEXT);"
   );
-  db.prepare("INSERT INTO sessions (id, summary, cwd) VALUES (?, ?, ?)").run(
+  db.prepare("INSERT INTO sessions (id, summary, cwd, repository, branch, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(
     SESSION,
     "My Chat Title",
-    "/repo"
+    "/repo",
+    "weft",
+    "main",
+    iso(5),
   );
   const ins = db.prepare(
     "INSERT INTO turns (session_id, turn_index, user_message, assistant_response, timestamp) VALUES (?, ?, ?, ?, ?)"
@@ -54,6 +64,18 @@ test("readSummary returns the session's title", async () => {
   assert.equal(await readSummary(SESSION, dbPath), "My Chat Title");
   assert.equal(await readSummary("nope", dbPath), "");
   assert.equal(await readSummary("", dbPath), "");
+});
+
+test("readSession returns catalog metadata for one session", async () => {
+  assert.deepEqual(await readSession(SESSION, dbPath), {
+    sessionId: SESSION,
+    title: "My Chat Title",
+    cwd: "/repo",
+    repository: "weft",
+    branch: "main",
+    updatedAt: Date.parse(iso(5)),
+  });
+  assert.equal(await readSession("missing", dbPath), null);
 });
 
 test("readHistory returns ascending items, skips the in-flight NULL assistant", async () => {

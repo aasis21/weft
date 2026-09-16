@@ -35,6 +35,9 @@ jobs:
       - name: Extension relay loop (harness smoke)
         run: npm run harness -w @aasis21/weft-extension -- --auto
 
+      - name: Dormant extension scale budget
+        run: npm run test:dormant-scale -w @aasis21/weft-extension
+
       - name: Build production workspaces
         run: npm run build
 
