@@ -226,6 +226,7 @@ export function Composer({
   const [slashIndex, setSlashIndex] = useState(0);
   const [pendingCommand, setPendingCommand] = useState<{ name: string; input: string } | null>(null);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeSlashRef = useRef<HTMLButtonElement | null>(null);
   const attachWrapRef = useRef<HTMLDivElement | null>(null);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const modeWrapRef = useRef<HTMLDivElement | null>(null);
@@ -325,6 +326,11 @@ export function Composer({
   useEffect(() => {
     setSlashIndex(0);
   }, [commandQuery]);
+
+  useEffect(() => {
+    if (!slashOpen) return;
+    activeSlashRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [slashIndex, slashOpen]);
 
   /** Clear the composer after a message/command is dispatched. */
   const clearDraft = (): void => {
@@ -662,6 +668,7 @@ export function Composer({
           {slashOptions.map((item, index) => (
             <button
               key={item.command}
+              ref={index === slashIndex ? activeSlashRef : undefined}
               type="button"
               role="option"
               aria-selected={index === slashIndex}
