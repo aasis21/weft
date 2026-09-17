@@ -5,6 +5,15 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.22
+
+- Synced laptop `/rename` changes into the Weft session UI without letting unchanged
+  heartbeats erase an intentional phone-local label.
+- Added `weft set-permission <default|allow-all>` and `weft show-permission` so each
+  laptop can choose the initial permission mode for phone-launched Start and Resume.
+- Kept the permission selector as a per-launch override and failed safely to normal
+  prompts when the configured value is missing or invalid.
+
 ## 0.2.21
 
 - Added the source device name beside each session's project metadata in the session drawer.
