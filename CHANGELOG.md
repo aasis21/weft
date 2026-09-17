@@ -5,6 +5,15 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.23
+
+- Resumed historical Copilot sessions created before Weft when no runtime ownership evidence
+  exists, while preserving fail-closed handling for conflicting or unverifiable modern runtimes.
+- Kept the phone at the reader's manual scroll position when new events, heartbeat-driven
+  rerenders, large tool cards, or older history pages arrive.
+- Stabilized live-runtime integration coverage by allowing the test assertion to outlive the
+  production discovery timeout it exercises.
+
 ## 0.2.22
 
 - Synced laptop `/rename` changes into the Weft session UI without letting unchanged
