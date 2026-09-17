@@ -29,7 +29,7 @@ for (const layout of [
         const row = Math.round(top);
         actionRows.set(row, (actionRows.get(row) ?? 0) + 1);
       }
-      expect([...actionRows.values()]).toEqual([3, 2]);
+      expect([...actionRows.values()]).toEqual([2, 3]);
       expect(actionBounds.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
       await page.locator('.device-quick-actions').screenshot({ path: testInfo.outputPath('quick-actions.png') });
       await expect(page.getByRole('button', { name: 'Open terminal', exact: true })).toBeEnabled();
