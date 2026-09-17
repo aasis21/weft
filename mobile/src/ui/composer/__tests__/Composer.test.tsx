@@ -1,4 +1,4 @@
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
@@ -449,6 +449,26 @@ describe('Composer', () => {
   });
 
   describe('slash commands', () => {
+    it('keeps a long slash-command list in its dedicated scroll region', async () => {
+      const scrollIntoView = vi.fn();
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+      });
+      const user = userEvent.setup();
+      renderComposer();
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/');
+
+      const menu = screen.getByRole('listbox', { name: 'Slash command suggestions' });
+      expect(menu).toHaveClass('slash-menu');
+      expect(within(menu).getAllByRole('option').length).toBeGreaterThan(5);
+
+      fireEvent.keyDown(textbox, { key: 'ArrowDown' });
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
+
     it('treats slash-prefixed text as steering while busy', async () => {
       const user = userEvent.setup();
       const onPrompt = vi.fn();

@@ -107,6 +107,11 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
   it('presents five actions without pretending unsupported utilities work', () => {
     renderDetails();
 
+    expect(screen.getByRole('button', { name: /start copilot/i })).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: /resume copilot/i })).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: /open terminal/i })).toHaveClass('secondary');
+    expect(screen.getByRole('button', { name: /clipboard/i })).toHaveClass('secondary');
+    expect(screen.getByRole('button', { name: /keep awake/i })).toHaveClass('secondary');
     expect(screen.getByRole('button', { name: /start copilot/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /resume copilot/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();

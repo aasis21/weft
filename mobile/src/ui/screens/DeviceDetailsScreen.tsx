@@ -608,7 +608,7 @@ export function DeviceDetailsScreen({
           <div className="device-action-grid">
             <button
               type="button"
-              className="device-quick-action"
+              className="device-quick-action primary"
               disabled={!online}
               onClick={() => onStartOnDevice(device.channelId)}
             >
@@ -617,7 +617,7 @@ export function DeviceDetailsScreen({
             </button>
             <button
               type="button"
-              className="device-quick-action"
+              className="device-quick-action primary"
               disabled={!online}
               onClick={() => onResumeOnDevice(device.channelId)}
             >
@@ -626,7 +626,7 @@ export function DeviceDetailsScreen({
             </button>
             <button
               type="button"
-              className="device-quick-action"
+              className="device-quick-action secondary"
               aria-haspopup="dialog"
               aria-describedby={!online || !clipboardSupported ? 'device-utility-support' : undefined}
               disabled={!online || !clipboardSupported}
@@ -641,7 +641,7 @@ export function DeviceDetailsScreen({
             </button>
             <button
               type="button"
-              className="device-quick-action"
+              className="device-quick-action secondary"
               aria-haspopup="dialog"
               aria-describedby={!online || !keepAwakeSupported ? 'device-utility-support' : undefined}
               disabled={!online || !keepAwakeSupported}
@@ -656,7 +656,7 @@ export function DeviceDetailsScreen({
             </button>
             <button
               type="button"
-              className="device-quick-action"
+              className="device-quick-action secondary"
               aria-label="Open terminal"
               aria-describedby={device.capabilities !== undefined && !terminalSupported ? 'terminal-enable-guidance' : undefined}
               disabled={!online || !terminalSupported || !onOpenTerminal}
