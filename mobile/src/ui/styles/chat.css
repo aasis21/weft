@@ -1446,9 +1446,9 @@
   color: var(--accent, #4c8dff);
   font-weight: 600;
 }
-/* #ui small folder-style chip for the session's project (cwd basename): a compact rounded tag,
-   not a pill, so it reads as a "folder" at a glance without stealing weight from the title. */
-.folder-chip {
+/* Small project/device metadata after the counts and activity age. */
+.folder-chip,
+.device-chip {
   display: inline-block;
   vertical-align: bottom;
   margin-left: 5px;
@@ -2932,7 +2932,7 @@
   font-size: 10.5px;
 }
 
-/* Balance the five capability-gated actions across two compact rows. */
+/* Keep the two Copilot lifecycle actions together, with the three device utilities below. */
 .weft-session .device-quick-actions {
   display: flex;
   flex-direction: column;
@@ -2947,7 +2947,6 @@
   background: var(--bg);
 }
 .weft-session .device-quick-action {
-  grid-column: span 2;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2965,11 +2964,14 @@
   cursor: pointer;
 }
 .weft-session .device-quick-action:first-child { border-left: 0; }
-.weft-session .device-quick-action:nth-child(n + 4) {
+.weft-session .device-quick-action.primary {
   grid-column: span 3;
+}
+.weft-session .device-quick-action.secondary {
+  grid-column: span 2;
   border-top: 1px solid var(--bg-rule);
 }
-.weft-session .device-quick-action:nth-child(4) { border-left: 0; }
+.weft-session .device-quick-action.secondary:nth-child(3) { border-left: 0; }
 .weft-session .device-quick-action:not(:disabled):active {
   background: color-mix(in srgb, var(--accent) 9%, var(--bg));
 }

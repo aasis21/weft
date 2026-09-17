@@ -9,7 +9,11 @@ function session(
   channelId: string,
   title: string,
   addedAt: number,
-  opts: Partial<SessionView> & { cwd?: string | null } = {},
+  opts: Partial<SessionView> & {
+    cwd?: string | null;
+    spawnedFromDeviceId?: string;
+    spawnedFromDeviceName?: string;
+  } = {},
 ): SessionView {
   return {
     meta: {
@@ -18,6 +22,8 @@ function session(
       cwd: opts.cwd ?? `C:\\repos\\${title}`,
       kind: 'live',
       addedAt,
+      spawnedFromDeviceId: opts.spawnedFromDeviceId,
+      spawnedFromDeviceName: opts.spawnedFromDeviceName,
     },
     status: opts.status ?? 'live',
     timeline: opts.timeline ?? emptyTimeline(),
@@ -98,6 +104,29 @@ describe('WeftDrawer', () => {
 
     expect(screen.getByText('Worker').closest('.session-row')?.textContent).toContain('· 5m');
     expect(screen.getByText('Heartbeat Only').closest('.session-row')?.textContent).not.toContain('· now');
+  });
+
+  it('shows the source device beside the project in muted session metadata', () => {
+    render(
+      <WeftDrawer
+        sessions={[
+          session('active', 'Review migration', 2_000, {
+            cwd: 'C:\\repos\\axon',
+            spawnedFromDeviceName: 'Devbox',
+          }),
+        ]}
+        activeId="active"
+        onSelect={vi.fn()}
+        onAddSession={vi.fn()}
+        onRemove={vi.fn()}
+        onGoHome={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText('Review migration').closest('.session-row') as HTMLElement;
+    expect(within(row).getByTitle('C:\\repos\\axon')).toHaveTextContent('• axon');
+    expect(within(row).getByTitle('Device: Devbox')).toHaveTextContent('• Devbox');
   });
 
   it('selects a session row and removes via the row delete button (with confirm) without selecting', async () => {

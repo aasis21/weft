@@ -350,6 +350,12 @@ export function WeftDrawer({
     const isActive = id === activeId;
     const pending = session.timeline.approvals.length;
     const activity = lastActivity(session);
+    const sourceDevice = session.meta.spawnedFromDeviceId
+      ? devices?.find((device) => device.deviceId === session.meta.spawnedFromDeviceId)
+      : undefined;
+    const sourceDeviceName = sourceDevice
+      ? deviceLabel(sourceDevice)
+      : session.meta.spawnedFromDeviceName;
     const derived = deriveStatus(session, { busy: isWorking(session.timeline) });
     // Active + Offline rows convey state purely through the leading .status-dot (colour/blink),
     // so the sub-line drops the text pill. Archived-group rows (Archived / Ended / Initializing…)
@@ -506,6 +512,11 @@ export function WeftDrawer({
             {session.meta.cwd ? (
               <span className="folder-chip" title={session.meta.cwd}>
                 • {session.meta.cwd.split(/[\\/]/).pop()}
+              </span>
+            ) : null}
+            {sourceDeviceName ? (
+              <span className="device-chip" title={`Device: ${sourceDeviceName}`}>
+                • {sourceDeviceName}
               </span>
             ) : null}
           </span>
