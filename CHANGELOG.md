@@ -5,6 +5,13 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.20
+
+- Improved device fallback states when Windows cannot provide system metrics or an
+  older Device Station does not advertise monitoring support.
+- Replaced the cramped terminal capability warning with a readable, mobile-safe card
+  that explains update and configuration options without overflowing.
+
 ## 0.2.19
 
 - Repairs incomplete same-version installs by downloading every mandatory bundle declared

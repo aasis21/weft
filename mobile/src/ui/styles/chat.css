@@ -2718,6 +2718,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.weft-session .device-metric-unavailable {
+  align-content: center;
+  min-height: 58px;
+  background: color-mix(in srgb, var(--bg) 82%, var(--bg-rule));
+}
+.weft-session .device-metric-unavailable .device-metric-detail {
+  overflow: visible;
+  color: var(--fg-faint);
+  text-overflow: clip;
+}
 .weft-session .device-meter {
   grid-column: 1 / -1;
   height: 3px;
@@ -2997,6 +3007,49 @@
   margin: 0;
   color: var(--fg-dim);
   font-size: 11px;
+}
+.weft-session .device-capability-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--bg-rule));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  color: var(--fg-dim);
+}
+.weft-session .device-capability-note > .device-action-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--warning);
+}
+.weft-session .device-capability-note > span:last-child {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+}
+.weft-session .device-capability-note strong {
+  color: var(--fg);
+  font-size: 12px;
+}
+.weft-session .device-capability-note small {
+  font-size: 11px;
+  line-height: 1.45;
+}
+.weft-session .device-capability-note code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  padding: 1px 4px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 10.5px;
 }
 .weft-session .device-utility-backdrop {
   position: fixed;

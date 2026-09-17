@@ -112,7 +112,8 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /clipboard/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /keep awake/i })).toBeDisabled();
-    expect(screen.getAllByText('Checking support')).toHaveLength(2);
+    expect(screen.getAllByText('Checking support')).toHaveLength(3);
+    expect(screen.queryByText('Terminal unavailable')).toBeNull();
     expect(screen.queryByText('New session')).toBeNull();
     expect(screen.queryByText('Recent session')).toBeNull();
   });
@@ -506,7 +507,7 @@ describe('DeviceDetailsScreen monitoring', () => {
 
     expect(screen.queryByText('2h 0m')).toBeNull();
     expect(screen.getByText('Power unavailable')).toBeTruthy();
-    expect(screen.getByText(/system metrics are temporarily unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/windows did not provide system metrics/i)).toBeTruthy();
   });
 });
 
@@ -602,11 +603,11 @@ describe('DeviceDetailsScreen monitoring', () => {
       expect(screen.getByRole('group', { name: 'Power' })).not.toHaveTextContent('Keep Awake');
     });
 
-    it('retains a single focused Power card without monitoring support', () => {
+    it('uses one compact update state without rendering fake health metrics', () => {
       renderDetails({ device: utilityDevice({ capabilities: [DEVICE_CAPABILITY.KEEP_AWAKE_V1], keepAwake: { pending: false, status: awakeStatus() } }) });
-      expect(screen.getAllByRole('group', { name: 'Power' })).toHaveLength(1);
-      expect(screen.getByRole('group', { name: 'Power' })).toHaveTextContent('Power unavailable');
-      expect(screen.getByRole('group', { name: 'Power' })).not.toHaveTextContent('15m left');
+      expect(screen.getByText('Update Weft on this laptop')).toBeTruthy();
+      expect(screen.queryByRole('group', { name: 'Power' })).toBeNull();
+      expect(screen.queryByRole('group', { name: 'CPU' })).toBeNull();
     });
 
     it('shows pending feedback on the action without inventing a successful lease', () => {
@@ -958,8 +959,11 @@ describe('DeviceDetailsScreen partial monitoring snapshots', () => {
     });
 
     expect(screen.getByText(/update delayed/i)).toBeTruthy();
-    expect(screen.getByText(/system metrics are temporarily unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/windows did not provide system metrics/i)).toBeTruthy();
     expect(screen.getByText(/running applications are temporarily unavailable/i)).toBeTruthy();
+    for (const name of ['CPU', 'Memory', 'Disk', 'Power']) {
+      expect(screen.getByRole('group', { name })).toHaveTextContent(/unavailable/i);
+    }
     expect(screen.queryByText('0%')).toBeNull();
   });
 });

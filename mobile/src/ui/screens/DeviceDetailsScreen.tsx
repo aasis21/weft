@@ -117,6 +117,15 @@ function formatBytes(value: number | null): string | null {
   return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
 }
 
+function UnavailableMetricCard({ name }: { name: string }): JSX.Element {
+  return (
+    <div className="device-metric device-metric-unavailable" role="group" aria-label={name}>
+      <span className="device-metric-name">{name}</span>
+      <span className="device-metric-detail">Unavailable</span>
+    </div>
+  );
+}
+
 function PowerCard({ system }: { system: DeviceSystemSnapshot | undefined }): JSX.Element {
   const batteryPercent = system?.batteryPercent ?? null;
   const source = batteryPercent !== null
@@ -546,7 +555,7 @@ export function DeviceDetailsScreen({
                     <strong>{formatPercent(system.cpuPercent)}</strong>
                     <span className="device-meter" aria-hidden="true"><i style={{ width: `${system.cpuPercent}%` }} /></span>
                   </div>
-                ) : null}
+                ) : <UnavailableMetricCard name="CPU" />}
                 {memoryPercent !== null ? (
                   <div className="device-metric">
                     <span className="device-metric-name">Memory</span>
@@ -556,7 +565,7 @@ export function DeviceDetailsScreen({
                     </span>
                     <span className="device-meter" aria-hidden="true"><i style={{ width: `${memoryPercent}%` }} /></span>
                   </div>
-                ) : null}
+                ) : <UnavailableMetricCard name="Memory" />}
                 {diskPercent !== null ? (
                   <div className="device-metric">
                     <span className="device-metric-name">Disk</span>
@@ -566,14 +575,14 @@ export function DeviceDetailsScreen({
                     </span>
                     <span className="device-meter" aria-hidden="true"><i style={{ width: `${diskPercent}%` }} /></span>
                   </div>
-                ) : null}
+                ) : <UnavailableMetricCard name="Disk" />}
                 <PowerCard system={system} />
               </div>
               {systemUnavailable ? (
-                <p className="device-monitor-partial">System metrics are temporarily unavailable.</p>
+                <p className="device-monitor-partial">Windows did not provide system metrics. Device Station will keep trying.</p>
               ) : null}
               {hasPartialSystemIssues && !systemUnavailable ? (
-                <p className="device-monitor-partial">Some system details are temporarily unavailable.</p>
+                <p className="device-monitor-partial">Some metrics were not provided by Windows. Device Station will keep trying.</p>
               ) : null}
             </>
           ) : !online ? (
@@ -592,9 +601,6 @@ export function DeviceDetailsScreen({
               <span>{device.monitoring?.error ?? 'Waiting for the first snapshot from this laptop.'}</span>
             </div>
           )}
-          {!health || (online && device.capabilities !== undefined && !monitoringSupported) ? (
-            <div className="device-metrics"><PowerCard system={undefined} /></div>
-          ) : null}
         </section>
 
         <section className="device-quick-actions device-panel" aria-labelledby="device-quick-actions-heading">
@@ -652,18 +658,22 @@ export function DeviceDetailsScreen({
               type="button"
               className="device-quick-action"
               aria-label="Open terminal"
-              aria-describedby={!terminalSupported ? 'terminal-enable-guidance' : undefined}
+              aria-describedby={device.capabilities !== undefined && !terminalSupported ? 'terminal-enable-guidance' : undefined}
               disabled={!online || !terminalSupported || !onOpenTerminal}
               onClick={() => onOpenTerminal?.(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><TerminalGlyph /></span>
               <strong>Open terminal</strong>
-              {!terminalSupported ? <small className="device-action-status">Unavailable</small> : null}
+              {!terminalSupported ? <small className="device-action-status">{utilityUnavailable}</small> : null}
             </button>
           </div>
-          {!terminalSupported ? (
-            <p id="terminal-enable-guidance" className="device-offline-note">
-              Terminal access is unavailable. Update Weft on a supported Windows laptop and check <code>terminal.enabled</code> in <code>~/.weft/weft.config.json</code>, then restart Station.
+          {device.capabilities !== undefined && !terminalSupported ? (
+            <p id="terminal-enable-guidance" className="device-capability-note">
+              <span className="device-action-icon" aria-hidden="true"><WarningGlyph /></span>
+              <span>
+                <strong>Terminal unavailable</strong>
+                <small>Update Weft on a supported Windows laptop. If it is already current, enable <code>terminal.enabled</code> in <code>~/.weft/weft.config.json</code> and restart Station.</small>
+              </span>
             </p>
           ) : null}
           {!online || !clipboardSupported || !keepAwakeSupported ? (
