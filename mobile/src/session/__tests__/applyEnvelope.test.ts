@@ -23,6 +23,40 @@ function reduceAll(session: Session, messages: EventEnvelope[]): Session {
 }
 
 describe('session applyEnvelope', () => {
+  it('preserves a phone label until Copilot reports a genuinely changed title', () => {
+    const session = makeSession('id-1', {
+      title: 'Phone label',
+      reportedTitle: 'Original laptop title',
+      renamed: true,
+    });
+
+    applyEnvelope(session, at(B.sessionMeta('Original laptop title'), 10));
+    expect(session.meta).toMatchObject({
+      title: 'Phone label',
+      reportedTitle: 'Original laptop title',
+      renamed: true,
+    });
+
+    applyEnvelope(session, at(B.sessionMeta('Renamed on laptop'), 20));
+    expect(session.meta).toMatchObject({
+      title: 'Renamed on laptop',
+      reportedTitle: 'Renamed on laptop',
+      renamed: false,
+    });
+  });
+
+  it('establishes a reported-title baseline without discarding a legacy phone label', () => {
+    const session = makeSession('id-1', { title: 'Phone label', renamed: true });
+
+    applyEnvelope(session, at(B.sessionMeta('Current laptop title'), 10));
+
+    expect(session.meta).toMatchObject({
+      title: 'Phone label',
+      reportedTitle: 'Current laptop title',
+      renamed: true,
+    });
+  });
+
   it('does not show a phone prompt twice when the laptop echoes it back (#193)', () => {
     const session = makeSession();
     appendUser(session, makeUserItem('p1', 'restart the build', 40));

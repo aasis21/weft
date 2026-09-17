@@ -223,6 +223,26 @@ export function savePairingMode(mode, { baseDir } = {}) {
   return mode;
 }
 
+/** Safe launch default advertised by Device Station to the phone. Missing or malformed values
+ * always fall back to normal permission prompts rather than accidentally escalating access. */
+export function loadDefaultPermissionMode({ baseDir } = {}) {
+  const { launch } = loadConfig({ baseDir });
+  return launch?.defaultPermissionMode === "allow-all" ? "allow-all" : "default";
+}
+
+/** Persist the permission mode selected by default on the phone's Start/Resume screen. */
+export function saveDefaultPermissionMode(mode, { baseDir } = {}) {
+  if (mode !== "default" && mode !== "allow-all") {
+    throw new Error('Weft: default permission mode must be "default" or "allow-all"');
+  }
+  const config = loadConfig({ baseDir });
+  const launch = config.launch && typeof config.launch === "object" && !Array.isArray(config.launch)
+    ? config.launch
+    : {};
+  writeConfig({ ...config, launch: { ...launch, defaultPermissionMode: mode } }, { baseDir });
+  return mode;
+}
+
 const MAX_DEVICE_NAME_LENGTH = 60;
 
 /** Read the user-chosen display name for this device (`weft set-name`), or null if unset —

@@ -104,6 +104,8 @@ uses the intended connection.
 | `weft set-default <name>` | Select the project used by a bare launch. |
 | `weft set-name <name>` | Set this laptop's display name. |
 | `weft show-name` | Show the effective device name and source. |
+| `weft set-permission <default\|allow-all>` | Choose the permission mode initially selected for phone-launched Start/Resume. |
+| `weft show-permission` | Show this laptop's configured launch permission default. |
 | `weft show-transport` | Show the effective transport and source. |
 | `weft set-transport <supabase\|devtunnel>` | Select the transport for subsequent starts. |
 | `weft set-transport clear` | Remove the explicit transport selection. |

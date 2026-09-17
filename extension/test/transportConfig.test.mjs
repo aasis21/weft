@@ -14,6 +14,8 @@ import {
   supabaseCredentialsPath,
   isPersistentPairingEnabled,
   savePairingMode,
+  loadDefaultPermissionMode,
+  saveDefaultPermissionMode,
   loadDeviceName,
   saveDeviceName,
   isTerminalEnabled,
@@ -111,6 +113,31 @@ test("savePairingMode can explicitly opt out of and back into persistent pairing
   assert.equal(isPersistentPairingEnabled({ baseDir: weftHome }), false);
   savePairingMode("persistent", { baseDir: weftHome });
   assert.equal(isPersistentPairingEnabled({ baseDir: weftHome }), true);
+});
+
+test("session permissions default safely and persist without clobbering other config", () => {
+  assert.equal(loadDefaultPermissionMode({ baseDir: weftHome }), "default");
+  saveTransportConfig({ kind: "local" }, { baseDir: weftHome });
+  saveDefaultPermissionMode("allow-all", { baseDir: weftHome });
+  assert.equal(loadDefaultPermissionMode({ baseDir: weftHome }), "allow-all");
+  assert.deepEqual(JSON.parse(readFileSync(join(weftHome, "weft.config.json"), "utf8")), {
+    transport: { kind: "local" },
+    launch: { defaultPermissionMode: "allow-all" },
+  });
+  saveDefaultPermissionMode("default", { baseDir: weftHome });
+  assert.equal(loadDefaultPermissionMode({ baseDir: weftHome }), "default");
+  assert.throws(
+    () => saveDefaultPermissionMode("unsafe", { baseDir: weftHome }),
+    /default permission mode/,
+  );
+});
+
+test("malformed permission config fails closed to normal prompts", () => {
+  writeFileSync(
+    join(weftHome, "weft.config.json"),
+    JSON.stringify({ launch: { defaultPermissionMode: "anything-else" } }),
+  );
+  assert.equal(loadDefaultPermissionMode({ baseDir: weftHome }), "default");
 });
 
 test("loadDeviceName returns null when nothing is configured", () => {

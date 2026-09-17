@@ -66,6 +66,16 @@ function basename(path: string | null): string | null {
   return parts[parts.length - 1] || path;
 }
 
+function applyReportedTitle(session: Session, title?: string | null): void {
+  if (!title) return;
+  const previous = session.meta.reportedTitle;
+  session.meta.reportedTitle = title;
+  if (!session.meta.renamed || (previous !== undefined && title !== previous)) {
+    session.meta.title = title;
+    session.meta.renamed = false;
+  }
+}
+
 function omitKey(map: Record<string, string>, key: string): Record<string, string> {
   if (!(key in map)) return map;
   const next = { ...map };
@@ -248,8 +258,9 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
         case SUBTYPE.CONTROL.CHANNEL_UP:
           if (message.sessionId && message.sessionId !== 'unknown-session') session.meta.sessionId = message.sessionId;
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
-          if (!session.meta.renamed)
-            session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
+          applyReportedTitle(session, message.msg.title);
+          if (!session.meta.renamed && !message.msg.title)
+            session.meta.title = basename(session.meta.cwd) || session.meta.title;
           session.connection.lastHeartbeat = beatTs;
           session.connection.ended = false;
           session.connection.endedReason = undefined;
@@ -259,8 +270,9 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           return;
         case SUBTYPE.CONTROL.SESSION_META:
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
-          if (!session.meta.renamed)
-            session.meta.title = message.msg.title || basename(session.meta.cwd) || session.meta.title;
+          applyReportedTitle(session, message.msg.title);
+          if (!session.meta.renamed && !message.msg.title)
+            session.meta.title = basename(session.meta.cwd) || session.meta.title;
           return;
         case SUBTYPE.CONTROL.CHANNEL_DOWN: {
           const reason = message.msg.reason ?? 'Session ended.';

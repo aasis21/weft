@@ -10,7 +10,18 @@ import readline from "node:readline/promises";
 import QRCode from "qrcode";
 import { createListener } from "../src/listener.mjs";
 import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
-import { clearTransportConfig, saveTransportConfig, loadSupabaseCredentials, supabaseCredentialsPath, savePairingMode, isPersistentPairingEnabled, loadDeviceName, saveDeviceName } from "../src/transportConfig.mjs";
+import {
+  clearTransportConfig,
+  saveTransportConfig,
+  loadSupabaseCredentials,
+  supabaseCredentialsPath,
+  savePairingMode,
+  isPersistentPairingEnabled,
+  loadDefaultPermissionMode,
+  saveDefaultPermissionMode,
+  loadDeviceName,
+  saveDeviceName,
+} from "../src/transportConfig.mjs";
 import { addProject, weftHome, listProjects, removeProject, setDefault } from "../src/projects.mjs";
 import { getOrCreatePersistedIdentity, clearPersistedIdentity, rotatePersistedIdentity } from "../src/pairingIdentity.mjs";
 import {
@@ -138,6 +149,10 @@ async function main() {
       setName(args);
     } else if (command === "show-name") {
       showName();
+    } else if (command === "set-permission") {
+      setPermission(args);
+    } else if (command === "show-permission") {
+      showPermission();
     } else if (command === "set-pairing") {
       await setPairing(args);
     } else if (command === "rotate-pairing") {
@@ -1103,6 +1118,24 @@ function showName() {
   }
 }
 
+function setPermission([rawMode]) {
+  const mode = rawMode === "normal" ? "default" : rawMode;
+  if (mode !== "default" && mode !== "allow-all") {
+    throw new Error("Usage: weft set-permission <default|allow-all>");
+  }
+  saveDefaultPermissionMode(mode);
+  console.log(
+    `Default session permissions set to ${mode === "allow-all" ? "Allow all" : "Default"}. ` +
+    "Reopen Start/Resume on the phone to use it.",
+  );
+}
+
+function showPermission() {
+  const mode = loadDefaultPermissionMode();
+  console.log(`Default session permissions: ${mode === "allow-all" ? "Allow all" : "Default"}`);
+  console.log(c.dim(`Source: ${join(weftHome(), "weft.config.json")}`));
+}
+
 // Print the running Weft version and persist it to ~/.weft/version.json. The persisted record is
 // the laptop's own note of "which build am I on" — handy for support/diagnostics and mirrors the
 // version the phone sees over the pairing handshake. Best-effort: a failed write never fails the
@@ -1445,6 +1478,8 @@ function usage() {
   weft show-transport
   weft set-name <name>
   weft show-name
+  weft set-permission <default|allow-all>
+  weft show-permission
   weft set-pairing <persistent|ephemeral>
   weft rotate-pairing
   weft devtunnel <start|status|stop>
@@ -1467,6 +1502,11 @@ and restart Station. Commands run with your local account permissions, not Copil
 Your device's display name (shown to phones in the DEVICES list) defaults to your OS hostname
 until you set your own with \`weft set-name <name>\` — the installer offers this as an
 interactive prompt (default: your hostname) the first time you install.
+
+Phone-launched Start/Resume defaults to normal permission prompts. Run
+\`weft set-permission allow-all\` to preselect Allow all for this laptop, or
+\`weft set-permission default\` to restore the safer default. The phone can still override it
+for one launch.
 
 By default, \`weft start\` reuses the same channel + device identity so an already-paired phone reconnects
 without rescanning. Run \`weft start --new-device\` to reset the saved phone trust and immediately

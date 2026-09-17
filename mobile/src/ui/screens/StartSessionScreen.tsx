@@ -69,10 +69,11 @@ export function StartSessionScreen({
   const [startMode, setStartMode] = useState<StartMode>(initialMode ?? 'new');
   const resuming = startMode === 'resume';
   const [projectName, setProjectName] = useState('');
-  // Permission mode is shared by both tabs and opens on the safe one. It used to reset to allow-all
-  // on every visit to the resume list, which quietly re-granted full permissions to a session you
-  // had deliberately opened restricted.
+  // Permission mode is shared by both tabs and starts from the selected laptop's configured
+  // preference. A user's choice on this screen wins until they switch devices.
   const [mode, setMode] = useState<SpawnMode>('default');
+  const modeTouchedRef = useRef(false);
+  const modeDeviceRef = useRef<string | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +110,16 @@ export function StartSessionScreen({
   useEffect(() => {
     if (selected) onConnectDevice(selected.channelId);
   }, [selected?.channelId, onConnectDevice]);
+
+  useEffect(() => {
+    const deviceChanged = modeDeviceRef.current !== selected?.channelId;
+    if (deviceChanged) {
+      modeDeviceRef.current = selected?.channelId ?? null;
+      modeTouchedRef.current = false;
+    }
+    if (!modeTouchedRef.current)
+      setMode(selected?.defaultPermissionMode ?? 'default');
+  }, [selected?.channelId, selected?.defaultPermissionMode]);
 
   useEffect(() => {
     if (!selected) return;
@@ -561,7 +572,10 @@ export function StartSessionScreen({
                   role="radio"
                   aria-checked={mode === 'default'}
                   className={mode === 'default' ? 'selected' : ''}
-                  onClick={() => setMode('default')}
+                  onClick={() => {
+                    modeTouchedRef.current = true;
+                    setMode('default');
+                  }}
                 >
                   Default
                 </button>
@@ -570,7 +584,10 @@ export function StartSessionScreen({
                   role="radio"
                   aria-checked={mode === 'allow-all'}
                   className={mode === 'allow-all' ? 'selected' : ''}
-                  onClick={() => setMode('allow-all')}
+                  onClick={() => {
+                    modeTouchedRef.current = true;
+                    setMode('allow-all');
+                  }}
                 >
                   Allow all
                 </button>

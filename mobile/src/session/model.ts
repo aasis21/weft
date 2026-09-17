@@ -110,8 +110,11 @@ export interface SessionMeta {
   channelId: string;
   sessionId?: string;
   title: string;
-  /** True once the user has renamed this session on the phone. When set, the CLI-reported title no
-   *  longer overrides the user's chosen name (persisted, so it survives reload + resume). */
+  /** Most recent real title reported by Copilot. Kept separately while a phone-local label is active
+   *  so an unchanged heartbeat preserves that label but a laptop `/rename` can still take ownership. */
+  reportedTitle?: string;
+  /** True once the user has renamed this session on the phone. An unchanged CLI title does not
+   *  override it; a newly reported CLI title clears the local override. */
   renamed?: boolean;
   /** Transport channels this durable session has rotated through (a `copilot --resume` mints a new
    *  channelId). The current transport is `channelId`; superseded ones are archived here so the debug
@@ -141,6 +144,8 @@ export interface SessionMeta {
 
 export interface ListenerDeviceState extends RegisteredDevice {
   projects: ListenerProject[];
+  /** Laptop-configured initial permission selection for Start/Resume. */
+  defaultPermissionMode?: SpawnMode;
   /** Behaviors advertised by the current Device Station. Runtime-only and refreshed with PROJECT_LIST. */
   capabilities?: string[];
   projectsLoading: boolean;
