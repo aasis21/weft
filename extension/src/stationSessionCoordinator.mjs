@@ -92,7 +92,7 @@ async function discoverTarget(target, { baseDir, attachedApi, pendingApi, timeou
       },
     };
   }
-  return { status: "uncertain" };
+  return { status: "none" };
 }
 
 async function locateOperationRuntime(operation, { baseDir, timeoutMs } = {}) {

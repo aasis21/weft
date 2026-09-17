@@ -127,16 +127,7 @@ interface MenuState {
 /** How close to the bottom still counts as "following along". */
 const PIN_SLACK_PX = 80;
 
-/**
- * Distance in pixels from the bottom of the scroller, measured live off the DOM.
- *
- * Deliberately not cached. The cached flag is written by a passive scroll listener, and the browser
- * dispatches those asynchronously — so during streaming, where a token re-renders the thread every
- * few frames, the render can ask "is the reader at the bottom?" before their finger's scroll event
- * has been delivered. It then scrolls to the bottom on stale information, and the scroll event that
- * finally arrives measures a gap of zero and confirms the wrong answer. Reading the DOM at the
- * moment of the decision cannot be stale.
- */
+/** Distance in pixels from the bottom, used when a real reader scroll settles. */
 function bottomGap(scroller: HTMLElement | null): number {
   if (!scroller) return 0;
   return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
@@ -193,8 +184,19 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   const prevItemsLenRef = useRef(items.length);
 
   const last = items[items.length - 1];
-  const lastText = last && 'text' in last ? last.text : last?.kind;
-  const lastIsUser = last?.kind === 'user';
+  const lastSignal = last?.kind === 'tool'
+    ? `${last.status}\0${last.resultPreview ?? ''}\0${last.finishedAt ?? ''}`
+    : last && 'text' in last
+      ? last.text
+      : undefined;
+  const lastId = last?.id ?? null;
+  const lastIsPhoneUser = last?.kind === 'user' && last.origin === 'phone';
+  const latestSendFailed = last?.kind === 'user' && last.failed === true;
+  const trailingRunningTool = last?.kind === 'tool' && last.status === 'running';
+  const showThinking =
+    streaming && !latestSendFailed && last?.kind !== 'assistant' && (busy || last?.kind === 'user' || trailingRunningTool);
+  const prevTailIdRef = useRef<string | null>(lastId);
+  const prevTailSignalRef = useRef(lastSignal);
   // Skeleton belongs ONLY to a first history pull that is actually in flight (empty thread +
   // historyLoading). Gating on `streaming` used to leave an empty live session stuck on the
   // skeleton forever; now once the pull settles empty we fall through to the welcome. Prefer the
@@ -350,51 +352,66 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       touchingRef.current = false;
       update();
     };
+    const wheel = (event: WheelEvent): void => {
+      if (settlingRef.current || event.deltaY >= 0) return;
+      pinnedRef.current = false;
+      setIsPinned(false);
+    };
     update();
     scroller.addEventListener('scroll', update, { passive: true });
     scroller.addEventListener('touchstart', hold, { passive: true });
     scroller.addEventListener('touchend', release, { passive: true });
     scroller.addEventListener('touchcancel', release, { passive: true });
+    scroller.addEventListener('wheel', wheel, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', update);
       scroller.removeEventListener('touchstart', hold);
       scroller.removeEventListener('touchend', release);
       scroller.removeEventListener('touchcancel', release);
+      scroller.removeEventListener('wheel', wheel);
     };
   }, [cancelLongPress]);
 
-  // Auto-scroll only when genuinely new content arrives (never on a Live/Quiet
-  // heartbeat flip), and only if the reader is pinned to the bottom or just sent.
+  // Auto-scroll only when content at the live tail changes, and only if the reader is still
+  // following it or just sent a prompt from this phone.
   useEffect(() => {
-    // Measured now, off the DOM, rather than read from the cached flag: during streaming this
-    // effect runs faster than passive scroll events are delivered, so the flag can still say
-    // "at the bottom" while the reader is already scrolling away. Believing it snapped them back
-    // on every token, which made reading history impossible for as long as the agent was working.
-    // While settling the thread is pinning hard on purpose, so the live gap does not get a vote.
-    const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
-    const following = settlingRef.current || bottomGap(scroller) < PIN_SLACK_PX;
+    const tailId = lastId;
+    const tailChanged = tailId !== prevTailIdRef.current;
+    const tailContentChanged = tailChanged || lastSignal !== prevTailSignalRef.current;
+    const phoneJustSent = tailChanged && lastIsPhoneUser;
+    const rememberTail = (): void => {
+      prevItemsLenRef.current = items.length;
+      prevTailIdRef.current = tailId;
+      prevTailSignalRef.current = lastSignal;
+    };
+    const following = settlingRef.current || pinnedRef.current;
     // A finger on the glass outranks everything. Even a correct "they are at the bottom" reading
     // must not move the viewport mid-gesture, or the first pixel of an upward drag gets undone
     // before it becomes a scroll.
     const held = touchingRef.current;
 
-    if ((!following || held) && !lastIsUser) {
-      if (!following) {
+    if ((!following || held) && !phoneJustSent) {
+      if (!following && tailContentChanged) {
         pinnedRef.current = false;
         setIsPinned(false);
         setHasNewWhileUnpinned(true);
       }
-      prevItemsLenRef.current = items.length;
+      rememberTail();
+      return;
+    }
+    // Prepending an older history page changes the item count but not the live tail. It must
+    // preserve the browser's anchored reading position instead of treating the old page as new.
+    if (!tailContentChanged && !showThinking) {
+      rememberTail();
       return;
     }
     // A brand-new item (or the user's own send) scrolls smoothly; streaming deltas that only grow
     // the current message scroll instantly, so rapid tokens don't stack competing smooth animations
     // into visible jitter (#106).
-    const isNewItem = items.length !== prevItemsLenRef.current;
-    prevItemsLenRef.current = items.length;
-    const smooth = !settlingRef.current && (isNewItem || lastIsUser);
+    const smooth = !settlingRef.current && tailChanged;
+    rememberTail();
     endRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' });
-  }, [items.length, lastText, lastIsUser]);
+  }, [items.length, lastId, lastIsPhoneUser, lastSignal, showThinking]);
 
   // The scroll container getting shorter does not move scrollTop, so the newest messages simply
   // fall below the fold and nothing puts them back — the auto-scroll above only runs when the item
@@ -412,7 +429,7 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
     const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
     if (!scroller) return undefined;
     const repin = (): void => {
-      if (!pinnedRef.current) return;
+      if (!pinnedRef.current || touchingRef.current) return;
       endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
     };
     // window resize covers the keyboard and rotation; the observer covers the composer changing
@@ -467,12 +484,6 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   // prompt, before the extension reports activity) — never merely because the last item isn't an
   // assistant bubble. That old heuristic lit up "working…" on every idle join, since backfilled
   // history renders in `history[]` and leaves `items` empty. An assistant bubble is streaming its
-  // own caret, so we suppress the row there.
-  const latestSendFailed = last?.kind === 'user' && last.failed === true;
-  const trailingRunningTool = last?.kind === 'tool' && last.status === 'running';
-  const showThinking =
-    streaming && !latestSendFailed && last?.kind !== 'assistant' && (busy || last?.kind === 'user' || trailingRunningTool);
-
   return (
     <div className="chat-thread" ref={rootRef}>
       <div aria-live="polite" className="sr-only">
