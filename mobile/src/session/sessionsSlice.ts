@@ -112,6 +112,8 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
     scannedAt: Math.max(keep.meta.scannedAt ?? 0, drop.meta.scannedAt ?? 0) || keep.meta.scannedAt || drop.meta.scannedAt,
   };
   if (!keep.meta.title && drop.meta.title) keep.meta.title = drop.meta.title;
+  if (!keep.meta.reportedTitle && drop.meta.reportedTitle)
+    keep.meta.reportedTitle = drop.meta.reportedTitle;
   // Preserve a user-chosen name across a resume/reconcile merge: if the dropped card was renamed but
   // the keeper wasn't, adopt the user's title so a channel rotation never reverts the rename (#37).
   if (drop.meta.renamed && !keep.meta.renamed) {
@@ -170,6 +172,7 @@ const sessionsSlice = createSlice({
         ...existing,
         ...incoming,
         projects: incoming.projects ?? existing?.projects ?? [],
+        defaultPermissionMode: incoming.defaultPermissionMode ?? existing?.defaultPermissionMode,
         capabilities: incoming.capabilities ?? existing?.capabilities,
         projectsLoading: incoming.projectsLoading ?? existing?.projectsLoading ?? false,
         connected: incoming.connected ?? existing?.connected ?? false,
@@ -207,11 +210,13 @@ const sessionsSlice = createSlice({
         projects: ListenerDeviceState['projects'];
         capabilities?: string[];
         deviceName?: string | null;
+        defaultPermissionMode?: ListenerDeviceState['defaultPermissionMode'];
       }>,
     ) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) {
         device.projects = action.payload.projects;
+        device.defaultPermissionMode = action.payload.defaultPermissionMode ?? 'default';
         device.capabilities = action.payload.capabilities ?? [];
         if (!device.capabilities.includes(DEVICE_CAPABILITY.CLIPBOARD_V1)) device.clipboard = undefined;
         if (!device.capabilities.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) device.keepAwake = undefined;

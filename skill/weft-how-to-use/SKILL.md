@@ -35,6 +35,8 @@ weft set-transport <supabase|devtunnel|clear> [--url <url>] [--anon-key <key>]
 weft show-transport
 weft set-name <name>
 weft show-name
+weft set-permission <default|allow-all>
+weft show-permission
 weft set-pairing <persistent|ephemeral>
 weft rotate-pairing
 weft devtunnel <start|status|stop>
@@ -76,6 +78,11 @@ weft help
   time, defaulting to the hostname (press Enter to keep it). Persisted alongside the
   transport in `~/.weft/weft.config.json` — reinstalling/rebuilding never resets it.
   Restart `weft start` / `/weft` for a changed name to reach an already-open session.
+- **`weft set-permission` / `show-permission`** — choose the permission mode preselected
+  when the phone opens Start or Resume for this laptop. `default` keeps normal Copilot
+  confirmations; `allow-all` passes `--allow-all`. This is only the initial selection:
+  the phone can override it for one launch. Existing installations safely default to
+  `default`.
 - **`weft devtunnel start`** — the ONLY command that provisions the shared Microsoft Dev
   Tunnel relay. Foreground: shells out to the `devtunnel` CLI, auto-runs `devtunnel user
   login -g` if needed, spawns the relay+tunnel as a child of this terminal, and blocks

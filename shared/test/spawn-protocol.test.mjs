@@ -81,6 +81,7 @@ test("spawn/project/forget factories build valid CONTROL envelopes", () => {
       "MacBook",
       "device-1",
       ["device-monitor-v1"],
+      "allow-all",
     ), SUBTYPE.CONTROL.PROJECT_LIST],
     [spawnSession("r1", "web", "allow-all", "brave-otter"), SUBTYPE.CONTROL.SPAWN_SESSION],
     [spawnPairing("r1", { v: 1, channelId: "c", pub: "p" }, "brave-otter", "web"), SUBTYPE.CONTROL.SPAWN_PAIRING],
@@ -99,6 +100,11 @@ test("spawn/project/forget factories build valid CONTROL envelopes", () => {
     projectList([], "MacBook", "device-1", ["device-monitor-v1", null]).msg.capabilities,
     ["device-monitor-v1"],
   );
+  assert.equal(
+    projectList([], "MacBook", "device-1", [], "allow-all").msg.defaultPermissionMode,
+    "allow-all",
+  );
+  assert.equal(projectList([]).msg.defaultPermissionMode, "default");
   assert.equal(spawnSession("r2", "web").msg.mode, "default", "spawn mode defaults to 'default'");
   assert.equal(spawnResult("r3", true).msg.error, null);
 });

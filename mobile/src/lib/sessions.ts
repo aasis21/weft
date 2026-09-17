@@ -20,6 +20,8 @@ export interface StoredSession {
    *  cards across channels/resumes. Optional: older stored entries won't have it. */
   sessionId?: string | null;
   title: string | null;
+  /** Most recent real title reported by Copilot, retained separately from a phone-local label. */
+  reportedTitle?: string | null;
   cwd: string | null;
   addedAt: number;
   lastSeenAt: number;
@@ -42,8 +44,7 @@ export interface StoredSession {
   unread?: boolean;
   /** Number of unread host turns/events, persisted so a reload keeps the "N new" count. */
   unreadCount?: number;
-  /** True once the user renamed this session on the phone; keeps the CLI title from overriding the
-   *  user's chosen name after reload/resume (#37). */
+  /** True once the user renamed this session on the phone. A subsequent laptop `/rename` clears it. */
   renamed?: boolean;
   /** Stable listener `deviceId` that spawned this session (see SessionMeta.spawnedFromDeviceId),
    *  persisted so the Device details screen survives reload. */

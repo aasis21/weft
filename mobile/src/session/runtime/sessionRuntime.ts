@@ -724,6 +724,8 @@ export class SessionRuntime {
       title: stored.renamed
         ? stored.title || titleFor(channelId, cwd, null)
         : titleFor(channelId, cwd, timeline.title ?? stored.title),
+      reportedTitle: stored.reportedTitle
+        ?? (!stored.renamed ? (timeline.title ?? stored.title ?? undefined) : undefined),
       renamed: stored.renamed ?? false,
       cwd,
       kind: 'live',
@@ -970,6 +972,8 @@ export class SessionRuntime {
     const prevCwd = before.meta.cwd;
     const prevSessionId = before.meta.sessionId;
     const prevTitle = before.meta.title;
+    const prevReportedTitle = before.meta.reportedTitle;
+    const prevRenamed = before.meta.renamed;
 
     this.recordEvent(channelId, 'in', message);
     this.store.dispatch(envelopeReceived({ id: channelId, envelope: this.filterInFlight(message) }));
@@ -1025,7 +1029,10 @@ export class SessionRuntime {
         }
         if (cur.meta.cwd && cur.meta.cwd !== prevCwd) patch.cwd = cur.meta.cwd;
         const title = reportedTitle(message);
-        if (title && cur.meta.title !== prevTitle) patch.title = title;
+        if (title && cur.meta.reportedTitle !== prevReportedTitle)
+          patch.reportedTitle = cur.meta.reportedTitle ?? title;
+        if (title && cur.meta.title !== prevTitle) patch.title = cur.meta.title;
+        if (cur.meta.renamed !== prevRenamed) patch.renamed = cur.meta.renamed;
         if (Object.keys(patch).length > 0) void patchSession(channelId, patch);
       }
     }
@@ -1144,6 +1151,7 @@ export class SessionRuntime {
         pairing,
         sessionId: prior?.sessionId ?? existing.meta.sessionId ?? null,
         title: prior?.title ?? null,
+        reportedTitle: prior?.reportedTitle ?? existing.meta.reportedTitle ?? null,
         cwd: prior?.cwd ?? null,
         addedAt: prior?.addedAt ?? existing.meta.addedAt,
         lastSeenAt: this.clock(),
@@ -1168,6 +1176,7 @@ export class SessionRuntime {
     await upsertSession({
       pairing,
       title: opts.title ?? null,
+      reportedTitle: opts.title ?? null,
       cwd: opts.cwd ?? null,
       addedAt: now,
       lastSeenAt: now,
@@ -1178,6 +1187,7 @@ export class SessionRuntime {
     const meta: SessionMeta = {
       channelId,
       title: titleFor(channelId, opts.cwd ?? null, opts.title ?? null),
+      reportedTitle: opts.title ?? undefined,
       renamed: opts.renamed ?? false,
       cwd: opts.cwd ?? null,
       kind: 'live',
@@ -2129,6 +2139,7 @@ export class SessionRuntime {
           projects: msg.projects ?? [],
           capabilities: msg.capabilities ?? [],
           deviceName: msg.deviceName,
+          defaultPermissionMode: msg.defaultPermissionMode ?? 'default',
         }),
       );
       if (msg.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) this.refreshDeviceKeepAwake(channelId);
@@ -2410,18 +2421,18 @@ export class SessionRuntime {
     this.syncHistory(channelId, ctrl.client);
   }
 
-  /** Rename a session to a user-chosen title (#37). Persists both the title and a `renamed` flag so
-   *  the CLI-reported title never overrides it after a reload/resume. A blank name clears the rename
-   *  and reverts to the CLI/cwd/creative-name default on the next update. */
+  /** Rename a session to a phone-local label (#37). Repeated reports of the same Copilot title keep
+   *  the label; a laptop `/rename` takes ownership. A blank label restores the latest Copilot title. */
   renameSession(channelId: string, rawTitle: string): void {
     const session = this.session(channelId);
     if (!session) return;
     const ctrl = this.controllers.get(channelId);
     const title = rawTitle.trim();
     if (!title) {
-      const fallback = titleFor(channelId, session.meta.cwd, null);
+      const fallback = titleFor(channelId, session.meta.cwd, session.meta.reportedTitle ?? null);
       this.store.dispatch(titleSet({ id: channelId, title: fallback, renamed: false }));
-      if (!ctrl?.ephemeral) void patchSession(channelId, { title: null, renamed: false });
+      if (!ctrl?.ephemeral)
+        void patchSession(channelId, { title: session.meta.reportedTitle ?? null, renamed: false });
       return;
     }
     this.store.dispatch(titleSet({ id: channelId, title, renamed: true }));

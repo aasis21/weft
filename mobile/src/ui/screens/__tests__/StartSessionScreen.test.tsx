@@ -147,6 +147,19 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
     expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('uses the selected laptop permission default while preserving a one-launch override', async () => {
+    const device = resumeDevice('/home/me/weft');
+    device.defaultPermissionMode = 'allow-all';
+    const { rerender, props } = renderScreen({ devices: [device] });
+
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /^allow all$/i })).toHaveAttribute('aria-checked', 'true'),
+    );
+    fireEvent.click(screen.getByRole('radio', { name: /^default$/i }));
+    rerender(<StartSessionScreen {...props} devices={[{ ...device }]} />);
+    expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('names the device in the call to action, and says which thing it will do', () => {    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
     expect(cta().textContent).toMatch(/start on macbook pro/i);
 

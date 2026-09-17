@@ -33,7 +33,11 @@ import * as attachedStore from "./attachedSessions.mjs";
 import * as launchStore from "./launchOperations.mjs";
 import { getOrCreateDeviceId } from "./deviceIdentity.mjs";
 import { getOrCreatePersistedIdentity, markPersistedIdentityConnected } from "./pairingIdentity.mjs";
-import { isPersistentPairingEnabled, loadDeviceName } from "./transportConfig.mjs";
+import {
+  isPersistentPairingEnabled,
+  loadDefaultPermissionMode,
+  loadDeviceName,
+} from "./transportConfig.mjs";
 import { isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { resolveVersion } from "./version.mjs";
 import { createDeviceTelemetryCollector } from "./deviceTelemetry.mjs";
@@ -701,6 +705,7 @@ export function createListener({
         ...(keepAwakeApi?.supported === true ? [DEVICE_CAPABILITY.KEEP_AWAKE_V1] : []),
         DEVICE_CAPABILITY.SESSION_ACTIVATION_V1,
       ],
+      loadDefaultPermissionMode(),
     ));
   }
 

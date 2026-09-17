@@ -465,6 +465,8 @@ export interface ProjectListMsg {
   deviceId?: string | null;
   /** Optional additive protocol features supported by this listener. */
   capabilities?: string[];
+  /** Permission mode this device prefers for new/resumed sessions. Older listeners omit it. */
+  defaultPermissionMode?: SpawnMode;
 }
 export interface SpawnSessionMsg {
   requestId: string;
@@ -913,7 +915,8 @@ export function projectList(
   projects: ListenerProject[],
   deviceName?: string | null,
   deviceId?: string | null,
-  capabilities?: string[] | null
+  capabilities?: string[] | null,
+  defaultPermissionMode?: SpawnMode
 ): ProjectListMessage;
 export function spawnSession(
   requestId: string,

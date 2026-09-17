@@ -555,7 +555,13 @@ export const projectListRequest = () =>
  * though its ephemeral pairing `channelId`/keypair are freshly minted every run (by design, for
  * forward secrecy — see docs/pairing.md). Never derived from or tied to any cryptographic key.
  */
-export const projectList = (projects, deviceName, deviceId, capabilities = null) =>
+export const projectList = (
+  projects,
+  deviceName,
+  deviceId,
+  capabilities = null,
+  defaultPermissionMode = "default",
+) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.PROJECT_LIST, {
     projects: Array.isArray(projects) ? projects : [],
     deviceName: deviceName ?? null,
@@ -563,6 +569,7 @@ export const projectList = (projects, deviceName, deviceId, capabilities = null)
     ...(Array.isArray(capabilities)
       ? { capabilities: capabilities.filter((value) => typeof value === "string" && value) }
       : {}),
+    defaultPermissionMode: defaultPermissionMode === "allow-all" ? "allow-all" : "default",
   });
 /**
  * Phone -> listener: spawn a new Copilot session. `requestId` correlates the reply; `projectName`
