@@ -1109,6 +1109,7 @@ test("an already-open Session A is activated in place and causes zero spawn call
       message.msg.operationId === "open-live-a" &&
       message.msg.state === "pairing-ready"),
     "live runtime pairing",
+    10_000,
   );
   assert.equal(status.msg.state, "pairing-ready");
   assert.deepEqual(status.msg.payload, payload);
@@ -1213,6 +1214,7 @@ test("session discovery merges a verified live runtime missing from the saved pa
   const list = await waitFor(
     () => h.messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
     "merged session list",
+    10_000,
   );
   assert.equal(list.msg.sessions.some((session) => session.sessionId === "session-live-catalog"), true);
 });

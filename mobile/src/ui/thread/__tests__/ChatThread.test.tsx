@@ -439,6 +439,7 @@ describe('letting the reader scroll away while the agent is still writing', () =
   it('does not drag the viewport back down while streaming deltas arrive', async () => {
     const { scroller, scrollIntoView, rerender } = mountStreaming();
     await settleThread();
+    fireEvent.touchStart(scroller);
     scrollUp(scroller);
     scrollIntoView.mockClear();
 
@@ -446,9 +447,98 @@ describe('letting the reader scroll away while the agent is still writing', () =
     // cached pin flag still says "at the bottom" here, so only a live measurement saves us.
     rerender([{ kind: 'assistant', id: 'a1', text: 'one two', ts: now }]);
     rerender([{ kind: 'assistant', id: 'a1', text: 'one two three', ts: now }]);
+    fireEvent.touchEnd(scroller);
 
     expect(scrollIntoView).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
+  });
+
+  it('keeps following when a large new event creates a bottom gap by itself', async () => {
+    const { scroller, scrollIntoView, rerender } = mountStreaming();
+    await settleThread();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 400 });
+    fireEvent.scroll(scroller);
+    scrollIntoView.mockClear();
+
+    // The new card lands before the effect runs, so the DOM now has a large gap even though the
+    // reader was following the tail. Reader intent, not the post-append gap, decides this case.
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1600 });
+    rerender([
+      { kind: 'assistant', id: 'a1', text: 'one', ts: now },
+      {
+        kind: 'tool',
+        id: 'large-tool',
+        name: 'build',
+        args: {},
+        status: 'running',
+        startedAt: now + 1,
+        ts: now + 1,
+      },
+    ]);
+
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('does not jump to a new event when the reader has manually scrolled up', async () => {
+    const { scroller, scrollIntoView, rerender } = mountStreaming();
+    await settleThread();
+    scrollUp(scroller);
+    fireEvent.scroll(scroller);
+    scrollIntoView.mockClear();
+
+    // A transient layout measurement can report the bottom while a heartbeat or event rerenders.
+    // The explicit reader-detached state must still win.
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 600 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 0 });
+    rerender([
+      { kind: 'assistant', id: 'a1', text: 'one', ts: now },
+      {
+        kind: 'tool',
+        id: 'heartbeat',
+        name: 'heartbeat',
+        args: {},
+        status: 'success',
+        startedAt: now + 1,
+        ts: now + 1,
+      },
+    ]);
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
+  });
+
+  it('does not treat prepended history as a newly sent phone prompt', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView as never;
+    const current: TimelineItem[] = [
+      { kind: 'assistant', id: 'a1', text: 'answer', ts: now },
+      { kind: 'user', id: 'u1', text: 'current prompt', ts: now + 1, origin: 'phone' },
+    ];
+    const { container, rerender } = render(
+      <div className="thread-scroll">
+        <ChatThread items={current} streaming busy />
+      </div>,
+    );
+    const scroller = container.querySelector('.thread-scroll') as HTMLElement;
+    await settleThread();
+    scrollUp(scroller);
+    fireEvent.scroll(scroller);
+    scrollIntoView.mockClear();
+
+    rerender(
+      <div className="thread-scroll">
+        <ChatThread
+          items={[{ kind: 'assistant', id: 'older', text: 'older answer', ts: now - 1 }, ...current]}
+          streaming
+          busy
+        />
+      </div>,
+    );
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('holds still while a finger is on the glass, even sitting at the bottom', async () => {
@@ -524,4 +614,3 @@ describe('The working row says what the agent is doing', () => {
     }
   });
 });
-

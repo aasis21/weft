@@ -153,7 +153,7 @@ test("new Station activates a positive old-extension offer without spawning", as
     getTransportDescriptor: () => ({ kind: "local" }),
   });
 
-  test("new Station fails closed when legacy ownership cannot be proven stopped", async (t) => {
+  test("new Station resumes a historical session with no Weft ownership record", async (t) => {
     const baseDir = mkdtempSync(join(tmpdir(), "weft-compat-unknown-"));
     const sessionDir = mkdtempSync(join(tmpdir(), "weft-compat-session-"));
     t.after(() => {
@@ -183,8 +183,8 @@ test("new Station activates a positive old-extension offer without spawning", as
       target: { kind: "existing", storeAuthority: "default", sessionId: "session-a" },
     });
 
-    assert.equal(result.failure.code, "ownership-unknown");
-    assert.equal(spawns, 0);
+    assert.equal(result.state, "launching");
+    assert.equal(spawns, 1);
   });
 
   test("new Station resumes when legacy evidence positively proves the prior process absent", async (t) => {
@@ -232,6 +232,53 @@ test("new Station activates a positive old-extension offer without spawning", as
 
   assert.equal(result.state, "pairing-ready");
   assert.deepEqual(result.pairingPayload, payload);
+  assert.equal(spawns, 0);
+});
+
+test("new Station still fails closed for genuinely uncertain runtime evidence", async (t) => {
+  const baseDir = mkdtempSync(join(tmpdir(), "weft-compat-uncertain-"));
+  const sessionDir = mkdtempSync(join(tmpdir(), "weft-compat-uncertain-session-"));
+  t.after(() => {
+    rmSync(baseDir, { recursive: true, force: true });
+    rmSync(sessionDir, { recursive: true, force: true });
+  });
+  const { createRuntimeIdentity } = await import("../src/runtimeIdentity.mjs");
+  const { publishRuntimePresence } = await import("../src/runtimePresence.mjs");
+  const presence = await publishRuntimePresence({
+    identity: createRuntimeIdentity({
+      storeAuthority: "sha256:test-store",
+      sessionId: "session-a",
+    }, { scope: {} }),
+    endpoint: "unreachable-runtime-endpoint",
+  }, { baseDir });
+  t.after(() => presence.close());
+
+  let spawns = 0;
+  const coordinator = createStationSessionCoordinator({
+    baseDir,
+    storeAuthority: "sha256:test-store",
+    timeoutMs: 50,
+    sessionsApi: { readSessionCwd: () => sessionDir },
+    projectsApi: { listProjects: () => [] },
+    attachedApi: {
+      inspectAttachedSessionOwnership: () => ({ state: "unknown" }),
+      findAttachedSession: () => null,
+    },
+    pendingApi: { listPendingSessions: () => [] },
+    launchApi,
+    spawnFn() {
+      spawns += 1;
+      return { pid: 101, unref() {} };
+    },
+    getTransportDescriptor: () => ({ kind: "local" }),
+  });
+
+  const result = await coordinator.open({
+    operationId: "runtime-uncertain",
+    target: { kind: "existing", storeAuthority: "default", sessionId: "session-a" },
+  });
+
+  assert.equal(result.failure.code, "ownership-unknown");
   assert.equal(spawns, 0);
 });
 
