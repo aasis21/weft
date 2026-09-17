@@ -5,6 +5,12 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.21
+
+- Added the source device name beside each session's project metadata in the session drawer.
+- Kept Start and Resume together above Clipboard, Keep Awake, and Terminal in Quick actions.
+- Made the mobile slash-command palette independently scrollable and bounded above the keyboard.
+
 ## 0.2.20
 
 - Improved device fallback states when Windows cannot provide system metrics or an
