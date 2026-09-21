@@ -1,15 +1,18 @@
 import { chromium } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 
 const SITE = process.env.WEFT_URL || 'https://useweft.netlify.app/';
-const OUT = 'C:\\Users\\akash\\weft\\design\\assets';
+const OUT = fileURLToPath(new URL('./assets/', import.meta.url));
 
 const browser = await chromium.launch();
-const shot = async (fn, file) => {
+const shot = async (fn, file, colorScheme = 'dark') => {
   const ctx = await browser.newContext({
     viewport: { width: 412, height: 915 },
     deviceScaleFactor: 3,
     isMobile: true,
     hasTouch: true,
+    colorScheme,
+    reducedMotion: 'reduce',
   });
   const page = await ctx.newPage();
   await page.goto(SITE, { waitUntil: 'networkidle' });
@@ -20,14 +23,14 @@ const shot = async (fn, file) => {
 };
 
 const startDemo = async (page) => {
-  await page.getByText('Demo / Simulator').click();
+  await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
   await page.waitForSelector('.weft-session', { timeout: 15000 });
 };
 
 // 1) Pairing / onboarding screen (fresh load)
 await shot(async (page) => {
   await page.waitForTimeout(1200);
-}, 'pairing.png');
+}, 'pairing.png', 'light');
 
 // 2) Chat hero — both inline tool cards done, markdown, before approval
 await shot(async (page) => {
@@ -58,6 +61,16 @@ await shot(async (page) => {
   await page.locator('.drawer-btn').click();
   await page.waitForTimeout(600);
 }, 'drawer.png');
+
+// 6) Shared terminal attached to the demo laptop
+await shot(async (page) => {
+  await startDemo(page);
+  await page.locator('.drawer-btn').click();
+  await page.getByRole('button', { name: /Demo laptop/ }).first().click();
+  await page.getByRole('button', { name: 'Open terminal', exact: true }).click();
+  await page.waitForSelector('.terminal-screen', { timeout: 15000 });
+  await page.waitForTimeout(600);
+}, 'terminal.png');
 
 await browser.close();
 console.log('done →', OUT);

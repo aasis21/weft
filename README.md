@@ -1,75 +1,56 @@
 <div align="center">
 
+<img src="mobile/public/icon.svg" width="88" alt="Weft logo" />
+
 # Weft
 
-**Your Copilot session, off the desk.**
+### Your GitHub Copilot session, off the desk.
 
+[![CI](https://github.com/aasis21/weft/actions/workflows/ci.yml/badge.svg)](https://github.com/aasis21/weft/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/aasis21/weft?display_name=tag)](https://github.com/aasis21/weft/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)](#get-started)
-[![Built with](https://img.shields.io/badge/built%20with-Copilot%20CLI-24292e?logo=github)](https://github.com/github/copilot-cli)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](#develop-locally)
+[![PWA](https://img.shields.io/badge/phone-PWA-5A0FC8?logo=pwa&logoColor=white)](https://useweft.netlify.app)
 
-Weft mirrors your live GitHub Copilot terminal session to your phone over an end-to-end
-encrypted relay — watch it work, approve its moves, steer it by text or voice, and pick any
-chat back up, from anywhere.
+Weft turns your phone into a secure control surface for GitHub Copilot CLI. Follow live
+work, send prompts, approve tool calls, resume sessions, and open a shared terminal while
+the actual process keeps running on your laptop.
 
-**[Product & web app → useweft.netlify.app](https://useweft.netlify.app)** · **[Documentation → aasis21.github.io/weft](https://aasis21.github.io/weft/)**
+[**Open the app**](https://useweft.netlify.app) ·
+[**Read the docs**](https://aasis21.github.io/weft/) ·
+[**Try the in-browser demo**](https://useweft.netlify.app/) ·
+[**View releases**](https://github.com/aasis21/weft/releases)
 
-<img src="docs/assets/session-transcript.webp" width="360" alt="A live Copilot session mirrored to a phone, with an inline approval prompt." />
+<br>
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="design/assets/pairing.png" width="360" alt="Weft product landing page with pairing and demo actions." />
+    </td>
+    <td width="50%" align="center">
+      <img src="design/assets/chat.png" width="360" alt="A live Copilot session in Weft with streamed work and an approval request." />
+    </td>
+  </tr>
+</table>
 
 </div>
 
-|  |  |  |
+## Why Weft
+
+| Stay in the loop | Stay in control | Stay private |
 |---|---|---|
-| <img src="docs/assets/landing-hero.webp" width="220" alt="Onboarding screen" /><br>**Pair in seconds** | <img src="docs/assets/session-chat.webp" width="220" alt="A working session" /><br>**Watch it work** | <img src="docs/assets/session-transcript.webp" width="220" alt="Approval prompt" /><br>**Approve from anywhere** |
+| Watch replies, tool calls, edits, and status stream live. | Prompt, steer, stop, change mode, and answer native approvals from your phone. | Session traffic is encrypted end to end; the relay forwards ciphertext and stores no session content. |
+| Resume existing work or launch a session in a registered project. | Use voice, image attachments, clipboard tools, keep-awake controls, and a shared terminal. | Pairing keys, transcripts, and session metadata remain on your devices. |
 
-> **Fastest path:** install Weft on your laptop, run `weft start`, then open
-> **<https://useweft.netlify.app>** on your phone and scan the QR.
+Weft is not a remote desktop and it does not move your workspace to the cloud. Copilot and
+your tools continue to run under your account on the laptop; the phone provides a focused,
+mobile-first interface to that work.
 
-Phone-driven discovery, Start, and Open/Resume require a running **Device Station**.
-`/weft` is the separate, explicit path for pairing the phone directly with the current
-Copilot session; it does not require Device Station.
+## Install in under a minute
 
-## What you can do
-
-Everything you'd do at the terminal — now from your phone:
-
-- **Drive it live** — send prompts and follow-ups; replies stream back token by token. It's the
-  real session, not a read-only mirror.
-- **Watch it work** — every command it runs and file it edits, unfolding live in the thread.
-- **Approve before it acts** — the *native* Copilot permission prompt is relayed to your phone;
-  allow or deny with a tap. The prompt stays open until you answer or the session ends.
-- **Go hands-free with Vox** — tap the waveform and just talk; the orb takes the keyboard's place in
-  the composer, so the thread and any approval stay in view while Vox transcribes, sends, and reads
-  the reply back. Expand it to the full-screen orb when you want to put the phone down.
-- **Show it a screenshot** — attach up to six images from your camera, library, paste, or drag so
-  it can *see* the bug, the design, the error.
-- **Keep it on track** — steer an active turn, queue the next instruction, switch
-  **interactive / plan / autopilot**, fire whitelisted slash commands (`/model`, `/compact`,
-  `/clear`, `/autopilot`, …) that run on the laptop, or **Stop** a turn mid-run.
-- **Run a fleet** — one Device Station drives many projects and sessions; start a fresh chat or tap
-  into a running one, across multiple laptops with a default device. If the selected session is
-  already open in a terminal, Station activates that exact process instead of launching a second
-  `copilot --resume`.
-- **Recover slow launches safely** — New and Resume requests survive phone reloads and temporary
-  Devbox outages; **Try again** reconnects to the same launch instead of silently opening duplicates.
-- **Use a shared terminal** — start Device Station with `weft start` on a supported Windows
-  laptop, then open or resume one real shell from the phone and its visible laptop window.
-  Enabled by default; disable it with `terminal.enabled: false` in the laptop configuration.
-  See [terminal controls and access boundaries](docs/terminal.md).
-- **Come back anytime** — sessions stay warm and reconnect on reopen; archive, pin, and rename them,
-  and juggle several at once.
-
-All live session traffic flows over the same end-to-end-encrypted channel. Weft stores
-transcripts, session metadata, and pairing keys locally on your devices so sessions can
-reconnect; the relay infrastructure forwards encrypted envelopes and stores no session content.
-
-## Get started
-
-### 1. Install on your laptop
-
-One line. Downloads the prebuilt extension into `~/.copilot/extensions/weft/` (where
-Copilot CLI auto-discovers it) plus a "how to use Weft" skill into
-`~/.copilot/skills/weft-how-to-use/`, pre-wired to the hosted relay — no clone, no Node build:
+Install the prebuilt extension and Device Station. No repository clone, mobile app-store
+download, or relay account is required.
 
 ```powershell
 # Windows (PowerShell)
@@ -81,56 +62,68 @@ irm https://useweft.netlify.app/install.ps1 | iex
 curl -fsSL https://useweft.netlify.app/install.sh | bash
 ```
 
-### 2. Start Weft
+Start the Device Station:
 
-```sh
+```shell
 weft start
 ```
 
-Leave that terminal open. The Device Station prints a pairing QR and lets the phone start
-or resume Copilot sessions on this laptop.
+Then open **[useweft.netlify.app](https://useweft.netlify.app)** on your phone, choose
+**Scan QR to pair**, and scan the code shown in the terminal. Leave `weft start` running
+while you use the phone.
 
-To connect a different phone, or after the phone browser/app storage was reset, use:
+> **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
+> replacing the trusted phone or after clearing the phone browser's storage.
 
-```sh
-weft start --new-device
-```
+## Product tour
 
-This replaces the previously trusted phone identity and prints a fresh QR.
+<table>
+  <tr>
+    <td width="33%" align="center">
+      <img src="design/assets/tool.png" width="270" alt="Expanded Copilot tool call with arguments and result." /><br>
+      <strong>Inspect the work</strong><br>
+      <sub>Tool activity, output, Markdown, and code stay readable on a small screen.</sub>
+    </td>
+    <td width="33%" align="center">
+      <img src="design/assets/approval.png" width="270" alt="Native Copilot permission request relayed to Weft." /><br>
+      <strong>Approve deliberately</strong><br>
+      <sub>Native Copilot permission requests remain pending until you answer.</sub>
+    </td>
+    <td width="33%" align="center">
+      <img src="design/assets/terminal.png" width="270" alt="Shared laptop terminal controlled from Weft." /><br>
+      <strong>Use the real terminal</strong><br>
+      <sub>Reconnect to one visible laptop shell with mobile-sized controls.</sub>
+    </td>
+  </tr>
+</table>
 
-### 3. Scan from your phone
+## Core capabilities
 
-Open **<https://useweft.netlify.app>**, choose **Scan QR to pair**, and scan the code in
-the terminal. The browser app works immediately; use **Install app** or **Add to Home
-Screen** for an app-like experience and automatic web updates.
+- **Live Copilot sessions** — stream replies and tool calls, send follow-ups, attach up to
+  six images, and use Vox for hands-free prompting.
+- **Native approval relay** — allow once, allow for the session, or deny the exact action
+  Copilot requested.
+- **Session control** — stop an active turn, queue the next instruction, use supported slash
+  commands, and switch between interactive, plan, and autopilot modes.
+- **Multi-device workspace** — use one phone to move among paired laptops, registered
+  projects, and active or historical sessions.
+- **Safe launch recovery** — reconnect to slow Start and Resume operations instead of
+  silently creating duplicate Copilot processes.
+- **Shared terminal** — open and resume one real shell on supported Windows laptops. See
+  [terminal controls and access boundaries](docs/terminal.md).
 
-- **PWA distribution** — the hosted PWA is the supported phone experience. Native
-  Android builds are currently developer builds only; Weft does not publish an APK
-  until a signed Android release pipeline is available.
-- **Zero-config** — uses the creator's hosted relay (a client-safe publishable key + RLS +
-  end-to-end AES-256-GCM; Supabase only ever sees ciphertext).
-- **Update safely** — `weft update --check` reports whether a hosted release is newer;
-  `weft update` verifies the published hashes, replaces only installed code and the Weft
-  skill, and leaves `~/.weft/` data untouched. Restart Copilot CLI or Device Station after.
-- **Uninstall** — remove the installed extension and skill. Remove `~/.weft/` only if you
-  also want to delete local configuration, registered projects, logs, and persistent
-  pairing keys. See [`SUPPORT.md`](SUPPORT.md) for the exact cleanup paths.
-- **Advanced options** — `/weft`, alternate transports, pairing lifetime, self-hosting,
-  and the full command reference live in [`docs/advanced.md`](docs/advanced.md).
+## Trust model
 
-> Sibling project to [`aasis21/vox`](https://github.com/aasis21/vox),
-> [`aasis21/anya`](https://github.com/aasis21/anya), and
-> [`aasis21/engram`](https://github.com/aasis21/engram).
+- **AES-256-GCM end-to-end encryption.** Pairing uses ECDH and a fresh handshake nonce.
+- **Content-free relay.** Supabase Realtime or a self-hosted Dev Tunnel carries encrypted
+  envelopes without storing session content.
+- **Local continuity.** Device configuration and persistent pairing material live under
+  `~/.weft/`; phone session data remains in local device storage.
+- **Explicit authority.** The phone receives the same approval boundaries exposed by the
+  underlying Copilot session. Weft does not invent an automatic approval policy.
 
----
-
-## Advanced use
-
-The default hosted relay needs no configuration. If you want to mirror only one existing
-Copilot session with `/weft`, change pairing lifetime, use a Visual Studio Dev Tunnel,
-point at your own Supabase project, or browse every CLI command, see
-[`docs/advanced.md`](docs/advanced.md). Self-hosting details remain in
-[`docs/hosting.md`](docs/hosting.md).
+Read the full [security model](docs/security.md), [privacy policy](PRIVACY.md), and
+[pairing protocol](docs/pairing.md).
 
 ---
 
@@ -157,8 +150,8 @@ point at your own Supabase project, or browse every CLI command, see
 
 ```
 +------------------------------+        +------------------------------+        +-------------------------------+
-| Weft Mobile                  |        |   Supabase Realtime          |        |  Laptop terminal              |
-| (React + Capacitor, Android) |        |   Broadcast channel          |        |  copilot (parent)             |
+| Weft Mobile                  |        |   Encrypted relay            |        |  Laptop terminal              |
+| (React PWA + Capacitor)      |        |   Supabase or Dev Tunnel     |        |  copilot (parent)             |
 |                              |        |   private:weft:<channelId>   |        |   └─ extension.mjs (child)    |
 |  • scans QR (channel + grant)|  WSS   |   • in-memory pub/sub        |  WSS   |   • joinSession()             |
 |  • ECDH → AES-256-GCM        | <----> |   • zero DB persistence      | <----> |   • onPermissionRequest→relay |
@@ -174,7 +167,7 @@ Three layers, one monorepo:
 | Workspace | What it is |
 |---|---|
 | `extension/` | The Copilot CLI extension (`joinSession`) + a local test **harness** that mimics the phone with no Supabase needed. |
-| `shared/` | Contracts imported by **both** ends: message schema, E2E crypto (ECDH→AES-GCM), and a pluggable transport (LocalTransport now → SupabaseTransport later). |
+| `shared/` | Contracts imported by **both** ends: message schema, E2E crypto (ECDH→AES-GCM), and pluggable local, Supabase, and WebSocket relay transports. |
 | `mobile/` | React + Vite + Capacitor app shipped as the supported **PWA** ([useweft.netlify.app](https://useweft.netlify.app)), with in-browser camera QR scanning and an Android development shell. |
 
 ### Design principles
@@ -213,7 +206,7 @@ Three layers, one monorepo:
 
 ---
 
-## Quick start
+## Develop locally
 
 Source builds require **Node.js 20 or newer**.
 
@@ -224,6 +217,7 @@ node extension/harness/harness.mjs --auto   # full relay loop vs a simulated pho
 npm run build -w @aasis21/weft-extension    # bundles -> extension/dist/extension.mjs + activeRuntime.mjs
 npm run build -w @aasis21/weft-mobile       # Vite production build
 cd mobile && npm run dev                    # then pick "Demo / Simulator"
+node design/capture.mjs                     # refresh product screenshots from the hosted app
 ```
 
 See [`docs/setup.md`](docs/setup.md) for the full developer guide.
