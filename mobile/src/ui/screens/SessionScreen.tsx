@@ -204,6 +204,7 @@ interface SessionScreenProps {
   onRetry(itemId: string): void;
   onSelectSession(channelId: string): void;
   onAddSession(): void;
+  onOpenExplore?(): void;
   onStartSession?(): void;
   onOpenDevices?(): void;
   /** #186 nav simplification: registered listener devices, surfaced in the drawer so picking one
@@ -238,6 +239,7 @@ export function SessionScreen({
   onRetry,
   onSelectSession,
   onAddSession,
+  onOpenExplore,
   onStartSession,
   onOpenDevices,
   devices,
@@ -621,6 +623,7 @@ export function SessionScreen({
         busy={agentBusy}
         {...(composerActivity ? { activity: composerActivity } : {})}
         onOpenDrawer={() => setDrawerOpen(true)}
+        {...(onOpenExplore ? { onOpenExplore } : {})}
         onAddSession={onAddSession}
         onStartSession={onStartSession}
         {...(onArchiveSession ? { onArchive: () => onArchiveSession(activeId) } : {})}

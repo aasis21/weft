@@ -66,6 +66,25 @@ cd mobile
 npm run dev          # open the printed localhost URL
 ```
 
+### Optional Explore video widget
+
+Explore's Discover, Play, Unwind, and Agent Pulse experiences require no external
+content provider. To exercise the Watch category, set an HTTPS URL for an isolated,
+auto-updating widget before starting or building the mobile app:
+
+```powershell
+$env:VITE_EXPLORE_WIDGET_URL = 'https://your-widget-provider.example/embed/...'
+npm run dev -w @aasis21/weft-mobile
+```
+
+The URL is build-time configuration, not a credential and not committed to source.
+Watch does not load it until the user explicitly chooses **Load video feed**. The
+provider runs in a sandboxed iframe with no Weft prompt, repository, filename, tool,
+agent-activity, channel, or session values appended or posted to it. Weft treats frame
+load only as navigation, not proof that cross-origin content rendered. Offline or invalid
+configuration produces an unavailable state; an unverified or blank embed keeps explicit
+reload, hide, and open-directly controls. The rest of Explore remains offline-capable.
+
 In the app choose **Try the demo**. It stands up a fake laptop side in-process
 (real ECDH keypairs + `LocalTransport`), completes the real
 `pair.hello`/`pair.challenge`/`pair.proof`/`pair.ack` handshake, then streams scripted

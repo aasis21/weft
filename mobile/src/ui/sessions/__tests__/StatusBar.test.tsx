@@ -112,6 +112,29 @@ describe('StatusBar', () => {
     expect(onRemove).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps Explore as a permanent action without changing the read-only status subtitle', async () => {
+    const user = userEvent.setup();
+    const onOpenExplore = vi.fn();
+    const rendered = renderStatusBar({ status: 'live', busy: false, onOpenExplore });
+
+    const explore = screen.getByRole('button', { name: 'Open Explore' });
+    expect(explore).toBeInTheDocument();
+    expect(screen.getByText('Live')).toBeInTheDocument();
+
+    await user.click(explore);
+    expect(onOpenExplore).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(
+      <StatusBar
+        {...rendered.props}
+        busy
+        onOpenExplore={onOpenExplore}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Open Explore' })).toBeInTheDocument();
+    expect(screen.getByText('Working…')).toBeInTheDocument();
+  });
+
   it('never renders an ambiguous hamburger badge (neither unread nor session count)', () => {
     const { container } = renderStatusBar();
     // The ambiguous rollup badge was removed (#161); the drawer conveys unread per-session instead.

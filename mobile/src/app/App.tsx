@@ -26,9 +26,13 @@ const SessionScreen = lazy(() =>
 const TerminalScreen = lazy(() =>
   import('@/ui/screens/TerminalScreen').then((module) => ({ default: module.TerminalScreen })),
 );
+const ExploreScreen = lazy(() =>
+  import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
+);
 
 type ModalHistoryState = { weftView: 'devices' } |
-  { weftView: 'device-details' | 'terminal'; channelId: string } | null;
+  { weftView: 'device-details' | 'terminal'; channelId: string } |
+  { weftView: 'explore'; exploreView?: string } | null;
 
 function loadingScreen(label: string): JSX.Element {
   return (
@@ -50,6 +54,7 @@ export default function App(): JSX.Element {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);
   const [terminalChannelId, setTerminalChannelId] = useState<string | undefined>();
+  const [exploreOpen, setExploreOpen] = useState(false);
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +75,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const onPopState = (event: PopStateEvent): void => {
       const state = event.state as ModalHistoryState;
+      setExploreOpen(state?.weftView === 'explore');
       setTerminalChannelId(state?.weftView === 'terminal' ? state.channelId : undefined);
       if (state?.weftView === 'devices') {
         setDevicesOpen(true);
@@ -87,6 +93,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openJoin = useCallback((manual = false): void => {
+    setExploreOpen(false);
     setTerminalChannelId(undefined);
     window.history.replaceState(null, '');
     setError(null);
@@ -98,6 +105,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openStart = useCallback((channelId?: string, mode: StartMode = 'new'): void => {
+    setExploreOpen(false);
     setTerminalChannelId(undefined);
     window.history.replaceState(null, '');
     setError(null);
@@ -110,6 +118,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openDevices = useCallback((): void => {
+    setExploreOpen(false);
     setTerminalChannelId(undefined);
     setError(null);
     setAdding(false);
@@ -120,6 +129,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const openDeviceDetails = useCallback((channelId: string): void => {
+    setExploreOpen(false);
     setTerminalChannelId(undefined);
     setError(null);
     setAdding(false);
@@ -129,6 +139,7 @@ export default function App(): JSX.Element {
     window.history.pushState({ weftView: 'device-details', channelId } satisfies ModalHistoryState, '');
   }, []);
   const openTerminal = useCallback((channelId: string): void => {
+    setExploreOpen(false);
     const terminal = sessionRuntime.terminal(channelId);
     terminal.enter();
     terminal.open();
@@ -179,6 +190,17 @@ export default function App(): JSX.Element {
     window.history.replaceState(null, '');
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
+  }, []);
+
+  const openExplore = useCallback((): void => {
+    setError(null);
+    setAdding(false);
+    setStarting(false);
+    setDevicesOpen(false);
+    setDeviceDetailsChannelId(undefined);
+    setTerminalChannelId(undefined);
+    setExploreOpen(true);
+    window.history.pushState({ weftView: 'explore' } satisfies ModalHistoryState, '');
   }, []);
 
   const handleVoiceModeChange = useCallback((channelId: string, active: boolean): void => {
@@ -492,51 +514,79 @@ export default function App(): JSX.Element {
     );
   }
 
+  const sessionScreen = (
+    <SessionScreen
+      active={active}
+      sessions={snapshot.sessions}
+      activeId={active.meta.channelId}
+      onPrompt={(text, attachments, delivery?: PromptDelivery) =>
+        void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments, delivery)
+      }
+      onApprove={(requestId, optionId) => void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)}
+      onElicitationRespond={(requestId, action, content) =>
+        void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
+      }
+      onInterrupt={() => void sessionRuntime.sendInterrupt(active.meta.channelId)}
+      onModeChange={(mode: SessionMode) => void sessionRuntime.sendMode(active.meta.channelId, mode)}
+      onCommand={(name, input) => void sessionRuntime.sendCommand(active.meta.channelId, name, input)}
+      onRetry={(itemId) => void sessionRuntime.retryPrompt(active.meta.channelId, itemId)}
+      onSelectSession={(id) => sessionRuntime.setActive(id)}
+      onAddSession={() => {
+        setAddManual(false);
+        setAdding(true);
+      }}
+      onOpenExplore={openExplore}
+      onStartSession={() => openStart()}
+      onOpenDevices={openDevices}
+      devices={snapshot.devices}
+      onStartOnDevice={(id) => openStart(id)}
+      onOpenDeviceDetails={(id) => openDeviceDetails(id)}
+      onVoiceModeChange={handleVoiceModeChange}
+      onRemoveSession={removeSession}
+      onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
+      onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
+      onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
+      onArchiveSession={(id) => sessionRuntime.archive(id)}
+      onReconnect={(id) => void sessionRuntime.reconnect(id)}
+      onRetrySpawn={(id) => {
+        const operationId = snapshot.sessions.find((session) => session.meta.channelId === id)
+          ?.spawning?.requestId;
+        if (operationId) void sessionAccess.retry(operationId);
+      }}
+      onGoHome={() => {
+        setError(null);
+        setShowLanding(true);
+      }}
+      onLoadEarlier={() => {}}
+    />
+  );
+
   return (
-    <Suspense fallback={loadingScreen('Opening your session…')}>
-      <SessionScreen
-        active={active}
-        sessions={snapshot.sessions}
-        activeId={active.meta.channelId}
-        onPrompt={(text, attachments, delivery?: PromptDelivery) =>
-          void sessionRuntime.sendPrompt(active.meta.channelId, text, attachments, delivery)
-        }
-        onApprove={(requestId, optionId) => void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)}
-        onElicitationRespond={(requestId, action, content) =>
-          void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
-        }
-        onInterrupt={() => void sessionRuntime.sendInterrupt(active.meta.channelId)}
-        onModeChange={(mode: SessionMode) => void sessionRuntime.sendMode(active.meta.channelId, mode)}
-        onCommand={(name, input) => void sessionRuntime.sendCommand(active.meta.channelId, name, input)}
-        onRetry={(itemId) => void sessionRuntime.retryPrompt(active.meta.channelId, itemId)}
-        onSelectSession={(id) => sessionRuntime.setActive(id)}
-        onAddSession={() => {
-          setAddManual(false);
-          setAdding(true);
-        }}
-        onStartSession={() => openStart()}
-        onOpenDevices={openDevices}
-        devices={snapshot.devices}
-        onStartOnDevice={(id) => openStart(id)}
-        onOpenDeviceDetails={(id) => openDeviceDetails(id)}
-        onVoiceModeChange={handleVoiceModeChange}
-        onRemoveSession={removeSession}
-        onRenameSession={(id, title) => sessionRuntime.renameSession(id, title)}
-        onPinSession={(id, pinned) => void sessionRuntime.pin(id, pinned)}
-        onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
-        onArchiveSession={(id) => sessionRuntime.archive(id)}
-        onReconnect={(id) => void sessionRuntime.reconnect(id)}
-        onRetrySpawn={(id) => {
-          const operationId = snapshot.sessions.find((session) => session.meta.channelId === id)
-            ?.spawning?.requestId;
-          if (operationId) void sessionAccess.retry(operationId);
-        }}
-        onGoHome={() => {
-          setError(null);
-          setShowLanding(true);
-        }}
-        onLoadEarlier={() => {}}
-      />
-    </Suspense>
+    <>
+      <div
+        className="session-surface"
+        aria-hidden={exploreOpen || undefined}
+        {...(exploreOpen ? { inert: '' as unknown as boolean } : {})}
+      >
+        <Suspense fallback={loadingScreen('Opening your session…')}>
+          {sessionScreen}
+        </Suspense>
+      </div>
+      {exploreOpen ? (
+        <Suspense fallback={loadingScreen('Opening Explore…')}>
+          <ExploreScreen
+            active={active}
+            onBack={() => window.history.back()}
+            onOpenChat={() => window.history.go(-2)}
+            onApprove={(requestId, optionId) =>
+              void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)
+            }
+            onElicitationRespond={(requestId, action, content) =>
+              void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
+            }
+          />
+        </Suspense>
+      ) : null}
+    </>
   );
 }

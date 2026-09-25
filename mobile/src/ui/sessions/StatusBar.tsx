@@ -17,6 +17,15 @@ function ScanGlyph(): JSX.Element {
   );
 }
 
+function CompassGlyph(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m14.8 9.2-1.7 3.9-3.9 1.7 1.7-3.9 3.9-1.7Z" />
+    </svg>
+  );
+}
+
 interface StatusBarProps {
   title: string;
   cwd: string | null;
@@ -26,6 +35,8 @@ interface StatusBarProps {
   /** What the composer is doing — outranks `busy` so the pill mirrors the mic/speech (#184). */
   activity?: ComposerActivity;
   onOpenDrawer(): void;
+  /** Open the permanent Explore destination. Independent from the read-only session status line. */
+  onOpenExplore?(): void;
   onAddSession(): void;
   onStartSession?(): void;
   /** #163: archive this session now (drop the live socket, keep the card). Shown only when live. */
@@ -55,6 +66,7 @@ export function StatusBar({
   busy = false,
   activity,
   onOpenDrawer,
+  onOpenExplore,
   onAddSession,
   onStartSession,
   onArchive,
@@ -193,6 +205,18 @@ export function StatusBar({
       </div>
 
       <div className="status-icons">
+        {onOpenExplore ? (
+          <button
+            className="icon-btn explore-btn"
+            type="button"
+            onClick={onOpenExplore}
+            aria-label="Open Explore"
+            title="Explore"
+          >
+            <CompassGlyph />
+          </button>
+        ) : null}
+
         <button
           className="icon-btn start-btn"
           type="button"
