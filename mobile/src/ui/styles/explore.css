@@ -509,7 +509,7 @@
   display: flex;
   position: relative;
   min-height: 145px;
-  overflow: hidden;
+  overflow-y: auto;
   border: 1px solid var(--bg-rule);
   border-radius: 18px;
   background:
@@ -662,7 +662,8 @@
 .watch-frame-shell {
   position: relative;
   min-height: min(68dvh, 700px);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid var(--bg-rule);
   border-radius: 18px;
   background: #05070b;
@@ -1060,5 +1061,464 @@
   .signal-grid button {
     transition: none;
     transform: none;
+  }
+}
+
+/* Explore live experience */
+.explore-content {
+  height: 100%;
+  overflow: hidden;
+}
+
+.explore-loading {
+  display: grid;
+  place-items: center;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.explore-header {
+  min-height: 54px;
+  padding: max(7px, env(safe-area-inset-top)) 10px 7px;
+}
+
+.explore-heading {
+  justify-content: flex-start;
+}
+
+.explore-heading strong {
+  font-size: 16px;
+}
+
+.explore-heading-icon {
+  width: 29px;
+  height: 29px;
+  border-radius: 9px;
+}
+
+.explore-home,
+.explore-category-body {
+  min-height: 0;
+  flex: 1;
+}
+
+.explore-home {
+  display: flex;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 12px 12px 10px;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.explore-intro {
+  margin: 0 2px 10px;
+}
+
+.explore-intro h1 {
+  font-size: clamp(22px, 6vw, 30px);
+}
+
+.explore-choice-grid {
+  min-height: 0;
+  flex: 1;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.explore-choice {
+  min-height: 0;
+  padding: 13px;
+  border-radius: 18px;
+}
+
+.explore-choice-icon {
+  width: 38px;
+  height: 38px;
+  margin-bottom: 0;
+  border-radius: 13px;
+}
+
+.explore-choice strong {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 15px;
+}
+
+.explore-tabs {
+  min-height: 48px;
+  padding: 6px 10px;
+}
+
+.explore-category-body {
+  padding-bottom: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.live-copilot-dock {
+  display: flex;
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(100% - 20px);
+  min-height: 86px;
+  max-height: 96px;
+  margin: 8px 10px max(8px, env(safe-area-inset-bottom));
+  padding: 10px 12px;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--bg-rule);
+  border-radius: 17px;
+  color: var(--fg);
+  text-align: left;
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 52%),
+    color-mix(in srgb, var(--bg-elev) 96%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.live-copilot-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--fg-faint) 18%, transparent);
+}
+
+.live-copilot-dock-working .live-copilot-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  animation: live-copilot-breathe 1.8s ease-in-out infinite;
+}
+
+.live-copilot-dock-ready .live-copilot-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.live-copilot-dock-attention .live-copilot-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.live-copilot-dock-error .live-copilot-dot {
+  background: var(--error);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--error) 18%, transparent);
+}
+
+@keyframes live-copilot-breathe {
+  50% { transform: scale(1.25); }
+}
+
+.live-copilot-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-copilot-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-copilot-status strong {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.live-copilot-status time {
+  color: var(--fg-faint);
+  font: 700 10px var(--mono);
+}
+
+.live-copilot-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.live-copilot-copy small {
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-copilot-chevron {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-size: 22px;
+}
+
+.discover-view {
+  display: grid;
+  height: 100%;
+  padding: 10px 12px;
+  overflow-y: auto;
+  outline: none;
+  touch-action: pan-x;
+}
+
+.discover-view-scrollable {
+  touch-action: pan-y;
+}
+
+.discover-deck-card {
+  display: flex;
+  min-height: 0;
+  width: min(100%, 680px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: clamp(14px, 3vh, 24px);
+  flex-direction: column;
+  overflow: visible;
+  border: 1px solid var(--bg-rule);
+  border-radius: 24px;
+  background:
+    radial-gradient(420px 220px at 100% 0, color-mix(in srgb, var(--accent) 16%, transparent), transparent 66%),
+    var(--bg-elev);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+}
+
+.discover-deck-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.discover-deck-illustration {
+  display: grid;
+  width: clamp(50px, 9vh, 72px);
+  aspect-ratio: 1;
+  margin: clamp(12px, 2.5vh, 22px) 0;
+  place-items: center;
+  border-radius: 20px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.discover-deck-illustration svg {
+  width: 52%;
+  height: 52%;
+}
+
+.discover-deck-card h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(24px, 7vw, 38px);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+}
+
+.discover-deck-summary {
+  margin: clamp(8px, 1.5vh, 14px) 0 0;
+  color: var(--fg-dim);
+  font-size: clamp(13px, 2.1vh, 16px);
+  line-height: 1.45;
+}
+
+.discover-deck-insight {
+  margin-top: clamp(12px, 2vh, 20px);
+  padding: clamp(11px, 2vh, 16px);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 14px 14px 0;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.discover-deck-insight strong {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.discover-deck-insight p {
+  margin: 6px 0 0;
+  color: var(--fg);
+  font-size: clamp(12px, 1.9vh, 15px);
+  line-height: 1.45;
+}
+
+.discover-deck-actions {
+  display: flex;
+  min-height: 38px;
+  margin-top: auto;
+  padding-top: 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--fg-faint);
+  font: 700 10px var(--mono);
+}
+
+.discover-deck-actions .discover-save {
+  position: static;
+  display: inline-flex;
+  width: auto;
+  height: 38px;
+  padding: 0 9px;
+  align-items: center;
+  gap: 5px;
+}
+
+.discover-deck-actions > div {
+  display: flex;
+  gap: 5px;
+}
+
+.discover-deck-actions > div button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--bg-rule);
+  border-radius: 11px;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.discover-deck-actions > div button:disabled {
+  opacity: 0.35;
+}
+
+.watch-view,
+.watch-consent,
+.watch-empty {
+  height: 100%;
+  min-height: 0;
+}
+
+.watch-consent,
+.watch-empty {
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.watch-frame-shell {
+  height: 100%;
+  min-height: 0;
+}
+
+.activity-picker {
+  height: 100%;
+  min-height: 0;
+  padding: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.activity-card {
+  min-height: 0;
+  padding: 10px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 9px;
+}
+
+.activity-preview {
+  width: 44px;
+  height: 58px;
+  border-radius: 13px;
+}
+
+.activity-preview svg {
+  width: 27px;
+  height: 27px;
+}
+
+.activity-card strong {
+  font-size: 16px;
+}
+
+.activity-card b {
+  grid-column: 2;
+}
+
+@media (max-height: 700px) {
+  .explore-header {
+    min-height: 48px;
+    padding-block: max(5px, env(safe-area-inset-top)) 5px;
+  }
+  .explore-home { padding-block: 8px 6px; }
+  .explore-intro { margin-bottom: 6px; }
+  .explore-choice { padding: 10px; }
+  .explore-choice-icon { width: 32px; height: 32px; }
+  .live-copilot-dock {
+    min-height: 76px;
+    max-height: 82px;
+    margin-block: 6px max(6px, env(safe-area-inset-bottom));
+  }
+  .discover-view { padding-block: 7px; }
+  .discover-deck-illustration { display: none; }
+  .discover-deck-insight { margin-top: 9px; padding: 9px 11px; }
+  .game-view,
+  .unwind-session,
+  .watch-view {
+    padding: 10px 12px;
+  }
+  .game-heading { margin-bottom: 8px; }
+  .game-heading h1,
+  .unwind-session h1,
+  .watch-view h1 { font-size: 23px; }
+  .threadline-board {
+    width: min(100%, calc(100dvh - 300px), 400px);
+  }
+  .signal-grid {
+    width: min(100%, calc(100dvh - 300px), 350px);
+    margin-block: 10px;
+    gap: 7px;
+  }
+  .weave-breath-visual {
+    width: min(42vh, 190px);
+    margin-block: 12px 8px;
+  }
+  .horizon-visual {
+    height: 112px;
+    margin-block: 12px 8px;
+  }
+  .activity-card p,
+  .activity-card b {
+    display: none;
+  }
+}
+
+@media (min-width: 700px) {
+  .explore-choice { min-height: 0; }
+  .live-copilot-dock {
+    width: min(calc(100% - 24px), 760px);
+    margin-inline: auto;
+  }
+  .activity-card {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .activity-preview {
+    width: 64px;
+    height: 82px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-copilot-dock-working .live-copilot-dot {
+    animation: none;
   }
 }

@@ -11,11 +11,9 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { ElicitationRequestMsg } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { TimelineItem, ToolItem } from '@/lib/timeline';
 import { isWorking } from '@/ui/sessions/sessionStatus';
-import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import {
   DISCOVER_CARDS,
   DISCOVER_TOPIC_LABELS,
@@ -24,11 +22,10 @@ import {
 } from './discoverCards';
 
 export type ExploreCategory = 'discover' | 'watch' | 'play' | 'unwind';
-type ExploreView = ExploreCategory | 'agent' | null;
-type FieldValue = string | number | boolean | string[];
+type ExploreView = ExploreCategory | null;
 type ExploreHistoryState = {
   weftView: 'explore';
-  exploreView?: Exclude<ExploreView, null>;
+  exploreView?: ExploreCategory;
 };
 
 function historyExploreView(state: ExploreHistoryState | null): ExploreView {
@@ -36,30 +33,26 @@ function historyExploreView(state: ExploreHistoryState | null): ExploreView {
   return candidate === 'discover' ||
     candidate === 'watch' ||
     candidate === 'play' ||
-    candidate === 'unwind' ||
-    candidate === 'agent'
+    candidate === 'unwind'
     ? candidate
     : null;
 }
 
 interface ExploreScreenProps {
   active: SessionView;
-  onBack(): void;
+  onOpenSessions(): void;
   onOpenChat(): void;
-  onApprove(requestId: string, optionId: string): void;
-  onElicitationRespond(
-    requestId: string,
-    action: 'accept' | 'decline' | 'cancel',
-    content?: Record<string, FieldValue>,
-  ): void;
+  onGoHome(): void;
+  desktopDocked?: boolean;
 }
 
-export type AgentPulseTone = 'attention' | 'error' | 'working' | 'ready' | 'idle';
+export type LiveDockTone = 'attention' | 'error' | 'working' | 'ready' | 'idle';
 
-export interface AgentPulseState {
-  tone: AgentPulseTone;
+export interface LiveDockState {
+  tone: LiveDockTone;
   label: string;
-  detail: string;
+  text: string;
+  detail: string | null;
   startedAt: number | null;
 }
 
@@ -92,6 +85,9 @@ interface ExploreStoredState {
   lastCategory?: ExploreCategory;
   savedCardIds?: string[];
   completedCardIds?: string[];
+  discoverDay?: string;
+  discoverCycle?: number;
+  discoverIndex?: number;
   threadlineCompleted?: number;
   signalBest?: number;
   vibration?: boolean;
@@ -101,6 +97,9 @@ const DEFAULT_STORED_STATE: Required<ExploreStoredState> = {
   lastCategory: 'discover',
   savedCardIds: [],
   completedCardIds: [],
+  discoverDay: '',
+  discoverCycle: 0,
+  discoverIndex: 0,
   threadlineCompleted: 0,
   signalBest: 0,
   vibration: false,
@@ -126,6 +125,15 @@ function parseStoredState(): Required<ExploreStoredState> {
       completedCardIds: Array.isArray(parsed.completedCardIds)
         ? parsed.completedCardIds.filter((value): value is string => typeof value === 'string')
         : [],
+      discoverDay: typeof parsed.discoverDay === 'string' ? parsed.discoverDay : '',
+      discoverCycle:
+        typeof parsed.discoverCycle === 'number' && parsed.discoverCycle >= 0
+          ? Math.floor(parsed.discoverCycle)
+          : 0,
+      discoverIndex:
+        typeof parsed.discoverIndex === 'number' && parsed.discoverIndex >= 0
+          ? Math.floor(parsed.discoverIndex)
+          : 0,
       threadlineCompleted:
         typeof parsed.threadlineCompleted === 'number' && parsed.threadlineCompleted >= 0
           ? Math.floor(parsed.threadlineCompleted)
@@ -163,13 +171,32 @@ function toolLabel(tool: ToolItem): string {
   return `${tool.name.replace(/[_-]+/g, ' ')} in progress`;
 }
 
-export function deriveAgentPulse(active: SessionView): AgentPulseState {
+function latestAssistant(active: SessionView, onlyStreaming = false) {
+  return [...active.timeline.items].reverse().find(
+    (item) => item.kind === 'assistant' && (!onlyStreaming || !item.final) && item.text.trim(),
+  );
+}
+
+function latestAssistantText(active: SessionView, onlyStreaming = false): string | null {
+  const assistant = latestAssistant(active, onlyStreaming);
+  return assistant?.kind === 'assistant' ? assistant.text : null;
+}
+
+function dockExcerpt(value: string, max = 220): string {
+  const clean = value.replace(/[`*_>#-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  return `…${clean.slice(clean.length - max + 1)}`;
+}
+
+export function deriveLiveDock(active: SessionView, replyCompletedInExplore = false): LiveDockState {
   if (active.timeline.approvals.length > 0) {
     const count = active.timeline.approvals.length;
+    const request = active.timeline.approvals[0];
     return {
       tone: 'attention',
       label: 'Approval needed',
-      detail: `${count} action${count === 1 ? '' : 's'} waiting for you`,
+      text: request.toolName || 'Copilot needs permission to continue',
+      detail: `${count} action${count === 1 ? '' : 's'} waiting in chat`,
       startedAt: null,
     };
   }
@@ -177,42 +204,58 @@ export function deriveAgentPulse(active: SessionView): AgentPulseState {
     return {
       tone: 'attention',
       label: 'Question waiting',
-      detail: 'The agent needs your answer to continue',
+      text: 'Copilot needs your answer to continue',
+      detail: 'Open chat to respond',
       startedAt: null,
     };
   }
   if (active.error) {
-    return { tone: 'error', label: 'Session disconnected', detail: active.error, startedAt: null };
+    return {
+      tone: 'error',
+      label: 'Session disconnected',
+      text: dockExcerpt(active.error),
+      detail: 'Open chat to reconnect',
+      startedAt: null,
+    };
   }
   if (active.status === 'ended') {
     return {
       tone: 'error',
       label: 'Session ended',
-      detail: active.timeline.endedReason ?? 'Return to chat to reconnect.',
+      text: active.timeline.endedReason ?? 'Return to chat to reconnect.',
+      detail: 'Open chat for session options',
       startedAt: null,
     };
   }
   if (isWorking(active.timeline)) {
     const running = latestRunningTool(active);
+    const streamed = latestAssistantText(active, true);
     return {
       tone: 'working',
-      label: active.intent?.trim() || (running ? toolLabel(running) : 'Agent working'),
-      detail: running ? `Using ${running.name}` : 'Work is continuing in the active session',
+      label: streamed ? 'Copilot is writing' : 'Copilot is working',
+      text: streamed
+        ? dockExcerpt(streamed)
+        : active.intent?.trim() || (running ? toolLabel(running) : 'Working in the active session'),
+      detail: running ? `Using ${running.name.replace(/[_-]+/g, ' ')}` : active.intent?.trim() || null,
       startedAt: active.thinkingSince ?? running?.startedAt ?? active.timeline.busyFrom,
     };
   }
-  if (active.unread || (active.unreadCount ?? 0) > 0) {
+  if (replyCompletedInExplore || active.unread || (active.unreadCount ?? 0) > 0) {
+    const reply = latestAssistantText(active);
     return {
       tone: 'ready',
       label: 'Reply ready',
-      detail: 'Return to the conversation when you are ready',
+      text: reply ? dockExcerpt(reply) : 'Copilot finished responding',
+      detail: 'Open chat to continue',
       startedAt: null,
     };
   }
+  const recent = latestAssistantText(active);
   return {
     tone: 'idle',
-    label: active.status === 'live' ? 'Agent ready' : 'Session quiet',
-    detail: recentActivityLabel(active.timeline.items),
+    label: active.status === 'live' ? 'Copilot ready' : 'Session quiet',
+    text: recent ? dockExcerpt(recent) : recentActivityLabel(active.timeline.items),
+    detail: null,
     startedAt: null,
   };
 }
@@ -297,22 +340,59 @@ function BookmarkGlyph({ filled }: { filled: boolean }): JSX.Element {
 
 export function ExploreScreen({
   active,
-  onBack,
+  onOpenSessions,
   onOpenChat,
-  onApprove,
-  onElicitationRespond,
+  onGoHome,
+  desktopDocked = false,
 }: ExploreScreenProps): JSX.Element {
   const [stored, setStored] = useState<Required<ExploreStoredState>>(() => parseStoredState());
   const [view, setView] = useState<ExploreView>(null);
   const [now, setNow] = useState(Date.now());
-  const pulse = deriveAgentPulse(active);
-  const interrupted = active.timeline.approvals.length > 0 || active.timeline.elicitations.length > 0;
+  const latestFinal = latestAssistant(active);
+  const latestFinalId =
+    latestFinal?.kind === 'assistant' && latestFinal.final ? latestFinal.id : null;
+  const working = isWorking(active.timeline);
+  const replyTrackerRef = useRef({
+    channelId: active.meta.channelId,
+    wasWorking: working,
+    baselineFinalId: latestFinalId,
+  });
+  const [replyReadyId, setReplyReadyId] = useState<string | null>(null);
+  useEffect(() => {
+    const tracker = replyTrackerRef.current;
+    if (tracker.channelId !== active.meta.channelId) {
+      replyTrackerRef.current = {
+        channelId: active.meta.channelId,
+        wasWorking: working,
+        baselineFinalId: latestFinalId,
+      };
+      setReplyReadyId(null);
+      return;
+    }
+    if (!tracker.wasWorking && working) {
+      tracker.baselineFinalId = latestFinalId;
+      setReplyReadyId(null);
+    } else if (
+      tracker.wasWorking &&
+      !working &&
+      latestFinalId &&
+      latestFinalId !== tracker.baselineFinalId
+    ) {
+      setReplyReadyId(latestFinalId);
+    }
+    tracker.wasWorking = working;
+  }, [active.meta.channelId, latestFinalId, working]);
+  const replyCompletedInExplore =
+    replyTrackerRef.current.channelId === active.meta.channelId &&
+    !working &&
+    latestFinalId === replyReadyId;
+  const dock = deriveLiveDock(active, replyCompletedInExplore);
 
   useEffect(() => {
-    if (pulse.tone !== 'working') return undefined;
+    if (dock.tone !== 'working') return undefined;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [pulse.tone]);
+  }, [dock.tone]);
 
   useEffect(() => {
     const onPopState = (event: PopStateEvent): void => {
@@ -329,7 +409,7 @@ export function ExploreScreen({
     writeStoredState(next);
   }, []);
 
-  const navigate = (next: Exclude<ExploreView, null>): void => {
+  const navigate = (next: ExploreCategory): void => {
     const state = { weftView: 'explore', exploreView: next } satisfies ExploreHistoryState;
     if (view === null) window.history.pushState(state, '');
     else window.history.replaceState(state, '');
@@ -341,56 +421,32 @@ export function ExploreScreen({
     navigate(category);
   };
 
-  const handleBack = (): void => {
-    if (view !== null) {
-      window.history.back();
-      return;
-    }
-    onBack();
-  };
-
   return (
-    <main className="weft-session explore-screen">
-      <div
-        className="explore-content"
-        aria-hidden={interrupted || undefined}
-        {...(interrupted ? { inert: '' as unknown as boolean } : {})}
-      >
+    <main className={`weft-session explore-screen${desktopDocked ? ' desktop-docked' : ''}`}>
+      <div className="explore-content">
         <header className="explore-header">
-          <button type="button" className="icon-btn" aria-label={view ? 'Back to Explore home' : 'Back to chat'} onClick={handleBack}>
-            <span aria-hidden="true">‹</span>
-          </button>
+          {desktopDocked ? (
+            <button type="button" className="icon-btn weft-mark-btn" aria-label="About Weft" onClick={onGoHome}>
+              <span className="weft-mark" aria-hidden="true">⎈</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="icon-btn drawer-btn"
+              aria-label={(active.unreadCount ?? 0) > 0 ? `Open sessions, ${active.unreadCount} unread` : 'Open sessions'}
+              onClick={onOpenSessions}
+            >
+              <span className="hamburger" aria-hidden="true"><span /><span /><span /></span>
+            </button>
+          )}
           <div className="explore-heading">
             <span className="explore-heading-icon" aria-hidden="true"><CompassGlyph /></span>
-            <span>
-              <strong>{view === 'agent' ? 'Agent activity' : view ? CATEGORY_META[view].title : 'Explore'}</strong>
-              <small>{view === null ? 'Something useful in the meantime' : 'Explore without leaving your session'}</small>
-            </span>
+            <strong>Explore</strong>
           </div>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Show saved Discover cards"
-            onClick={() => navigate('discover')}
-          >
-            <BookmarkGlyph filled={stored.savedCardIds.length > 0} />
-            {stored.savedCardIds.length > 0 ? <span className="explore-saved-count">{stored.savedCardIds.length}</span> : null}
-          </button>
         </header>
 
-        <AgentPulse
-          pulse={pulse}
-          now={now}
-          onClick={() => {
-            if (pulse.tone === 'attention') return;
-            navigate('agent');
-          }}
-        />
-
         {view === null ? (
-          <ExploreHome stored={stored} onOpen={openCategory} />
-        ) : view === 'agent' ? (
-          <AgentActivity active={active} onOpenChat={onOpenChat} />
+          <ExploreHome onOpen={openCategory} />
         ) : (
           <>
             <CategoryTabs active={view} onSelect={openCategory} />
@@ -407,30 +463,21 @@ export function ExploreScreen({
             </div>
           </>
         )}
+        <LiveCopilotDock dock={dock} now={now} onOpenChat={onOpenChat} />
       </div>
-
-      <ExploreInterruptions
-        active={active}
-        onApprove={onApprove}
-        onElicitationRespond={onElicitationRespond}
-      />
     </main>
   );
 }
 
 function ExploreHome({
-  stored,
   onOpen,
 }: {
-  stored: Required<ExploreStoredState>;
   onOpen(category: ExploreCategory): void;
 }): JSX.Element {
   return (
     <section className="explore-home" aria-labelledby="explore-question">
       <div className="explore-intro">
-        <p className="explore-kicker">Your space</p>
         <h1 id="explore-question">What do you feel like?</h1>
-        <p>Pick something useful, interesting, playful, or calm. Your Copilot session keeps running.</p>
       </div>
       <div className="explore-choice-grid">
         {(Object.keys(CATEGORY_META) as ExploreCategory[]).map((category) => {
@@ -450,13 +497,6 @@ function ExploreHome({
           );
         })}
       </div>
-      <button type="button" className="explore-continue" onClick={() => onOpen(stored.lastCategory)}>
-        <span>
-          <small>Continue</small>
-          <strong>{CATEGORY_META[stored.lastCategory].title}</strong>
-        </span>
-        <span aria-hidden="true">›</span>
-      </button>
     </section>
   );
 }
@@ -485,80 +525,86 @@ function CategoryTabs({
   );
 }
 
-function AgentPulse({
-  pulse,
+function LiveCopilotDock({
+  dock,
   now,
-  onClick,
+  onOpenChat,
 }: {
-  pulse: AgentPulseState;
+  dock: LiveDockState;
   now: number;
-  onClick(): void;
+  onOpenChat(): void;
 }): JSX.Element {
-  const elapsed = formatElapsed(pulse.startedAt, now);
+  const elapsed = formatElapsed(dock.startedAt, now);
   return (
     <button
       type="button"
-      className={`agent-pulse agent-pulse-${pulse.tone}`}
-      onClick={onClick}
-      aria-label={`${pulse.label}. ${pulse.detail}${elapsed ? `. ${elapsed}` : ''}`}
+      className={`live-copilot-dock live-copilot-dock-${dock.tone}`}
+      onClick={onOpenChat}
+      aria-label={`${dock.label}. ${dock.text}${dock.detail ? `. ${dock.detail}` : ''}${elapsed ? `. ${elapsed}` : ''}. Open chat`}
     >
-      <span className="agent-pulse-dot" aria-hidden="true" />
-      <span className="agent-pulse-copy">
-        <strong>{pulse.label}</strong>
-        <small>{pulse.detail}</small>
+      <span className="live-copilot-dot" aria-hidden="true" />
+      <span className="live-copilot-copy">
+        <span className="live-copilot-status">
+          <strong>{dock.label}</strong>
+          {elapsed ? <time>{elapsed}</time> : null}
+        </span>
+        <span className="live-copilot-text">{dock.text}</span>
+        {dock.detail ? <small>{dock.detail}</small> : null}
       </span>
-      {elapsed ? <time>{elapsed}</time> : null}
-      <span className="agent-pulse-chevron" aria-hidden="true">›</span>
+      <span className="live-copilot-chevron" aria-hidden="true">›</span>
     </button>
   );
-}
-
-function AgentActivity({ active, onOpenChat }: { active: SessionView; onOpenChat(): void }): JSX.Element {
-  const visibleItems = [...active.timeline.items].reverse().slice(0, 10);
-  return (
-    <section className="agent-activity-view">
-      <div className="agent-activity-summary">
-        <p className="explore-kicker">Current session</p>
-        <h1>{active.meta.title}</h1>
-        <p>{active.intent ?? recentActivityLabel(active.timeline.items)}</p>
-      </div>
-      <ol className="agent-activity-list">
-        {visibleItems.length === 0 ? (
-          <li className="agent-activity-empty">No recent activity has arrived yet.</li>
-        ) : (
-          visibleItems.map((item) => <AgentActivityItem key={item.id} item={item} />)
-        )}
-      </ol>
-      <button type="button" className="explore-primary" onClick={onOpenChat}>
-        Return to conversation
-      </button>
-    </section>
-  );
-}
-
-function AgentActivityItem({ item }: { item: TimelineItem }): JSX.Element {
-  if (item.kind === 'tool') {
-    return (
-      <li>
-        <span className={`agent-step-mark ${item.status}`} aria-hidden="true">
-          {item.status === 'running' ? '●' : item.status === 'success' ? '✓' : '×'}
-        </span>
-        <span><strong>{item.name}</strong><small>{toolLabel(item)}</small></span>
-      </li>
-    );
-  }
-  if (item.kind === 'assistant') {
-    return <li><span className="agent-step-mark success" aria-hidden="true">✓</span><span><strong>Reply</strong><small>{shorten(item.text, 120)}</small></span></li>;
-  }
-  if (item.kind === 'notice') {
-    return <li><span className="agent-step-mark" aria-hidden="true">•</span><span><strong>Notice</strong><small>{item.text}</small></span></li>;
-  }
-  return <li><span className="agent-step-mark" aria-hidden="true">→</span><span><strong>Your message</strong><small>{shorten(item.text, 120)}</small></span></li>;
 }
 
 function shorten(value: string, max: number): string {
   const clean = value.replace(/\s+/g, ' ').trim();
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+function discoverDayKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function hashSeed(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function shuffleCards(cards: DiscoverCard[], random: () => number): DiscoverCard[] {
+  const result = [...cards];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(random() * (index + 1));
+    [result[index], result[target]] = [result[target], result[index]];
+  }
+  return result;
+}
+
+export function buildDiscoverDeck(cards: DiscoverCard[], seed: number): DiscoverCard[] {
+  const topics = Object.keys(DISCOVER_TOPIC_LABELS) as DiscoverTopic[];
+  const random = seededRandom(seed || 1);
+  const start = seed % topics.length;
+  const topicOrder = [...topics.slice(start), ...topics.slice(0, start)];
+  const buckets = new Map(
+    topics.map((topic) => [topic, shuffleCards(cards.filter((card) => card.topic === topic), random)]),
+  );
+  const result: DiscoverCard[] = [];
+  let remaining = cards.length;
+  while (remaining > 0) {
+    for (const topic of topicOrder) {
+      const next = buckets.get(topic)?.shift();
+      if (!next) continue;
+      result.push(next);
+      remaining -= 1;
+    }
+  }
+  return result;
 }
 
 function DiscoverView({
@@ -568,93 +614,139 @@ function DiscoverView({
   stored: Required<ExploreStoredState>;
   onChange(next: Required<ExploreStoredState>): void;
 }): JSX.Element {
-  const [topic, setTopic] = useState<DiscoverTopic | 'all'>('all');
-  const [reader, setReader] = useState<DiscoverCard | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const savedScroll = useRef(0);
-  const saved = useMemo(() => new Set(stored.savedCardIds), [stored.savedCardIds]);
-  const completed = useMemo(() => new Set(stored.completedCardIds), [stored.completedCardIds]);
-  const visibleCards = topic === 'all' ? DISCOVER_CARDS : DISCOVER_CARDS.filter((card) => card.topic === topic);
+  const today = discoverDayKey();
+  const cycle = stored.discoverDay === today ? stored.discoverCycle : 0;
+  const persistedIndex = stored.discoverDay === today ? stored.discoverIndex : 0;
+  const deck = useMemo(
+    () => buildDiscoverDeck(DISCOVER_CARDS, hashSeed(`${today}:${cycle}`)),
+    [cycle, today],
+  );
+  const index = Math.min(persistedIndex, Math.max(0, deck.length - 1));
+  const card = deck[index];
+  const saved = new Set(stored.savedCardIds);
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const viewRef = useRef<HTMLElement | null>(null);
+  const [scrollable, setScrollable] = useState(false);
 
-  const toggleSaved = (id: string): void => {
+  useLayoutEffect(() => {
+    const element = viewRef.current;
+    if (!element) return undefined;
+    const measure = (): void => {
+      setScrollable(element.scrollHeight > element.clientHeight + 1);
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [card.id]);
+
+  useEffect(() => {
+    if (
+      stored.discoverDay !== today ||
+      stored.discoverCycle !== cycle ||
+      stored.discoverIndex !== index
+    ) {
+      onChange({ ...stored, discoverDay: today, discoverCycle: cycle, discoverIndex: index });
+    }
+  }, [cycle, index, onChange, stored, today]);
+
+  const changeCard = (direction: 1 | -1): void => {
+    if (!card) return;
+    const completed = stored.completedCardIds.includes(card.id)
+      ? stored.completedCardIds
+      : [...stored.completedCardIds, card.id];
+    if (direction < 0) {
+      if (index === 0) return;
+      onChange({ ...stored, completedCardIds: completed, discoverDay: today, discoverCycle: cycle, discoverIndex: index - 1 });
+      return;
+    }
+    if (index < deck.length - 1) {
+      onChange({ ...stored, completedCardIds: completed, discoverDay: today, discoverCycle: cycle, discoverIndex: index + 1 });
+      return;
+    }
+    onChange({ ...stored, completedCardIds: completed, discoverDay: today, discoverCycle: cycle + 1, discoverIndex: 0 });
+  };
+
+  const toggleSaved = (): void => {
+    if (!card) return;
     const next = new Set(saved);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(card.id)) next.delete(card.id);
+    else next.add(card.id);
     onChange({ ...stored, savedCardIds: [...next] });
   };
 
-  const openReader = (card: DiscoverCard): void => {
-    savedScroll.current = scrollRef.current?.scrollTop ?? 0;
-    setReader(card);
-    if (!completed.has(card.id)) {
-      onChange({ ...stored, completedCardIds: [...stored.completedCardIds, card.id] });
-    }
+  const onPointerUp = (event: ReactPointerEvent<HTMLElement>): void => {
+    const start = pointerStart.current;
+    pointerStart.current = null;
+    if (!start) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaY) < 48 || Math.abs(deltaY) <= Math.abs(deltaX) * 1.2) return;
+    changeCard(deltaY < 0 ? 1 : -1);
   };
 
-  useLayoutEffect(() => {
-    if (reader === null && scrollRef.current) scrollRef.current.scrollTop = savedScroll.current;
-  }, [reader]);
-
-  if (reader) {
-    return (
-      <article className="discover-reader">
-        <button type="button" className="explore-text-back" onClick={() => setReader(null)}>‹ Discover</button>
-        <p className="explore-kicker">{DISCOVER_TOPIC_LABELS[reader.topic]} · {reader.minutes} min</p>
-        <h1>{reader.title}</h1>
-        <p className="discover-reader-lead">{reader.summary}</p>
-        <div className="discover-illustration" aria-hidden="true"><CompassSpark /></div>
-        <h2>The useful idea</h2>
-        <p>{reader.insight}</p>
-        <p>
-          Notice this idea the next time you encounter it in daily life. A small mental model is most
-          useful when it helps explain something that previously felt mysterious.
-        </p>
-        <button type="button" className="explore-secondary" onClick={() => toggleSaved(reader.id)}>
-          <BookmarkGlyph filled={saved.has(reader.id)} />
-          {saved.has(reader.id) ? 'Saved' : 'Save for later'}
-        </button>
-      </article>
-    );
-  }
+  if (!card) return <div className="discover-view">No Discover cards are available.</div>;
 
   return (
-    <div className="discover-view" ref={scrollRef}>
-      <div className="discover-topic-row" role="group" aria-label="Discover topics">
-        <button type="button" className={topic === 'all' ? 'active' : ''} onClick={() => setTopic('all')}>All</button>
-        {(Object.keys(DISCOVER_TOPIC_LABELS) as DiscoverTopic[]).map((value) => (
-          <button type="button" key={value} className={topic === value ? 'active' : ''} onClick={() => setTopic(value)}>
-            {DISCOVER_TOPIC_LABELS[value].replace('Everyday ', '').replace(' made understandable', '')}
+    <section
+      ref={viewRef}
+      className={`discover-view${scrollable ? ' discover-view-scrollable' : ''}`}
+      aria-label="Discover card deck"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          changeCard(1);
+        } else if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          changeCard(-1);
+        }
+      }}
+      onPointerDown={(event) => {
+        pointerStart.current = scrollable ? null : { x: event.clientX, y: event.clientY };
+      }}
+      onPointerCancel={() => {
+        pointerStart.current = null;
+      }}
+      onPointerUp={onPointerUp}
+    >
+      <article className="discover-deck-card" aria-live="polite">
+        <div className="discover-deck-topline">
+          <span>{DISCOVER_TOPIC_LABELS[card.topic]}</span>
+          <span>{card.minutes} min</span>
+        </div>
+        <div className="discover-deck-illustration" aria-hidden="true"><CompassSpark /></div>
+        <h1>{card.title}</h1>
+        <p className="discover-deck-summary">{card.summary}</p>
+        <div className="discover-deck-insight">
+          <strong>The useful idea</strong>
+          <p>{card.insight}</p>
+        </div>
+        <div className="discover-deck-actions">
+          <button
+            type="button"
+            className="discover-save"
+            aria-label={saved.has(card.id) ? `Unsave ${card.title}` : `Save ${card.title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleSaved();
+            }}
+          >
+            <BookmarkGlyph filled={saved.has(card.id)} />
+            <span>{saved.has(card.id) ? 'Saved' : 'Save'}</span>
           </button>
-        ))}
-      </div>
-      <div className="discover-feed">
-        {visibleCards.map((card) => (
-          <article className="discover-card" key={card.id}>
-            <button
-              type="button"
-              className="discover-card-main"
-              aria-label={`Read ${card.title}`}
-              onClick={() => openReader(card)}
-            >
-              <span className="discover-card-meta">
-                {DISCOVER_TOPIC_LABELS[card.topic]} · {card.minutes} min
-              </span>
-              <strong>{card.title}</strong>
-              <span>{card.summary}</span>
-              {completed.has(card.id) ? <small>Read</small> : null}
-            </button>
-            <button
-              type="button"
-              className="discover-save"
-              aria-label={`${saved.has(card.id) ? 'Unsave' : 'Save'} ${card.title}`}
-              onClick={() => toggleSaved(card.id)}
-            >
-              <BookmarkGlyph filled={saved.has(card.id)} />
-            </button>
-          </article>
-        ))}
-      </div>
-    </div>
+          <span>{index + 1} / {deck.length}</span>
+          <div>
+            <button type="button" aria-label="Previous Discover card" disabled={index === 0} onClick={() => changeCard(-1)}>↓</button>
+            <button type="button" aria-label="Next Discover card" onClick={() => changeCard(1)}>↑</button>
+          </div>
+        </div>
+      </article>
+    </section>
   );
 }
 
@@ -1388,121 +1480,5 @@ function EyeHorizon({
         {remaining === 0 ? 'Again' : running ? 'Resting…' : 'Start 20 seconds'}
       </button>
     </section>
-  );
-}
-
-function ExploreInterruptions({
-  active,
-  onApprove,
-  onElicitationRespond,
-}: {
-  active: SessionView;
-  onApprove(requestId: string, optionId: string): void;
-  onElicitationRespond(
-    requestId: string,
-    action: 'accept' | 'decline' | 'cancel',
-    content?: Record<string, FieldValue>,
-  ): void;
-}): JSX.Element | null {
-  const approval = active.timeline.approvals[0];
-  const elicitation: ElicitationRequestMsg | undefined = active.timeline.elicitations[0];
-  const responsive = active.status === 'live' && !active.error;
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const wasOpenRef = useRef(false);
-  const open = Boolean(approval || elicitation);
-  const requestId = approval?.requestId ?? elicitation?.requestId;
-
-  useEffect(() => {
-    if (open && !wasOpenRef.current) {
-      previousFocusRef.current = document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    }
-    wasOpenRef.current = open;
-    if (open) {
-      const firstAction = dialogRef.current?.querySelector<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      );
-      (firstAction ?? dialogRef.current)?.focus();
-    } else {
-      const previous = previousFocusRef.current;
-      previousFocusRef.current = null;
-      if (previous?.isConnected) previous.focus();
-    }
-  }, [open, requestId]);
-
-  useEffect(() => () => {
-    const previous = previousFocusRef.current;
-    if (previous?.isConnected) previous.focus();
-  }, []);
-
-  if (!open) return null;
-  return (
-    <div
-      ref={dialogRef}
-      className="explore-interruption"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Agent needs your attention"
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        if (event.key !== 'Tab') return;
-        const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-        ) ?? [])];
-        if (focusable.length === 0) {
-          event.preventDefault();
-          return;
-        }
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }}
-    >
-      <div className="explore-interruption-backdrop" />
-      <div className="explore-interruption-card">
-        {approval ? (
-          <>
-            <p className="explore-kicker">Approval needed</p>
-            <h2>{approval.toolName}</h2>
-            <p>The agent is blocked until you choose an action.</p>
-            {active.timeline.approvalErrors[approval.requestId] ? (
-              <p className="approval-error" role="alert">{active.timeline.approvalErrors[approval.requestId]}</p>
-            ) : null}
-            <div className="explore-interruption-actions">
-              {approval.options.map((option) => (
-                <button
-                  type="button"
-                  key={option.id}
-                  className={/deny|reject|cancel|suggest|\bno\b/i.test(option.id) ? 'explore-secondary' : 'explore-primary'}
-                  disabled={!responsive}
-                  onClick={() => onApprove(approval.requestId, option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </>
-        ) : elicitation ? (
-          <ElicitationCard
-            req={elicitation}
-            disabled={!responsive}
-            {...(active.timeline.elicitationErrors[elicitation.requestId]
-              ? { error: active.timeline.elicitationErrors[elicitation.requestId] }
-              : {})}
-            onSubmit={(content) => onElicitationRespond(elicitation.requestId, 'accept', content)}
-            onDecline={() => onElicitationRespond(elicitation.requestId, 'decline')}
-            onCancel={() => onElicitationRespond(elicitation.requestId, 'cancel')}
-          />
-        ) : null}
-      </div>
-    </div>
   );
 }

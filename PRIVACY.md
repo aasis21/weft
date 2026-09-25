@@ -69,10 +69,11 @@ request metadata such as your IP address and browser headers when those assets l
 
 ## Optional Explore video provider
 
-Explore's Agent Pulse, bundled Discover cards, Play activities, Unwind activities,
-saved-card state, and scores remain local to the phone. If a deployment configures the
-optional Watch widget, Weft displays a disclosure and does not contact that provider
-until you explicitly choose to load the video feed.
+Explore's live Copilot dock only projects activity already present in the active
+end-to-end encrypted session. Its bundled shuffled Discover deck, saved-card state,
+Play activities, Unwind activities, and scores remain local to the phone. If a
+deployment configures the optional Watch widget, Weft displays a disclosure and does
+not contact that provider until you explicitly choose to load the video feed.
 
 The provider runs in a sandboxed frame and receives no Weft prompts, transcripts,
 repository names, filenames, tool arguments, agent activity, channel identifiers, or

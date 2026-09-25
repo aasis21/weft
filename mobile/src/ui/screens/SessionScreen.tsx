@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
@@ -15,6 +15,10 @@ import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
 import type { VoiceState } from '@/ui/voice/useVoxEngine';
 import { getStableDeviceId } from '@/lib/weftClient';
 import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
+
+const ExploreScreen = lazy(() =>
+  import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
+);
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -205,6 +209,8 @@ interface SessionScreenProps {
   onSelectSession(channelId: string): void;
   onAddSession(): void;
   onOpenExplore?(): void;
+  exploreOpen?: boolean;
+  onCloseExplore?(): void;
   onStartSession?(): void;
   onOpenDevices?(): void;
   /** #186 nav simplification: registered listener devices, surfaced in the drawer so picking one
@@ -240,6 +246,8 @@ export function SessionScreen({
   onSelectSession,
   onAddSession,
   onOpenExplore,
+  exploreOpen = false,
+  onCloseExplore,
   onStartSession,
   onOpenDevices,
   devices,
@@ -582,6 +590,11 @@ export function SessionScreen({
 
   return (
     <div className={`weft-session${isDesktopWide ? ' desktop-docked' : ''}`} ref={rootRef}>
+      <div
+        className="session-surface"
+        aria-hidden={exploreOpen || undefined}
+        {...(exploreOpen ? { inert: '' as unknown as boolean } : {})}
+      >
       {isDesktopWide ? (
         sidebarCollapsed ? (
           <button
@@ -913,6 +926,19 @@ export function SessionScreen({
         />
       </div>
       </div>
+      </div>
+
+      {exploreOpen && onCloseExplore ? (
+        <Suspense fallback={<main className="explore-screen explore-loading" role="status">Opening Explore…</main>}>
+          <ExploreScreen
+            active={active}
+            onOpenSessions={() => setDrawerOpen(true)}
+            onOpenChat={onCloseExplore}
+            onGoHome={onGoHome}
+            desktopDocked={isDesktopWide}
+          />
+        </Suspense>
+      ) : null}
 
       {!isDesktopWide && drawerOpen ? (
         <WeftDrawer

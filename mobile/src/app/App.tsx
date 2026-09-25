@@ -26,9 +26,6 @@ const SessionScreen = lazy(() =>
 const TerminalScreen = lazy(() =>
   import('@/ui/screens/TerminalScreen').then((module) => ({ default: module.TerminalScreen })),
 );
-const ExploreScreen = lazy(() =>
-  import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
-);
 
 type ModalHistoryState = { weftView: 'devices' } |
   { weftView: 'device-details' | 'terminal'; channelId: string } |
@@ -536,6 +533,11 @@ export default function App(): JSX.Element {
         setAdding(true);
       }}
       onOpenExplore={openExplore}
+      exploreOpen={exploreOpen}
+      onCloseExplore={() => {
+        const state = window.history.state as ModalHistoryState;
+        window.history.go(state?.weftView === 'explore' && state.exploreView ? -2 : -1);
+      }}
       onStartSession={() => openStart()}
       onOpenDevices={openDevices}
       devices={snapshot.devices}
@@ -554,6 +556,11 @@ export default function App(): JSX.Element {
         if (operationId) void sessionAccess.retry(operationId);
       }}
       onGoHome={() => {
+        if (exploreOpen) {
+          const state = window.history.state as ModalHistoryState;
+          window.history.go(state?.weftView === 'explore' && state.exploreView ? -2 : -1);
+          setExploreOpen(false);
+        }
         setError(null);
         setShowLanding(true);
       }}
@@ -562,31 +569,8 @@ export default function App(): JSX.Element {
   );
 
   return (
-    <>
-      <div
-        className="session-surface"
-        aria-hidden={exploreOpen || undefined}
-        {...(exploreOpen ? { inert: '' as unknown as boolean } : {})}
-      >
-        <Suspense fallback={loadingScreen('Opening your session…')}>
-          {sessionScreen}
-        </Suspense>
-      </div>
-      {exploreOpen ? (
-        <Suspense fallback={loadingScreen('Opening Explore…')}>
-          <ExploreScreen
-            active={active}
-            onBack={() => window.history.back()}
-            onOpenChat={() => window.history.go(-2)}
-            onApprove={(requestId, optionId) =>
-              void sessionRuntime.sendApproval(active.meta.channelId, requestId, optionId)
-            }
-            onElicitationRespond={(requestId, action, content) =>
-              void sessionRuntime.sendElicitation(active.meta.channelId, requestId, action, content)
-            }
-          />
-        </Suspense>
-      ) : null}
-    </>
+    <Suspense fallback={loadingScreen('Opening your session…')}>
+      {sessionScreen}
+    </Suspense>
   );
 }
