@@ -5,6 +5,13 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.24
+
+- Preserved ordered-list start markers so numbered findings separated by explanatory
+  paragraphs no longer restart at 1.
+- Moved the optional session name before permissions and kept it visible while the
+  Android keyboard is open, with the keyboard action able to start the session.
+
 ## 0.2.23
 
 - Resumed historical Copilot sessions created before Weft when no runtime ownership evidence

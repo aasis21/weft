@@ -75,6 +75,8 @@ export function StartSessionScreen({
   const modeTouchedRef = useRef(false);
   const modeDeviceRef = useRef<string | null>(null);
   const [name, setName] = useState('');
+  const [nameEditing, setNameEditing] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<LifecycleStatusMsg | null>(null);
@@ -169,6 +171,19 @@ export function StartSessionScreen({
     if (folderTouchedRef.current || !defaultFolder) return;
     setSessionFolder(defaultFolder);
   }, [defaultFolder]);
+
+  useEffect(() => {
+    if (!nameEditing) return undefined;
+    const keepNameVisible = (): void => {
+      nameInputRef.current?.scrollIntoView({ block: 'center' });
+    };
+    const frame = window.requestAnimationFrame(keepNameVisible);
+    window.visualViewport?.addEventListener('resize', keepNameVisible);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.visualViewport?.removeEventListener('resize', keepNameVisible);
+    };
+  }, [nameEditing]);
 
   // Opening the Resume tab is itself the request to see what is resumable, so pull the list rather
   // than parking behind a Load button — the empty and loading states already cover the wait. Only
@@ -306,7 +321,7 @@ export function StartSessionScreen({
       : `Start on ${selected ? deviceLabel(selected) : 'device'}`;
 
   return (
-    <main className="weft-session join-session start-session-v2">
+    <main className={`weft-session join-session start-session-v2${nameEditing ? ' name-editing' : ''}`}>
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -565,6 +580,27 @@ export function StartSessionScreen({
 
             <section className="start-section">
               <h3 className="start-section-title">3. Options</h3>
+              {resuming ? null : (
+                <label className="session-field start-name-field">
+                  <span>Session name (optional)</span>
+                  <input
+                    ref={nameInputRef}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    onFocus={() => setNameEditing(true)}
+                    onBlur={() => setNameEditing(false)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || ctaDisabled) return;
+                      e.preventDefault();
+                      setNameEditing(false);
+                      e.currentTarget.blur();
+                      void submitNew();
+                    }}
+                    enterKeyHint="go"
+                    placeholder="e.g. Mobile bug sweep"
+                  />
+                </label>
+              )}
               <span className="start-field-label" id="start-mode-label">Permissions</span>
               <div className="start-mode-toggle" role="radiogroup" aria-labelledby="start-mode-label">
                 <button
@@ -597,13 +633,6 @@ export function StartSessionScreen({
                   Grants full permissions: tools, file paths, and URLs run without confirmation.
                 </p>
               ) : null}
-
-              {resuming ? null : (
-                <label className="session-field start-name-field">
-                  <span>Session name (optional)</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Mobile bug sweep" />
-                </label>
-              )}
             </section>
 
             {error ? <p className="error-banner">{error}</p> : null}

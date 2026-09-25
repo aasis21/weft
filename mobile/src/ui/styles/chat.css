@@ -2302,6 +2302,7 @@
 
 .weft-session .start-name-field {
   margin-top: 2px;
+  scroll-margin-block: 24px;
 }
 
 /* The footer floats over a scrolling list, so it needs its own ground: without a background the
@@ -2328,6 +2329,10 @@
   height: 20px;
   pointer-events: none;
   background: linear-gradient(to top, var(--bg), transparent);
+}
+
+.weft-session.start-session-v2.name-editing .start-footer {
+  display: none;
 }
 
 .weft-session .start-footer-links {

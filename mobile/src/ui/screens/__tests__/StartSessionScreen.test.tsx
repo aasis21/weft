@@ -147,6 +147,40 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
     expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('places the optional session name before permissions', () => {
+    renderScreen();
+
+    const name = screen.getByLabelText(/session name/i);
+    const permissions = screen.getByRole('radiogroup', { name: /permissions/i });
+    expect(name.compareDocumentPosition(permissions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps the name field visible while editing and starts from the keyboard action', async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
+
+    try {
+      const { container } = renderScreen({ onOpen });
+      const name = screen.getByLabelText(/session name/i);
+
+      fireEvent.focus(name);
+      expect(container.querySelector('.start-session-v2')).toHaveClass('name-editing');
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+
+      fireEvent.change(name, { target: { value: 'Inbox cleanup' } });
+      fireEvent.keyDown(name, { key: 'Enter' });
+
+      await waitFor(() =>
+        expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ name: 'Inbox cleanup' })),
+      );
+      expect(container.querySelector('.start-session-v2')).not.toHaveClass('name-editing');
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it('uses the selected laptop permission default while preserving a one-launch override', async () => {
     const device = resumeDevice('/home/me/weft');
     device.defaultPermissionMode = 'allow-all';

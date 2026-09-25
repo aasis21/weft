@@ -304,6 +304,8 @@ function renderList(lines: string[], start: number, blockKey: string): { element
   function parseLevel(index: number, indent: number, ordered: boolean, keyBase: string): ListParse {
     const items: ListItem[] = [];
     let next = index;
+    const firstMatch = LIST_ITEM.exec(lines[index]);
+    const orderedStart = ordered && firstMatch ? Number.parseInt(firstMatch[2], 10) : undefined;
 
     while (next < lines.length) {
       const match = LIST_ITEM.exec(lines[next]);
@@ -343,7 +345,13 @@ function renderList(lines: string[], start: number, blockKey: string): { element
       ),
     );
     return {
-      element: ordered ? <ol key={keyBase}>{renderedItems}</ol> : <ul key={keyBase}>{renderedItems}</ul>,
+      element: ordered ? (
+        <ol key={keyBase} start={orderedStart}>
+          {renderedItems}
+        </ol>
+      ) : (
+        <ul key={keyBase}>{renderedItems}</ul>
+      ),
       next,
     };
   }
