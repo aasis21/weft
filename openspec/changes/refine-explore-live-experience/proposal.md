@@ -7,11 +7,11 @@ Explore currently behaves like a nested content page: Agent Pulse occupies premi
 - Replace the top Agent Pulse and Agent Activity screen with a persistent bottom Live Copilot Dock.
 - Stream the latest assistant text in the dock, with intent, active tool, elapsed work, reply-ready, blocked, error, and idle fallbacks compacted into the same fixed space.
 - Make the dock return directly to the active chat when activated.
-- Replace the Explore Back and saved-card header actions with the existing sessions hamburger, compass mark, and a compact Explore title.
+- Replace the Explore Back and right-side header actions with the existing sessions hamburger, compass mark, and a compact Explore title.
 - Reuse the existing session drawer rather than introducing an Explore-specific menu.
-- Replace Discover topic filters, multi-card feed, and separate reader with one complete vertically swipeable card at a time.
+- Replace Discover topic filters, multi-card feed, and separate reader with one complete horizontally swipeable card at a time.
 - Build a deterministic balanced deck that varies topics, avoids repeats until exhaustion, and preserves position locally.
-- Keep per-card Save as a local signal for later personalization without exposing a saved-content list or personalization controls.
+- Remove the Discover card-side secondary action and its persisted field.
 - Reflow Explore home, Watch, Play, and Unwind into a fixed `100dvh` shell with no page scrolling at standard mobile text sizes.
 - Preserve safe internal scrolling only when accessibility text scaling makes it necessary.
 

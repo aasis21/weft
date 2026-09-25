@@ -59,7 +59,7 @@ The pulse row always has a fixed layout height. Tapping a blocked state opens th
 
 ### Bundled content uses typed local data
 
-The 50 Discover cards will be stored as typed application data with stable identifiers, category, title, summary, estimated duration, body sections, and optional illustration metadata. Reading and saved state will be persisted locally through the existing settings/storage conventions.
+The 50 Discover cards will be stored as typed application data with stable identifiers, category, title, summary, estimated duration, body sections, and optional illustration metadata. Reading progress will be persisted locally through the existing settings/storage conventions.
 
 The initial cards use original text and local assets so Discover works offline and has no licensing or network dependency.
 
@@ -88,7 +88,6 @@ Approvals and elicitations render in a Weft-owned overlay above every Explore ca
 Explore stores only:
 
 - last selected category,
-- saved Discover card IDs,
 - per-card reading completion,
 - local game progress and daily scores,
 - unwind preferences such as vibration,

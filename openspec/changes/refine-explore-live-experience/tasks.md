@@ -1,7 +1,7 @@
 ## 1. Shared Explore Shell
 
 - [x] 1.1 Render Explore within the mounted active session shell so it can reuse the existing session drawer
-- [x] 1.2 Replace the Explore Back and saved-card header actions with the mobile hamburger or desktop Weft mark, compass, and compact title
+- [x] 1.2 Replace the Explore Back and right-side header actions with the mobile hamburger or desktop Weft mark, compass, and compact title
 - [x] 1.3 Preserve system Back behavior from category or activity to Explore home and then chat
 - [x] 1.4 Reflow the Explore shell into fixed header, optional tabs, flexible content, and bottom dock viewport bands
 - [x] 1.5 Compact Explore home to a no-scroll title and `2 x 2` category grid without the introductory paragraph or Continue card
@@ -20,11 +20,11 @@
 - [x] 3.1 Replace topic filters, feed cards, and reader state with one complete Discover card
 - [x] 3.2 Implement deterministic per-topic shuffling and balanced topic interleaving from a daily seed
 - [x] 3.3 Persist deck day, cycle seed, and current index while migrating existing Explore storage safely
-- [x] 3.4 Implement vertical swipe thresholds for next and previous without intercepting horizontal gestures
-- [x] 3.5 Add Arrow Up, Arrow Down, and accessible Previous and Next controls
-- [x] 3.6 Keep per-card Save as local state without a saved-card list, filter, icon, or count
+- [x] 3.4 Implement horizontal swipe thresholds for next and previous while preserving vertical scrolling
+- [x] 3.5 Add Arrow Left, Arrow Right, and accessible Previous and Next controls
+- [x] 3.6 Remove the per-card secondary action and its legacy persisted field
 - [x] 3.7 Add catalog length constraints and remove repeated reader-only copy so every standard card fits
-- [x] 3.8 Add logic and interaction tests for deterministic balance, no repeats, persistence, gestures, keyboard operation, cycle exhaustion, and saving
+- [x] 3.8 Add logic and interaction tests for deterministic balance, no repeats, persistence, gestures, keyboard operation, cycle exhaustion, and storage migration
 
 ## 4. Category Viewport Fitting
 

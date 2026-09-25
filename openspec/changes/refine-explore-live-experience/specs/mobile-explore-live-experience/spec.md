@@ -9,7 +9,7 @@ Explore SHALL use the established Weft sessions navigation affordance rather tha
 
 #### Scenario: Compact header
 - **WHEN** Explore is displayed on mobile
-- **THEN** the header contains the sessions button, compass mark, and Explore title without a Back button, subtitle, saved-card icon, count, or right-side action
+- **THEN** the header contains the sessions button, compass mark, and Explore title without a Back button, subtitle, count, or right-side action
 
 #### Scenario: Desktop-wide navigation
 - **WHEN** the persistent desktop session sidebar is visible
@@ -47,23 +47,23 @@ Discover SHALL present one complete useful-idea card at a time without topic fil
 
 #### Scenario: Open Discover
 - **WHEN** the user selects Discover
-- **THEN** the application immediately shows one complete card with topic, duration, title, summary, useful insight, Save action, and deck position
+- **THEN** the application immediately shows one complete card with topic, duration, title, summary, useful insight, and deck position
 
 #### Scenario: Advance by touch
-- **WHEN** the user swipes upward beyond the gesture threshold
+- **WHEN** the user swipes left beyond the gesture threshold
 - **THEN** Discover advances exactly one card
 
 #### Scenario: Return by touch
-- **WHEN** the user swipes downward beyond the gesture threshold and a prior card exists
+- **WHEN** the user swipes right beyond the gesture threshold and a prior card exists
 - **THEN** Discover returns exactly one card
 
 #### Scenario: Operate without touch
-- **WHEN** the user presses Arrow Up, Arrow Down, or the accessible Previous and Next controls
+- **WHEN** the user presses Arrow Left, Arrow Right, or the accessible Previous and Next controls
 - **THEN** Discover performs the equivalent single-card navigation
 
-#### Scenario: Avoid platform gesture conflict
-- **WHEN** the user makes a predominantly horizontal gesture
-- **THEN** Discover does not change cards or suppress platform Back navigation
+#### Scenario: Preserve vertical scrolling
+- **WHEN** enlarged content requires scrolling
+- **THEN** vertical gestures scroll the current card without changing cards
 
 ### Requirement: Balanced deterministic discovery
 Discover SHALL generate a locally deterministic deck that varies topics and avoids repeats until the catalog is exhausted.
@@ -82,11 +82,7 @@ Discover SHALL generate a locally deterministic deck that varies topics and avoi
 
 #### Scenario: Exhaust a cycle
 - **WHEN** the user reaches the final unseen card
-- **THEN** the next advance begins a newly seeded complete cycle without losing saved-card state
-
-#### Scenario: Save without filtering
-- **WHEN** the user saves or unsaves the current card
-- **THEN** the application persists that local signal without opening or exposing a saved-card list
+- **THEN** the next advance begins a newly seeded complete cycle
 
 ### Requirement: Single-screen Explore layout
 Explore SHALL fit its standard mobile experiences within the dynamic viewport without page scrolling.
