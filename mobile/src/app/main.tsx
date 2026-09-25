@@ -5,6 +5,7 @@ import App from './App';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import '@/ui/styles/styles.css';
 import '@/ui/styles/chat.css';
+import '@/ui/styles/explore.css';
 import { initTheme } from '@/lib/settings';
 
 void initTheme();

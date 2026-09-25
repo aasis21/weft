@@ -111,6 +111,9 @@ while you use the phone.
   silently creating duplicate Copilot processes.
 - **Shared terminal** — open and resume one real shell on supported Windows laptops. See
   [terminal controls and access boundaries](docs/terminal.md).
+- **Explore between turns** — open the permanent compass destination for local agent
+  activity, 50 offline Discover cards, two lightweight games, guided rest activities,
+  and an optional explicitly loaded third-party short-video widget.
 
 ## Trust model
 
@@ -121,6 +124,9 @@ while you use the phone.
   `~/.weft/`; phone session data remains in local device storage.
 - **Explicit authority.** The phone receives the same approval boundaries exposed by the
   underlying Copilot session. Weft does not invent an automatic approval policy.
+- **Explore stays local by default.** Agent Pulse, Discover, Play, Unwind, saved cards,
+  and scores remain on the phone. The optional Watch provider loads only after an explicit
+  tap and receives no Weft prompt, repository, filename, tool, or session context.
 
 Read the full [security model](docs/security.md), [privacy policy](PRIVACY.md), and
 [pairing protocol](docs/pairing.md).

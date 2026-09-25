@@ -67,6 +67,20 @@ retention.
 The hosted web app loads font files from Google Fonts. Google may receive ordinary web
 request metadata such as your IP address and browser headers when those assets load.
 
+## Optional Explore video provider
+
+Explore's Agent Pulse, bundled Discover cards, Play activities, Unwind activities,
+saved-card state, and scores remain local to the phone. If a deployment configures the
+optional Watch widget, Weft displays a disclosure and does not contact that provider
+until you explicitly choose to load the video feed.
+
+The provider runs in a sandboxed frame and receives no Weft prompts, transcripts,
+repository names, filenames, tool arguments, agent activity, channel identifiers, or
+session identifiers from Weft. Like any external website, the provider can receive
+ordinary request metadata such as your IP address and browser headers and applies its
+own content and privacy policies. Weft does not copy the provider's viewing history
+into its local session data.
+
 ## Accounts, analytics, and notifications
 
 - Weft pairing does not require a Weft account.
