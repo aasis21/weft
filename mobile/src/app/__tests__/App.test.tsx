@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '@/app/App';
 
 const runtime = vi.hoisted(() => {
@@ -77,25 +77,49 @@ vi.mock('@/ui/hooks/usePairing', () => ({
   isNativeRuntime: () => false,
 }));
 
+vi.mock('@/ui/screens/LandingScreen', () => ({
+  LandingScreen: () => <main data-testid="landing-screen">Landing</main>,
+}));
+
 vi.mock('@/ui/screens/SessionScreen', () => ({
-  SessionScreen: ({ onOpenExplore }: { onOpenExplore(): void }) => {
+  SessionScreen: ({
+    onOpenExplore,
+    exploreOpen,
+    onGoHome,
+  }: {
+    onOpenExplore(): void;
+    exploreOpen: boolean;
+    onGoHome(): void;
+  }) => {
     const [count, setCount] = useState(0);
     return (
-      <main data-testid="session-screen">
-        <span>Local state {count}</span>
-        <button type="button" onClick={() => setCount((value) => value + 1)}>Increment local state</button>
-        <button type="button" onClick={onOpenExplore}>Open Explore</button>
-      </main>
+      <>
+        <main
+          data-testid="session-screen"
+          aria-hidden={exploreOpen || undefined}
+          {...(exploreOpen ? { inert: '' as unknown as boolean } : {})}
+        >
+          <span>Local state {count}</span>
+          <button type="button" onClick={() => setCount((value) => value + 1)}>Increment local state</button>
+          <button type="button" onClick={onOpenExplore}>Open Explore</button>
+        </main>
+        {exploreOpen ? (
+          <main data-testid="explore-screen">
+            Explore overlay
+            <button type="button" onClick={onGoHome}>Go Home</button>
+          </main>
+        ) : null}
+      </>
     );
   },
 }));
 
-vi.mock('@/ui/explore/ExploreScreen', () => ({
-  ExploreScreen: () => <main data-testid="explore-screen">Explore overlay</main>,
-}));
-
 beforeEach(() => {
   window.history.replaceState(null, '');
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('App Explore layering', () => {
@@ -108,8 +132,8 @@ describe('App Explore layering', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Explore' }));
     expect(await screen.findByTestId('explore-screen')).toBeInTheDocument();
     expect(session).toBeInTheDocument();
-    expect(session.parentElement).toHaveAttribute('aria-hidden', 'true');
-    expect(session.parentElement).toHaveAttribute('inert');
+    expect(session).toHaveAttribute('aria-hidden', 'true');
+    expect(session).toHaveAttribute('inert');
 
     act(() => {
       window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
@@ -117,7 +141,19 @@ describe('App Explore layering', () => {
 
     expect(screen.queryByTestId('explore-screen')).not.toBeInTheDocument();
     expect(screen.getByText('Local state 1')).toBeInTheDocument();
-    expect(session.parentElement).not.toHaveAttribute('aria-hidden');
-    expect(session.parentElement).not.toHaveAttribute('inert');
+    expect(session).not.toHaveAttribute('aria-hidden');
+    expect(session).not.toHaveAttribute('inert');
+  });
+
+  it('collapses both Explore history entries when going Home from a category', async () => {
+    const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+    render(<App />);
+    await screen.findByTestId('session-screen');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Explore' }));
+    window.history.pushState({ weftView: 'explore', exploreView: 'discover' }, '');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Home' }));
+
+    expect(go).toHaveBeenCalledWith(-2);
   });
 });

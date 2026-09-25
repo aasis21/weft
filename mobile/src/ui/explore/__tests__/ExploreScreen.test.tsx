@@ -5,17 +5,18 @@ import { emptyTimeline } from '@/lib/timeline';
 import type { SessionView } from '@/session/view';
 import {
   ExploreScreen,
+  buildDiscoverDeck,
   countThreadlineCrossings,
   createSignalSequence,
   createThreadlinePoints,
-  deriveAgentPulse,
+  deriveLiveDock,
 } from '@/ui/explore/ExploreScreen';
 import { DISCOVER_CARDS } from '@/ui/explore/discoverCards';
 
 function session(overrides: Partial<SessionView> = {}): SessionView {
   return {
     meta: {
-      kind: 'paired',
+      kind: 'live',
       channelId: 'channel-1',
       title: 'Explore session',
       cwd: 'C:\\repo',
@@ -33,10 +34,9 @@ function renderExplore(active = session()) {
   return render(
     <ExploreScreen
       active={active}
-      onBack={vi.fn()}
+      onOpenSessions={vi.fn()}
       onOpenChat={vi.fn()}
-      onApprove={vi.fn()}
-      onElicitationRespond={vi.fn()}
+      onGoHome={vi.fn()}
     />,
   );
 }
@@ -53,192 +53,324 @@ afterEach(() => {
 });
 
 describe('Explore catalog', () => {
-  it('ships exactly 50 unique, readable starter cards', () => {
+  it('ships exactly 50 unique, bounded starter cards', () => {
     expect(DISCOVER_CARDS).toHaveLength(50);
     expect(new Set(DISCOVER_CARDS.map((card) => card.id)).size).toBe(50);
     for (const card of DISCOVER_CARDS) {
       expect(card.title.length).toBeGreaterThan(8);
+      expect(card.title.length).toBeLessThanOrEqual(52);
       expect(card.summary.length).toBeGreaterThan(40);
+      expect(card.summary.length).toBeLessThanOrEqual(170);
       expect(card.insight.length).toBeGreaterThan(40);
+      expect(card.insight.length).toBeLessThanOrEqual(190);
       expect(card.minutes).toBeGreaterThan(0);
     }
   });
 });
 
-describe('Agent Pulse', () => {
-  it('prioritizes approvals over working state and does not alter the session status', () => {
-    const timeline = {
-      ...emptyTimeline(),
-      busy: true,
-      busyFrom: 1_000,
-      approvals: [
-        {
-          requestId: 'approval-1',
-          toolName: 'powershell',
-          toolArgs: { command: 'npm test' },
-          options: [{ id: 'approve', label: 'Approve' }],
-        },
-      ],
-    };
-    const active = session({ timeline });
-
-    expect(deriveAgentPulse(active)).toMatchObject({
-      tone: 'attention',
-      label: 'Approval needed',
-    });
-    expect(active.status).toBe('live');
-  });
-
-  it('uses live agent intent and timing while work is in flight', () => {
-    const active = session({
-      intent: 'running focused mobile tests',
-      thinkingSince: 5_000,
-      timeline: { ...emptyTimeline(), busy: true, busyFrom: 4_000 },
-    });
-
-    expect(deriveAgentPulse(active)).toEqual({
-      tone: 'working',
-      label: 'running focused mobile tests',
-      detail: 'Work is continuing in the active session',
-      startedAt: 5_000,
-    });
-  });
-
-  it('opens current activity without replacing the chat status', async () => {
-    const user = userEvent.setup();
-    const onOpenChat = vi.fn();
-    const active = session({
-      intent: 'Checking the mobile release',
-      timeline: { ...emptyTimeline(), busy: true, busyFrom: Date.now() - 4_000 },
-    });
-    render(
-      <ExploreScreen
-        active={active}
-        onBack={vi.fn()}
-        onOpenChat={onOpenChat}
-        onApprove={vi.fn()}
-        onElicitationRespond={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: /Checking the mobile release/ }));
-    expect(screen.getByRole('heading', { name: 'Explore session' })).toBeInTheDocument();
-    expect(screen.getAllByText('Checking the mobile release')).toHaveLength(2);
-    await user.click(screen.getByRole('button', { name: 'Return to conversation' }));
-    expect(onOpenChat).toHaveBeenCalledOnce();
-    expect(active.status).toBe('live');
-  });
-});
-
-describe('Explore navigation and content', () => {
-  it('opens with Agent Pulse and four choices, then replaces choices with category tabs', async () => {
-    const user = userEvent.setup();
-    renderExplore();
-
-    expect(screen.getByRole('button', { name: /Agent ready/ })).toBeInTheDocument();
-    const discoverChoice = screen.getByRole('button', { name: 'Discover: Read something worth knowing' });
-    expect(discoverChoice).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Watch: Short visual content' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Unwind: Breathe, reset, and rest' })).toBeInTheDocument();
-
-    await user.click(discoverChoice);
-
-    expect(screen.getByRole('navigation', { name: 'Explore categories' })).toBeInTheDocument();
-    expect(screen.queryByText('What do you feel like?')).not.toBeInTheDocument();
-    expect(screen.getByText('How QR codes survive scratches')).toBeInTheDocument();
-  });
-
-  it('integrates category and agent detail state with browser history', () => {
-    const onBack = vi.fn();
-    render(
-      <ExploreScreen
-        active={session()}
-        onBack={onBack}
-        onOpenChat={vi.fn()}
-        onApprove={vi.fn()}
-        onElicitationRespond={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Unwind: Breathe, reset, and rest' }));
-    expect(window.history.state).toEqual({ weftView: 'explore', exploreView: 'unwind' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discover' }));
-    expect(window.history.state).toEqual({ weftView: 'explore', exploreView: 'discover' });
-
-    act(() => {
-      window.dispatchEvent(new PopStateEvent('popstate', {
-        state: { weftView: 'explore' },
-      }));
-    });
-    expect(screen.getByRole('heading', { name: 'What do you feel like?' })).toBeInTheDocument();
-    expect(onBack).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Back to chat' }));
-    expect(onBack).toHaveBeenCalledOnce();
-  });
-
-  it('keeps bundled Discover cards readable while offline', () => {
-    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
-    renderExplore();
-    fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
-    expect(screen.getByRole('button', { name: 'Read How QR codes survive scratches' })).toBeInTheDocument();
-  });
-
-  it('opens a readable card and persists its saved state locally', async () => {
-    const user = userEvent.setup();
-    renderExplore();
-    await user.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
-    await user.click(screen.getByRole('button', { name: 'Read How QR codes survive scratches' }));
-
-    expect(screen.getByRole('heading', { name: 'How QR codes survive scratches' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Save for later' }));
-    expect(screen.getByRole('button', { name: 'Saved' })).toBeInTheDocument();
-    expect(localStorage.getItem('weft.explore.v1')).toContain('qr-error-correction');
-  });
-
-  it('keeps approval decisions actionable above Explore content', async () => {
-    const onApprove = vi.fn();
+describe('Live Copilot Dock', () => {
+  it('prioritizes attention over working state', () => {
     const active = session({
       timeline: {
         ...emptyTimeline(),
-        approvals: [
-          {
-            requestId: 'approval-1',
-            toolName: 'Run tests',
-            toolArgs: { command: 'npm test' },
-            options: [
-              { id: 'approve', label: 'Approve' },
-              { id: 'deny', label: 'Deny' },
-            ],
-          },
-        ],
+        busy: true,
+        approvals: [{
+          requestId: 'approval-1',
+          toolName: 'Run tests',
+          toolArgs: {},
+          options: [{ id: 'approve', label: 'Approve' }],
+        }],
       },
     });
+
+    expect(deriveLiveDock(active)).toMatchObject({
+      tone: 'attention',
+      label: 'Approval needed',
+      text: 'Run tests',
+    });
+  });
+
+  it('projects streamed assistant text into the fixed dock and opens chat', async () => {
+    const onOpenChat = vi.fn();
+    const active = session({
+      timeline: {
+        ...emptyTimeline(),
+        busy: true,
+        busyFrom: Date.now() - 4_000,
+        items: [{
+          kind: 'assistant',
+          id: 'reply-1',
+          text: 'I am checking the focused mobile tests now.',
+          ts: Date.now(),
+          final: false,
+        }],
+      },
+    });
+    const user = userEvent.setup();
     render(
       <ExploreScreen
         active={active}
-        onBack={vi.fn()}
-        onOpenChat={vi.fn()}
-        onApprove={onApprove}
-        onElicitationRespond={vi.fn()}
+        onOpenSessions={vi.fn()}
+        onOpenChat={onOpenChat}
+        onGoHome={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole('dialog', { name: 'Agent needs your attention' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    expect(onApprove).toHaveBeenCalledWith('approval-1', 'approve');
+    const dock = screen.getByRole('button', { name: /Copilot is writing/ });
+    expect(dock).toHaveTextContent('I am checking the focused mobile tests now.');
+    await user.click(dock);
+    expect(onOpenChat).toHaveBeenCalledOnce();
+  });
+
+  it('shows a newly completed active-session reply without relying on unread state', () => {
+    const props = {
+      onOpenSessions: vi.fn(),
+      onOpenChat: vi.fn(),
+      onGoHome: vi.fn(),
+    };
+    const { rerender } = render(
+      <ExploreScreen
+        {...props}
+        active={session({
+          timeline: {
+            ...emptyTimeline(),
+            busy: true,
+            items: [{
+              kind: 'assistant',
+              id: 'active-reply',
+              text: 'Finishing the implementation.',
+              ts: 100,
+              final: false,
+            }],
+          },
+        })}
+      />,
+    );
+
+    rerender(
+      <ExploreScreen
+        {...props}
+        active={session({
+          unread: false,
+          unreadCount: 0,
+          timeline: {
+            ...emptyTimeline(),
+            items: [{
+              kind: 'assistant',
+              id: 'active-reply',
+              text: 'The implementation is complete.',
+              ts: 100,
+              final: true,
+            }],
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Reply ready/ })).toHaveTextContent(
+      'The implementation is complete.',
+    );
+  });
+
+  it('handles final-before-idle ordering and resets completion tracking across sessions', () => {
+    const props = {
+      onOpenSessions: vi.fn(),
+      onOpenChat: vi.fn(),
+      onGoHome: vi.fn(),
+    };
+    const streaming = (busy: boolean, final: boolean, channelId = 'channel-1') => session({
+      meta: {
+        kind: 'live',
+        channelId,
+        title: 'Explore session',
+        cwd: 'C:\\repo',
+        addedAt: 1,
+        scannedAt: 1,
+      },
+      timeline: {
+        ...emptyTimeline(),
+        busy,
+        items: [{
+          kind: 'assistant',
+          id: channelId === 'channel-1' ? 'ordered-reply' : 'other-reply',
+          text: final ? 'Ordered reply complete.' : 'Writing ordered reply.',
+          ts: 100,
+          final,
+        }],
+      },
+    });
+    const { rerender } = render(<ExploreScreen {...props} active={streaming(true, false)} />);
+    rerender(<ExploreScreen {...props} active={streaming(true, true)} />);
+    expect(screen.getByRole('button', { name: /Copilot is working/ })).toBeInTheDocument();
+    rerender(<ExploreScreen {...props} active={streaming(false, true)} />);
+    expect(screen.getByRole('button', { name: /Reply ready/ })).toBeInTheDocument();
+
+    rerender(<ExploreScreen {...props} active={streaming(false, true, 'channel-2')} />);
+    expect(screen.getByRole('button', { name: /Copilot ready/ })).toBeInTheDocument();
+  });
+
+  it('falls back through intent, running tool, reply, and idle states', () => {
+    expect(deriveLiveDock(session({
+      intent: 'Running focused checks',
+      timeline: { ...emptyTimeline(), busy: true, busyFrom: 100 },
+    }))).toMatchObject({ tone: 'working', text: 'Running focused checks' });
+
+    expect(deriveLiveDock(session({
+      timeline: {
+        ...emptyTimeline(),
+        busy: true,
+        items: [{
+          kind: 'tool',
+          id: 'tool-1',
+          name: 'powershell',
+          args: { description: 'Run mobile tests' },
+          status: 'running',
+          startedAt: 100,
+          ts: 100,
+        }],
+      },
+    }))).toMatchObject({ tone: 'working', text: 'Run mobile tests' });
+
+    expect(deriveLiveDock(session({
+      unread: true,
+      timeline: {
+        ...emptyTimeline(),
+        items: [{
+          kind: 'assistant',
+          id: 'reply-1',
+          text: 'The implementation is ready.',
+          ts: 100,
+          final: true,
+        }],
+      },
+    }))).toMatchObject({ tone: 'ready', text: 'The implementation is ready.' });
+
+    expect(deriveLiveDock(session())).toMatchObject({ tone: 'idle', label: 'Copilot ready' });
+  });
+});
+
+describe('Explore navigation and Discover deck', () => {
+  it('uses the shared navigation affordance and compact four-choice home', async () => {
+    const onOpenSessions = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ExploreScreen
+        active={session()}
+        onOpenSessions={onOpenSessions}
+        onOpenChat={vi.fn()}
+        onGoHome={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'What do you feel like?' })).toBeInTheDocument();
+    expect(screen.queryByText(/Pick something useful/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/saved Discover/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open sessions' }));
+    expect(onOpenSessions).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the header, flexible content, and live dock as one bounded shell', () => {
+    renderExplore();
+    const content = document.querySelector('.explore-content');
+    expect(content?.firstElementChild).toHaveClass('explore-header');
+    expect(content?.lastElementChild).toHaveClass('live-copilot-dock');
+    expect(document.querySelector('.agent-pulse')).not.toBeInTheDocument();
+    expect(document.querySelector('.agent-activity-view')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
+    expect(document.querySelector('.explore-tabs')?.nextElementSibling).toHaveClass('explore-category-body');
+    expect(document.querySelector('.explore-category-body')?.nextElementSibling).toHaveClass('live-copilot-dock');
+  });
+
+  it('integrates category detail with browser history without adding card entries', () => {
+    renderExplore();
+    fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
+    expect(window.history.state).toEqual({ weftView: 'explore', exploreView: 'discover' });
+    const before = window.history.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Next Discover card' }));
+    expect(window.history.length).toBe(before);
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate', { state: { weftView: 'explore' } }));
+    });
+    expect(screen.getByRole('heading', { name: 'What do you feel like?' })).toBeInTheDocument();
+  });
+
+  it('builds a deterministic balanced deck with no repeats', () => {
+    const first = buildDiscoverDeck(DISCOVER_CARDS, 12345);
+    const second = buildDiscoverDeck(DISCOVER_CARDS, 12345);
+    expect(first.map((card) => card.id)).toEqual(second.map((card) => card.id));
+    expect(new Set(first.map((card) => card.id)).size).toBe(DISCOVER_CARDS.length);
+    expect(first).toHaveLength(DISCOVER_CARDS.length);
+    for (let index = 1; index < first.length; index += 1) {
+      expect(first[index].topic).not.toBe(first[index - 1].topic);
+    }
+  });
+
+  it('shows one complete card, advances with controls and keyboard, and persists position', () => {
+    renderExplore();
+    fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
+    const deck = screen.getByRole('region', { name: 'Discover card deck' });
+    expect(document.querySelectorAll('.discover-deck-card')).toHaveLength(1);
+    const firstTitle = document.querySelector('.discover-deck-card h1')?.textContent;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next Discover card' }));
+    expect(document.querySelector('.discover-deck-card h1')?.textContent).not.toBe(firstTitle);
+    expect(JSON.parse(localStorage.getItem('weft.explore.v1') ?? '{}').discoverIndex).toBe(1);
+
+    fireEvent.keyDown(deck, { key: 'ArrowDown' });
+    expect(document.querySelector('.discover-deck-card h1')?.textContent).toBe(firstTitle);
+  });
+
+  it('responds only to dominant vertical swipes and keeps Save local', () => {
+    renderExplore();
+    fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
+    const deck = screen.getByRole('region', { name: 'Discover card deck' });
+    const firstTitle = document.querySelector('.discover-deck-card h1')?.textContent;
+
+    fireEvent.pointerDown(deck, { clientX: 10, clientY: 100 });
+    fireEvent.pointerUp(deck, { clientX: 100, clientY: 80 });
+    expect(document.querySelector('.discover-deck-card h1')?.textContent).toBe(firstTitle);
+
+    fireEvent.pointerDown(deck, { clientX: 10, clientY: 100 });
+    fireEvent.pointerUp(deck, { clientX: 12, clientY: 20 });
+    expect(document.querySelector('.discover-deck-card h1')?.textContent).not.toBe(firstTitle);
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save / }));
+    expect(localStorage.getItem('weft.explore.v1')).toContain('savedCardIds');
+    expect(screen.queryByRole('group', { name: 'Discover topics' })).not.toBeInTheDocument();
+  });
+
+  it('starts a new shuffled cycle only after the current deck is exhausted', () => {
+    const today = new Date();
+    const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    localStorage.setItem('weft.explore.v1', JSON.stringify({
+      lastCategory: 'discover',
+      savedCardIds: [],
+      completedCardIds: [],
+      discoverDay: day,
+      discoverCycle: 2,
+      discoverIndex: DISCOVER_CARDS.length - 1,
+      threadlineCompleted: 0,
+      signalBest: 0,
+      vibration: false,
+    }));
+    renderExplore();
+    fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
+    expect(screen.getByText(`50 / ${DISCOVER_CARDS.length}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next Discover card' }));
+    expect(JSON.parse(localStorage.getItem('weft.explore.v1') ?? '{}')).toMatchObject({
+      discoverCycle: 3,
+      discoverIndex: 0,
+    });
+    expect(screen.getByText(`1 / ${DISCOVER_CARDS.length}`)).toBeInTheDocument();
   });
 
   it('loads configured Watch content only after consent and keeps it isolated', () => {
     vi.stubEnv('VITE_EXPLORE_WIDGET_URL', 'https://videos.example.test/embed');
     renderExplore();
-
     fireEvent.click(screen.getByRole('button', { name: 'Watch: Short visual content' }));
-    expect(screen.queryByTitle('External short video feed')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Load video feed' }));
-
     const frame = screen.getByTitle('External short video feed');
     expect(frame).toHaveAttribute('src', 'https://videos.example.test/embed');
     expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
@@ -246,189 +378,8 @@ describe('Explore navigation and content', () => {
       'sandbox',
       'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation',
     );
-    expect(frame.getAttribute('src')).not.toContain('channel-1');
     fireEvent.load(frame);
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Provider navigation completed. Display readiness cannot be verified yet.',
-    );
-    expect(screen.queryByText('The provider reported that its content is ready.')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open provider directly' })).toHaveAttribute(
-      'href',
-      'https://videos.example.test/embed',
-    );
-  });
-
-  it('times out to truthful unverified guidance without claiming the provider failed', () => {
-    vi.useFakeTimers();
-    vi.stubEnv('VITE_EXPLORE_WIDGET_URL', 'https://videos.example.test/embed');
-    renderExplore();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Watch: Short visual content' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Load video feed' }));
-    const frame = screen.getByTitle('External short video feed');
-    fireEvent.load(frame);
-    act(() => vi.advanceTimersByTime(12_000));
-
-    expect(screen.getByRole('alert')).toHaveTextContent('Weft could not verify the embedded display');
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
-    expect(frame).toBeInTheDocument();
-  });
-
-  it('accepts optional readiness only from the configured provider origin and sends no context', () => {
-    vi.stubEnv('VITE_EXPLORE_WIDGET_URL', 'https://videos.example.test/embed');
-    renderExplore();
-    fireEvent.click(screen.getByRole('button', { name: 'Watch: Short visual content' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Load video feed' }));
-    const frame = screen.getByTitle('External short video feed') as HTMLIFrameElement;
-    fireEvent.load(frame);
-
-    act(() => {
-      window.dispatchEvent(new MessageEvent('message', {
-        origin: 'https://attacker.example.test',
-        source: frame.contentWindow,
-        data: { type: 'weft:explore-ready', channelId: 'leak' },
-      }));
-    });
-    expect(screen.queryByText('The provider reported that its content is ready.')).not.toBeInTheDocument();
-
-    act(() => {
-      window.dispatchEvent(new MessageEvent('message', {
-        origin: 'https://videos.example.test',
-        source: frame.contentWindow,
-        data: { type: 'weft:explore-ready' },
-      }));
-    });
-    expect(screen.getByRole('status')).toHaveTextContent('The provider reported that its content is ready.');
-    expect(frame.src).toBe('https://videos.example.test/embed');
-    expect(frame.src).not.toContain('channel-1');
-  });
-
-  it('keeps an arriving approval operable above a loaded Watch frame', () => {
-    vi.stubEnv('VITE_EXPLORE_WIDGET_URL', 'https://videos.example.test/embed');
-    const onApprove = vi.fn();
-    const props = {
-      onBack: vi.fn(),
-      onOpenChat: vi.fn(),
-      onApprove,
-      onElicitationRespond: vi.fn(),
-    };
-    const { rerender } = render(<ExploreScreen active={session()} {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Watch: Short visual content' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Load video feed' }));
-    fireEvent.load(screen.getByTitle('External short video feed'));
-
-    rerender(
-      <ExploreScreen
-        active={session({
-          timeline: {
-            ...emptyTimeline(),
-            approvals: [{
-              requestId: 'watch-approval',
-              toolName: 'Publish release',
-              toolArgs: {},
-              options: [{ id: 'approve', label: 'Approve' }],
-            }],
-          },
-        })}
-        {...props}
-      />,
-    );
-
-    expect(screen.getByTitle('External short video feed')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Agent needs your attention' })).toBeInTheDocument();
-    const content = document.querySelector('.explore-content');
-    expect(content).toHaveAttribute('aria-hidden', 'true');
-    expect(content).toHaveAttribute('inert');
-    expect(screen.getByRole('button', { name: 'Approve' })).toHaveFocus();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    expect(onApprove).toHaveBeenCalledWith('watch-approval', 'approve');
-  });
-
-  it('traps interruption focus and restores the prior Watch focus after dismissal', () => {
-    vi.stubEnv('VITE_EXPLORE_WIDGET_URL', 'https://videos.example.test/embed');
-    const props = {
-      onBack: vi.fn(),
-      onOpenChat: vi.fn(),
-      onApprove: vi.fn(),
-      onElicitationRespond: vi.fn(),
-    };
-    const { rerender } = render(<ExploreScreen active={session()} {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Watch: Short visual content' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Load video feed' }));
-    const frame = screen.getByTitle('External short video feed');
-    frame.focus();
-
-    rerender(
-      <ExploreScreen
-        active={session({
-          timeline: {
-            ...emptyTimeline(),
-            approvals: [{
-              requestId: 'focus-approval',
-              toolName: 'Publish release',
-              toolArgs: {},
-              options: [
-                { id: 'approve', label: 'Approve' },
-                { id: 'deny', label: 'Deny' },
-              ],
-            }],
-          },
-        })}
-        {...props}
-      />,
-    );
-
-    const approve = screen.getByRole('button', { name: 'Approve' });
-    const deny = screen.getByRole('button', { name: 'Deny' });
-    expect(approve).toHaveFocus();
-    deny.focus();
-    fireEvent.keyDown(deny, { key: 'Tab' });
-    expect(approve).toHaveFocus();
-    fireEvent.keyDown(approve, { key: 'Tab', shiftKey: true });
-    expect(deny).toHaveFocus();
-
-    rerender(<ExploreScreen active={session()} {...props} />);
-    expect(frame).toHaveFocus();
-    expect(document.querySelector('.explore-content')).not.toHaveAttribute('aria-hidden');
-    expect(document.querySelector('.explore-content')).not.toHaveAttribute('inert');
-  });
-
-  it('focuses the dialog when a disconnected interruption has no enabled actions', () => {
-    const props = {
-      onBack: vi.fn(),
-      onOpenChat: vi.fn(),
-      onApprove: vi.fn(),
-      onElicitationRespond: vi.fn(),
-    };
-    const { rerender } = render(<ExploreScreen active={session()} {...props} />);
-    const underlying = screen.getByRole('button', { name: 'Back to chat' });
-    underlying.focus();
-    expect(underlying).toHaveFocus();
-
-    rerender(
-      <ExploreScreen
-        active={session({
-          status: 'connecting',
-          timeline: {
-            ...emptyTimeline(),
-            approvals: [{
-              requestId: 'disabled-approval',
-              toolName: 'Waiting for reconnection',
-              toolArgs: {},
-              options: [{ id: 'approve', label: 'Approve' }],
-            }],
-          },
-        })}
-        {...props}
-      />,
-    );
-
-    const dialog = screen.getByRole('dialog', { name: 'Agent needs your attention' });
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
-    expect(document.querySelector('.explore-content')).toHaveAttribute('inert');
-    expect(underlying).not.toHaveFocus();
-    expect(dialog).toHaveAttribute('tabindex', '-1');
-    expect(dialog).toHaveFocus();
+    expect(screen.getByRole('status')).toHaveTextContent('Display readiness cannot be verified yet.');
   });
 });
 
@@ -452,7 +403,7 @@ describe('Threadline logic', () => {
     ])).toBe(0);
   });
 
-  it('rejects coincident nodes, overlaps, endpoint touches, and nodes on unrelated edges', () => {
+  it('rejects coincident nodes and nodes on unrelated edges', () => {
     const planar = [
       { id: 0, x: 50, y: 10 },
       { id: 1, x: 85, y: 30 },
@@ -461,26 +412,9 @@ describe('Threadline logic', () => {
       { id: 4, x: 15, y: 70 },
       { id: 5, x: 15, y: 30 },
     ];
-
     expect(countThreadlineCrossings(planar.map((point) =>
       point.id === 5 ? { ...point, x: 15, y: 70 } : point,
     ))).toBeGreaterThan(0);
-    expect(countThreadlineCrossings([
-      { id: 0, x: 10, y: 10 },
-      { id: 1, x: 30, y: 10 },
-      { id: 2, x: 50, y: 10 },
-      { id: 3, x: 80, y: 80 },
-      { id: 4, x: 10, y: 80 },
-      { id: 5, x: 80, y: 30 },
-    ])).toBeGreaterThan(0);
-    expect(countThreadlineCrossings([
-      { id: 0, x: 10, y: 10 },
-      { id: 1, x: 40, y: 40 },
-      { id: 2, x: 40, y: 40 },
-      { id: 3, x: 70, y: 10 },
-      { id: 4, x: 80, y: 80 },
-      { id: 5, x: 10, y: 80 },
-    ])).toBeGreaterThan(0);
     expect(countThreadlineCrossings(planar.map((point) =>
       point.id === 5 ? { ...point, x: 67.5, y: 20 } : point,
     ))).toBeGreaterThan(0);

@@ -68,9 +68,11 @@ npm run dev          # open the printed localhost URL
 
 ### Optional Explore video widget
 
-Explore's Discover, Play, Unwind, and Agent Pulse experiences require no external
-content provider. To exercise the Watch category, set an HTTPS URL for an isolated,
-auto-updating widget before starting or building the mobile app:
+Explore's balanced Discover deck, Play, Unwind, and live Copilot dock require no
+external content provider. The dock only projects activity already available in the
+active Weft session and returns attention actions to chat. To exercise the Watch
+category, set an HTTPS URL for an isolated, auto-updating widget before starting or
+building the mobile app:
 
 ```powershell
 $env:VITE_EXPLORE_WIDGET_URL = 'https://your-widget-provider.example/embed/...'
