@@ -41,3 +41,12 @@
 - [x] 5.3 Run complete repository tests, build, lint, and version checks
 - [x] 5.4 Review the final diff for navigation, streaming privacy, gesture conflicts, accessibility, viewport fitting, and unrelated changes
 - [x] 5.5 Validate all OpenSpec artifacts and mark every completed task
+
+## 6. Dense Animated Explore Refinement
+
+- [x] 6.1 Move category navigation into compact accessible header tiles and remove the separate category band
+- [x] 6.2 Remove the Discover illustration and bottom controls, move deck position beside duration, and add card-edge navigation
+- [x] 6.3 Implement pointer-follow, bounded rotation, adjacent-card reveal, exit, spring-back, keyboard, and reduced-motion behavior
+- [x] 6.4 Increase the Live Copilot Dock height and render up to three ordered real assistant and tool events
+- [x] 6.5 Add focused tests for integrated navigation, dense card layout, swipe motion, real activity ordering, and quiet working behavior
+- [ ] 6.6 Run complete validation, review, merge, release, and verify production

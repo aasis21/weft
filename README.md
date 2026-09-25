@@ -111,10 +111,11 @@ while you use the phone.
   silently creating duplicate Copilot processes.
 - **Shared terminal** — open and resume one real shell on supported Windows laptops. See
   [terminal controls and access boundaries](docs/terminal.md).
-- **Explore between turns** — open the permanent compass destination for local agent
-  activity streamed into a compact bottom dock, a balanced swipe-through deck of 50
-  offline Discover cards, two lightweight games, guided rest activities, and an optional
-  explicitly loaded third-party short-video widget.
+- **Explore between turns** — use compact header tiles for Discover, Watch, Play, and
+  Unwind while real assistant and tool activity rolls through the bottom Copilot dock.
+  Discover provides a balanced animated swipe deck of 50 offline cards, alongside two
+  lightweight games, guided rest activities, and an optional explicitly loaded
+  third-party short-video widget.
 
 ## Trust model
 

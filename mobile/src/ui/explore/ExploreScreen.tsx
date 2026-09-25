@@ -6,12 +6,13 @@ import {
   useState,
 } from 'react';
 import type {
+  CSSProperties,
   JSX,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { SessionView } from '@/session/view';
-import type { TimelineItem, ToolItem } from '@/lib/timeline';
+import type { AssistantItem, TimelineItem, ToolItem } from '@/lib/timeline';
 import { isWorking } from '@/ui/sessions/sessionStatus';
 import {
   DISCOVER_CARDS,
@@ -53,6 +54,13 @@ export interface LiveDockState {
   text: string;
   detail: string | null;
   startedAt: number | null;
+}
+
+export interface LiveDockActivity {
+  id: string;
+  text: string;
+  kind: 'assistant' | 'tool' | 'context';
+  state: 'live' | 'complete' | 'error' | 'context';
 }
 
 const CATEGORY_META: Record<ExploreCategory, { title: string; subtitle: string; icon: JSX.Element }> = {
@@ -187,6 +195,86 @@ function dockExcerpt(value: string, max = 220): string {
   return `…${clean.slice(clean.length - max + 1)}`;
 }
 
+function plainToolName(name: string): string {
+  return name.replace(/[_-]+/g, ' ').trim();
+}
+
+export function deriveLiveDockActivity(
+  active: SessionView,
+  dock: LiveDockState,
+): LiveDockActivity[] {
+  if (dock.tone !== 'working') {
+    return [
+      {
+        id: `${dock.tone}-primary`,
+        text: dock.text,
+        kind: 'context',
+        state: dock.tone === 'error' ? 'error' : dock.tone === 'ready' ? 'complete' : 'context',
+      },
+      ...(dock.detail
+        ? [{
+            id: `${dock.tone}-detail`,
+            text: dock.detail,
+            kind: 'context' as const,
+            state: 'context' as const,
+          }]
+        : []),
+    ];
+  }
+
+  const activity = active.timeline.items
+    .filter((item): item is AssistantItem | ToolItem =>
+      (item.kind === 'assistant' && Boolean(item.text.trim())) || item.kind === 'tool',
+    )
+    .slice(-6)
+    .map((item): LiveDockActivity => {
+      if (item.kind === 'assistant') {
+        return {
+          id: `assistant-${item.id}`,
+          text: dockExcerpt(item.text, 150),
+          kind: 'assistant',
+          state: item.final ? 'complete' : 'live',
+        };
+      }
+      const activityLabel = toolLabel(item).replace(/ in progress$/, '');
+      return {
+        id: `tool-${item.id}`,
+        text:
+          item.status === 'running'
+            ? toolLabel(item)
+            : item.status === 'success'
+              ? `${activityLabel} completed`
+              : `${activityLabel} failed`,
+        kind: 'tool',
+        state:
+          item.status === 'running'
+            ? 'live'
+            : item.status === 'success'
+              ? 'complete'
+              : 'error',
+      };
+    });
+
+  const intent = active.intent?.trim();
+  if (intent && activity.length < 3 && !activity.some((item) => item.text === intent)) {
+    activity.unshift({
+      id: 'current-intent',
+      text: dockExcerpt(intent, 150),
+      kind: 'context',
+      state: 'context',
+    });
+  }
+  if (activity.length === 0) {
+    activity.push({
+      id: 'working-context',
+      text: dock.text,
+      kind: 'context',
+      state: 'live',
+    });
+  }
+  return activity.slice(-3);
+}
+
 export function deriveLiveDock(active: SessionView, replyCompletedInExplore = false): LiveDockState {
   if (active.timeline.approvals.length > 0) {
     const count = active.timeline.approvals.length;
@@ -235,7 +323,7 @@ export function deriveLiveDock(active: SessionView, replyCompletedInExplore = fa
       text: streamed
         ? dockExcerpt(streamed)
         : active.intent?.trim() || (running ? toolLabel(running) : 'Working in the active session'),
-      detail: running ? `Using ${running.name.replace(/[_-]+/g, ' ')}` : active.intent?.trim() || null,
+      detail: running ? `Using ${plainToolName(running.name)}` : active.intent?.trim() || null,
       startedAt: active.thinkingSince ?? running?.startedAt ?? active.timeline.busyFrom,
     };
   }
@@ -279,15 +367,6 @@ function formatElapsed(startedAt: number | null, now: number): string | null {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return minutes > 0 ? `${minutes}:${remainder.toString().padStart(2, '0')}` : `${seconds}s`;
-}
-
-function CompassGlyph(): JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="m14.8 9.2-1.7 3.9-3.9 1.7 1.7-3.9 3.9-1.7Z" />
-    </svg>
-  );
 }
 
 function CompassSpark(): JSX.Element {
@@ -372,6 +451,7 @@ export function ExploreScreen({
     !working &&
     latestFinalId === replyReadyId;
   const dock = deriveLiveDock(active, replyCompletedInExplore);
+  const dockActivity = deriveLiveDockActivity(active, dock);
 
   useEffect(() => {
     if (dock.tone !== 'working') return undefined;
@@ -425,30 +505,27 @@ export function ExploreScreen({
             </button>
           )}
           <div className="explore-heading">
-            <span className="explore-heading-icon" aria-hidden="true"><CompassGlyph /></span>
             <strong>Explore</strong>
           </div>
+          <CategoryHeaderNav active={view} onSelect={openCategory} />
         </header>
 
         {view === null ? (
           <ExploreHome onOpen={openCategory} />
         ) : (
-          <>
-            <CategoryTabs active={view} onSelect={openCategory} />
-            <div className="explore-category-body">
-              {view === 'discover' ? (
-                <DiscoverView stored={stored} onChange={updateStored} />
-              ) : view === 'watch' ? (
-                <WatchView />
-              ) : view === 'play' ? (
-                <PlayView stored={stored} onChange={updateStored} />
-              ) : (
-                <UnwindView stored={stored} onChange={updateStored} />
-              )}
-            </div>
-          </>
+          <div className="explore-category-body">
+            {view === 'discover' ? (
+              <DiscoverView stored={stored} onChange={updateStored} />
+            ) : view === 'watch' ? (
+              <WatchView />
+            ) : view === 'play' ? (
+              <PlayView stored={stored} onChange={updateStored} />
+            ) : (
+              <UnwindView stored={stored} onChange={updateStored} />
+            )}
+          </div>
         )}
-        <LiveCopilotDock dock={dock} now={now} onOpenChat={onOpenChat} />
+        <LiveCopilotDock dock={dock} activity={dockActivity} now={now} onOpenChat={onOpenChat} />
       </div>
     </main>
   );
@@ -486,24 +563,26 @@ function ExploreHome({
   );
 }
 
-function CategoryTabs({
+function CategoryHeaderNav({
   active,
   onSelect,
 }: {
-  active: ExploreCategory;
+  active: ExploreView;
   onSelect(category: ExploreCategory): void;
 }): JSX.Element {
   return (
-    <nav className="explore-tabs" aria-label="Explore categories">
+    <nav className="explore-header-nav" aria-label="Explore categories">
       {(Object.keys(CATEGORY_META) as ExploreCategory[]).map((category) => (
         <button
           type="button"
           key={category}
           className={active === category ? 'active' : ''}
+          aria-label={`Show ${CATEGORY_META[category].title}`}
           aria-current={active === category ? 'page' : undefined}
           onClick={() => onSelect(category)}
         >
-          {CATEGORY_META[category].title}
+          <span aria-hidden="true">{CATEGORY_META[category].icon}</span>
+          <strong>{CATEGORY_META[category].title}</strong>
         </button>
       ))}
     </nav>
@@ -512,29 +591,44 @@ function CategoryTabs({
 
 function LiveCopilotDock({
   dock,
+  activity,
   now,
   onOpenChat,
 }: {
   dock: LiveDockState;
+  activity: LiveDockActivity[];
   now: number;
   onOpenChat(): void;
 }): JSX.Element {
   const elapsed = formatElapsed(dock.startedAt, now);
+  const activityText = activity.map((item) => item.text).join('. ');
   return (
     <button
       type="button"
       className={`live-copilot-dock live-copilot-dock-${dock.tone}`}
       onClick={onOpenChat}
-      aria-label={`${dock.label}. ${dock.text}${dock.detail ? `. ${dock.detail}` : ''}${elapsed ? `. ${elapsed}` : ''}. Open chat`}
+      aria-label={`${dock.label}. ${activityText}${elapsed ? `. ${elapsed}` : ''}. Open chat`}
     >
-      <span className="live-copilot-dot" aria-hidden="true" />
       <span className="live-copilot-copy">
         <span className="live-copilot-status">
-          <strong>{dock.label}</strong>
+          <span>
+            <i className="live-copilot-dot" aria-hidden="true" />
+            <strong>{dock.label}</strong>
+          </span>
           {elapsed ? <time>{elapsed}</time> : null}
         </span>
-        <span className="live-copilot-text">{dock.text}</span>
-        {dock.detail ? <small>{dock.detail}</small> : null}
+        <span className="live-copilot-feed" aria-hidden="true">
+          {activity.map((item) => (
+            <span
+              key={item.id}
+              className={`live-copilot-line live-copilot-line-${item.state}`}
+            >
+              <i>{item.kind === 'tool' ? '›' : item.state === 'complete' ? '✓' : '•'}</i>
+              <span>{item.text}</span>
+              {item.state === 'live' ? <b /> : null}
+            </span>
+          ))}
+        </span>
       </span>
       <span className="live-copilot-chevron" aria-hidden="true">›</span>
     </button>
@@ -608,7 +702,18 @@ function DiscoverView({
   );
   const index = Math.min(persistedIndex, Math.max(0, deck.length - 1));
   const card = deck[index];
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const pointerStart = useRef<{
+    x: number;
+    y: number;
+    pointerId: number;
+    horizontal: boolean;
+  } | null>(null);
+  const motionTimer = useRef<number | null>(null);
+  const [motion, setMotion] = useState<{
+    phase: 'idle' | 'dragging' | 'settling' | 'exiting';
+    x: number;
+    direction: 1 | -1 | null;
+  }>({ phase: 'idle', x: 0, direction: null });
 
   useEffect(() => {
     if (
@@ -619,6 +724,10 @@ function DiscoverView({
       onChange({ ...stored, discoverDay: today, discoverCycle: cycle, discoverIndex: index });
     }
   }, [cycle, index, onChange, stored, today]);
+
+  useEffect(() => () => {
+    if (motionTimer.current !== null) window.clearTimeout(motionTimer.current);
+  }, []);
 
   const changeCard = (direction: 1 | -1): void => {
     if (!card) return;
@@ -637,17 +746,79 @@ function DiscoverView({
     onChange({ ...stored, completedCardIds: completed, discoverDay: today, discoverCycle: cycle + 1, discoverIndex: 0 });
   };
 
+  const reduceMotion = (): boolean =>
+    globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+  const adjacentCard = (direction: 1 | -1): { card: DiscoverCard; index: number } | null => {
+    if (direction < 0) {
+      return index > 0 ? { card: deck[index - 1], index: index - 1 } : null;
+    }
+    if (index < deck.length - 1) return { card: deck[index + 1], index: index + 1 };
+    const nextDeck = buildDiscoverDeck(DISCOVER_CARDS, hashSeed(`${today}:${cycle + 1}`));
+    return nextDeck[0] ? { card: nextDeck[0], index: 0 } : null;
+  };
+
+  const finishMotion = (callback?: () => void): void => {
+    if (motionTimer.current !== null) window.clearTimeout(motionTimer.current);
+    const duration = reduceMotion() ? 0 : 230;
+    motionTimer.current = window.setTimeout(() => {
+      callback?.();
+      setMotion({ phase: 'idle', x: 0, direction: null });
+      motionTimer.current = null;
+    }, duration);
+  };
+
+  const animateCard = (direction: 1 | -1): void => {
+    if (motion.phase === 'exiting' || !adjacentCard(direction)) return;
+    if (reduceMotion()) {
+      changeCard(direction);
+      setMotion({ phase: 'idle', x: 0, direction: null });
+      return;
+    }
+    const width = Math.max(globalThis.innerWidth || 0, 360);
+    setMotion({
+      phase: 'exiting',
+      x: direction > 0 ? -width * 1.15 : width * 1.15,
+      direction,
+    });
+    finishMotion(() => changeCard(direction));
+  };
+
+  const settleCard = (): void => {
+    if (reduceMotion()) {
+      setMotion({ phase: 'idle', x: 0, direction: null });
+      return;
+    }
+    setMotion((current) => ({ ...current, phase: 'settling', x: 0 }));
+    finishMotion();
+  };
+
   const onPointerUp = (event: ReactPointerEvent<HTMLElement>): void => {
     const start = pointerStart.current;
     pointerStart.current = null;
     if (!start) return;
     const deltaX = event.clientX - start.x;
     const deltaY = event.clientY - start.y;
-    if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return;
-    changeCard(deltaX < 0 ? 1 : -1);
+    if (!start.horizontal) return;
+    if (
+      Math.abs(deltaX) < Math.max(64, event.currentTarget.clientWidth * 0.2) ||
+      Math.abs(deltaX) <= Math.abs(deltaY) * 1.15
+    ) {
+      settleCard();
+      return;
+    }
+    animateCard(deltaX < 0 ? 1 : -1);
   };
 
   if (!card) return <div className="discover-view">No Discover cards are available.</div>;
+  const preview = motion.direction ? adjacentCard(motion.direction) : null;
+  const progress = Math.min(1, Math.abs(motion.x) / Math.max(1, globalThis.innerWidth * 0.55));
+  const rotation = Math.max(-7, Math.min(7, motion.x / 28));
+  const cardStyle = {
+    '--discover-x': `${motion.x}px`,
+    '--discover-rotation': `${rotation}deg`,
+    '--discover-progress': progress,
+  } as CSSProperties;
 
   return (
     <section
@@ -657,41 +828,115 @@ function DiscoverView({
       onKeyDown={(event) => {
         if (event.key === 'ArrowRight') {
           event.preventDefault();
-          changeCard(1);
+          animateCard(1);
         } else if (event.key === 'ArrowLeft') {
           event.preventDefault();
-          changeCard(-1);
+          animateCard(-1);
         }
       }}
       onPointerDown={(event) => {
-        pointerStart.current = { x: event.clientX, y: event.clientY };
+        if ((event.target as HTMLElement).closest('button')) return;
+        pointerStart.current = {
+          x: event.clientX,
+          y: event.clientY,
+          pointerId: event.pointerId,
+          horizontal: false,
+        };
+      }}
+      onPointerMove={(event) => {
+        const start = pointerStart.current;
+        if (!start) return;
+        const deltaX = event.clientX - start.x;
+        const deltaY = event.clientY - start.y;
+        if (!start.horizontal) {
+          if (Math.abs(deltaX) < 8 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
+          start.horizontal = true;
+          event.currentTarget.setPointerCapture?.(start.pointerId);
+        }
+        event.preventDefault();
+        const direction: 1 | -1 = deltaX < 0 ? 1 : -1;
+        if (!adjacentCard(direction)) {
+          setMotion({ phase: 'dragging', x: deltaX * 0.18, direction: null });
+          return;
+        }
+        setMotion({ phase: 'dragging', x: deltaX, direction });
       }}
       onPointerCancel={() => {
         pointerStart.current = null;
+        settleCard();
       }}
       onPointerUp={onPointerUp}
     >
-      <article className="discover-deck-card" aria-live="polite">
-        <div className="discover-deck-topline">
-          <span>{DISCOVER_TOPIC_LABELS[card.topic]}</span>
-          <span>{card.minutes} min</span>
-        </div>
-        <div className="discover-deck-illustration" aria-hidden="true"><CompassSpark /></div>
-        <h1>{card.title}</h1>
-        <p className="discover-deck-summary">{card.summary}</p>
-        <div className="discover-deck-insight">
-          <strong>The useful idea</strong>
-          <p>{card.insight}</p>
-        </div>
-        <div className="discover-deck-actions">
-          <span>{index + 1} / {deck.length}</span>
-          <div>
-            <button type="button" aria-label="Previous Discover card" disabled={index === 0} onClick={() => changeCard(-1)}>←</button>
-            <button type="button" aria-label="Next Discover card" onClick={() => changeCard(1)}>→</button>
-          </div>
-        </div>
-      </article>
+      {preview ? (
+        <DiscoverDeckCard
+          card={preview.card}
+          index={preview.index}
+          total={deck.length}
+          className="discover-deck-card discover-deck-card-underlay"
+          hidden
+        />
+      ) : null}
+      <DiscoverDeckCard
+        card={card}
+        index={index}
+        total={deck.length}
+        className={`discover-deck-card discover-deck-card-current discover-deck-card-${motion.phase}`}
+        style={cardStyle}
+      />
+      <button
+        type="button"
+        className="discover-edge-nav discover-edge-nav-previous"
+        aria-label="Previous Discover card"
+        disabled={index === 0 || motion.phase === 'exiting'}
+        onClick={() => animateCard(-1)}
+      >
+        ←
+      </button>
+      <button
+        type="button"
+        className="discover-edge-nav discover-edge-nav-next"
+        aria-label="Next Discover card"
+        disabled={motion.phase === 'exiting'}
+        onClick={() => animateCard(1)}
+      >
+        →
+      </button>
     </section>
+  );
+}
+
+function DiscoverDeckCard({
+  card,
+  index,
+  total,
+  className,
+  style,
+  hidden = false,
+}: {
+  card: DiscoverCard;
+  index: number;
+  total: number;
+  className: string;
+  style?: CSSProperties;
+  hidden?: boolean;
+}): JSX.Element {
+  return (
+    <article className={className} style={style} aria-live={hidden ? undefined : 'polite'} aria-hidden={hidden || undefined}>
+      <div className="discover-deck-topline">
+        <span>{DISCOVER_TOPIC_LABELS[card.topic]}</span>
+        <span>
+          <b>{index + 1} / {total}</b>
+          <i aria-hidden="true">·</i>
+          <b>{card.minutes} min</b>
+        </span>
+      </div>
+      <h1>{card.title}</h1>
+      <p className="discover-deck-summary">{card.summary}</p>
+      <div className="discover-deck-insight">
+        <strong>The useful idea</strong>
+        <p>{card.insight}</p>
+      </div>
+    </article>
   );
 }
 
