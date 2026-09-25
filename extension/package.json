@@ -1,6 +1,6 @@
 {
   "name": "@aasis21/weft-extension",
-  "version": "0.2.25",
+  "version": "0.2.26",
   "private": true,
   "type": "module",
   "description": "Weft Copilot CLI extension with a dormant bootstrap and lazy active runtime. Source in src/, bundled by esbuild with @github/copilot-sdk external.",
