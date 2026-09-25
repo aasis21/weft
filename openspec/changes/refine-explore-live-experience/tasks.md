@@ -49,4 +49,4 @@
 - [x] 6.3 Implement pointer-follow, bounded rotation, adjacent-card reveal, exit, spring-back, keyboard, and reduced-motion behavior
 - [x] 6.4 Increase the Live Copilot Dock height and render up to three ordered real assistant and tool events
 - [x] 6.5 Add focused tests for integrated navigation, dense card layout, swipe motion, real activity ordering, and quiet working behavior
-- [ ] 6.6 Run complete validation, review, merge, release, and verify production
+- [x] 6.6 Run complete validation, review, merge, release, and verify production
