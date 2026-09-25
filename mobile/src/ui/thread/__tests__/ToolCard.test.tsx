@@ -4,6 +4,46 @@ import { describe, expect, it } from 'vitest';
 import { ToolCard } from '@/ui/thread/ToolCard';
 
 describe('ToolCard', () => {
+  it('renders shell input, output, and completion status as separate surfaces', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ToolCard
+        item={{
+          kind: 'tool',
+          id: 'shell-1',
+          name: 'powershell',
+          args: {
+            command: 'git -C "C:\\repos\\weft" status --short',
+            description: 'Check working tree',
+            initial_wait: 120,
+            mode: 'sync',
+          },
+          status: 'success',
+          resultPreview: ' M mobile/src/App.tsx\n<shellId: 7 completed with exit code 0>',
+          startedAt: 1,
+          finishedAt: 2001,
+          ts: 1,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /RunCheck working tree2\.0s/i }));
+
+    expect(screen.getByText('INPUT')).toBeInTheDocument();
+    expect(screen.getByText('OUTPUT')).toBeInTheDocument();
+    expect(screen.getByText('git -C "C:\\repos\\weft" status --short')).toHaveClass('tc-command');
+    expect(screen.getByText('M mobile/src/App.tsx')).toHaveClass('tc-output');
+    expect(screen.getByText('Exit 0')).toBeInTheDocument();
+    expect(screen.getByText('shell 7')).toBeInTheDocument();
+    expect(screen.getByText('sync')).toBeInTheDocument();
+    expect(screen.getByText('wait up to 120s')).toBeInTheDocument();
+    expect(screen.getByText(/"command":/)).not.toBeVisible();
+
+    await user.click(screen.getByText('View raw arguments'));
+    expect(screen.getByText(/"command":/)).toBeVisible();
+  });
+
   it('renders edit tool arguments as a colored unified diff', async () => {
     const user = userEvent.setup();
 

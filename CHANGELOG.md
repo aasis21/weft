@@ -5,6 +5,13 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.25
+
+- Replaced raw shell-tool JSON with separate mobile-friendly Input, Output, and Status
+  surfaces while keeping raw arguments available on demand.
+- Made resumable sessions a full-width stacked list with compact metadata, aligned ages,
+  subtle dividers, and a lightweight selected state.
+
 ## 0.2.24
 
 - Preserved ordered-list start markers so numbered findings separated by explanatory

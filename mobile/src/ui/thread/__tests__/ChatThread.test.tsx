@@ -72,7 +72,7 @@ describe('ChatThread', () => {
 
   it('renders a tool card and expands details on click', async () => {
     const user = userEvent.setup();
-    render(
+    const { container } = render(
       <ChatThread
         items={[
           {
@@ -96,9 +96,9 @@ describe('ChatThread', () => {
 
     await user.click(toolButton);
     expect(toolButton).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('ARGUMENTS')).toBeInTheDocument();
-    expect(screen.getByText('RESULT')).toBeInTheDocument();
-    expect(screen.getByText(/"command": "npm test"/)).toBeInTheDocument();
+    expect(screen.getByText('INPUT')).toBeInTheDocument();
+    expect(screen.getByText('OUTPUT')).toBeInTheDocument();
+    expect(container.querySelector('.tc-command')).toHaveTextContent('npm test');
     expect(screen.getByText('passed')).toBeInTheDocument();
   });
 

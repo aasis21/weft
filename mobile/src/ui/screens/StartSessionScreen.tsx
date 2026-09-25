@@ -536,11 +536,13 @@ export function StartSessionScreen({
                                   setError(null);
                                 }}
                               >
-                                <span className="device-card-name">{label}</span>
+                                <span className="device-session-main">
+                                  <span className="device-card-name">{label}</span>
+                                  {when ? <span className="device-session-age">{when}</span> : null}
+                                </span>
                                 <span className="device-card-sub device-session-status">
                                   {live ? 'already on this phone' : 'resumable'}
                                   {subtitle ? ` · ${subtitle}` : ''}
-                                  {when ? ` · ${when}` : ''}
                                 </span>
                               </button>
                             </li>

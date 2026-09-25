@@ -337,6 +337,19 @@ describe('StartSessionScreen — the resumable list', () => {
     expect(screen.queryByText(/showing/i)).toBeNull();
   });
 
+  it('uses compact resume rows with age separated from repository metadata', () => {
+    const sessions = [
+      storedSession({ sessionId: 'a', title: 'Fix the auth bug', updatedAt: Date.now() - 60_000 }),
+    ];
+    renderScreen({ devices: [makeDevice({ sessions, projects: [] })], initialMode: 'resume' });
+
+    const firstRow = screen.getByRole('radio', { name: /fix the auth bug/i });
+    expect(firstRow.querySelector('.device-session-main .device-card-name')).toHaveTextContent('Fix the auth bug');
+    expect(firstRow.querySelector('.device-session-age')).toBeInTheDocument();
+    expect(firstRow.querySelector('.device-session-status')).toHaveTextContent(/resumable.*ModernOrder.*main/i);
+    expect(firstRow.querySelector('.device-session-status')).not.toHaveTextContent(/ago/i);
+  });
+
   it('offers registered projects above folders the store merely happens to know about', () => {
     // The two sets diverge: the store knows every cwd a session ever ran in, registered or not.
     // Resume needs the union, or the folder you are most likely to want is missing whenever it has
