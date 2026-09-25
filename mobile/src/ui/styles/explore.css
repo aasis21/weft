@@ -311,20 +311,8 @@
 .explore-continue strong { margin-top: 2px; font-size: 13px; }
 .explore-continue span:last-child { color: var(--fg-faint); font-size: 22px; }
 
-.explore-tabs {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 9px 10px 8px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--bg-rule);
-  scrollbar-width: none;
-}
-
-.explore-tabs::-webkit-scrollbar,
 .discover-topic-row::-webkit-scrollbar { display: none; }
 
-.explore-tabs button,
 .discover-topic-row button,
 .duration-row button {
   min-height: 36px;
@@ -338,7 +326,6 @@
   white-space: nowrap;
 }
 
-.explore-tabs button.active,
 .discover-topic-row button.active,
 .duration-row button.active {
   border-color: color-mix(in srgb, var(--accent) 25%, var(--bg-rule));
@@ -1049,6 +1036,7 @@
 }
 
 .explore-heading {
+  flex: 0 0 auto;
   justify-content: flex-start;
 }
 
@@ -1056,10 +1044,62 @@
   font-size: 16px;
 }
 
-.explore-heading-icon {
-  width: 29px;
-  height: 29px;
-  border-radius: 9px;
+.explore-header-nav {
+  display: flex;
+  min-width: 0;
+  margin-left: auto;
+  align-items: center;
+  gap: 3px;
+}
+
+.explore-header-nav button {
+  display: flex;
+  min-width: 36px;
+  height: 38px;
+  padding: 0 9px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--fg-faint);
+  background: transparent;
+}
+
+.explore-header-nav button > span {
+  display: grid;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+}
+
+.explore-header-nav svg {
+  width: 18px;
+  height: 18px;
+}
+
+.explore-header-nav strong {
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  font-size: 11px;
+  transition:
+    max-width 180ms ease,
+    opacity 140ms ease;
+  white-space: nowrap;
+}
+
+.explore-header-nav button.active {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--bg-rule));
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.explore-header-nav button.active strong {
+  max-width: 64px;
+  opacity: 1;
 }
 
 .explore-home,
@@ -1111,11 +1151,6 @@
   font-size: 15px;
 }
 
-.explore-tabs {
-  min-height: 48px;
-  padding: 6px 10px;
-}
-
 .explore-category-body {
   padding-bottom: 0;
   overflow-y: auto;
@@ -1127,11 +1162,11 @@
   position: relative;
   flex: 0 0 auto;
   width: calc(100% - 20px);
-  min-height: 86px;
-  max-height: 96px;
+  min-height: 128px;
+  max-height: 140px;
   margin: 8px 10px max(8px, env(safe-area-inset-bottom));
   padding: 10px 12px;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
   overflow: hidden;
   border: 1px solid var(--bg-rule);
@@ -1145,6 +1180,7 @@
 }
 
 .live-copilot-dot {
+  display: inline-block;
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
@@ -1183,13 +1219,20 @@
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 7px;
 }
 
 .live-copilot-status {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+}
+
+.live-copilot-status > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: 8px;
 }
 
@@ -1205,23 +1248,68 @@
   font: 700 10px var(--mono);
 }
 
-.live-copilot-text {
-  display: -webkit-box;
+.live-copilot-feed {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.live-copilot-copy small {
-  overflow: hidden;
+.live-copilot-line {
+  display: grid;
+  min-width: 0;
+  min-height: 20px;
+  padding: 3px 6px;
+  grid-template-columns: 10px minmax(0, 1fr) 5px;
+  align-items: center;
+  gap: 5px;
+  border-radius: 7px;
+  color: var(--fg-dim);
+  background: color-mix(in srgb, var(--bg) 35%, transparent);
+  font-size: 11px;
+  line-height: 1.25;
+  animation: live-copilot-line-in 180ms ease-out;
+}
+
+.live-copilot-line > i {
   color: var(--fg-faint);
-  font-size: 10px;
-  line-height: 1.2;
+  font-style: normal;
+  text-align: center;
+}
+
+.live-copilot-line > span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.live-copilot-line-live {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 700;
+}
+
+.live-copilot-line-complete > i { color: var(--success); }
+.live-copilot-line-error > i { color: var(--error); }
+.live-copilot-line-context { color: var(--fg-faint); }
+
+.live-copilot-line > b {
+  width: 4px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: live-copilot-cursor 900ms steps(1, end) infinite;
+}
+
+@keyframes live-copilot-line-in {
+  from { opacity: 0; transform: translateY(7px); }
+}
+
+@keyframes live-copilot-cursor {
+  50% { opacity: 0; }
 }
 
 .live-copilot-chevron {
@@ -1232,15 +1320,20 @@
 
 .discover-view {
   display: grid;
+  position: relative;
   height: 100%;
   padding: 10px 12px;
   overflow-y: auto;
+  isolation: isolate;
   outline: none;
   touch-action: pan-y;
 }
 
 .discover-deck-card {
   display: flex;
+  position: relative;
+  z-index: 2;
+  grid-area: 1 / 1;
   min-height: 0;
   width: min(100%, 680px);
   min-height: 100%;
@@ -1256,6 +1349,27 @@
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
 }
 
+.discover-deck-card-current {
+  transform: translate3d(var(--discover-x, 0), 0, 0) rotate(var(--discover-rotation, 0));
+  transform-origin: 50% 90%;
+  will-change: transform;
+}
+
+.discover-deck-card-settling,
+.discover-deck-card-exiting {
+  transition: transform 230ms cubic-bezier(0.22, 0.75, 0.28, 1);
+}
+
+.discover-deck-card-underlay {
+  z-index: 1;
+  pointer-events: none;
+  transform: scale(0.975);
+  opacity: 0.78;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent),
+    0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
 .discover-deck-topline {
   display: flex;
   align-items: center;
@@ -1268,24 +1382,23 @@
   text-transform: uppercase;
 }
 
-.discover-deck-illustration {
-  display: grid;
-  width: clamp(50px, 9vh, 72px);
-  aspect-ratio: 1;
-  margin: clamp(12px, 2.5vh, 22px) 0;
-  place-items: center;
-  border-radius: 20px;
-  color: var(--accent);
-  background: var(--accent-soft);
+.discover-deck-topline > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
-.discover-deck-illustration svg {
-  width: 52%;
-  height: 52%;
+.discover-deck-topline b {
+  font: inherit;
+}
+
+.discover-deck-topline i {
+  opacity: 0.55;
+  font-style: normal;
 }
 
 .discover-deck-card h1 {
-  margin: 0;
+  margin: clamp(15px, 2.5vh, 24px) 0 0;
   font-family: var(--display);
   font-size: clamp(24px, 7vw, 38px);
   line-height: 1.04;
@@ -1321,36 +1434,28 @@
   line-height: 1.45;
 }
 
-.discover-deck-actions {
-  display: flex;
-  min-height: 38px;
-  margin-top: auto;
-  padding-top: 10px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--fg-faint);
-  font: 700 10px var(--mono);
-}
-
-.discover-deck-actions > div {
-  display: flex;
-  gap: 5px;
-}
-
-.discover-deck-actions > div button {
+.discover-edge-nav {
   display: grid;
-  width: 36px;
-  height: 36px;
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  width: 38px;
+  height: 50px;
   place-items: center;
   border: 1px solid var(--bg-rule);
-  border-radius: 11px;
+  border-radius: 14px;
   color: var(--fg);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  transform: translateY(-50%);
+  backdrop-filter: blur(12px);
 }
 
-.discover-deck-actions > div button:disabled {
-  opacity: 0.35;
+.discover-edge-nav-previous { left: 14px; }
+.discover-edge-nav-next { right: 14px; }
+
+.discover-edge-nav:disabled {
+  opacity: 0.22;
 }
 
 .watch-view,
@@ -1416,12 +1521,11 @@
   .explore-choice { padding: 10px; }
   .explore-choice-icon { width: 32px; height: 32px; }
   .live-copilot-dock {
-    min-height: 76px;
-    max-height: 82px;
+    min-height: 112px;
+    max-height: 120px;
     margin-block: 6px max(6px, env(safe-area-inset-bottom));
   }
   .discover-view { padding-block: 7px; }
-  .discover-deck-illustration { display: none; }
   .discover-deck-insight { margin-top: 9px; padding: 9px 11px; }
   .game-view,
   .unwind-session,
@@ -1470,7 +1574,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .live-copilot-dock-working .live-copilot-dot {
+  .live-copilot-dock-working .live-copilot-dot,
+  .live-copilot-line,
+  .live-copilot-line > b {
     animation: none;
+  }
+  .explore-header-nav strong,
+  .discover-deck-card-current {
+    transition: none;
   }
 }

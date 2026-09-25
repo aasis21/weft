@@ -10,6 +10,7 @@ import {
   createSignalSequence,
   createThreadlinePoints,
   deriveLiveDock,
+  deriveLiveDockActivity,
 } from '@/ui/explore/ExploreScreen';
 import { DISCOVER_CARDS } from '@/ui/explore/discoverCards';
 
@@ -39,6 +40,19 @@ function renderExplore(active = session()) {
       onGoHome={vi.fn()}
     />,
   );
+}
+
+function useReducedMotion(): void {
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: query === '(prefers-reduced-motion: reduce)',
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
 }
 
 beforeEach(() => {
@@ -120,6 +134,66 @@ describe('Live Copilot Dock', () => {
     expect(dock).toHaveTextContent('I am checking the focused mobile tests now.');
     await user.click(dock);
     expect(onOpenChat).toHaveBeenCalledOnce();
+  });
+
+  it('shows ordered real assistant and tool activity without inventing extra steps', () => {
+    const active = session({
+      intent: 'Validate the Explore redesign',
+      timeline: {
+        ...emptyTimeline(),
+        busy: true,
+        busyFrom: 50,
+        items: [
+          {
+            kind: 'tool',
+            id: 'read-tool',
+            name: 'view',
+            args: { description: 'Read ExploreScreen.tsx' },
+            status: 'success',
+            startedAt: 60,
+            finishedAt: 70,
+            ts: 60,
+          },
+          {
+            kind: 'assistant',
+            id: 'streaming-reply',
+            text: 'I am tightening the card layout.',
+            ts: 80,
+            final: false,
+          },
+          {
+            kind: 'tool',
+            id: 'test-tool',
+            name: 'powershell',
+            args: { description: 'Run focused Explore tests' },
+            status: 'running',
+            startedAt: 90,
+            ts: 90,
+          },
+        ],
+      },
+    });
+    const dock = deriveLiveDock(active);
+    const activity = deriveLiveDockActivity(active, dock);
+
+    expect(activity.map((item) => item.text)).toEqual([
+      'Read ExploreScreen.tsx completed',
+      'I am tightening the card layout.',
+      'Run focused Explore tests',
+    ]);
+    renderExplore(active);
+    expect(document.querySelectorAll('.live-copilot-line')).toHaveLength(3);
+    expect(document.querySelector('.live-copilot-feed')).toHaveTextContent(
+      'Run focused Explore tests',
+    );
+
+    const quiet = session({
+      intent: 'Thinking through the safest change',
+      timeline: { ...emptyTimeline(), busy: true, busyFrom: 100 },
+    });
+    expect(deriveLiveDockActivity(quiet, deriveLiveDock(quiet))).toEqual([
+      expect.objectContaining({ text: 'Thinking through the safest change' }),
+    ]);
   });
 
   it('shows a newly completed active-session reply without relying on unread state', () => {
@@ -264,6 +338,8 @@ describe('Explore navigation and Discover deck', () => {
 
     expect(screen.getByRole('heading', { name: 'What do you feel like?' })).toBeInTheDocument();
     expect(screen.queryByText(/Pick something useful/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.explore-header-nav button')).toHaveLength(4);
+    expect(document.querySelector('.explore-tabs')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenSessions).toHaveBeenCalledOnce();
   });
@@ -277,11 +353,13 @@ describe('Explore navigation and Discover deck', () => {
     expect(document.querySelector('.agent-activity-view')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
-    expect(document.querySelector('.explore-tabs')?.nextElementSibling).toHaveClass('explore-category-body');
+    expect(screen.getByRole('button', { name: 'Show Play' })).toHaveClass('active');
+    expect(document.querySelector('.explore-header')?.nextElementSibling).toHaveClass('explore-category-body');
     expect(document.querySelector('.explore-category-body')?.nextElementSibling).toHaveClass('live-copilot-dock');
   });
 
   it('integrates category detail with browser history without adding card entries', () => {
+    useReducedMotion();
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
     expect(window.history.state).toEqual({ weftView: 'explore', exploreView: 'discover' });
@@ -307,11 +385,20 @@ describe('Explore navigation and Discover deck', () => {
   });
 
   it('shows one complete card, advances with controls and keyboard, and persists position', () => {
+    useReducedMotion();
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
     const deck = screen.getByRole('region', { name: 'Discover card deck' });
     expect(document.querySelectorAll('.discover-deck-card')).toHaveLength(1);
     const firstTitle = document.querySelector('.discover-deck-card h1')?.textContent;
+    expect(document.querySelector('.discover-deck-illustration')).not.toBeInTheDocument();
+    expect(document.querySelector('.discover-deck-actions')).not.toBeInTheDocument();
+    expect(document.querySelector('.discover-deck-topline > span:last-child')).toHaveTextContent(
+      new RegExp(`1 / ${DISCOVER_CARDS.length}·\\d+ min`),
+    );
+    expect(screen.getByRole('button', { name: 'Previous Discover card' })).toHaveClass(
+      'discover-edge-nav',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Next Discover card' }));
     expect(document.querySelector('.discover-deck-card h1')?.textContent).not.toBe(firstTitle);
@@ -321,18 +408,29 @@ describe('Explore navigation and Discover deck', () => {
     expect(document.querySelector('.discover-deck-card h1')?.textContent).toBe(firstTitle);
   });
 
-  it('responds only to dominant horizontal swipes', () => {
+  it('follows dominant horizontal swipes, reveals the next card, and commits after exit', () => {
+    vi.useFakeTimers();
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
     const deck = screen.getByRole('region', { name: 'Discover card deck' });
     const firstTitle = document.querySelector('.discover-deck-card h1')?.textContent;
 
     fireEvent.pointerDown(deck, { clientX: 10, clientY: 100 });
+    fireEvent.pointerMove(deck, { clientX: 30, clientY: 20 });
     fireEvent.pointerUp(deck, { clientX: 30, clientY: 20 });
     expect(document.querySelector('.discover-deck-card h1')?.textContent).toBe(firstTitle);
 
     fireEvent.pointerDown(deck, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(deck, { clientX: 20, clientY: 98 });
+    expect(document.querySelector('.discover-deck-card-current')).toHaveClass(
+      'discover-deck-card-dragging',
+    );
+    expect(document.querySelector('.discover-deck-card-underlay')).toBeInTheDocument();
     fireEvent.pointerUp(deck, { clientX: 20, clientY: 98 });
+    expect(document.querySelector('.discover-deck-card-current')).toHaveClass(
+      'discover-deck-card-exiting',
+    );
+    act(() => vi.advanceTimersByTime(240));
     expect(document.querySelector('.discover-deck-card h1')?.textContent).not.toBe(firstTitle);
     expect(screen.queryByRole('group', { name: 'Discover topics' })).not.toBeInTheDocument();
   });
@@ -345,12 +443,13 @@ describe('Explore navigation and Discover deck', () => {
     }));
     const user = userEvent.setup();
     renderExplore();
-    await user.click(screen.getByRole('button', { name: /discover/i }));
+    await user.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
     expect(localStorage.getItem('weft.explore.v1')).not.toContain(legacyKey);
-    expect(document.querySelectorAll('.discover-deck-actions button')).toHaveLength(2);
+    expect(document.querySelectorAll('.discover-edge-nav')).toHaveLength(2);
   });
 
   it('starts a new shuffled cycle only after the current deck is exhausted', () => {
+    useReducedMotion();
     const today = new Date();
     const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     localStorage.setItem('weft.explore.v1', JSON.stringify({

@@ -9,7 +9,11 @@ Explore SHALL use the established Weft sessions navigation affordance rather tha
 
 #### Scenario: Compact header
 - **WHEN** Explore is displayed on mobile
-- **THEN** the header contains the sessions button, compass mark, and Explore title without a Back button, subtitle, count, or right-side action
+- **THEN** the header contains the sessions button, Explore title, and compact accessible tiles for Discover, Watch, Play, and Unwind without a separate category band
+
+#### Scenario: Active category
+- **WHEN** an Explore category is selected
+- **THEN** its header tile expands to show the category label while the other category tiles remain compact
 
 #### Scenario: Desktop-wide navigation
 - **WHEN** the persistent desktop session sidebar is visible
@@ -20,7 +24,15 @@ Explore SHALL display a fixed bottom dock that projects live state from the acti
 
 #### Scenario: Stream assistant text
 - **WHEN** an assistant response is arriving through assistant deltas
-- **THEN** the dock updates the latest normalized text in place using at most two visible lines without changing height
+- **THEN** the current dock activity line updates normalized text in place with a live indicator without changing height
+
+#### Scenario: Show ordered tool activity
+- **WHEN** tools start, complete, or fail while the session is working
+- **THEN** the dock shows up to three real assistant and tool events in timeline order and rolls older activity upward
+
+#### Scenario: Do not invent activity
+- **WHEN** the session remains busy without receiving a new assistant or tool event
+- **THEN** the dock preserves the latest real event with elapsed time and an active indicator rather than fabricating progress text
 
 #### Scenario: Show work before text arrives
 - **WHEN** the session is busy but has no streamed assistant text
@@ -47,19 +59,23 @@ Discover SHALL present one complete useful-idea card at a time without topic fil
 
 #### Scenario: Open Discover
 - **WHEN** the user selects Discover
-- **THEN** the application immediately shows one complete card with topic, duration, title, summary, useful insight, and deck position
+- **THEN** the application immediately shows one complete card with topic, deck position beside duration, title, summary, and useful insight without a standalone illustration or bottom action row
 
 #### Scenario: Advance by touch
 - **WHEN** the user swipes left beyond the gesture threshold
-- **THEN** Discover advances exactly one card
+- **THEN** the current card follows the gesture, exits left, reveals the next card, and advances exactly once
 
 #### Scenario: Return by touch
 - **WHEN** the user swipes right beyond the gesture threshold and a prior card exists
-- **THEN** Discover returns exactly one card
+- **THEN** the current card follows the gesture, exits right, reveals the previous card, and returns exactly once
+
+#### Scenario: Cancel an incomplete swipe
+- **WHEN** a horizontal gesture ends before the navigation threshold
+- **THEN** the current card springs back without changing deck position
 
 #### Scenario: Operate without touch
 - **WHEN** the user presses Arrow Left, Arrow Right, or the accessible Previous and Next controls
-- **THEN** Discover performs the equivalent single-card navigation
+- **THEN** Discover performs the equivalent animated single-card navigation from controls positioned at the card's vertical edges
 
 #### Scenario: Preserve vertical scrolling
 - **WHEN** enlarged content requires scrolling
@@ -93,7 +109,7 @@ Explore SHALL fit its standard mobile experiences within the dynamic viewport wi
 
 #### Scenario: Category view
 - **WHEN** a category is displayed at a supported standard phone size
-- **THEN** the header, compact category tabs, category content, and Live Copilot Dock are simultaneously visible without page scrolling
+- **THEN** the integrated header navigation, category content, and taller Live Copilot Dock are simultaneously visible without page scrolling
 
 #### Scenario: Short viewport
 - **WHEN** viewport height is below the comfortable breakpoint
