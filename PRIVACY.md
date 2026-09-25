@@ -70,7 +70,7 @@ request metadata such as your IP address and browser headers when those assets l
 ## Optional Explore video provider
 
 Explore's live Copilot dock only projects activity already present in the active
-end-to-end encrypted session. Its bundled shuffled Discover deck, saved-card state,
+end-to-end encrypted session. Its bundled shuffled Discover deck, reading progress,
 Play activities, Unwind activities, and scores remain local to the phone. If a
 deployment configures the optional Watch widget, Weft displays a disclosure and does
 not contact that provider until you explicitly choose to load the video feed.

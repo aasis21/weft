@@ -85,23 +85,6 @@
   white-space: nowrap;
 }
 
-.explore-saved-count {
-  position: absolute;
-  top: 1px;
-  right: 0;
-  display: grid;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  place-items: center;
-  border: 2px solid var(--bg);
-  border-radius: 999px;
-  color: #fff;
-  background: var(--accent);
-  font-size: 9px;
-  font-weight: 800;
-}
-
 .agent-pulse {
   display: flex;
   position: relative;
@@ -560,23 +543,6 @@
   font-size: 10px;
   font-weight: 800;
 }
-
-.discover-save {
-  position: absolute;
-  top: 10px;
-  right: 9px;
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border: 0;
-  border-radius: 11px;
-  color: var(--fg-faint);
-  background: transparent;
-}
-
-.discover-save svg { width: 18px; height: 18px; }
-.discover-save:hover { color: var(--accent); background: var(--accent-soft); }
 
 .discover-reader {
   max-width: 680px;
@@ -1270,10 +1236,6 @@
   padding: 10px 12px;
   overflow-y: auto;
   outline: none;
-  touch-action: pan-x;
-}
-
-.discover-view-scrollable {
   touch-action: pan-y;
 }
 
@@ -1369,16 +1331,6 @@
   gap: 10px;
   color: var(--fg-faint);
   font: 700 10px var(--mono);
-}
-
-.discover-deck-actions .discover-save {
-  position: static;
-  display: inline-flex;
-  width: auto;
-  height: 38px;
-  padding: 0 9px;
-  align-items: center;
-  gap: 5px;
 }
 
 .discover-deck-actions > div {

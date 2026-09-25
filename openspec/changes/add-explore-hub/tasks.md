@@ -17,8 +17,8 @@
 
 - [x] 3.1 Define the typed Discover card model and add all 50 original bundled starter cards
 - [x] 3.2 Build the Discover card feed and accessible reader with estimated duration and return-position preservation
-- [x] 3.3 Add local saved-card and reading-completion persistence using repository-standard storage helpers
-- [x] 3.4 Add tests for catalog integrity, offline rendering, reader navigation, and saved state
+- [x] 3.3 Add local reading-completion persistence using repository-standard storage helpers
+- [x] 3.4 Add tests for catalog integrity, offline rendering, reader navigation, and reading state
 
 ## 4. Watch Integration
 

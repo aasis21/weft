@@ -52,10 +52,6 @@ Discover SHALL provide 50 original, bundled, offline-readable cards with stable 
 - **WHEN** the device has no network connection
 - **THEN** the user can browse and read every bundled Discover card
 
-#### Scenario: Save a card
-- **WHEN** the user saves or unsaves a Discover card
-- **THEN** the selection persists locally across application restarts
-
 #### Scenario: Read a card
 - **WHEN** the user opens a Discover card
 - **THEN** the application presents readable typography, semantic headings, estimated duration, and a route back to the prior card position
@@ -116,7 +112,7 @@ Explore SHALL preserve Weft-owned approvals, elicitations, errors, and completed
 Explore SHALL keep personalization and activity state local and SHALL NOT disclose private Weft session context to content providers.
 
 #### Scenario: Persist local preferences
-- **WHEN** the user changes category, saved cards, game progress, or unwind preferences
+- **WHEN** the user changes category, reading progress, game progress, or unwind preferences
 - **THEN** the application stores only those Explore-specific values in local application storage
 
 #### Scenario: Load external content

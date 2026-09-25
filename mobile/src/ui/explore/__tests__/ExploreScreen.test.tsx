@@ -264,7 +264,6 @@ describe('Explore navigation and Discover deck', () => {
 
     expect(screen.getByRole('heading', { name: 'What do you feel like?' })).toBeInTheDocument();
     expect(screen.queryByText(/Pick something useful/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/saved Discover/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenSessions).toHaveBeenCalledOnce();
   });
@@ -318,27 +317,37 @@ describe('Explore navigation and Discover deck', () => {
     expect(document.querySelector('.discover-deck-card h1')?.textContent).not.toBe(firstTitle);
     expect(JSON.parse(localStorage.getItem('weft.explore.v1') ?? '{}').discoverIndex).toBe(1);
 
-    fireEvent.keyDown(deck, { key: 'ArrowDown' });
+    fireEvent.keyDown(deck, { key: 'ArrowLeft' });
     expect(document.querySelector('.discover-deck-card h1')?.textContent).toBe(firstTitle);
   });
 
-  it('responds only to dominant vertical swipes and keeps Save local', () => {
+  it('responds only to dominant horizontal swipes', () => {
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
     const deck = screen.getByRole('region', { name: 'Discover card deck' });
     const firstTitle = document.querySelector('.discover-deck-card h1')?.textContent;
 
     fireEvent.pointerDown(deck, { clientX: 10, clientY: 100 });
-    fireEvent.pointerUp(deck, { clientX: 100, clientY: 80 });
+    fireEvent.pointerUp(deck, { clientX: 30, clientY: 20 });
     expect(document.querySelector('.discover-deck-card h1')?.textContent).toBe(firstTitle);
 
-    fireEvent.pointerDown(deck, { clientX: 10, clientY: 100 });
-    fireEvent.pointerUp(deck, { clientX: 12, clientY: 20 });
+    fireEvent.pointerDown(deck, { clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(deck, { clientX: 20, clientY: 98 });
     expect(document.querySelector('.discover-deck-card h1')?.textContent).not.toBe(firstTitle);
-
-    fireEvent.click(screen.getByRole('button', { name: /^Save / }));
-    expect(localStorage.getItem('weft.explore.v1')).toContain('savedCardIds');
     expect(screen.queryByRole('group', { name: 'Discover topics' })).not.toBeInTheDocument();
+  });
+
+  it('removes the legacy per-card preference from Explore storage', async () => {
+    const legacyKey = 'savedCardIds';
+    localStorage.setItem('weft.explore.v1', JSON.stringify({
+      [legacyKey]: ['legacy-card'],
+      lastCategory: 'discover',
+    }));
+    const user = userEvent.setup();
+    renderExplore();
+    await user.click(screen.getByRole('button', { name: /discover/i }));
+    expect(localStorage.getItem('weft.explore.v1')).not.toContain(legacyKey);
+    expect(document.querySelectorAll('.discover-deck-actions button')).toHaveLength(2);
   });
 
   it('starts a new shuffled cycle only after the current deck is exhausted', () => {
@@ -346,7 +355,6 @@ describe('Explore navigation and Discover deck', () => {
     const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     localStorage.setItem('weft.explore.v1', JSON.stringify({
       lastCategory: 'discover',
-      savedCardIds: [],
       completedCardIds: [],
       discoverDay: day,
       discoverCycle: 2,

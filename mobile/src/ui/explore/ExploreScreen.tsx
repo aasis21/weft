@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -83,7 +82,6 @@ const STORAGE_KEY = 'weft.explore.v1';
 
 interface ExploreStoredState {
   lastCategory?: ExploreCategory;
-  savedCardIds?: string[];
   completedCardIds?: string[];
   discoverDay?: string;
   discoverCycle?: number;
@@ -95,7 +93,6 @@ interface ExploreStoredState {
 
 const DEFAULT_STORED_STATE: Required<ExploreStoredState> = {
   lastCategory: 'discover',
-  savedCardIds: [],
   completedCardIds: [],
   discoverDay: '',
   discoverCycle: 0,
@@ -117,11 +114,8 @@ function parseStoredState(): Required<ExploreStoredState> {
       parsed.lastCategory === 'unwind'
         ? parsed.lastCategory
         : DEFAULT_STORED_STATE.lastCategory;
-    return {
+    const state: Required<ExploreStoredState> = {
       lastCategory,
-      savedCardIds: Array.isArray(parsed.savedCardIds)
-        ? parsed.savedCardIds.filter((value): value is string => typeof value === 'string')
-        : [],
       completedCardIds: Array.isArray(parsed.completedCardIds)
         ? parsed.completedCardIds.filter((value): value is string => typeof value === 'string')
         : [],
@@ -142,6 +136,11 @@ function parseStoredState(): Required<ExploreStoredState> {
         typeof parsed.signalBest === 'number' && parsed.signalBest >= 0 ? Math.floor(parsed.signalBest) : 0,
       vibration: parsed.vibration === true,
     };
+    const legacyCardPreferenceKey = 'savedCardIds';
+    if (legacyCardPreferenceKey in parsed) {
+      globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+    return state;
   } catch {
     return DEFAULT_STORED_STATE;
   }
@@ -320,20 +319,6 @@ function WaveGlyph(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <path d="M3 12c2.2-4.6 4.4-4.6 6.5 0s4.3 4.6 6.5 0 4.3-4.6 5 0" />
-    </svg>
-  );
-}
-
-function BookmarkGlyph({ filled }: { filled: boolean }): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke="currentColor"
-      strokeWidth="1.7"
-      aria-hidden="true"
-    >
-      <path d="M6.5 4.5h11v15l-5.5-3.2-5.5 3.2v-15Z" />
     </svg>
   );
 }
@@ -623,26 +608,7 @@ function DiscoverView({
   );
   const index = Math.min(persistedIndex, Math.max(0, deck.length - 1));
   const card = deck[index];
-  const saved = new Set(stored.savedCardIds);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const viewRef = useRef<HTMLElement | null>(null);
-  const [scrollable, setScrollable] = useState(false);
-
-  useLayoutEffect(() => {
-    const element = viewRef.current;
-    if (!element) return undefined;
-    const measure = (): void => {
-      setScrollable(element.scrollHeight > element.clientHeight + 1);
-    };
-    measure();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    observer?.observe(element);
-    window.addEventListener('resize', measure);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-  }, [card.id]);
 
   useEffect(() => {
     if (
@@ -671,43 +637,34 @@ function DiscoverView({
     onChange({ ...stored, completedCardIds: completed, discoverDay: today, discoverCycle: cycle + 1, discoverIndex: 0 });
   };
 
-  const toggleSaved = (): void => {
-    if (!card) return;
-    const next = new Set(saved);
-    if (next.has(card.id)) next.delete(card.id);
-    else next.add(card.id);
-    onChange({ ...stored, savedCardIds: [...next] });
-  };
-
   const onPointerUp = (event: ReactPointerEvent<HTMLElement>): void => {
     const start = pointerStart.current;
     pointerStart.current = null;
     if (!start) return;
     const deltaX = event.clientX - start.x;
     const deltaY = event.clientY - start.y;
-    if (Math.abs(deltaY) < 48 || Math.abs(deltaY) <= Math.abs(deltaX) * 1.2) return;
-    changeCard(deltaY < 0 ? 1 : -1);
+    if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return;
+    changeCard(deltaX < 0 ? 1 : -1);
   };
 
   if (!card) return <div className="discover-view">No Discover cards are available.</div>;
 
   return (
     <section
-      ref={viewRef}
-      className={`discover-view${scrollable ? ' discover-view-scrollable' : ''}`}
+      className="discover-view"
       aria-label="Discover card deck"
       tabIndex={0}
       onKeyDown={(event) => {
-        if (event.key === 'ArrowUp') {
+        if (event.key === 'ArrowRight') {
           event.preventDefault();
           changeCard(1);
-        } else if (event.key === 'ArrowDown') {
+        } else if (event.key === 'ArrowLeft') {
           event.preventDefault();
           changeCard(-1);
         }
       }}
       onPointerDown={(event) => {
-        pointerStart.current = scrollable ? null : { x: event.clientX, y: event.clientY };
+        pointerStart.current = { x: event.clientX, y: event.clientY };
       }}
       onPointerCancel={() => {
         pointerStart.current = null;
@@ -727,22 +684,10 @@ function DiscoverView({
           <p>{card.insight}</p>
         </div>
         <div className="discover-deck-actions">
-          <button
-            type="button"
-            className="discover-save"
-            aria-label={saved.has(card.id) ? `Unsave ${card.title}` : `Save ${card.title}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleSaved();
-            }}
-          >
-            <BookmarkGlyph filled={saved.has(card.id)} />
-            <span>{saved.has(card.id) ? 'Saved' : 'Save'}</span>
-          </button>
           <span>{index + 1} / {deck.length}</span>
           <div>
-            <button type="button" aria-label="Previous Discover card" disabled={index === 0} onClick={() => changeCard(-1)}>↓</button>
-            <button type="button" aria-label="Next Discover card" onClick={() => changeCard(1)}>↑</button>
+            <button type="button" aria-label="Previous Discover card" disabled={index === 0} onClick={() => changeCard(-1)}>←</button>
+            <button type="button" aria-label="Next Discover card" onClick={() => changeCard(1)}>→</button>
           </div>
         </div>
       </article>

@@ -126,7 +126,7 @@ while you use the phone.
 - **Explicit authority.** The phone receives the same approval boundaries exposed by the
   underlying Copilot session. Weft does not invent an automatic approval policy.
 - **Explore stays local by default.** The live Copilot dock projects data already present
-  in the active encrypted session, while the shuffled Discover deck, saved-card signals,
+  in the active encrypted session, while the shuffled Discover deck, reading progress,
   Play, Unwind, and scores remain on the phone. Attention states return to the canonical
   chat controls. The optional Watch provider loads only after an explicit tap and receives
   no Weft prompt, repository, filename, tool, or session context.
