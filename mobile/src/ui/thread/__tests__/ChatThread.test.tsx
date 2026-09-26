@@ -90,14 +90,14 @@ describe('ChatThread', () => {
       />,
     );
 
-    const toolButton = screen.getByRole('button', { name: /Runnpm test42ms/i });
+    const toolButton = screen.getByRole('button', { name: /Run Commandnpm test42ms/i });
     expect(toolButton.closest('.tool-card')).toHaveClass('success');
     expect(toolButton).toHaveAttribute('aria-expanded', 'false');
 
     await user.click(toolButton);
     expect(toolButton).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('ARGUMENTS')).toBeInTheDocument();
-    expect(screen.getByText('RESULT')).toBeInTheDocument();
+    expect(screen.getByText('INPUT')).toBeInTheDocument();
+    expect(screen.getByText('OUTPUT')).toBeInTheDocument();
     expect(screen.getByText(/"command": "npm test"/)).toBeInTheDocument();
     expect(screen.getByText('passed')).toBeInTheDocument();
   });
@@ -507,6 +507,31 @@ describe('letting the reader scroll away while the agent is still writing', () =
     ]);
 
     expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
+  });
+
+  it('honors touch intent when a heartbeat lands before momentum scroll updates position', async () => {
+    const { scroller, scrollIntoView, rerender } = mountStreaming();
+    await settleThread();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 400 });
+    fireEvent.scroll(scroller);
+
+    fireEvent.touchStart(scroller, { touches: [{ clientY: 200 }] });
+    fireEvent.touchMove(scroller, { touches: [{ clientY: 230 }] });
+    fireEvent.touchEnd(scroller);
+    scrollIntoView.mockClear();
+
+    // A real heartbeat toggles activity/status and can resize the available thread area before
+    // Android reports the momentum scroll position. Neither rerender nor resize may reclaim it.
+    rerender([{ kind: 'assistant', id: 'a1', text: 'one two', ts: now }]);
+    fireEvent(window, new Event('resize'));
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    scrollUp(scroller);
+    fireEvent.scroll(scroller);
     expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
   });
 

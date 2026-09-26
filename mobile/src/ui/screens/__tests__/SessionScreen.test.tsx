@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
 
@@ -253,6 +253,127 @@ describe('SessionScreen desktop keyboard shortcuts', () => {
     } finally {
       matchMediaSpy.mockRestore();
     }
+  });
+});
+
+describe('SessionScreen direct Discover gesture', () => {
+  it('commits a horizontally dominant left swipe from the right edge', () => {
+    const onOpenDiscover = vi.fn();
+    const now = vi.spyOn(performance, 'now');
+    now.mockReturnValueOnce(0).mockReturnValueOnce(500);
+    const { container } = renderActive(makeSession('live'), { onOpenDiscover });
+    const root = container.querySelector('.weft-session') as HTMLElement;
+
+    fireEvent.touchStart(root, { touches: [{ clientX: window.innerWidth - 4, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: window.innerWidth - 280, clientY: 205 }] });
+    expect(container.querySelector('.discover-edge-preview')).toBeInTheDocument();
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: window.innerWidth - 280, clientY: 205 }] });
+
+    expect(onOpenDiscover).toHaveBeenCalledOnce();
+  });
+
+  it('cancels short or vertically dominant gestures and springs the preview away', () => {
+    vi.useFakeTimers();
+    const onOpenDiscover = vi.fn();
+    const now = vi.spyOn(performance, 'now');
+    now.mockReturnValueOnce(0).mockReturnValueOnce(1_000);
+    const { container } = renderActive(makeSession('live'), { onOpenDiscover });
+    const root = container.querySelector('.weft-session') as HTMLElement;
+
+    fireEvent.touchStart(root, { touches: [{ clientX: window.innerWidth - 4, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: window.innerWidth - 36, clientY: 201 }] });
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: window.innerWidth - 36, clientY: 201 }] });
+    expect(container.querySelector('.discover-edge-preview')).toHaveClass('settling');
+    expect(onOpenDiscover).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(190));
+    expect(container.querySelector('.discover-edge-preview')).not.toBeInTheDocument();
+
+    fireEvent.touchStart(root, { touches: [{ clientX: window.innerWidth - 4, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: window.innerWidth - 44, clientY: 100 }] });
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: window.innerWidth - 200, clientY: 100 }] });
+    expect(onOpenDiscover).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(root, { touches: [{ clientX: window.innerWidth - 20, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: window.innerWidth - 2, clientY: 200 }] });
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: window.innerWidth - 2, clientY: 200 }] });
+    expect(onOpenDiscover).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('does not start outside the edge or while an approval overlay needs attention', () => {
+    const onOpenDiscover = vi.fn();
+    const { container, rerender } = renderActive(makeSession('live'), { onOpenDiscover });
+    const root = container.querySelector('.weft-session') as HTMLElement;
+
+    fireEvent.touchStart(root, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: 0, clientY: 200 }] });
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: 0, clientY: 200 }] });
+    expect(onOpenDiscover).not.toHaveBeenCalled();
+
+    const blocked = makeSession('live');
+    blocked.timeline.approvals = [{
+      requestId: 'approval-1',
+      toolName: 'powershell',
+      toolArgs: {},
+      options: [{ id: 'approve', label: 'Approve' }],
+    }] as never;
+    rerender(
+      <SessionScreen
+        active={blocked as never}
+        sessions={[blocked] as never}
+        activeId="session-a"
+        onPrompt={vi.fn()}
+        onApprove={vi.fn()}
+        onElicitationRespond={vi.fn()}
+        onInterrupt={vi.fn()}
+        onModeChange={vi.fn()}
+        onCommand={vi.fn()}
+        onRetry={vi.fn()}
+        onSelectSession={vi.fn()}
+        onAddSession={vi.fn()}
+        onOpenDiscover={onOpenDiscover}
+        onRemoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onReconnect={vi.fn()}
+        onGoHome={vi.fn()}
+        onLoadEarlier={vi.fn()}
+      />,
+    );
+    const blockedRoot = container.querySelector('.weft-session') as HTMLElement;
+    fireEvent.touchStart(blockedRoot, { touches: [{ clientX: window.innerWidth - 4, clientY: 200 }] });
+    fireEvent.touchMove(blockedRoot, { touches: [{ clientX: 20, clientY: 200 }] });
+    fireEvent.touchEnd(blockedRoot, { changedTouches: [{ clientX: 20, clientY: 200 }] });
+    expect(onOpenDiscover).not.toHaveBeenCalled();
+  });
+
+  it('stays disabled while the keyboard is active and skips spatial preview for reduced motion', () => {
+    const onOpenDiscover = vi.fn();
+    const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    const { container } = renderActive(makeSession('live'), { onOpenDiscover });
+    const root = container.querySelector('.weft-session') as HTMLElement;
+    screen.getByRole('textbox', { name: 'mock composer' }).focus();
+
+    fireEvent.touchStart(root, { touches: [{ clientX: window.innerWidth - 4, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: 20, clientY: 200 }] });
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: 20, clientY: 200 }] });
+    expect(onOpenDiscover).not.toHaveBeenCalled();
+
+    screen.getByRole('textbox', { name: 'mock composer' }).blur();
+    fireEvent.touchStart(root, { touches: [{ clientX: window.innerWidth - 4, clientY: 200 }] });
+    fireEvent.touchMove(root, { touches: [{ clientX: 20, clientY: 200 }] });
+    expect(container.querySelector('.discover-edge-preview')).not.toBeInTheDocument();
+    fireEvent.touchEnd(root, { changedTouches: [{ clientX: 20, clientY: 200 }] });
+    expect(onOpenDiscover).toHaveBeenCalledOnce();
+    matchMedia.mockRestore();
   });
 });
 

@@ -3,14 +3,18 @@ import '@/ui/styles/composer.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
 import { MODES } from '@aasis21/weft-shared';
-import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
-import { PHONE_COMMANDS, getPhoneCommand } from '@aasis21/weft-shared';
+import type { PhoneCommand, PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
+import { PHONE_COMMANDS, getPhoneCommand, validatePhoneCommandInput } from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { VoxDock } from '@/ui/voice/VoxDock';
 import type { VoiceState } from '@/ui/voice/useVoxEngine';
 import type { AssistantItem } from '@/lib/timeline';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 import { isDesktopInput } from '@/lib/platform';
+import {
+  getCommandArgumentStage,
+  getCommandArgumentSuggestions,
+} from '@/ui/composer/commandPalette';
 
 /** Inline Vox (voice in / voice out) rendered in the composer where the keyboard would be. */
 export interface ComposerVox {
@@ -73,6 +77,18 @@ interface SlashItem {
   /** Only for `template` kind: the text inserted into the composer. */
   template?: string;
 }
+
+interface ArgumentItem {
+  key: string;
+  kind: 'argument';
+  command: PhoneCommand;
+  label: string;
+  hint: string;
+  input: string;
+  disabled?: boolean;
+}
+
+type PaletteItem = SlashItem | ArgumentItem;
 
 function appendSpeechText(committed: string, fresh: string): string {
   const base = committed.trimEnd();
@@ -186,7 +202,7 @@ function basename(path: string | null): string | null {
   return parts[parts.length - 1] || path;
 }
 
-function slashQuery(value: string): string | null {
+function commandQuery(value: string): string | null {
   if (!value.startsWith('/')) return null;
   const firstToken = value.split(/\s/, 1)[0] ?? '';
   if (value !== firstToken || !/^\/[a-z-]*$/i.test(firstToken)) return null;
@@ -317,15 +333,29 @@ export function Composer({
     };
   }, [attachMenuOpen]);
 
-  const commandQuery = busy ? null : slashQuery(text);
-  const slashOptions = commandQuery === null
+  const parsedDraft = parseCommand(text.trimEnd());
+  const argumentStage = busy ? null : getCommandArgumentStage(text, parsedDraft ? getPhoneCommand(parsedDraft.name) : null);
+  const query = busy ? null : commandQuery(text);
+  const commandOptions: PaletteItem[] = query === null
     ? []
-    : SLASH_ITEMS.filter((item) => item.command.slice(1).startsWith(commandQuery));
-  const slashOpen = commandQuery !== null && slashOptions.length > 0 && !slashDismissed;
+    : SLASH_ITEMS.filter((item) => {
+        const normalized = query.toLocaleLowerCase();
+        return item.command.slice(1).toLocaleLowerCase().includes(normalized)
+          || item.hint.toLocaleLowerCase().includes(normalized);
+      });
+  const argumentOptions: PaletteItem[] = argumentStage
+    ? getCommandArgumentSuggestions(argumentStage.command, argumentStage.query).map((item) => ({
+        ...item,
+        kind: 'argument',
+        command: argumentStage.command,
+      }))
+    : [];
+  const slashOptions = argumentStage ? argumentOptions : commandOptions;
+  const slashOpen = !busy && slashOptions.length > 0 && !slashDismissed;
 
   useEffect(() => {
     setSlashIndex(0);
-  }, [commandQuery]);
+  }, [query, argumentStage?.command.name]);
 
   useEffect(() => {
     if (!slashOpen) return;
@@ -343,9 +373,21 @@ export function Composer({
     saveAttachments(sessionId, []);
   };
 
-  const runCommand = (name: string, input: string): void => {
+  const runCommand = (name: string, input?: string): void => {
     clearDraft();
-    onCommand(name, input || undefined);
+    onCommand(name, input);
+  };
+
+  const submitCommand = (command: PhoneCommand, rawInput: string): boolean => {
+    const validated = validatePhoneCommandInput(command, rawInput);
+    if (!validated.valid) return false;
+    const pending = { name: command.name, input: validated.input ?? '' };
+    if (command.confirm) {
+      setPendingCommand(pending);
+      return true;
+    }
+    runCommand(pending.name, pending.input || undefined);
+    return true;
   };
 
   const send = async (delivery: PromptDelivery = 'immediate'): Promise<void> => {
@@ -361,12 +403,7 @@ export function Composer({
       const parsed = parseCommand(trimmed);
       if (parsed) {
         const meta = getPhoneCommand(parsed.name);
-        if (meta?.arg === 'required' && !parsed.input) return; // wait for the required argument
-        if (meta?.confirm) {
-          setPendingCommand(parsed);
-          return;
-        }
-        runCommand(parsed.name, parsed.input);
+        if (!meta || !submitCommand(meta, parsed.input)) return;
         return;
       }
     }
@@ -519,14 +556,18 @@ export function Composer({
     setAttachError(null);
   };
 
-  const selectSlashCommand = (item: SlashItem): void => {
+  const selectPaletteItem = (item: PaletteItem): void => {
+    if (item.kind === 'argument') {
+      if (item.disabled) return;
+      submitCommand(item.command, item.input);
+      return;
+    }
     if (item.kind === 'command') {
       const meta = getPhoneCommand(item.command.slice(1));
-      // No-arg commands are ready to run (Enter sends); arg commands get a trailing space to type into.
-      const suffix = meta && meta.arg !== 'none' ? ' ' : '';
+      const suffix = meta && meta.input.kind !== 'none' ? ' ' : '';
       const next = text.replace(/^\/[a-z-]*/i, `${item.command}${suffix}`);
       onTextChange(next);
-      setSlashDismissed(true);
+      setSlashDismissed(meta?.input.kind === 'none');
       window.requestAnimationFrame(() => areaRef.current?.focus());
       return;
     }
@@ -547,7 +588,7 @@ export function Composer({
       if (event.key === 'Enter') {
         event.preventDefault();
         const item = slashOptions[slashIndex];
-        if (item) selectSlashCommand(item);
+        if (item) selectPaletteItem(item);
         return;
       }
       if (event.key === 'Escape') {
@@ -664,23 +705,30 @@ export function Composer({
       }}
     >
       {slashOpen ? (
-        <div className="slash-menu" role="listbox" aria-label="Slash command suggestions">
+        <div
+          className="slash-menu"
+          role="listbox"
+          aria-label={argumentStage ? `Arguments for /${argumentStage.command.name}` : 'Slash command suggestions'}
+        >
           {slashOptions.map((item, index) => (
             <button
-              key={item.command}
+              key={item.kind === 'argument' ? item.key : item.command}
               ref={index === slashIndex ? activeSlashRef : undefined}
               type="button"
               role="option"
               aria-selected={index === slashIndex}
+              disabled={item.kind === 'argument' && item.disabled}
               className={`slash-item${index === slashIndex ? ' active' : ''}`}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => selectSlashCommand(item)}
+              onClick={() => selectPaletteItem(item)}
             >
               <span className="slash-command">
-                {item.command}
+                {item.kind === 'argument' ? item.label : item.command}
                 {item.kind === 'command' ? <span className="slash-badge">runs on laptop</span> : null}
               </span>
-              <span className="slash-template">{item.kind === 'command' ? item.hint : item.template}</span>
+              <span className="slash-template">
+                {item.kind === 'template' ? item.template : item.hint}
+              </span>
             </button>
           ))}
         </div>
@@ -702,7 +750,7 @@ export function Composer({
               onClick={() => {
                 const cmd = pendingCommand;
                 setPendingCommand(null);
-                runCommand(cmd.name, cmd.input);
+                runCommand(cmd.name, cmd.input || undefined);
               }}
             >
               Run /{pendingCommand.name}

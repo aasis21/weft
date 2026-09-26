@@ -29,7 +29,7 @@ const TerminalScreen = lazy(() =>
 
 type ModalHistoryState = { weftView: 'devices' } |
   { weftView: 'device-details' | 'terminal'; channelId: string } |
-  { weftView: 'explore'; exploreView?: string } | null;
+  { weftView: 'explore'; exploreView?: string; entry?: 'direct-discover' } | null;
 
 function loadingScreen(label: string): JSX.Element {
   return (
@@ -52,6 +52,7 @@ export default function App(): JSX.Element {
   const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);
   const [terminalChannelId, setTerminalChannelId] = useState<string | undefined>();
   const [exploreOpen, setExploreOpen] = useState(false);
+  const [exploreEntry, setExploreEntry] = useState<'home' | 'direct-discover'>('home');
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +74,11 @@ export default function App(): JSX.Element {
     const onPopState = (event: PopStateEvent): void => {
       const state = event.state as ModalHistoryState;
       setExploreOpen(state?.weftView === 'explore');
+      setExploreEntry(
+        state?.weftView === 'explore' && state.entry === 'direct-discover'
+          ? 'direct-discover'
+          : 'home',
+      );
       setTerminalChannelId(state?.weftView === 'terminal' ? state.channelId : undefined);
       if (state?.weftView === 'devices') {
         setDevicesOpen(true);
@@ -196,8 +202,31 @@ export default function App(): JSX.Element {
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
     setTerminalChannelId(undefined);
+    setExploreEntry('home');
     setExploreOpen(true);
     window.history.pushState({ weftView: 'explore' } satisfies ModalHistoryState, '');
+  }, []);
+
+  const openDiscoverFromChat = useCallback((): void => {
+    setError(null);
+    setExploreEntry('direct-discover');
+    setExploreOpen(true);
+    window.history.pushState({
+      weftView: 'explore',
+      exploreView: 'discover',
+      entry: 'direct-discover',
+    } satisfies ModalHistoryState, '');
+  }, []);
+
+  const closeExplore = useCallback((): void => {
+    const state = window.history.state as ModalHistoryState;
+    window.history.go(
+      state?.weftView === 'explore' &&
+      state.exploreView &&
+      state.entry !== 'direct-discover'
+        ? -2
+        : -1,
+    );
   }, []);
 
   const handleVoiceModeChange = useCallback((channelId: string, active: boolean): void => {
@@ -533,11 +562,11 @@ export default function App(): JSX.Element {
         setAdding(true);
       }}
       onOpenExplore={openExplore}
+      onOpenDiscover={openDiscoverFromChat}
       exploreOpen={exploreOpen}
-      onCloseExplore={() => {
-        const state = window.history.state as ModalHistoryState;
-        window.history.go(state?.weftView === 'explore' && state.exploreView ? -2 : -1);
-      }}
+      exploreInitialView={exploreEntry === 'direct-discover' ? 'discover' : undefined}
+      exploreDirectFromChat={exploreEntry === 'direct-discover'}
+      onCloseExplore={closeExplore}
       onStartSession={() => openStart()}
       onOpenDevices={openDevices}
       devices={snapshot.devices}
@@ -557,8 +586,7 @@ export default function App(): JSX.Element {
       }}
       onGoHome={() => {
         if (exploreOpen) {
-          const state = window.history.state as ModalHistoryState;
-          window.history.go(state?.weftView === 'explore' && state.exploreView ? -2 : -1);
+          closeExplore();
           setExploreOpen(false);
         }
         setError(null);

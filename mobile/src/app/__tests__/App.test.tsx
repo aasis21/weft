@@ -84,11 +84,19 @@ vi.mock('@/ui/screens/LandingScreen', () => ({
 vi.mock('@/ui/screens/SessionScreen', () => ({
   SessionScreen: ({
     onOpenExplore,
+    onOpenDiscover,
     exploreOpen,
+    exploreInitialView,
+    exploreDirectFromChat,
+    onCloseExplore,
     onGoHome,
   }: {
     onOpenExplore(): void;
+    onOpenDiscover(): void;
     exploreOpen: boolean;
+    exploreInitialView?: string;
+    exploreDirectFromChat?: boolean;
+    onCloseExplore(): void;
     onGoHome(): void;
   }) => {
     const [count, setCount] = useState(0);
@@ -102,10 +110,12 @@ vi.mock('@/ui/screens/SessionScreen', () => ({
           <span>Local state {count}</span>
           <button type="button" onClick={() => setCount((value) => value + 1)}>Increment local state</button>
           <button type="button" onClick={onOpenExplore}>Open Explore</button>
+          <button type="button" onClick={onOpenDiscover}>Open Discover directly</button>
         </main>
         {exploreOpen ? (
           <main data-testid="explore-screen">
-            Explore overlay
+            Explore overlay {exploreInitialView ?? 'home'} {exploreDirectFromChat ? 'from chat' : ''}
+            <button type="button" onClick={onCloseExplore}>Back to chat</button>
             <button type="button" onClick={onGoHome}>Go Home</button>
           </main>
         ) : null}
@@ -155,5 +165,23 @@ describe('App Explore layering', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go Home' }));
 
     expect(go).toHaveBeenCalledWith(-2);
+  });
+
+  it('opens Discover directly with one history entry and returns to Chat in one Back action', async () => {
+    const go = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+    render(<App />);
+    await screen.findByTestId('session-screen');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Discover directly' }));
+
+    expect(await screen.findByTestId('explore-screen')).toHaveTextContent('discover from chat');
+    expect(window.history.state).toEqual({
+      weftView: 'explore',
+      exploreView: 'discover',
+      entry: 'direct-discover',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to chat' }));
+    expect(go).toHaveBeenCalledWith(-1);
   });
 });

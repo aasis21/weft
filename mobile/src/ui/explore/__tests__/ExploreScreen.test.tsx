@@ -177,12 +177,14 @@ describe('Live Copilot Dock', () => {
     const activity = deriveLiveDockActivity(active, dock);
 
     expect(activity.map((item) => item.text)).toEqual([
-      'Read ExploreScreen.tsx completed',
+      'View: Read ExploreScreen.tsx',
+      'Run Command: Run focused Explore tests',
       'I am tightening the card layout.',
-      'Run focused Explore tests',
     ]);
     renderExplore(active);
-    expect(document.querySelectorAll('.live-copilot-line')).toHaveLength(3);
+    expect(document.querySelectorAll('.live-copilot-current')).toHaveLength(1);
+    expect(document.querySelectorAll('.live-copilot-previous')).toHaveLength(1);
+    expect(document.querySelectorAll('.live-copilot-stream')).toHaveLength(1);
     expect(document.querySelector('.live-copilot-feed')).toHaveTextContent(
       'Run focused Explore tests',
     );
@@ -303,7 +305,7 @@ describe('Live Copilot Dock', () => {
           ts: 100,
         }],
       },
-    }))).toMatchObject({ tone: 'working', text: 'Run mobile tests' });
+    }))).toMatchObject({ tone: 'working', text: 'Run Command: Run mobile tests' });
 
     expect(deriveLiveDock(session({
       unread: true,
@@ -321,9 +323,97 @@ describe('Live Copilot Dock', () => {
 
     expect(deriveLiveDock(session())).toMatchObject({ tone: 'idle', label: 'Copilot ready' });
   });
+
+  it('collapses adjacent duplicate tools and never exposes raw compact arguments', () => {
+    const active = session({
+      timeline: {
+        ...emptyTimeline(),
+        busy: true,
+        items: [
+          {
+            kind: 'tool',
+            id: 'search-1',
+            name: 'rg',
+            args: { pattern: 'private first query', paths: 'C:\\private\\repo' },
+            status: 'success',
+            startedAt: 10,
+            finishedAt: 11,
+            ts: 10,
+          },
+          {
+            kind: 'tool',
+            id: 'search-2',
+            name: 'rg',
+            args: { pattern: 'private second query', paths: 'C:\\private\\repo' },
+            status: 'running',
+            startedAt: 12,
+            ts: 12,
+          },
+        ],
+      },
+    });
+
+    expect(deriveLiveDockActivity(active, deriveLiveDock(active))).toEqual([
+      expect.objectContaining({ text: 'Search', count: 2, state: 'live' }),
+    ]);
+    renderExplore(active);
+    expect(screen.getByRole('button', { name: /Search/ })).toHaveTextContent('Search ×2');
+    expect(document.body).not.toHaveTextContent('private first query');
+    expect(document.body).not.toHaveTextContent('C:\\private\\repo');
+  });
+
+  it('hides short elapsed times and presents attention as one chat action', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-26T00:00:03Z'));
+    const short = session({
+      timeline: { ...emptyTimeline(), busy: true, busyFrom: Date.parse('2026-09-26T00:00:00Z') },
+    });
+    const { unmount } = renderExplore(short);
+    expect(document.querySelector('.live-copilot-status time')).not.toBeInTheDocument();
+    unmount();
+
+    vi.setSystemTime(new Date('2026-09-26T00:00:08Z'));
+    const elapsed = renderExplore(short);
+    expect(document.querySelector('.live-copilot-status time')).toHaveTextContent('8s');
+    elapsed.unmount();
+
+    const attention = session({
+      timeline: {
+        ...emptyTimeline(),
+        approvals: [{
+          requestId: 'approval-1',
+          toolName: 'powershell',
+          toolArgs: {},
+          options: [{ id: 'approve', label: 'Approve' }],
+        }],
+      },
+    });
+    renderExplore(attention);
+    expect(screen.getByRole('button', { name: /Approval needed/ })).toHaveTextContent('Review in chat');
+    expect(document.querySelector('.live-copilot-feed')).not.toBeInTheDocument();
+  });
 });
 
 describe('Explore navigation and Discover deck', () => {
+  it('opens direct Discover with one Back to chat affordance', async () => {
+    const onOpenChat = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ExploreScreen
+        active={session()}
+        onOpenSessions={vi.fn()}
+        onOpenChat={onOpenChat}
+        onGoHome={vi.fn()}
+        initialView="discover"
+        directFromChat
+      />,
+    );
+
+    expect(screen.getByRole('region', { name: 'Discover card deck' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Back to chat' }));
+    expect(onOpenChat).toHaveBeenCalledOnce();
+  });
+
   it('uses the shared navigation affordance and compact four-choice home', async () => {
     const onOpenSessions = vi.fn();
     const user = userEvent.setup();

@@ -25,6 +25,7 @@ import {
   recentTurns,
   stateSnapshot,
   getPhoneCommand,
+  validatePhoneCommandInput,
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
@@ -905,7 +906,6 @@ async function applyInterrupt(session, logger, sendSafe) {
 // line so the phone sees the outcome even when the command emits no further session events.
 async function applyCommand(session, body, logger, sendSafe) {
   const command = getPhoneCommand(body?.name);
-  const rawInput = typeof body?.input === "string" ? body.input.trim() : "";
   if (!command) {
     logger(`Weft: ignored non-whitelisted command "/${body?.name ?? ""}" from phone.`, {
       level: "warning",
@@ -914,9 +914,10 @@ async function applyCommand(session, body, logger, sendSafe) {
     await sendSafe(logLine("warning", `Command /${body?.name ?? ""} isn't allowed from the phone.`));
     return;
   }
-  if (command.arg === "required" && !rawInput) {
-    logger(`Weft: /${command.name} needs an argument; ignored.`, { level: "warning", ephemeral: false });
-    await sendSafe(logLine("warning", `/${command.name} needs an argument.`));
+  const validated = validatePhoneCommandInput(command, body?.input);
+  if (!validated.valid) {
+    logger(`Weft: ${validated.error} Ignored phone request.`, { level: "warning", ephemeral: false });
+    await sendSafe(logLine("warning", validated.error));
     return;
   }
   if (typeof session.rpc?.commands?.invoke !== "function") {
@@ -927,9 +928,16 @@ async function applyCommand(session, body, logger, sendSafe) {
     await sendSafe(logLine("warning", `This CLI build can't run /${command.name} remotely.`));
     return;
   }
-  const shown = rawInput ? `/${command.name} ${rawInput}` : `/${command.name}`;
+  const input = validated.input;
+  const shownInput = validated.option?.label ?? input;
+  const shown = shownInput ? `/${command.name} ${shownInput}` : `/${command.name}`;
   try {
-    await session.rpc.commands.invoke(rawInput ? { name: command.name, input: rawInput } : { name: command.name });
+    const result = await session.rpc.commands.invoke(
+      input ? { name: command.name, input } : { name: command.name },
+    );
+    if (result?.success === false) {
+      throw new Error(result.error?.message ?? result.error ?? result.message ?? "Command was rejected by the CLI.");
+    }
     logger(`Weft: ran ${shown} from phone.`, { level: "info", ephemeral: false });
     await sendSafe(logLine("info", `▷ Ran ${shown} from your phone.`));
   } catch (err) {

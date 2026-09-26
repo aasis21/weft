@@ -653,6 +653,47 @@ test("refuses a required-arg command with no argument", async () => {
   });
 });
 
+test("canonicalizes an approved model label before invoking the SDK", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "Claude Sonnet 5"));
+    await flush();
+    assert.deepEqual(session.invokedCommands, [{ name: "model", input: "claude-sonnet-5" }]);
+    const ok = channel.sent.find(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /Ran \/model Claude Sonnet 5/.test(m.msg.message ?? "")
+    );
+    assert.ok(ok, "expected the friendly model label in the success notice");
+    assert.equal(channel.sent.some((m) => /claude-sonnet-5/.test(m.msg.message ?? "")), false);
+  });
+});
+
+test("refuses an unlisted model before invoking the SDK", async () => {
+  await withRelay(async ({ channel, session }) => {
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "unlisted-model"));
+    await flush();
+    assert.deepEqual(session.invokedCommands, []);
+    const warn = channel.sent.find(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /isn't available for \/model/i.test(m.msg.message ?? "")
+    );
+    assert.ok(warn, "expected an unavailable-option warning relayed to the phone");
+  });
+});
+
+test("relays a resolved SDK command failure without a success-shaped fallback", async () => {
+  await withRelay(async ({ channel, session }) => {
+    session.rpc.commands.invoke = async (params) => {
+      session.invokedCommands.push(params);
+      return { success: false, error: { message: "Model unavailable for this account" } };
+    };
+
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "auto"));
+    await flush();
+
+    const logs = channel.sent.filter((m) => m.eventSubtype === SUBTYPE.STREAM.LOG);
+    assert.ok(logs.some((m) => /\/model Auto failed: Model unavailable/i.test(m.msg.message ?? "")));
+    assert.equal(logs.some((m) => /Ran \/model Auto/i.test(m.msg.message ?? "")), false);
+  });
+});
+
 test("forwards turn lifecycle as activity busy=true on message_start, false on idle", async () => {
   await withRelay(async ({ channel, session }) => {
     // A turn begins with the assistant streaming text (no tool yet) — Stop must show here.
