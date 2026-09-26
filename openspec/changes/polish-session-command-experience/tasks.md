@@ -41,7 +41,7 @@
 
 ## 7. Land and Release
 
-- [ ] 7.1 Create and link the matching work item and feature PR
+- [x] 7.1 Create and link the matching work item and feature PR
 - [ ] 7.2 Merge the feature after all required checks pass
 - [ ] 7.3 Build and deploy the next patch release with the normal release script
 - [ ] 7.4 Merge the release PR, verify production and immutable manifests, and complete the work item
