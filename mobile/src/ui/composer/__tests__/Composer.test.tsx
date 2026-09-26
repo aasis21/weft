@@ -499,6 +499,88 @@ describe('Composer', () => {
       expect(textbox).toHaveValue('');
     });
 
+    it('uses the same keyboard flow for command selection and required text input', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/ren');
+      fireEvent.keyDown(textbox, { key: 'Enter' });
+      expect(textbox).toHaveValue('/rename ');
+      expect(screen.getByRole('listbox', { name: 'Arguments for /rename' })).toBeInTheDocument();
+
+      await user.type(textbox, 'My Session');
+      fireEvent.keyDown(textbox, { key: 'Enter' });
+
+      expect(onCommand).toHaveBeenCalledWith('rename', 'My Session');
+      expect(textbox).toHaveValue('');
+    });
+
+    it('filters model choices by friendly metadata and invokes the hidden value on touch selection', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      const { container } = renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/mod');
+      await user.click(screen.getByRole('option', { name: /\/model/i }));
+      expect(textbox).toHaveValue('/model ');
+
+      const modelMenu = screen.getByRole('listbox', { name: 'Arguments for /model' });
+      expect(within(modelMenu).getByText('Auto')).toBeInTheDocument();
+      expect(within(modelMenu).getByText('Recommended')).toBeInTheDocument();
+      expect(container).not.toHaveTextContent('gpt-5.6-sol');
+      expect(container).not.toHaveTextContent('claude-sonnet-5');
+      expect(container).not.toHaveTextContent('gemini-3.8-flash');
+
+      await user.type(textbox, 'recommended');
+      expect(within(modelMenu).getAllByRole('option')).toHaveLength(1);
+      await user.click(within(modelMenu).getByRole('option', { name: /AutoRecommended/i }));
+
+      expect(onCommand).toHaveBeenCalledWith('model', 'auto');
+      expect(textbox).toHaveValue('');
+    });
+
+    it('canonicalizes a friendly model label when the command is submitted directly', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/model Claude Sonnet 5');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onCommand).toHaveBeenCalledWith('model', 'claude-sonnet-5');
+    });
+
+    it('does not submit a curated option command with an unknown value', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      const onPrompt = vi.fn();
+      renderComposer({ onCommand, onPrompt });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/model unavailable');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onCommand).not.toHaveBeenCalled();
+      expect(onPrompt).not.toHaveBeenCalled();
+      expect(textbox).toHaveValue('/model unavailable');
+    });
+
+    it('allows optional text commands to run from the generic argument stage without text', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      renderComposer({ onCommand });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/compact ');
+      await user.click(screen.getByRole('option', { name: /Optional focusOptional text/i }));
+
+      expect(onCommand).toHaveBeenCalledWith('compact', undefined);
+    });
+
     it('invokes a no-arg command with undefined input', async () => {
       const user = userEvent.setup();
       const onCommand = vi.fn();

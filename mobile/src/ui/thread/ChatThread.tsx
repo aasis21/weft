@@ -126,6 +126,8 @@ interface MenuState {
 
 /** How close to the bottom still counts as "following along". */
 const PIN_SLACK_PX = 80;
+const TOUCH_DETACH_PX = 8;
+const MOMENTUM_GRACE_MS = 220;
 
 /** Distance in pixels from the bottom, used when a real reader scroll settles. */
 function bottomGap(scroller: HTMLElement | null): number {
@@ -160,11 +162,14 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   // scrolled up to read history we must not yank them back down — we only stick to
   // the bottom if they were already there (or just sent a prompt themselves).
   const pinnedRef = useRef(true);
+  const readerDetachedRef = useRef(false);
   const [isPinned, setIsPinned] = useState(true);
   // True from the moment a finger lands on the thread until it leaves. Nothing may move the
   // viewport under an active gesture: the reader is steering, and any correction we apply is
   // fighting their thumb.
   const touchingRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
+  const touchReleaseTimerRef = useRef<number | null>(null);
   // Opening a conversation should *present* the newest message, not travel to it. History arrives
   // after mount and lands above what is already rendered, so every page used to count as new content
   // and animate the viewport downwards — you watched the thread scroll itself while you were trying
@@ -294,7 +299,12 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   );
 
   const scrollToLatest = useCallback((): void => {
+    if (touchReleaseTimerRef.current !== null) {
+      window.clearTimeout(touchReleaseTimerRef.current);
+      touchReleaseTimerRef.current = null;
+    }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    readerDetachedRef.current = false;
     pinnedRef.current = true;
     setIsPinned(true);
     setHasNewWhileUnpinned(false);
@@ -302,8 +312,13 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
 
   // Re-arm on arrival at a different conversation.
   useLayoutEffect(() => {
+    if (touchReleaseTimerRef.current !== null) {
+      window.clearTimeout(touchReleaseTimerRef.current);
+      touchReleaseTimerRef.current = null;
+    }
     settlingRef.current = true;
     setSettling(true);
+    readerDetachedRef.current = false;
     pinnedRef.current = true;
     setIsPinned(true);
     setHasNewWhileUnpinned(false);
@@ -339,36 +354,74 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       // the reader went anywhere. Believing them is what stranded the view mid-history.
       if (settlingRef.current) return;
       const nextPinned = bottomGap(scroller) < PIN_SLACK_PX;
+      if (nextPinned && readerDetachedRef.current && touchReleaseTimerRef.current !== null) {
+        pinnedRef.current = false;
+        setIsPinned(false);
+        return;
+      }
+      readerDetachedRef.current = !nextPinned;
       pinnedRef.current = nextPinned;
       setIsPinned(nextPinned);
       if (nextPinned) setHasNewWhileUnpinned(false);
     };
     // Gesture bookends. These fire synchronously with the touch, unlike scroll, which is why they
     // are the only signal fast enough to protect the very start of a drag.
-    const hold = (): void => {
+    const detachReader = (): void => {
+      readerDetachedRef.current = true;
+      pinnedRef.current = false;
+      setIsPinned(false);
+    };
+    const hold = (event: TouchEvent): void => {
+      if (touchReleaseTimerRef.current !== null) {
+        window.clearTimeout(touchReleaseTimerRef.current);
+        touchReleaseTimerRef.current = null;
+      }
       touchingRef.current = true;
+      touchStartYRef.current = event.touches[0]?.clientY ?? null;
+    };
+    const move = (event: TouchEvent): void => {
+      const startY = touchStartYRef.current;
+      const currentY = event.touches[0]?.clientY;
+      if (startY == null || currentY == null) return;
+      // Pulling the finger down moves the transcript toward older messages. Record that intent
+      // before momentum scrolling produces a reliable scrollTop, so a heartbeat in this narrow
+      // window cannot mistake the reader for someone still following the tail.
+      if (currentY - startY > TOUCH_DETACH_PX) detachReader();
     };
     const release = (): void => {
       touchingRef.current = false;
-      update();
+      touchStartYRef.current = null;
+      if (!readerDetachedRef.current) {
+        update();
+        return;
+      }
+      touchReleaseTimerRef.current = window.setTimeout(() => {
+        touchReleaseTimerRef.current = null;
+        update();
+      }, MOMENTUM_GRACE_MS);
     };
     const wheel = (event: WheelEvent): void => {
       if (settlingRef.current || event.deltaY >= 0) return;
-      pinnedRef.current = false;
-      setIsPinned(false);
+      detachReader();
     };
     update();
     scroller.addEventListener('scroll', update, { passive: true });
     scroller.addEventListener('touchstart', hold, { passive: true });
+    scroller.addEventListener('touchmove', move, { passive: true });
     scroller.addEventListener('touchend', release, { passive: true });
     scroller.addEventListener('touchcancel', release, { passive: true });
     scroller.addEventListener('wheel', wheel, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', update);
       scroller.removeEventListener('touchstart', hold);
+      scroller.removeEventListener('touchmove', move);
       scroller.removeEventListener('touchend', release);
       scroller.removeEventListener('touchcancel', release);
       scroller.removeEventListener('wheel', wheel);
+      if (touchReleaseTimerRef.current !== null) {
+        window.clearTimeout(touchReleaseTimerRef.current);
+        touchReleaseTimerRef.current = null;
+      }
     };
   }, [cancelLongPress]);
 
@@ -384,7 +437,16 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       prevTailIdRef.current = tailId;
       prevTailSignalRef.current = lastSignal;
     };
-    const following = settlingRef.current || pinnedRef.current;
+    if (phoneJustSent) {
+      if (touchReleaseTimerRef.current !== null) {
+        window.clearTimeout(touchReleaseTimerRef.current);
+        touchReleaseTimerRef.current = null;
+      }
+      readerDetachedRef.current = false;
+      pinnedRef.current = true;
+    }
+    const following =
+      settlingRef.current || (!readerDetachedRef.current && pinnedRef.current);
     // A finger on the glass outranks everything. Even a correct "they are at the bottom" reading
     // must not move the viewport mid-gesture, or the first pixel of an upward drag gets undone
     // before it becomes a scroll.
@@ -429,7 +491,7 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
     const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
     if (!scroller) return undefined;
     const repin = (): void => {
-      if (!pinnedRef.current || touchingRef.current) return;
+      if (readerDetachedRef.current || !pinnedRef.current || touchingRef.current) return;
       endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
     };
     // window resize covers the keyboard and rotation; the observer covers the composer changing

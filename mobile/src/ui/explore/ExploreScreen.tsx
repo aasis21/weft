@@ -12,8 +12,9 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { SessionView } from '@/session/view';
-import type { AssistantItem, TimelineItem, ToolItem } from '@/lib/timeline';
+import type { TimelineItem, ToolItem } from '@/lib/timeline';
 import { isWorking } from '@/ui/sessions/sessionStatus';
+import { compactToolDetail, toolDisplayName } from '@/ui/tools/toolPresentation';
 import {
   DISCOVER_CARDS,
   DISCOVER_TOPIC_LABELS,
@@ -26,6 +27,7 @@ type ExploreView = ExploreCategory | null;
 type ExploreHistoryState = {
   weftView: 'explore';
   exploreView?: ExploreCategory;
+  entry?: 'direct-discover';
 };
 
 function historyExploreView(state: ExploreHistoryState | null): ExploreView {
@@ -44,6 +46,8 @@ interface ExploreScreenProps {
   onOpenChat(): void;
   onGoHome(): void;
   desktopDocked?: boolean;
+  initialView?: ExploreCategory;
+  directFromChat?: boolean;
 }
 
 export type LiveDockTone = 'attention' | 'error' | 'working' | 'ready' | 'idle';
@@ -61,6 +65,7 @@ export interface LiveDockActivity {
   text: string;
   kind: 'assistant' | 'tool' | 'context';
   state: 'live' | 'complete' | 'error' | 'context';
+  count?: number;
 }
 
 const CATEGORY_META: Record<ExploreCategory, { title: string; subtitle: string; icon: JSX.Element }> = {
@@ -171,11 +176,9 @@ function latestRunningTool(active: SessionView): ToolItem | null {
 }
 
 function toolLabel(tool: ToolItem): string {
-  const record =
-    tool.args && typeof tool.args === 'object' ? (tool.args as Record<string, unknown>) : undefined;
-  const description = typeof record?.description === 'string' ? record.description.trim() : '';
-  if (description) return description;
-  return `${tool.name.replace(/[_-]+/g, ' ')} in progress`;
+  const name = toolDisplayName(tool.name, tool.args);
+  const detail = compactToolDetail(tool.name, tool.args);
+  return detail ? `${name}: ${detail}` : name;
 }
 
 function latestAssistant(active: SessionView, onlyStreaming = false) {
@@ -193,10 +196,6 @@ function dockExcerpt(value: string, max = 220): string {
   const clean = value.replace(/[`*_>#-]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (clean.length <= max) return clean;
   return `…${clean.slice(clean.length - max + 1)}`;
-}
-
-function plainToolName(name: string): string {
-  return name.replace(/[_-]+/g, ' ').trim();
 }
 
 export function deriveLiveDockActivity(
@@ -222,48 +221,21 @@ export function deriveLiveDockActivity(
     ];
   }
 
-  const activity = active.timeline.items
-    .filter((item): item is AssistantItem | ToolItem =>
-      (item.kind === 'assistant' && Boolean(item.text.trim())) || item.kind === 'tool',
-    )
-    .slice(-6)
-    .map((item): LiveDockActivity => {
-      if (item.kind === 'assistant') {
-        return {
-          id: `assistant-${item.id}`,
-          text: dockExcerpt(item.text, 150),
-          kind: 'assistant',
-          state: item.final ? 'complete' : 'live',
-        };
-      }
-      const activityLabel = toolLabel(item).replace(/ in progress$/, '');
-      return {
-        id: `tool-${item.id}`,
-        text:
-          item.status === 'running'
-            ? toolLabel(item)
-            : item.status === 'success'
-              ? `${activityLabel} completed`
-              : `${activityLabel} failed`,
-        kind: 'tool',
-        state:
-          item.status === 'running'
-            ? 'live'
-            : item.status === 'success'
-              ? 'complete'
-              : 'error',
-      };
-    });
-
-  const intent = active.intent?.trim();
-  if (intent && activity.length < 3 && !activity.some((item) => item.text === intent)) {
-    activity.unshift({
-      id: 'current-intent',
-      text: dockExcerpt(intent, 150),
-      kind: 'context',
-      state: 'context',
-    });
+  const tools: LiveDockActivity[] = [];
+  for (const item of active.timeline.items.filter((entry): entry is ToolItem => entry.kind === 'tool').slice(-8)) {
+    const text = toolLabel(item);
+    const state = item.status === 'running' ? 'live' : item.status === 'success' ? 'complete' : 'error';
+    const previous = tools.at(-1);
+    if (previous?.text === text) {
+      previous.id = `tool-${item.id}`;
+      previous.state = state;
+      previous.count = (previous.count ?? 1) + 1;
+    } else {
+      tools.push({ id: `tool-${item.id}`, text, kind: 'tool', state, count: 1 });
+    }
   }
+
+  const activity = tools.slice(-2);
   if (activity.length === 0) {
     activity.push({
       id: 'working-context',
@@ -272,7 +244,17 @@ export function deriveLiveDockActivity(
       state: 'live',
     });
   }
-  return activity.slice(-3);
+
+  const streaming = latestAssistant(active, true);
+  if (streaming?.kind === 'assistant') {
+    activity.push({
+      id: `assistant-${streaming.id}`,
+      text: dockExcerpt(streaming.text, 220),
+      kind: 'assistant',
+      state: 'live',
+    });
+  }
+  return activity;
 }
 
 export function deriveLiveDock(active: SessionView, replyCompletedInExplore = false): LiveDockState {
@@ -323,7 +305,7 @@ export function deriveLiveDock(active: SessionView, replyCompletedInExplore = fa
       text: streamed
         ? dockExcerpt(streamed)
         : active.intent?.trim() || (running ? toolLabel(running) : 'Working in the active session'),
-      detail: running ? `Using ${plainToolName(running.name)}` : active.intent?.trim() || null,
+      detail: running ? `Using ${toolDisplayName(running.name, running.args)}` : active.intent?.trim() || null,
       startedAt: active.thinkingSince ?? running?.startedAt ?? active.timeline.busyFrom,
     };
   }
@@ -352,11 +334,12 @@ function recentActivityLabel(items: TimelineItem[]): string {
   if (!latest) return 'No recent agent activity';
   if (latest.kind === 'assistant') return 'Last response is available in chat';
   if (latest.kind === 'tool') {
+    const name = toolDisplayName(latest.name, latest.args);
     return latest.status === 'success'
-      ? `${latest.name} completed`
+      ? `${name} completed`
       : latest.status === 'error'
-        ? `${latest.name} reported an error`
-        : `${latest.name} is running`;
+        ? `${name} reported an error`
+        : `${name} is running`;
   }
   return latest.text;
 }
@@ -364,6 +347,7 @@ function recentActivityLabel(items: TimelineItem[]): string {
 function formatElapsed(startedAt: number | null, now: number): string | null {
   if (startedAt == null) return null;
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  if (seconds < 5) return null;
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return minutes > 0 ? `${minutes}:${remainder.toString().padStart(2, '0')}` : `${seconds}s`;
@@ -408,9 +392,13 @@ export function ExploreScreen({
   onOpenChat,
   onGoHome,
   desktopDocked = false,
+  initialView,
+  directFromChat = false,
 }: ExploreScreenProps): JSX.Element {
   const [stored, setStored] = useState<Required<ExploreStoredState>>(() => parseStoredState());
-  const [view, setView] = useState<ExploreView>(null);
+  const [view, setView] = useState<ExploreView>(
+    () => initialView ?? historyExploreView(window.history.state as ExploreHistoryState | null),
+  );
   const [now, setNow] = useState(Date.now());
   const latestFinal = latestAssistant(active);
   const latestFinalId =
@@ -475,7 +463,11 @@ export function ExploreScreen({
   }, []);
 
   const navigate = (next: ExploreCategory): void => {
-    const state = { weftView: 'explore', exploreView: next } satisfies ExploreHistoryState;
+    const state = {
+      weftView: 'explore',
+      exploreView: next,
+      ...(directFromChat ? { entry: 'direct-discover' as const } : {}),
+    } satisfies ExploreHistoryState;
     if (view === null) window.history.pushState(state, '');
     else window.history.replaceState(state, '');
     setView(next);
@@ -490,7 +482,12 @@ export function ExploreScreen({
     <main className={`weft-session explore-screen${desktopDocked ? ' desktop-docked' : ''}`}>
       <div className="explore-content">
         <header className="explore-header">
-          {desktopDocked ? (
+          {directFromChat ? (
+            <button type="button" className="explore-chat-back" onClick={onOpenChat} aria-label="Back to chat">
+              <span aria-hidden="true">‹</span>
+              Chat
+            </button>
+          ) : desktopDocked ? (
             <button type="button" className="icon-btn weft-mark-btn" aria-label="About Weft" onClick={onGoHome}>
               <span className="weft-mark" aria-hidden="true">⎈</span>
             </button>
@@ -602,6 +599,11 @@ function LiveCopilotDock({
 }): JSX.Element {
   const elapsed = formatElapsed(dock.startedAt, now);
   const activityText = activity.map((item) => item.text).join('. ');
+  const streaming = activity.find((item) => item.kind === 'assistant' && item.state === 'live') ?? null;
+  const steps = activity.filter((item) => item !== streaming);
+  const current = steps.at(-1) ?? null;
+  const previous = steps.length > 1 ? steps.at(-2) ?? null : null;
+  const needsAttention = dock.tone === 'attention' || dock.tone === 'error';
   return (
     <button
       type="button"
@@ -609,6 +611,9 @@ function LiveCopilotDock({
       onClick={onOpenChat}
       aria-label={`${dock.label}. ${activityText}${elapsed ? `. ${elapsed}` : ''}. Open chat`}
     >
+      <span className="live-copilot-glyph" aria-hidden="true">
+        <span>✦</span>
+      </span>
       <span className="live-copilot-copy">
         <span className="live-copilot-status">
           <span>
@@ -617,20 +622,32 @@ function LiveCopilotDock({
           </span>
           {elapsed ? <time>{elapsed}</time> : null}
         </span>
-        <span className="live-copilot-feed" aria-hidden="true">
-          {activity.map((item) => (
-            <span
-              key={item.id}
-              className={`live-copilot-line live-copilot-line-${item.state}`}
-            >
-              <i>{item.kind === 'tool' ? '›' : item.state === 'complete' ? '✓' : '•'}</i>
-              <span>{item.text}</span>
-              {item.state === 'live' ? <b /> : null}
-            </span>
-          ))}
+        {needsAttention ? (
+          <span className="live-copilot-attention">
+            <strong>{dock.text}</strong>
+            {dock.detail ? <small>{dock.detail}</small> : null}
+          </span>
+        ) : (
+          <span className="live-copilot-feed" aria-hidden="true">
+            {current ? (
+              <span className={`live-copilot-current live-copilot-line-${current.state}`}>
+                <i>{current.state === 'complete' ? '✓' : current.state === 'error' ? '!' : '›'}</i>
+                <span>{current.text}{(current.count ?? 1) > 1 ? ` ×${current.count}` : ''}</span>
+              </span>
+            ) : null}
+            {streaming ? <span className="live-copilot-stream">{streaming.text}<b /></span> : null}
+            {previous ? (
+              <span className="live-copilot-previous">
+                {previous.text}{(previous.count ?? 1) > 1 ? ` ×${previous.count}` : ''}
+              </span>
+            ) : null}
+          </span>
+        )}
+        <span className="live-copilot-action">
+          {needsAttention ? (dock.tone === 'attention' ? 'Review in chat' : 'Open chat') : 'Open chat'}
+          <span aria-hidden="true">›</span>
         </span>
       </span>
-      <span className="live-copilot-chevron" aria-hidden="true">›</span>
     </button>
   );
 }

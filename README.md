@@ -103,8 +103,10 @@ while you use the phone.
   six images, and use Vox for hands-free prompting.
 - **Native approval relay** — allow once, allow for the session, or deny the exact action
   Copilot requested.
-- **Session control** — stop an active turn, queue the next instruction, use supported slash
-  commands, and switch between interactive, plan, and autopilot modes.
+- **Session control** — stop an active turn, queue the next instruction, and use supported slash
+  commands through one searchable command flow. Commands can run directly, request text, or offer
+  a curated option list; `/model` exposes supported model choices without leaking internal IDs.
+  Weft reports command failures from Copilot instead of claiming a model change succeeded.
 - **Multi-device workspace** — use one phone to move among paired laptops, registered
   projects, and active or historical sessions.
 - **Safe launch recovery** — reconnect to slow Start and Resume operations instead of
@@ -112,7 +114,9 @@ while you use the phone.
 - **Shared terminal** — open and resume one real shell on supported Windows laptops. See
   [terminal controls and access boundaries](docs/terminal.md).
 - **Explore between turns** — use compact header tiles for Discover, Watch, Play, and
-  Unwind while real assistant and tool activity rolls through the bottom Copilot dock.
+  Unwind, or swipe left from the right edge of Chat to open Discover and return with one Back.
+  A concise Copilot presence tile shows the current activity and useful live response context
+  without turning Explore into a second debug log.
   Discover provides a balanced animated swipe deck of 50 offline cards, alongside two
   lightweight games, guided rest activities, and an optional explicitly loaded
   third-party short-video widget.

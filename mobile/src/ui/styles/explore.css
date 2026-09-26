@@ -1044,6 +1044,25 @@
   font-size: 16px;
 }
 
+.explore-chat-back {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 8px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.explore-chat-back span {
+  font-size: 22px;
+  line-height: 1;
+}
+
 .explore-header-nav {
   display: flex;
   min-width: 0;
@@ -1158,7 +1177,7 @@
 }
 
 .live-copilot-dock {
-  display: flex;
+  display: grid;
   position: relative;
   flex: 0 0 auto;
   width: calc(100% - 20px);
@@ -1166,7 +1185,8 @@
   max-height: 140px;
   margin: 8px 10px max(8px, env(safe-area-inset-bottom));
   padding: 10px 12px;
-  align-items: stretch;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
   overflow: hidden;
   border: 1px solid var(--bg-rule);
@@ -1177,6 +1197,21 @@
     linear-gradient(110deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 52%),
     color-mix(in srgb, var(--bg-elev) 96%, transparent);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.live-copilot-glyph {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--bg-rule));
+  border-radius: 14px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.live-copilot-glyph span {
+  font-size: 21px;
 }
 
 .live-copilot-dot {
@@ -1219,7 +1254,7 @@
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
 }
 
 .live-copilot-status {
@@ -1237,10 +1272,9 @@
 }
 
 .live-copilot-status strong {
-  color: var(--accent);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: var(--fg);
+  font-size: 12px;
+  letter-spacing: 0;
 }
 
 .live-copilot-status time {
@@ -1253,69 +1287,99 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  justify-content: flex-end;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 3px;
   overflow: hidden;
 }
 
-.live-copilot-line {
-  display: grid;
+.live-copilot-current {
+  display: flex;
   min-width: 0;
-  min-height: 20px;
-  padding: 3px 6px;
-  grid-template-columns: 10px minmax(0, 1fr) 5px;
   align-items: center;
   gap: 5px;
-  border-radius: 7px;
-  color: var(--fg-dim);
-  background: color-mix(in srgb, var(--bg) 35%, transparent);
-  font-size: 11px;
-  line-height: 1.25;
-  animation: live-copilot-line-in 180ms ease-out;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 750;
 }
 
-.live-copilot-line > i {
+.live-copilot-current > i {
+  flex: 0 0 auto;
   color: var(--fg-faint);
   font-style: normal;
-  text-align: center;
 }
 
-.live-copilot-line > span {
+.live-copilot-current > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.live-copilot-line-live {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  font-weight: 700;
-}
-
 .live-copilot-line-complete > i { color: var(--success); }
 .live-copilot-line-error > i { color: var(--error); }
-.live-copilot-line-context { color: var(--fg-faint); }
 
-.live-copilot-line > b {
+.live-copilot-stream {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.live-copilot-stream > b {
+  display: inline-block;
   width: 4px;
   height: 12px;
+  margin-left: 3px;
   border-radius: 2px;
   background: var(--accent);
   animation: live-copilot-cursor 900ms steps(1, end) infinite;
 }
 
-@keyframes live-copilot-line-in {
-  from { opacity: 0; transform: translateY(7px); }
+.live-copilot-previous {
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-copilot-attention {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.live-copilot-attention strong,
+.live-copilot-attention small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-copilot-attention strong {
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.live-copilot-attention small {
+  color: var(--fg-faint);
+  font-size: 10.5px;
+}
+
+.live-copilot-action {
+  display: inline-flex;
+  margin-top: auto;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 @keyframes live-copilot-cursor {
   50% { opacity: 0; }
-}
-
-.live-copilot-chevron {
-  flex: 0 0 auto;
-  color: var(--fg-faint);
-  font-size: 22px;
 }
 
 .discover-view {
@@ -1575,8 +1639,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .live-copilot-dock-working .live-copilot-dot,
-  .live-copilot-line,
-  .live-copilot-line > b {
+  .live-copilot-stream > b {
     animation: none;
   }
   .explore-header-nav strong,

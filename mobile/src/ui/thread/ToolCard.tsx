@@ -1,55 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { ToolItem } from '@/lib/timeline';
+import { toolDisplayName } from '@/ui/tools/toolPresentation';
 
 interface ToolCardProps {
   item: ToolItem;
-}
-
-const TOOL_LABELS: Record<string, string> = {
-  powershell: 'Run',
-  bash: 'Run',
-  shell: 'Run',
-  view: 'View',
-  read: 'Read',
-  str_replace: 'Edit',
-  edit: 'Edit',
-  create: 'Create',
-  write: 'Write',
-  grep: 'Search',
-  glob: 'Find',
-  ls: 'List',
-};
-
-function titleCase(name: string): string {
-  return name
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
-}
-
-/**
- * When the relay couldn't resolve a real tool name (falls back to the literal "tool"), infer a
- * friendlier generic label from the argument shape instead of showing bare "Tool" in the header.
- */
-function labelFromArgs(args: unknown): string | null {
-  if (!args || typeof args !== 'object') return null;
-  const record = args as Record<string, unknown>;
-  if (typeof record.command === 'string') return 'Run';
-  if (typeof record.old_string === 'string' || typeof record.new_string === 'string') return 'Edit';
-  if (typeof record.pattern === 'string' || typeof record.query === 'string') return 'Search';
-  if (typeof record.url === 'string') return 'Fetch';
-  if (typeof record.path === 'string' || typeof record.file === 'string') return 'View';
-  return null;
-}
-
-function label(name: string, args?: unknown): string {
-  const known = TOOL_LABELS[name];
-  if (known) return known;
-  if (!name || name.trim().toLowerCase() === 'tool') {
-    return labelFromArgs(args) ?? 'Tool';
-  }
-  return titleCase(name);
 }
 
 interface ArgSummary {
@@ -78,6 +33,17 @@ interface EditDiff {
 }
 
 const SHELL_TOOL_NAMES = new Set(['powershell', 'bash', 'shell']);
+
+interface ShellPresentation {
+  command: string;
+  metadata: string[];
+}
+
+interface ShellResult {
+  output: string;
+  shellId?: string;
+  exitCode?: number;
+}
 
 /**
  * One-line summary of the most useful argument, flagging file-path args for basename styling.
@@ -226,6 +192,38 @@ function getEditDiff(name: string, args: unknown): EditDiff | null {
   return null;
 }
 
+function getShellPresentation(name: string, args: unknown): ShellPresentation | null {
+  if (!SHELL_TOOL_NAMES.has(name.trim().toLowerCase())) return null;
+  const record = asRecord(args);
+  if (!record || typeof record.command !== 'string' || !record.command.trim()) return null;
+
+  const metadata: string[] = [];
+  if (typeof record.mode === 'string' && record.mode.trim()) metadata.push(record.mode.trim());
+  if (typeof record.initial_wait === 'number') metadata.push(`wait up to ${record.initial_wait}s`);
+  if (record.detach === true) metadata.push('detached');
+  return { command: record.command.trim(), metadata };
+}
+
+function parseShellResult(value: string): ShellResult {
+  const complete = /(?:\r?\n)?<shellId:\s*([^\s>]+)\s+completed with exit code\s+(-?\d+)>\s*$/.exec(value);
+  if (complete) {
+    return {
+      output: value.slice(0, complete.index).trimEnd(),
+      shellId: complete[1],
+      exitCode: Number.parseInt(complete[2], 10),
+    };
+  }
+
+  const started = /(?:\r?\n)?<command started in background with shellId:\s*([^>]+)>\s*$/.exec(value);
+  if (started) {
+    return {
+      output: value.slice(0, started.index).trimEnd(),
+      shellId: started[1].trim(),
+    };
+  }
+  return { output: value };
+}
+
 function elapsed(item: ToolItem): string {
   if (item.finishedAt) {
     const ms = Math.max(0, item.finishedAt - item.startedAt);
@@ -246,8 +244,11 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
   const hasDetail = !!argLine || !!item.resultPreview;
   const argsText = formatArgs(item.args);
   const resultText = item.resultPreview ?? '';
-  const canViewFull = isLongOutput(resultText);
   const editDiff = getEditDiff(item.name, item.args);
+  const shell = getShellPresentation(item.name, item.args);
+  const shellResult = shell ? parseShellResult(resultText) : null;
+  const displayedResult = shellResult?.output ?? resultText;
+  const canViewFull = isLongOutput(displayedResult);
 
   useEffect(() => {
     return () => {
@@ -275,7 +276,7 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
         onClick={() => hasDetail && setExpanded((v) => !v)}
       >
         <span className="tc-icon" aria-hidden="true">{icon}</span>
-        <span className="tc-name">{label(item.name, item.args)}</span>
+        <span className="tc-name">{toolDisplayName(item.name, item.args)}</span>
         {argLine ? (
           argPath ? (
             <span className="tc-args is-path">
@@ -315,6 +316,30 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
                 ))}
               </div>
             </>
+          ) : shell ? (
+            <>
+              <div className="tc-section">
+                <span>INPUT</span>
+                <button
+                  type="button"
+                  className="tc-copy"
+                  aria-label="Copy command"
+                  onClick={() => void copyText('args', shell.command)}
+                >
+                  {copied === 'args' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <pre className="tc-command">{shell.command}</pre>
+              {shell.metadata.length > 0 ? (
+                <div className="tc-meta" aria-label="Command options">
+                  {shell.metadata.map((entry) => <span key={entry}>{entry}</span>)}
+                </div>
+              ) : null}
+              <details className="tc-raw">
+                <summary>View raw arguments</summary>
+                <pre className="tc-pre">{argsText}</pre>
+              </details>
+            </>
           ) : argLine ? (
             <>
               <div className="tc-section">
@@ -334,12 +359,12 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
           {item.resultPreview ? (
             <>
               <div className="tc-section">
-                <span>{item.status === 'error' ? 'ERROR' : 'RESULT'}</span>
+                <span>{item.status === 'error' ? 'ERROR' : 'OUTPUT'}</span>
                 <button
                   type="button"
                   className="tc-copy"
                   aria-label={item.status === 'error' ? 'Copy error' : 'Copy result'}
-                  onClick={() => void copyText('result', resultText)}
+                  onClick={() => void copyText('result', displayedResult)}
                 >
                   {copied === 'result' ? 'Copied' : 'Copy'}
                 </button>
@@ -353,8 +378,22 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
                   </button>
                 ) : null}
               </div>
-              <pre className={`tc-pre${fullResult && canViewFull ? ' full' : ''}`}>{item.resultPreview}</pre>
+              <pre className={`tc-pre${shell ? ' tc-output' : ''}${fullResult && canViewFull ? ' full' : ''}`}>
+                {displayedResult || 'No output'}
+              </pre>
             </>
+          ) : null}
+          {shell ? (
+            <div className={`tc-status ${item.status}`}>
+              <span>
+                {item.status === 'running'
+                  ? 'Running'
+                  : shellResult?.exitCode === undefined
+                    ? item.status === 'success' ? 'Completed' : 'Failed'
+                    : `Exit ${shellResult.exitCode}`}
+              </span>
+              {shellResult?.shellId ? <span>shell {shellResult.shellId}</span> : null}
+            </div>
           ) : null}
         </div>
       ) : null}

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import type { JSX } from 'react';
+import type { CSSProperties, JSX, TouchEvent as ReactTouchEvent } from 'react';
 import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
@@ -116,6 +116,17 @@ function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
+function isTextEntryElement(value: Element | null): boolean {
+  if (!(value instanceof HTMLElement)) return false;
+  if (value.isContentEditable) return true;
+  const tag = value.tagName.toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag !== 'input') return false;
+  return !['button', 'checkbox', 'file', 'hidden', 'radio', 'range', 'reset', 'submit'].includes(
+    (value as HTMLInputElement).type,
+  );
+}
+
 /** Persisted across sessions: whether the user collapsed the desktop docked sidebar (#183). */
 const SIDEBAR_COLLAPSED_KEY = 'weft.desktop-sidebar-collapsed';
 
@@ -209,7 +220,10 @@ interface SessionScreenProps {
   onSelectSession(channelId: string): void;
   onAddSession(): void;
   onOpenExplore?(): void;
+  onOpenDiscover?(): void;
   exploreOpen?: boolean;
+  exploreInitialView?: 'discover';
+  exploreDirectFromChat?: boolean;
   onCloseExplore?(): void;
   onStartSession?(): void;
   onOpenDevices?(): void;
@@ -246,7 +260,10 @@ export function SessionScreen({
   onSelectSession,
   onAddSession,
   onOpenExplore,
+  onOpenDiscover,
   exploreOpen = false,
+  exploreInitialView,
+  exploreDirectFromChat = false,
   onCloseExplore,
   onStartSession,
   onOpenDevices,
@@ -270,6 +287,11 @@ export function SessionScreen({
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voxOpen, setVoxOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [discoverPreview, setDiscoverPreview] = useState<{
+    progress: number;
+    settling: boolean;
+  } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
   // Desktop (wide viewport): dock the session list as a persistent, collapsible sidebar
@@ -286,6 +308,14 @@ export function SessionScreen({
   };
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const discoverGestureRef = useRef<{
+    startX: number;
+    startY: number;
+    startedAt: number;
+    locked: boolean;
+    cancelled: boolean;
+  } | null>(null);
+  const discoverPreviewTimerRef = useRef<number | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const approvalStackRef = useRef<HTMLDivElement | null>(null);
   const prevApprovalCount = useRef(0);
@@ -540,24 +570,14 @@ export function SessionScreen({
     // Only lift the fixed shell while a text-entry control is focused, so browser
     // chrome animation never moves the composer.
     const MIN_KEYBOARD_INSET = 160;
-    const isTextEntryFocused = (): boolean => {
-      const active = document.activeElement;
-      if (!(active instanceof HTMLElement)) return false;
-      if (active.isContentEditable) return true;
-      const tag = active.tagName.toLowerCase();
-      if (tag === 'textarea') return true;
-      if (tag !== 'input') return false;
-      return !['button', 'checkbox', 'file', 'hidden', 'radio', 'range', 'reset', 'submit'].includes(
-        (active as HTMLInputElement).type,
-      );
-    };
     const apply = (): void => {
       const el = rootRef.current;
       if (!el) return;
       const raw = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       const keyboardThreshold = Math.max(MIN_KEYBOARD_INSET, Math.round(window.innerHeight * 0.18));
-      const inset = isTextEntryFocused() && raw >= keyboardThreshold ? raw : 0;
+      const inset = isTextEntryElement(document.activeElement) && raw >= keyboardThreshold ? raw : 0;
       el.style.setProperty('--weft-kb', `${inset}px`);
+      setKeyboardOpen(inset > 0);
     };
     apply();
     vv.addEventListener('resize', apply);
@@ -571,6 +591,122 @@ export function SessionScreen({
       window.removeEventListener('focusout', apply);
     };
   }, []);
+
+  useEffect(() => () => {
+    if (discoverPreviewTimerRef.current !== null) {
+      window.clearTimeout(discoverPreviewTimerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    discoverGestureRef.current = null;
+    setDiscoverPreview(null);
+  }, [activeId, exploreOpen]);
+
+  const reducedMotion = (): boolean =>
+    globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+  const conflictingOverlayOpen =
+    drawerOpen ||
+    debugOpen ||
+    settingsOpen ||
+    voiceOpen ||
+    voxOpen ||
+    confirmRemoveId !== null ||
+    timeline.approvals.length > 0 ||
+    timeline.elicitations.length > 0;
+
+  const cancelDiscoverPreview = (): void => {
+    discoverGestureRef.current = null;
+    if (!discoverPreview || reducedMotion()) {
+      setDiscoverPreview(null);
+      return;
+    }
+    setDiscoverPreview({ progress: 0, settling: true });
+    if (discoverPreviewTimerRef.current !== null) {
+      window.clearTimeout(discoverPreviewTimerRef.current);
+    }
+    discoverPreviewTimerRef.current = window.setTimeout(() => {
+      setDiscoverPreview(null);
+      discoverPreviewTimerRef.current = null;
+    }, 180);
+  };
+
+  const onDiscoverTouchStart = (event: ReactTouchEvent<HTMLDivElement>): void => {
+    if (
+      !onOpenDiscover ||
+      exploreOpen ||
+      isDesktopWide ||
+      isDesktopInput() ||
+      keyboardOpen ||
+      isTextEntryElement(document.activeElement) ||
+      conflictingOverlayOpen ||
+      event.touches.length !== 1 ||
+      rootRef.current?.querySelector('.slash-menu, [role="dialog"], .drawer:not(.docked)')
+    ) {
+      discoverGestureRef.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    const width = Math.max(window.innerWidth, document.documentElement.clientWidth);
+    if (touch.clientX < width - 28) return;
+    discoverGestureRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      startedAt: performance.now(),
+      locked: false,
+      cancelled: false,
+    };
+  };
+
+  const onDiscoverTouchMove = (event: ReactTouchEvent<HTMLDivElement>): void => {
+    const gesture = discoverGestureRef.current;
+    const touch = event.touches[0];
+    if (!gesture || !touch || gesture.cancelled) return;
+    const deltaX = touch.clientX - gesture.startX;
+    const deltaY = touch.clientY - gesture.startY;
+    const horizontalDistance = Math.abs(deltaX);
+    const verticalDistance = Math.abs(deltaY);
+
+    if (!gesture.locked) {
+      if (horizontalDistance < 10 && verticalDistance < 10) return;
+      if (deltaX >= 0 || horizontalDistance <= verticalDistance * 1.2) {
+        gesture.cancelled = true;
+        cancelDiscoverPreview();
+        return;
+      }
+      gesture.locked = true;
+    }
+
+    event.preventDefault();
+    const width = Math.max(window.innerWidth, 1);
+    const progress = Math.min(1, Math.max(0, -deltaX / width));
+    if (!reducedMotion()) setDiscoverPreview({ progress, settling: false });
+  };
+
+  const onDiscoverTouchEnd = (event: ReactTouchEvent<HTMLDivElement>): void => {
+    const gesture = discoverGestureRef.current;
+    discoverGestureRef.current = null;
+    if (!gesture || !gesture.locked || gesture.cancelled) {
+      cancelDiscoverPreview();
+      return;
+    }
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      cancelDiscoverPreview();
+      return;
+    }
+    const distance = gesture.startX - touch.clientX;
+    const elapsedMs = Math.max(1, performance.now() - gesture.startedAt);
+    const velocity = distance / elapsedMs;
+    const threshold = Math.max(72, window.innerWidth * 0.22);
+    if (distance >= threshold || velocity >= 0.55) {
+      setDiscoverPreview(null);
+      onOpenDiscover?.();
+      return;
+    }
+    cancelDiscoverPreview();
+  };
 
   // The "jump to latest" pill floats above the composer. Track the composer dock's
   // live height in --composer-h so the pill always clears it (even when the composer
@@ -589,7 +725,14 @@ export function SessionScreen({
   }, []);
 
   return (
-    <div className={`weft-session${isDesktopWide ? ' desktop-docked' : ''}`} ref={rootRef}>
+    <div
+      className={`weft-session${isDesktopWide ? ' desktop-docked' : ''}`}
+      ref={rootRef}
+      onTouchStart={onDiscoverTouchStart}
+      onTouchMove={onDiscoverTouchMove}
+      onTouchEnd={onDiscoverTouchEnd}
+      onTouchCancel={cancelDiscoverPreview}
+    >
       <div
         className="session-surface"
         aria-hidden={exploreOpen || undefined}
@@ -928,6 +1071,17 @@ export function SessionScreen({
       </div>
       </div>
 
+      {discoverPreview ? (
+        <div
+          className={`discover-edge-preview${discoverPreview.settling ? ' settling' : ''}`}
+          style={{ '--discover-preview-progress': discoverPreview.progress } as CSSProperties}
+          aria-hidden="true"
+        >
+          <span>✦</span>
+          <strong>Discover</strong>
+        </div>
+      ) : null}
+
       {exploreOpen && onCloseExplore ? (
         <Suspense fallback={<main className="explore-screen explore-loading" role="status">Opening Explore…</main>}>
           <ExploreScreen
@@ -936,6 +1090,8 @@ export function SessionScreen({
             onOpenChat={onCloseExplore}
             onGoHome={onGoHome}
             desktopDocked={isDesktopWide}
+            initialView={exploreInitialView}
+            directFromChat={exploreDirectFromChat}
           />
         </Suspense>
       ) : null}
