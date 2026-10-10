@@ -75,6 +75,10 @@ while you use the phone.
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.
 
+**GitHub Copilot app:** ask Copilot to **open Weft pairing** for a graphical QR and
+connection status in the side panel. Or connect to a running local app session from
+the phone's **Resume** screen. CLI `/weft` remains available.
+
 ## Product tour
 
 <table>
@@ -206,7 +210,8 @@ Three layers, one monorepo:
 ## Runtime & packaging model
 
 - The extension is authored in `extension/src/` and bundled (esbuild) to a single
-  `extension/dist/extension.mjs` plus the lazily imported `extension/dist/activeRuntime.mjs`.
+  `extension/dist/extension.mjs` plus the lazily imported `extension/dist/activeRuntime.mjs`
+  and on-demand `extension/dist/pairingCanvas.mjs`.
   `@github/copilot-sdk` is marked **external** (the CLI provides
   it at runtime); everything else (e.g. `@supabase/supabase-js`, `shared/`) is bundled in.
 - Install copies `extension/dist/` into `~/.copilot/extensions/weft/`, where Copilot CLI

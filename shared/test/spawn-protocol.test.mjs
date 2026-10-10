@@ -207,6 +207,8 @@ test("sessionList filters malformed rows and normalizes fields", () => {
     sessionId: "s2", title: null, cwd: "/repo/api", repository: null, branch: null, updatedAt: null,
   });
   assert.deepEqual(sessionList(null).msg.sessions, [], "tolerates a nullish list");
+  assert.equal(sessionList([{ sessionId: "app-session", cwd: "/repo", running: true }]).msg.sessions[0].running, true);
+  assert.equal(sessionList([{ sessionId: "unknown", cwd: "/repo", running: "true" }]).msg.sessions[0].running, undefined);
 });
 
 test("resumeSession carries requestId, sessionId, and a defaulted mode", () => {

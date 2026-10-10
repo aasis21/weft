@@ -354,7 +354,10 @@ export async function mergeSavedSessionsWithRuntimePresence(
     if (directoryExists(session.cwd)) merged.set(presence.sessionId, session);
   }
   const liveIds = new Set(discovery.runtimes.map((presence) => presence.sessionId));
-  return [...merged.values()].sort((left, right) => {
+  return [...merged.values()].map((session) => ({
+    ...session,
+    ...(liveIds.has(session.sessionId) ? { running: true } : {}),
+  })).sort((left, right) => {
     const liveDifference = Number(liveIds.has(right.sessionId)) - Number(liveIds.has(left.sessionId));
     return liveDifference || (right.updatedAt ?? 0) - (left.updatedAt ?? 0);
   });

@@ -98,8 +98,8 @@ application payloads travel over AES-256-GCM.
 The source installer writes code into your personal Copilot extensions directory.
 Review it before running it in a managed environment.
 
-**1. Install the extension** (builds + copies the dormant `extension.mjs` bootstrap and lazy
-`activeRuntime.mjs` into
+**1. Install the extension** (builds + copies the dormant `extension.mjs` bootstrap, lazy
+`activeRuntime.mjs`, and on-demand `pairingCanvas.mjs` into
 `~/.copilot/extensions/weft/`, where the CLI auto-discovers it — that directory holds
 installed **code only**):
 

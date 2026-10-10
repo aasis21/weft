@@ -17,8 +17,21 @@ Station on a headless box, or to manage the relay independently).
   configured yet, this also prompts you to pick one.
 - `/weft <name>` — override the transport for just this session without touching the
   saved config. Valid names: `supabase`, `devtunnel`, `clear`.
-- Weft auto-loads at session start and prints one status line; nothing else happens
-  until you run `/weft`.
+- Weft auto-loads silently at session start. Pairing and transport work start only
+  when you run `/weft`, open pairing, or connect through Device Station.
+
+## Inside the GitHub Copilot app
+
+Ask to **open Weft pairing**. Call the extension's `weft_pair` tool when available;
+it opens the `weft-pairing` canvas on hosts that support canvases and falls back to
+the terminal QR on CLI-only hosts. Never copy pairing credentials into generated
+files, diagnostic logs, or an agent response. The panel renders the graphical QR
+and copy-code fallback directly.
+
+For a phone already paired to Device Station, use Resume and select the correct
+laptop/folder. Verified live sessions offer Connect and activate the existing
+runtime without starting another CLI. Resume refreshes on reconnect and foreground
+return. These paths support local app sessions, not remote or cloud discovery.
 
 ## Standalone `weft` CLI (no Copilot session needed)
 

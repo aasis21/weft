@@ -6,6 +6,12 @@ import { startRuntimeLifecycleHost } from "./runtimeLifecycle.mjs";
 
 const BOOTSTRAP_STATE = Symbol.for("weft.extension-bootstrap.v1");
 const ACTIVE_RUNTIME_PATH = "./activeRuntime.mjs";
+const PAIRING_CANVAS_PATH = "./pairingCanvas.mjs";
+
+async function defaultLoadPairingCanvas(options) {
+  const module = await import(PAIRING_CANVAS_PATH);
+  return module.createPairingCanvasServer(options);
+}
 
 function defaultStorePath() {
   return join(homedir(), ".copilot", "session-store.db");
@@ -26,6 +32,8 @@ async function defaultLoadActiveRuntime(options) {
 
 export async function startExtensionBootstrap({
   joinSession,
+  createCanvas,
+  loadPairingCanvas = defaultLoadPairingCanvas,
   loadActiveRuntime = defaultLoadActiveRuntime,
   startLifecycleHost = startRuntimeLifecycleHost,
   storePath = defaultStorePath(),
@@ -50,8 +58,10 @@ export async function startExtensionBootstrap({
   let lifecycleHost = null;
   let closing = false;
   let reloadIdentity = null;
+  const pairingPanels = new Map();
 
   const activate = async ({ reason, context = null, showQr = false } = {}) => {
+    if (closing) throw new Error("This Copilot session has ended.");
     if (!activationPromise) {
       lifecycleHost?.updatePresence({ state: "activating" });
       activationPromise = (async () => {
@@ -62,24 +72,94 @@ export async function startExtensionBootstrap({
             channelIdEnv,
             reloadIdentity,
           });
-          const result = await activeRuntime.activate({ reason, context, showQr });
-          lifecycleHost?.updatePresence({ state: "active" });
-          return result;
+          return activeRuntime;
         } catch (error) {
           activationPromise = null;
           lifecycleHost?.updatePresence({ state: "degraded" });
           throw error;
         }
       })();
-    } else if (showQr) {
-      await activationPromise;
-      await activeRuntime.showPairing(context);
     }
-    return activationPromise;
+    const runtime = await activationPromise;
+    if (closing) throw new Error("This Copilot session has ended.");
+    try {
+      const result = await runtime.activate({ reason, context, showQr });
+      lifecycleHost?.updatePresence({ state: "active" });
+      return result;
+    } catch (error) {
+      lifecycleHost?.updatePresence({ state: "degraded" });
+      throw error;
+    }
   };
+
+  const preparePairing = async (options = {}) => {
+    if (closing) throw new Error("This Copilot session has ended.");
+    if (!activeRuntime) await activate({ reason: "pairing" });
+    return activeRuntime.preparePairing(options);
+  };
+  const pairingStatus = () => activeRuntime?.status() ?? { state: "dormant" };
+  const pairingCanvas = typeof createCanvas === "function" ? createCanvas({
+    id: "weft-pairing",
+    displayName: "Weft",
+    description: "Pair a phone to this Copilot session with a graphical QR and live connection status.",
+    inputSchema: {
+      type: "object",
+      properties: { transport: { type: "string", enum: ["supabase", "devtunnel"] } },
+      additionalProperties: false,
+    },
+    actions: [{
+      name: "status",
+      description: "Check the phone connection without exposing the pairing credential.",
+      handler: () => ({ state: pairingStatus().state }),
+    }],
+    open: async ({ instanceId, input }) => {
+      let panel = pairingPanels.get(instanceId);
+      if (!panel) {
+        panel = loadPairingCanvas({ preparePairing, status: pairingStatus }).catch((error) => {
+          pairingPanels.delete(instanceId);
+          throw error;
+        });
+        pairingPanels.set(instanceId, panel);
+      }
+      const server = await panel;
+      try {
+        await preparePairing({ transport: input?.transport });
+      } catch (error) {
+        server.setError(error.message);
+      }
+      return { title: "Weft - pair your phone", url: server.url };
+    },
+    onClose: async ({ instanceId }) => {
+      const panel = pairingPanels.get(instanceId);
+      pairingPanels.delete(instanceId);
+      if (panel) await (await panel).close();
+    },
+  }) : null;
 
   const session = await joinSession({
     streaming: true,
+    ...(pairingCanvas ? { canvases: [pairingCanvas] } : {}),
+    tools: [{
+      name: "weft_pair",
+      description: "Pair a phone to this session. Opens a graphical QR in the Copilot app, or shows the terminal QR in CLI. Use only when the user asks to pair or open Weft.",
+      parameters: {
+        type: "object",
+        properties: { transport: { type: "string", enum: ["supabase", "devtunnel"] } },
+        additionalProperties: false,
+      },
+      handler: async (args = {}) => {
+        if (pairingCanvas && session.capabilities?.ui?.canvases) {
+          await session.rpc.canvas.open({
+            canvasId: "weft-pairing",
+            instanceId: "weft-phone-pairing",
+            input: args,
+          });
+          return "Weft pairing is open in the side panel. Scan the QR or copy its code to the phone.";
+        }
+        await activate({ reason: "command", context: { args: args.transport ?? "" }, showQr: true });
+        return "Weft pairing is shown in the session. CLI users can also run /weft.";
+      },
+    }],
     onPermissionRequest: async (request, invocation) => {
       if (!activeRuntime) return { kind: "user-not-available" };
       return activeRuntime.onPermissionRequest(request, invocation);
@@ -147,9 +227,14 @@ export async function startExtensionBootstrap({
     lifecycleHost?.withdrawPresence?.();
     processTarget.off?.("exit", onProcessExit);
     try {
-      if (activeRuntime) {
-        if (isClear(reason)) activeRuntime.discardHandoffIdentity();
-        await activeRuntime.shutdown(reason, { preserveIdentity });
+      try {
+        await Promise.all([...pairingPanels.values()].map(async (panel) => (await panel).close()));
+      } finally {
+        pairingPanels.clear();
+        if (activeRuntime) {
+          if (isClear(reason)) activeRuntime.discardHandoffIdentity();
+          await activeRuntime.shutdown(reason, { preserveIdentity });
+        }
       }
     } finally {
       try {

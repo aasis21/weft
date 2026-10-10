@@ -24,6 +24,29 @@ or resume sessions across registered projects. These are separate connection sco
 the device log shows Device Station traffic, while each session has its own log.
 See [diagnostic scope and retention](https://aasis21.github.io/weft/#diagnostics).
 
+## Use Weft in the GitHub Copilot app
+
+Local Copilot app sessions use the same Weft extension and encrypted connection as CLI
+sessions. Ask Copilot to **open Weft pairing**: the `weft_pair` tool opens a side-panel
+canvas with a graphical QR, a copy-code fallback, and live connection status. The canvas
+is loaded only when requested. Closing it does not disconnect the phone; reopening it
+does not replace an already-connected phone. **New pairing code** requires confirmation
+before replacing that connection.
+
+CLI users can continue to use `/weft`. Hosts without canvas support fall back to the
+terminal QR. The extension does not depend on the app exposing custom slash commands.
+For Dev Tunnel, start the shared relay with `weft devtunnel start` first; the panel
+reports setup errors and lets you retry with a different per-session transport without
+changing the saved laptop configuration.
+
+With Device Station running, the phone's **Resume** screen also lists local app
+sessions. It refreshes when the device reconnects, when Resume is reopened, and when
+the phone app returns to the foreground. A verified running session offers **Connect**,
+which activates the existing runtime; stopped or older sessions retain **Resume**.
+Select the correct device and folder, or use **All folders** and **Refresh** if needed.
+This does not add support for discovering cloud or remote-host app sessions on the
+local laptop.
+
 ## Register and maintain projects
 
 A project is a named existing directory on the laptop, not a copy uploaded to the phone.

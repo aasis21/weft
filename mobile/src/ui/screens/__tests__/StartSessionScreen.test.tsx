@@ -280,6 +280,51 @@ describe('StartSessionScreen — the resumable list', () => {
     expect(screen.getByText(/device is offline/i)).toBeTruthy();
   });
 
+  it('refreshes the same folder after reconnect instead of retaining the cached list', () => {
+    const device = resumeDevice('/home/me/weft');
+    const { rerender, props } = renderScreen({ devices: [device], initialMode: 'resume' });
+    expect(props.onRefreshSessions).toHaveBeenCalledTimes(1);
+    rerender(<StartSessionScreen {...props} devices={[{ ...device, connected: false }]} />);
+    rerender(<StartSessionScreen {...props} devices={[{ ...device, connected: true }]} />);
+    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
+    expect(props.onRefreshSessions).toHaveBeenLastCalledWith('chan-1', '/home/me/weft');
+  });
+
+  it('refreshes after a seamless connection attempt and when returning to Resume', () => {
+    const device = resumeDevice('/home/me/weft');
+    const { rerender, props } = renderScreen({ devices: [device], initialMode: 'resume' });
+    rerender(<StartSessionScreen {...props} devices={[{ ...device, lastAttemptAt: 1234 }]} />);
+    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('tab', { name: /new session/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
+    expect(props.onRefreshSessions).toHaveBeenCalledTimes(3);
+  });
+
+  it('offers Connect for a verified running app or CLI session', async () => {
+    const running = storedSession({ sessionId: 'running', title: 'Copilot app session', running: true });
+    const { props } = renderScreen({
+      devices: [makeDevice({ projects: [], sessions: [running] })], initialMode: 'resume',
+    });
+    fireEvent.click(screen.getByRole('radio', { name: /copilot app session/i }));
+    expect(cta()).toHaveTextContent('Connect on MacBook Pro');
+    expect(screen.getByText(/running · connect/)).toBeInTheDocument();
+    fireEvent.click(cta());
+    await waitFor(() => expect(props.onOpen).toHaveBeenCalledWith(expect.objectContaining({
+      target: { kind: 'existing', storeAuthority: null, sessionId: 'running' },
+    })));
+  });
+
+  it('refreshes on foreground return only when Resume is online and not already loading', () => {
+    const device = resumeDevice('/home/me/weft');
+    const { rerender, props } = renderScreen({ devices: [device], initialMode: 'resume' });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    fireEvent(document, new Event('visibilitychange'));
+    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
+    rerender(<StartSessionScreen {...props} devices={[{ ...device, sessionsLoading: true }]} />);
+    fireEvent(document, new Event('visibilitychange'));
+    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
+  });
+
   it('does not pull anything while the New tab is showing', () => {
     const onRefreshSessions = vi.fn();
     renderScreen({ devices: [makeDevice({ sessions: undefined })], onRefreshSessions });

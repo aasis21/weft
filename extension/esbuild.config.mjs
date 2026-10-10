@@ -29,6 +29,7 @@ await build({
     "@github/copilot-sdk/extension",
     "node-pty",
     "./activeRuntime.mjs",
+    "./pairingCanvas.mjs",
   ],
   // Bundled CommonJS deps (qrcode, supabase transitive deps) call require("fs").
   // In ESM output esbuild's shim throws "Dynamic require of ... is not supported"

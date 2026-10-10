@@ -54,13 +54,7 @@ jobs:
         run: |
           npm run build -w @aasis21/weft-extension
           mkdir -p release
-          cp extension/dist/extension.mjs release/
-          cp extension/dist/activeRuntime.mjs release/
-          cp extension/dist/relayServerProcess.mjs release/
-          cp extension/dist/devtunnelHostWatchdog.mjs release/
-          cp extension/dist/weft.mjs release/
-          cp extension/dist/native-runtime-*.json release/
-          cp skill/weft-how-to-use/SKILL.md release/weft-skill.md
+          node scripts/stage-release-payload.mjs extension/dist release skill/weft-how-to-use/SKILL.md
           cp mobile/public/install.ps1 release/
           cp mobile/public/install.sh release/
           node scripts/generate-release-manifest.mjs release

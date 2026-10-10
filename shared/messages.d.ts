@@ -488,6 +488,8 @@ export interface StoredSession {
   branch: string | null;
   /** Epoch ms of the session's last activity (store `updated_at`), or null when unparseable. */
   updatedAt: number | null;
+  /** A verified live Weft runtime exists. Absent on older stations or when liveness is unknown. */
+  running?: boolean;
 }
 export interface SessionListRequestMsg {
   /** Optional page size; clamped by the listener to SESSION_LIST_MAX. */

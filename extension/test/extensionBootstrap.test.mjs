@@ -44,6 +44,10 @@ function createHarness({
     async showPairing(context) {
       calls.activeCalls.push(["showPairing", context]);
     },
+    async preparePairing(options) {
+      calls.activeCalls.push(["preparePairing", options]);
+      return { state: "pairing-ready", pairingPayload: { token: "token" } };
+    },
     status() {
       return { state: "active" };
     },
@@ -151,6 +155,64 @@ test("direct /weft activates in-process and shows a QR path without Station", as
     { reason: "command", context: { args: "supabase" }, showQr: true },
   ]);
   assert.deepEqual(harness.calls.presence, ["dormant", "activating", "active"]);
+  await bootstrap.close();
+});
+
+test("app pairing is lazy, uses a canvas, and closes only its panel", async () => {
+  const harness = createHarness();
+  harness.session.capabilities = { ui: { canvases: true } };
+  const opens = [];
+  harness.session.rpc = { canvas: { open: async (input) => opens.push(input) } };
+  let loads = 0;
+  let closes = 0;
+  const bootstrap = await startExtensionBootstrap({
+    ...harness,
+    createCanvas: (definition) => definition,
+    loadPairingCanvas: async () => {
+      loads++;
+      return { url: "http://127.0.0.1:1234/panel/", close: async () => { closes++; }, setError() {} };
+    },
+  });
+  assert.equal(loads, 0);
+  await harness.calls.configs[0].tools[0].handler({});
+  assert.equal(loads, 0, "the renderer remains lazy until the runtime opens the panel");
+  assert.equal(opens[0].canvasId, "weft-pairing");
+  const canvas = harness.calls.configs[0].canvases[0];
+  await canvas.open({ instanceId: "panel", input: {} });
+  await canvas.open({ instanceId: "panel", input: {} });
+  assert.equal(loads, 1);
+  assert.equal(harness.calls.activeLoads.length, 1);
+  assert.equal(harness.calls.activeCalls.filter(([name]) => name === "showPairing").length, 0);
+  assert.deepEqual(await canvas.actions[0].handler(), { state: "active" });
+  await canvas.onClose({ instanceId: "panel" });
+  assert.equal(closes, 1);
+  assert.equal(harness.calls.activeCalls.filter(([name]) => name === "shutdown").length, 0);
+  await bootstrap.close();
+});
+
+test("older SDKs and CLI hosts keep a terminal pairing path", async () => {
+  const harness = createHarness();
+  const bootstrap = await startExtensionBootstrap(harness);
+  assert.equal(harness.calls.configs[0].canvases, undefined);
+  const result = await harness.calls.configs[0].tools[0].handler({ transport: "supabase" });
+  assert.match(result, /CLI/);
+  assert.deepEqual(harness.calls.activeCalls[0], [
+    "activate", { reason: "command", context: { args: "supabase" }, showQr: true },
+  ]);
+  await bootstrap.close();
+});
+
+test("Station activation reads the current runtime instead of replaying an old pairing result", async () => {
+  const harness = createHarness();
+  const bootstrap = await startExtensionBootstrap(harness);
+  const first = await harness.calls.handlers.activate({ requesterId: "phone-a" });
+  bootstrap.activeRuntime.activate = async () => ({
+    state: "controller-conflict", controllerConflict: true,
+  });
+  const second = await harness.calls.handlers.activate({ requesterId: "phone-b" });
+  assert.equal(first.state, "pairing-ready");
+  assert.equal(second.controllerConflict, true);
+  assert.equal(harness.calls.activeLoads.length, 1);
   await bootstrap.close();
 });
 
@@ -271,7 +333,7 @@ test("the dormant bundle excludes pairing crypto, QR, transport, relay, and diag
     platform: "node",
     target: "node20",
     format: "esm",
-    external: ["@github/copilot-sdk/extension", "./activeRuntime.mjs"],
+    external: ["@github/copilot-sdk/extension", "./activeRuntime.mjs", "./pairingCanvas.mjs"],
     logLevel: "silent",
   });
   const inputs = Object.keys(result.metafile.inputs).join("\n");

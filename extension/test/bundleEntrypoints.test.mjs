@@ -60,13 +60,14 @@ test("every spawnable sibling under src/ is emitted by esbuild and shipped by th
   }
 });
 
-test("both ship scripts stage the centralized payload and verify its manifest", () => {
+test("ship scripts and release CI stage the centralized payload and verify its manifest", () => {
   const repoRoot = path.resolve(extensionRoot, "..");
-  for (const script of ["ship.ps1", "ship.sh"]) {
+  for (const script of ["ship.ps1", "ship.sh", ".github/workflows/release.yml"]) {
     const text = readFileSync(path.join(repoRoot, script), "utf8");
     assert.match(text, /stage-release-payload\.mjs/);
     assert.match(text, /generate-release-manifest\.mjs/);
-    assert.match(text, /verify-release-manifest\.mjs/);
+    if (script !== ".github/workflows/release.yml")
+      assert.match(text, /verify-release-manifest\.mjs/);
   }
 });
 
@@ -75,4 +76,5 @@ test("the active runtime is built and shipped beside the dormant bootstrap", () 
   assert.match(esbuildConfig, /entryPoints:\s*\["src\/activeRuntime\.mjs"\]/);
   assert.match(esbuildConfig, /activeRuntimeOutfile\s*=\s*"dist\/activeRuntime\.mjs"/);
   assert.ok(RELEASE_BUNDLE_NAMES.includes("activeRuntime.mjs"));
+  assert.ok(RELEASE_BUNDLE_NAMES.includes("pairingCanvas.mjs"));
 });

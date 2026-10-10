@@ -29,8 +29,7 @@ interface StartSessionScreenProps {
   onConnectDevice(channelId: string): void;
   onOpen(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
   onConfirmTakeover(operationId: string): Promise<LifecycleStatusMsg>;
-  /** On-demand pull of the device's recent resumable CLI sessions. Never automatic: the store is
-   *  large and rewritten every turn, and the reply arrives asynchronously. */
+  /** Pull recent CLI/app sessions when Resume opens, reconnects, or is refreshed. */
   onRefreshSessions(channelId: string, cwd?: string | null): void;
   onScanListener(): void;
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
@@ -190,11 +189,15 @@ export function StartSessionScreen({
   // while the device is connected: asking an offline laptop just produces a timeout. Re-pulls on
   // every folder change because the cap is applied by the laptop AFTER filtering.
   useEffect(() => {
-    if (!resuming || !selected?.connected || selected.sessionsLoading) return;
+    if (!resuming || !selected?.connected) {
+      fetchedScopeRef.current = '';
+      return;
+    }
+    if (selected.sessionsLoading) return;
     // The device's default folder arrives asynchronously with its project list; fetching "all"
     // first and then immediately re-fetching the default would flash a list we never meant to show.
     if (!folderTouchedRef.current && defaultFolder && sessionFolder !== defaultFolder) return;
-    const scope = `${selected.channelId}|${sessionFolder}`;
+    const scope = `${selected.channelId}|${sessionFolder}|${selected.lastAttemptAt ?? 0}`;
     if (fetchedScopeRef.current === scope) return;
     fetchedScopeRef.current = scope;
     onRefreshSessions(selected.channelId, sessionFolder === ALL_FOLDERS ? null : sessionFolder);
@@ -203,10 +206,22 @@ export function StartSessionScreen({
     selected?.channelId,
     selected?.connected,
     selected?.sessionsLoading,
+    selected?.lastAttemptAt,
     sessionFolder,
     defaultFolder,
     onRefreshSessions,
   ]);
+
+  useEffect(() => {
+    if (!resuming || !selected?.connected) return undefined;
+    const refreshOnReturn = (): void => {
+      if (document.visibilityState === 'visible' && !selected.sessionsLoading) {
+        onRefreshSessions(selected.channelId, activeFolder === ALL_FOLDERS ? null : activeFolder);
+      }
+    };
+    document.addEventListener('visibilitychange', refreshOnReturn);
+    return () => document.removeEventListener('visibilitychange', refreshOnReturn);
+  }, [resuming, selected?.channelId, selected?.connected, selected?.sessionsLoading, activeFolder, onRefreshSessions]);
 
   // A selection that scrolls out of the filtered list is no longer a thing the CTA can act on.
   useEffect(() => {
@@ -310,12 +325,12 @@ export function StartSessionScreen({
     || (resuming ? !chosenSession : !projectName || selected.projectsLoading);
   const ctaLabel = resuming
     ? busy
-      ? 'Resuming…'
+      ? chosenSession?.running ? 'Connecting…' : 'Resuming…'
       : chosenLive
         ? `Open ${chosenLive.meta.title || 'session'}`
         : forcing
           ? 'Close it and resume anyway'
-          : `Resume on ${selected ? deviceLabel(selected) : 'device'}`
+          : `${chosenSession?.running ? 'Connect' : 'Resume'} on ${selected ? deviceLabel(selected) : 'device'}`
     : busy
       ? 'Starting…'
       : `Start on ${selected ? deviceLabel(selected) : 'device'}`;
@@ -463,7 +478,7 @@ export function StartSessionScreen({
                         activeFolder === ALL_FOLDERS ? null : activeFolder,
                       )
                     }
-                    disabled={!selected || selected.sessionsLoading}
+                    disabled={!selected?.connected || selected.sessionsLoading}
                   >
                     {selected?.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}
                   </button>
@@ -541,7 +556,7 @@ export function StartSessionScreen({
                                   {when ? <span className="device-session-age">{when}</span> : null}
                                 </span>
                                 <span className="device-card-sub device-session-status">
-                                  {live ? 'already on this phone' : 'resumable'}
+                                  {live ? 'already on this phone' : s.running ? 'running · connect' : 'resumable'}
                                   {subtitle ? ` · ${subtitle}` : ''}
                                 </span>
                               </button>

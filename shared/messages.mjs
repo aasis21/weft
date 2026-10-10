@@ -605,6 +605,7 @@ export const sessionList = (sessions, folders = null) =>
         repository: typeof s.repository === "string" && s.repository.length > 0 ? s.repository : null,
         branch: typeof s.branch === "string" && s.branch.length > 0 ? s.branch : null,
         updatedAt: Number.isFinite(s.updatedAt) ? s.updatedAt : null,
+        ...(s.running === true ? { running: true } : {}),
       })),
     // Whole-store per-folder totals, independent of the capped page above, so the phone's folder
     // picker can say how many sessions a folder really holds rather than how many of them happened

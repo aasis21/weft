@@ -1098,6 +1098,14 @@ test("an already-open Session A is activated in place and causes zero spawn call
   });
   t.after(() => h.listener.stop());
 
+  await h.phoneChannel.send(sessionListRequest(50));
+  const listed = await waitFor(
+    () => h.messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
+    "live runtime session list",
+    10_000,
+  );
+  assert.equal(listed.msg.sessions[0].running, true);
+
   await h.phoneChannel.send(openSession("open-live-a", {
     kind: "existing",
     storeAuthority,
