@@ -41,9 +41,12 @@ The panel identifies the current session, workspace, branch, selected model,
 interaction mode, activity, laptop, and connected phone. Live metadata refreshes
 while it is open; unavailable fields are marked explicitly rather than guessed.
 These details are displayed only in the local panel, not added to relay diagnostics.
-The panel tab is **Weft | Phone companion** and the heading is **Continue on your
-phone**. The conversation name is shown as Session in the details, not used as the
+The panel tab is **Weft | Phone companion**, with a single introductory line:
+**Weft lets you follow and control your Copilot session from your phone.**
+The conversation name is shown as Session in the details, not used as the
 product title. Session ID and Started remain directly visible.
+Session details use compact label/value rows, with two columns where there is room
+and a single column on narrow panels. Long paths and IDs wrap without hiding fields.
 For Dev Tunnel, start the shared relay with `weft devtunnel start` first; the panel
 reports setup errors and lets you retry with a different per-session transport without
 changing the saved laptop configuration.

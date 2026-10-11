@@ -172,19 +172,22 @@ export function renderPairingHtml() {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weft | Phone companion</title>
 <style>
-body { margin:0; padding:24px; background:var(--background-color-default,#fff); color:var(--text-color-default,#1f2328); font-family:var(--font-sans,system-ui,-apple-system,"Segoe UI",sans-serif); font-size:var(--text-body-medium,14px); line-height:1.5; }
-main { max-width:700px; margin:auto; } h1 { margin:0; font-size:25px; line-height:1.25; overflow-wrap:anywhere; }
+body { margin:0; padding:20px; background:var(--background-color-default,#fff); color:var(--text-color-default,#1f2328); font-family:var(--font-sans,system-ui,-apple-system,"Segoe UI",sans-serif); font-size:var(--text-body-medium,14px); line-height:1.5; }
+main { max-width:700px; margin:auto; }
 p { color:var(--text-color-muted,#59636e); } a { color:var(--true-color-blue,#0969da); }
+.intro { margin:0 0 12px; }
 section { padding:20px; border:1px solid var(--border-color-default,#d1d9e0); border-radius:16px; margin:20px 0; }
-.brand { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:24px; }
+.brand { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
 .wordmark { display:flex; align-items:center; gap:9px; font-size:19px; font-weight:700; }
 .mark { background:#c6f24e; color:#172114; border-radius:10px; padding:3px 9px; font-weight:800; }
 .eyebrow { color:var(--text-color-muted,#59636e); font-size:11px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; }
 .badge { display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:4px 10px; border-radius:20px; border:1px solid var(--border-color-default,#d1d9e0); }
 .badge::before { content:''; width:6px; height:6px; border-radius:50%; background:#86939e; }
 .badge.online::before { background:#238636; }
-.session-card { margin-bottom:16px; } .session-card p { margin:6px 0 0; }
-.session-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:18px 0 0; }
+.session-card { padding:14px 16px; margin:12px 0; } .session-card p { margin:6px 0 0; }
+.session-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 16px; margin:12px 0 0; }
+.session-grid > div { display:grid; grid-template-columns:80px minmax(0,1fr); align-items:baseline; gap:8px; }
+.session-grid dd { margin:0; }
 dt { color:var(--text-color-muted,#59636e); font-size:12px; } dd { margin:3px 0 0; overflow-wrap:anywhere; }
 .full { grid-column:1/-1; } .mono { font:12px/1.5 var(--font-mono,monospace); }
 .pair-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(180px,.85fr); gap:24px; align-items:center; }
@@ -199,13 +202,11 @@ button { cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
 .controls { display:flex; gap:10px; flex-wrap:wrap; } textarea { box-sizing:border-box; width:100%; height:100px; font:12px var(--font-mono,monospace); }
 #error { color:var(--true-color-red,#cf222e); } .footer { font-size:12px; }
 [hidden] { display:none!important; }
-@media(max-width:560px) { body { padding:16px; } section { padding:16px; } .pair-grid { grid-template-columns:1fr; gap:8px; } .session-grid { gap:12px; } }
+@media(max-width:560px) { body { padding:16px; } section { padding:16px; } .session-card { padding:12px; } .pair-grid { grid-template-columns:1fr; gap:8px; } .session-grid { grid-template-columns:1fr; gap:4px; } .session-grid > div { grid-template-columns:72px minmax(0,1fr); } }
 </style></head><body><main>
 <header class="brand"><span class="wordmark"><span class="mark" aria-hidden="true">W</span>Weft</span>
 <span id="version" class="eyebrow">SESSION COMPANION</span></header>
-<div class="eyebrow">YOUR COPILOT SESSION</div>
-<h1>Continue on your phone</h1>
-<p>Continue this session on your phone. Same conversation, same workspace.</p>
+<p class="intro">Weft lets you follow and control your Copilot session from your phone.</p>
 <section class="session-card" aria-label="Session details">
 <div class="controls"><span id="activity" class="badge">Activity unavailable</span><span id="mode" class="badge">Mode unavailable</span><span id="device" class="badge">This laptop</span></div>
 <dl class="session-grid">
