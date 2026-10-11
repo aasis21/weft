@@ -27,6 +27,7 @@ import {
   getPhoneCommand,
   validatePhoneCommandInput,
   WORKSPACE_CAPABILITY,
+  SESSION_FILES_CAPABILITY,
   WORKSPACE_LIMITS,
   workspaceResult,
   validWorkspaceRequest,
@@ -35,6 +36,11 @@ import {
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
 import { clearAttachedSession, recordAttachedSession } from "./attachedSessions.mjs";
+import { WorkspaceError } from "./workspaceView.mjs";
+import { SessionFilesError } from "./sessionFiles.mjs";
+
+const knownWorkspaceError = (error) =>
+  (error instanceof WorkspaceError || error instanceof SessionFilesError) && WORKSPACE_CODES.includes(error.code);
 
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
@@ -430,12 +436,35 @@ export async function attachRelay({
     }
   };
 
-  const workspaceCapabilities = workspaceView &&
+  const supportsWorkspacePolicy = workspaceView &&
     session.rpc?.contentExclusion?.checkPaths && session.rpc?.tools?.execute &&
     session.rpc?.permissions?.paths?.list &&
-    session.rpc?.permissions?.paths?.isPathWithinAllowedDirectories
-    ? [WORKSPACE_CAPABILITY] : [];
-  await sendSafe(channelUp(cwd, lastTitle, workspaceCapabilities));
+    session.rpc?.permissions?.paths?.isPathWithinAllowedDirectories;
+  let workspaceWarning = null;
+  async function readWorkspaceCapabilities() {
+    if (!supportsWorkspacePolicy) return [];
+    let timer;
+    try {
+      await Promise.race([
+        (async () => { await (await workspaceView()).checkAvailable(); })(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Workspace policy check timed out.")), 5000);
+          timer.unref?.();
+        }),
+      ]);
+      workspaceWarning = null;
+      return [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY];
+    } catch (error) {
+      const message = `Files and Changes unavailable: ${knownWorkspaceError(error)
+        ? error.message : "Copilot could not verify workspace read policy. Restart or update Copilot, then reconnect. No files were read."}`;
+      if (message !== workspaceWarning) {
+        workspaceWarning = message;
+        await sendSafe(logLine("warning", message));
+      }
+      return [];
+    } finally { clearTimeout(timer); }
+  }
+  await sendSafe(channelUp(cwd, lastTitle, await readWorkspaceCapabilities()));
   // This session is now attached to a phone. Publish that, so a RESUME_SESSION arriving at the
   // station for this same CLI session can be answered with "it's already running" instead of
   // forking a second `copilot --resume` onto it. Refreshed on every beat below so the station can
@@ -552,7 +581,7 @@ export async function attachRelay({
                 error: { code: "too-large", message: "The requested page is too large. Choose a narrower view." } });
             }
           } catch (error) {
-            const known = WORKSPACE_CODES.includes(error.code);
+            const known = knownWorkspaceError(error);
             response = workspaceResult({ requestId: input.requestId,
               error: { code: known ? error.code : "unavailable",
                 message: known ? error.message : "Workspace preview is unavailable. Update Copilot and Weft." } });
@@ -590,7 +619,7 @@ export async function attachRelay({
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
-        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, capabilities: workspaceCapabilities });
+        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, readWorkspaceCapabilities });
       }
     }),
   );
@@ -805,16 +834,17 @@ async function serveRecentTurns(turnBuffer, req, sendSafe, logger) {
  * or MID-TURN join immediately shows the truth (working vs ready, current mode, latest turn cursor)
  * and re-renders any prompts still pending on the terminal — instead of waiting for the next event.
  */
-async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, capabilities }) {
+async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, readWorkspaceCapabilities }) {
   try {
-    const [activity, mode, latestTurnIndex] = await Promise.all([
+    const [activity, mode, latestTurnIndex, capabilities] = await Promise.all([
       readSessionActivity(session),
       readCurrentMode(session),
       readLatestTurnIndex(sessionId),
+      readWorkspaceCapabilities(),
     ]);
     await sendSafe(
       stateSnapshot({
-        ...(capabilities?.length ? { capabilities } : {}),
+        capabilities,
         // A one-shot connect snapshot defaults to idle when the host can't tell us (null).
         busy: activity?.busy ?? false,
         abortable: activity?.abortable ?? false,

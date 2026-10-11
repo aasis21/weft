@@ -43,9 +43,10 @@ connect to existing sessions while the actual process keeps running on your lapt
 | Watch replies, tool calls, edits, and status stream live. | Prompt, steer, stop, change mode, and answer native approvals from your phone. | Session traffic is encrypted end to end; the relay forwards ciphertext and stores no session content. |
 | Resume existing work or launch a session in a registered project. | Use voice, image attachments, clipboard tools, keep-awake controls, and a shared terminal. | Pairing keys, transcripts, and session metadata remain on your devices. |
 
-**Files and Changes:** open the session menu to browse workspace filenames lazily,
-preview a selected file, or inspect its current Git diff. Explicit local file links
-in chat open the same read-only viewer. Content is fetched only when requested.
+**Files and Changes:** Files has separate **Current folder** and **Agent-touched files**
+trees: browse workspace folders lazily or see files this session read or wrote,
+including permitted external paths. Changes shows touched workspace files' Git diffs.
+Both trees and chat file links use the same read-only, on-demand viewer.
 
 Weft is not a remote desktop and it does not move your workspace to the cloud. Copilot and
 your tools continue to run under your account on the laptop; the phone provides a focused,

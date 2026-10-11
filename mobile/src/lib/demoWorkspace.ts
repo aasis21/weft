@@ -5,6 +5,8 @@ const files: Record<string, { format: 'source' | 'markdown' | 'html'; text: stri
   'README.md': { format: 'markdown', text: '# Demo workspace\n\nOpen the [report](reports/summary.html) or inspect [source](src/app.ts#L2).\n\nThese files are simulated; no laptop files are read.' },
   'src/app.ts': { format: 'source', text: 'export const title = "Weft preview";\nexport const version = 2;\n' },
   'reports/summary.html': { format: 'html', text: '<!doctype html><html><head><style>body{font:16px system-ui;padding:24px}h1{color:#166534}</style></head><body><h1>Demo report</h1><p>Files, Changes, and chat links open the same read-only preview.</p></body></html>' },
+  'docs/guide.md': { format: 'markdown', text: '# Workspace guide\n\nThis file is in the current folder but has not been touched by the simulated agent.' },
+  'C:/Users/demo/reports/outside.md': { format: 'markdown', text: '# Outside workspace\n\nThis simulated file was written by the same session outside its project folder.' },
 };
 const patch = 'diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,2 +1,2 @@\n export const title = "Weft preview";\n-export const version = 1;\n+export const version = 2;\n';
 export function attachDemoWorkspace(channel: SecureChannel): () => void {
@@ -15,13 +17,26 @@ export function attachDemoWorkspace(channel: SecureChannel): () => void {
     let data: WorkspaceData;
     const path = 'path' in input ? input.path.replace(/\\/g, '/').replace(/^\.\//, '') : '';
     if (input.action === 'list') {
-      const prefix = path ? path + '/' : '';
-      const names = new Map<string, 'file' | 'folder'>();
-      for (const file of Object.keys(files).filter((file) => file.startsWith(prefix))) {
-        const tail = file.slice(prefix.length);
-        names.set(tail.split('/')[0], tail.includes('/') ? 'folder' : 'file');
+      if (input.scope === 'touched') {
+        if (path && path !== '.') {
+          void channel.send(workspaceResult({ requestId: input.requestId, error: { code: 'denied', message: 'Touched folders are not browsed.' } }));
+          return;
+        }
+        data = { action: 'list', scope: 'touched', path: '', entries: Object.keys(files).filter((file) => file !== 'docs/guide.md').map((file) => ({
+          name: file.split('/').pop() ?? file, path: file.startsWith('C:') ? file.replace(/\//g, '\\') : file,
+          kind: 'file', access: file === 'README.md' ? 'read' : 'written', external: file.startsWith('C:'),
+        })), cursor: null };
+      } else {
+        const prefix = path && path !== '.' ? path + '/' : '';
+        const names = new Map<string, 'file' | 'folder'>();
+        for (const file of Object.keys(files).filter((file) => !file.startsWith('C:') && file.startsWith(prefix))) {
+          const tail = file.slice(prefix.length), name = tail.split('/')[0];
+          names.set(name, tail.includes('/') ? 'folder' : 'file');
+        }
+        data = { action: 'list', scope: 'workspace', path, entries: [...names].map(([name, kind]) => ({
+          name, kind, path: prefix + name,
+        })), cursor: null };
       }
-      data = { action: 'list', path, entries: [...names].map(([name, kind]) => ({ name, path: prefix + name, kind })), cursor: null };
     } else if (input.action === 'changes') {
       data = { action: 'changes', entries: [{ name: 'app.ts', path: 'src/app.ts', kind: 'file', status: 'M' }],
         base: 'a'.repeat(40), cursor: null };
@@ -29,7 +44,7 @@ export function attachDemoWorkspace(channel: SecureChannel): () => void {
       const file = files[path], diff = input.format === 'diff';
       const previewId = crypto.randomUUID(), text = diff ? patch : file.text;
       previews.set(previewId, { text, revision: 'demo-revision' });
-      data = { action: 'open', path, previewId, format: diff ? 'diff' : file.format, revision: 'demo-revision',
+      data = { action: 'open', path: path.startsWith('C:') ? path.replace(/\//g, '\\') : path, previewId, format: diff ? 'diff' : file.format, revision: 'demo-revision',
         text: text.slice(0, WORKSPACE_LIMITS.pageBytes), offset: 0, nextOffset: text.length > WORKSPACE_LIMITS.pageBytes ? WORKSPACE_LIMITS.pageBytes : null,
         capturedAt: Date.now(), totalLines: text.split('\n').length, ...(diff ? { base: 'a'.repeat(40) } : {}) };
     } else if (input.action === 'page' && previews.has(input.previewId)) {

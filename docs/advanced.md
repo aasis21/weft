@@ -61,22 +61,31 @@ local laptop.
 
 ## Register and maintain projects
 
-The session menu's **Files** and **Changes** views are read-only and workspace-scoped.
-Folder expansion fetches names only; tapping a file or Markdown file link fetches a
+The session menu's **Files** has two independent trees. **Current folder** expands
+the session workspace one level at a time, fetching names only. **Agent-touched files**
+groups files successfully read or written in this session, including exact permitted
+paths outside the workspace. Its folders are virtual groupings, not permission to
+browse external directories. Tapping a file in either tree or a Markdown file link fetches a
 revision-labelled preview. Markdown, text/source, and self-contained HTML are supported;
 HTML scripts, forms, and external assets are disabled. **Refresh** captures the latest
 version; loaded content remains visible offline, but fetching more requires reconnection.
-Changes compares staged and unstaged working files against a pinned HEAD commit;
+Changes compares session-touched workspace files against a pinned HEAD commit;
 untracked files appear as New. No staging, reverting, or file editing is provided.
 
 Workspace reads use Copilot's native approval pipeline, allowed-directory policy,
 and content-exclusion checks. Older hosts without those checks do not advertise this
-feature. Denied names and contents are not sent. Each text file is capped at 2 MiB or
+feature. A prior read/write is not permanent permission. Denied names and contents
+are not sent. Each text file is capped at 2 MiB or
 20,000 lines, HTML and patches at 1 MiB; transfers are bounded pages. Temporary
 snapshots expire after five minutes and are not persisted by Weft. Preview requests,
 contents, and patches are excluded from diagnostic logs.
-Changes checks candidate paths before running Git diffs; workspaces with more than
-4,000 candidates or an oversized path list must be narrowed rather than scanned without limits.
+Tracking is rebuilt from host history on reconnect/reload. Known file-tool successes
+and committed native edits are tracked; arbitrary shell commands, MCP paths,
+relative paths without authoritative working-directory metadata, and failed reads
+are not inferred. Protected internal paths remain blocked. Outside-workspace files
+have previews, not Git diffs. Lists are capped at 4,000 files, and Git checks only
+policy-approved touched workspace paths. Workspace previews need not have been
+touched; outside-workspace previews always require an exact session record.
 
 A project is a named existing directory on the laptop, not a copy uploaded to the phone.
 The device dashboard groups these registrations under **Copilot workspaces**; the CLI

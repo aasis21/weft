@@ -22,4 +22,14 @@ describe('workspace request correlation', () => {
     client.dispose();
     await expect(disconnected).rejects.toThrow(/connection ended/);
   });
+
+  it('does not substitute a touched-file listing for a current-folder request', async () => {
+    const sent: EventEnvelope[] = [];
+    const client = new WorkspaceClient(async (message) => { sent.push(message); });
+    const pending = client.request({ action: 'list', scope: 'workspace', path: '' });
+    const id = sent[0].msg as { requestId: string };
+    client.receive({ requestId: id.requestId, data: { action: 'list', scope: 'touched', entries: [] } });
+    await expect(pending).rejects.toThrow(/unexpected workspace response/);
+    client.dispose();
+  });
 });

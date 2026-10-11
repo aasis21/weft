@@ -24,6 +24,7 @@ import {
   userMessage,
   waitForPeer,
   WORKSPACE_CAPABILITY,
+  SESSION_FILES_CAPABILITY,
 } from '@aasis21/weft-shared';
 import type { ApprovalDecision, ElicitationResponse, ModeChange, PromptMessage } from '@aasis21/weft-shared';
 import { pairSession } from './weftClient';
@@ -134,7 +135,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   ];
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
-  push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session', [WORKSPACE_CAPABILITY])));
+  push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session', [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY])));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>

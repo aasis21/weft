@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 export const WORKSPACE_CAPABILITY = "workspace-view-v1";
+export const SESSION_FILES_CAPABILITY = "session-files-v1";
 export const WORKSPACE_LIMITS = Object.freeze({
   entries: 100, directoryEntries: 4000, fileBytes: 2 * 1024 * 1024,
   htmlBytes: 1024 * 1024, lines: 20000, pageLines: 200,
@@ -19,13 +20,14 @@ export function validWorkspaceRequest(value) {
   if (typeof value.requestId !== "string" || !/^[a-zA-Z0-9-]{1,96}$/.test(value.requestId)) return false;
   if (!["list", "changes", "open", "page", "close"].includes(value.action)) return false;
   const fields = {
-    list: ["path", "cursor"], changes: ["cursor"],
+    list: ["path", "cursor", "scope"], changes: ["cursor"],
     open: ["path", "format", "base"], page: ["previewId", "offset"],
     close: ["previewId"],
   };
   if (Object.keys(value).some((key) => !["requestId", "action", ...fields[value.action]].includes(key))) return false;
   if (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 2048 || /[\0\r\n]/.test(value.path))) return false;
   if (["list", "open"].includes(value.action) && typeof value.path !== "string") return false;
+  if (value.scope !== undefined && !["workspace", "touched"].includes(value.scope)) return false;
   if (value.format !== undefined && !["file", "diff"].includes(value.format)) return false;
   if (value.base !== undefined && (typeof value.base !== "string" || !/^[a-f0-9]{40,64}$/.test(value.base))) return false;
   if (value.cursor !== undefined && (typeof value.cursor !== "string" || value.cursor.length > 128)) return false;
@@ -42,12 +44,15 @@ export function validWorkspaceResult(value) {
   if (!data || !["list", "changes", "open", "page", "close"].includes(data.action)) return false;
   if (data.base != null && (typeof data.base !== "string" || !/^[a-f0-9]{40,64}$/.test(data.base))) return false;
   if (data.path !== undefined && (typeof data.path !== "string" || data.path.length > 2048)) return false;
+  if (data.scope !== undefined && (data.action !== "list" || !["workspace", "touched"].includes(data.scope))) return false;
   if (["list", "changes"].includes(data.action)) {
     return Array.isArray(data.entries) && data.entries.length <= WORKSPACE_LIMITS.entries &&
       data.entries.every((entry) => entry && typeof entry.path === "string" && entry.path.length <= 2048 &&
         typeof entry.name === "string" && entry.name.length <= 255 &&
         (entry.status === undefined || typeof entry.status === "string" && entry.status.length <= 1) &&
         (entry.oldPath === undefined || typeof entry.oldPath === "string" && entry.oldPath.length <= 2048) &&
+        (entry.access === undefined || ["read", "written", "read-written"].includes(entry.access)) &&
+        (entry.external === undefined || typeof entry.external === "boolean") &&
         ["file", "folder"].includes(entry.kind)) &&
       (data.cursor == null || typeof data.cursor === "string" && data.cursor.length <= 128);
   }

@@ -16,13 +16,43 @@ interface Props {
   onBack(): void;
   approvalControls?: ReactNode;
   workspaceName?: string | undefined;
+  workspacePath?: string | undefined;
 }
 interface FileView {
   data: WorkspaceData; text: string; next: number | null; source: boolean;
 }
-export function WorkspaceScreen({ initial, initialFile, connected, request, onBack, approvalControls, workspaceName }: Props): JSX.Element {
+interface TouchedNode {
+  key: string; name: string; children: TouchedNode[]; entry?: WorkspaceEntry;
+}
+function touchedTree(entries: WorkspaceEntry[]): TouchedNode[] {
+  const roots: TouchedNode[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== 'file') continue;
+    const path = entry.path.replace(/\\/g, '/');
+    const parts = [...(entry.external ? ['Outside workspace', ...(path.startsWith('/') ? ['/'] : [])] : []),
+      ...path.split('/').filter(Boolean)];
+    let children = roots, key = entry.external ? 'external:' : 'workspace:';
+    for (let i = 0; i < parts.length; i++) {
+      key += `${parts[i].length}:${parts[i]}`;
+      let node = children.find((item) => item.key === key);
+      if (!node) {
+        node = { key, name: parts[i], children: [] };
+        children.push(node);
+      }
+      if (i === parts.length - 1) node.entry = entry;
+      children = node.children;
+    }
+  }
+  const sort = (nodes: TouchedNode[]): TouchedNode[] => nodes.sort((a, b) =>
+    Number(Boolean(a.entry)) - Number(Boolean(b.entry)) || a.name.localeCompare(b.name)).map((node) =>
+    ({ ...node, children: sort(node.children) }));
+  return sort(roots);
+}
+export function WorkspaceScreen({ initial, initialFile, connected, request, onBack, approvalControls, workspaceName, workspacePath }: Props): JSX.Element {
+  const [files, setFiles] = useState<WorkspaceData | null>(null);
   const [folders, setFolders] = useState<Record<string, WorkspaceData>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['']));
+  const [expandedTouched, setExpandedTouched] = useState<Set<string>>(new Set());
   const [changes, setChanges] = useState<WorkspaceData | null>(null);
   const [file, setFile] = useState<FileView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,15 +94,31 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
     } finally { if (current === generation.current) setLoading(false); }
   }, []);
 
-  const loadFolder = useCallback((path: string, more = false): Promise<void> => run(async (signal) => {
-    const previous = folders[path];
-    const result = await request({ action: 'list', path,
-      ...(more && previous?.cursor ? { cursor: previous.cursor } : {}) }, signal);
+  const fetchTouched = useCallback(async (signal: AbortSignal, more = false): Promise<void> => {
+    const result = await request({ action: 'list', scope: 'touched', path: '',
+      ...(more && files?.cursor ? { cursor: files.cursor } : {}) }, signal);
+    if (signal.aborted) return;
+    setFiles((current) => ({
+      ...result, entries: more ? [...(current?.entries ?? []), ...(result.entries ?? [])] : result.entries ?? [],
+    }));
+  }, [files, request]);
+
+  const fetchFolder = useCallback(async (signal: AbortSignal, path: string, more = false): Promise<void> => {
+    const result = await request({ action: 'list', scope: 'workspace', path,
+      ...(more && folders[path]?.cursor ? { cursor: folders[path].cursor } : {}) }, signal);
     if (signal.aborted) return;
     setFolders((current) => ({ ...current, [path]: {
       ...result, entries: more ? [...(current[path]?.entries ?? []), ...(result.entries ?? [])] : result.entries ?? [],
     } }));
-  }), [folders, request, run]);
+  }, [folders, request]);
+
+  const loadFiles = useCallback((): Promise<void> => run(async (signal) => {
+    for (const path of expandedFolders) {
+      await fetchFolder(signal, path);
+      if (signal.aborted) return;
+    }
+    await fetchTouched(signal);
+  }), [expandedFolders, fetchFolder, fetchTouched, run]);
 
   const loadChanges = useCallback((more = false): Promise<void> => run(async (signal) => {
     const result = await request({ action: 'changes', ...(more && changes?.cursor ? { cursor: changes.cursor } : {}) }, signal);
@@ -117,8 +163,8 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
     started.current = true;
     if (initialFile) void openFile(initialFile);
     else if (initial === 'changes') void loadChanges();
-    else void loadFolder('');
-  }, [initial, initialFile, openFile, loadChanges, loadFolder]);
+    else void loadFiles();
+  }, [initial, initialFile, openFile, loadChanges, loadFiles]);
 
   const loadMore = (): void => {
     const current = fileRef.current;
@@ -149,15 +195,7 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
     }
     else if (initialFile) void openFile(initialFile);
     else if (initial === 'changes') void loadChanges();
-    else {
-      void run(async (signal) => {
-        for (const path of expanded) {
-          const result = await request({ action: 'list', path }, signal);
-          if (signal.aborted) return;
-          setFolders((current) => ({ ...current, [path]: result }));
-        }
-      });
-    }
+    else void loadFiles();
   };
   const back = (): void => {
     abort.current?.abort(); ++generation.current; setLoading(false); setError(null);
@@ -165,38 +203,66 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
     closeSnapshot(file.data.previewId); setFile(null);
     window.requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = listScroll.current; });
   };
-  const renderEntries = (path: string, depth = 0): JSX.Element => <ul className="workspace-tree">
-    {folders[path] && !folders[path].entries?.length && !loading ? <li className="workspace-meta">No visible files in this folder.</li> : null}
-    {(folders[path]?.entries ?? []).map((entry) => <li key={entry.path}>
-      <button type="button" disabled={!connected || loading}
-        aria-expanded={entry.kind === 'folder' ? expanded.has(entry.path) : undefined}
-        onClick={() => {
-          if (entry.kind !== 'folder') { void openFile(entry.path); return; }
-          setExpanded((current) => {
-            const next = new Set(current);
-            if (next.has(entry.path)) next.delete(entry.path); else next.add(entry.path);
-            return next;
-          });
-          if (!expanded.has(entry.path) && !Object.prototype.hasOwnProperty.call(folders, entry.path)) void loadFolder(entry.path);
-        }}>
-        <span aria-hidden="true">{entry.kind === 'folder' ? expanded.has(entry.path) ? '▾' : '▸' : '·'}</span>
-        <span>{entry.name}</span>
-      </button>
-      {entry.kind === 'folder' && expanded.has(entry.path) ? renderEntries(entry.path, depth + 1) : null}
-    </li>)}
-    {folders[path]?.cursor ? <li><button type="button" disabled={loading || !connected}
-      onClick={() => void loadFolder(path, true)}>Load more files</button></li> : null}
-  </ul>;
   const srcdoc = useMemo(() => file?.data.format === 'html' && !file.source ? htmlPreview(file.text) : undefined, [file]);
   const openChange = (entry: WorkspaceEntry): void => {
     if (entry.status === '?') void openFile(entry.path);
     else void openFile(entry.path, 'diff', changes?.base ?? undefined);
   };
   const rows = useMemo(() => file?.data.format === 'diff' ? diffRows(file.text) : [], [file]);
+  const touched = useMemo(() => touchedTree(files?.entries ?? []), [files]);
+  const toggleTouched = (key: string): void => setExpandedTouched((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const toggleFolder = (path: string): void => {
+    const opening = !expandedFolders.has(path);
+    setExpandedFolders((current) => {
+      const next = new Set(current);
+      if (opening) next.add(path); else next.delete(path);
+      return next;
+    });
+    if (opening && !Object.prototype.hasOwnProperty.call(folders, path)) {
+      void run((signal) => fetchFolder(signal, path));
+    }
+  };
+  const fileButton = (entry: WorkspaceEntry): JSX.Element => <button type="button" aria-label={entry.path}
+    disabled={loading || !connected} onClick={() => void openFile(entry.path)}>
+    <span aria-hidden="true">·</span><span className="workspace-file-detail">
+      <span>{entry.name}</span>
+      {entry.access ? <span className="workspace-file-access">{entry.access === 'read-written' ? 'Read and written' : entry.access === 'written' ? 'Written' : 'Read'}
+        {entry.external ? ' · Outside workspace' : ''}</span> : null}
+    </span>
+  </button>;
+  const renderFolder = (path: string): JSX.Element => <ul className="workspace-tree">
+    {(folders[path]?.entries ?? []).map((entry) => <li key={entry.path}>
+      {entry.kind === 'folder' ? <>
+        <button type="button" aria-label={entry.path} aria-expanded={expandedFolders.has(entry.path)}
+          disabled={loading || !connected && !folders[entry.path]} onClick={() => toggleFolder(entry.path)}>
+          <span aria-hidden="true">{expandedFolders.has(entry.path) ? '▾' : '▸'}</span><span>{entry.name}</span>
+        </button>
+        {expandedFolders.has(entry.path) ? renderFolder(entry.path) : null}
+      </> : fileButton(entry)}
+    </li>)}
+    {folders[path]?.cursor ? <li><button type="button" disabled={loading || !connected}
+      onClick={() => void run((signal) => fetchFolder(signal, path, true))}>Load more folder entries</button></li> : null}
+    {folders[path] && !folders[path].entries?.length && !folders[path].cursor && !loading
+      ? <li className="workspace-meta">No permitted entries in this folder.</li> : null}
+  </ul>;
+  const renderTouched = (nodes: TouchedNode[]): JSX.Element => <ul className="workspace-tree">
+    {nodes.map((node) => <li key={node.key}>
+      {node.entry ? fileButton(node.entry) : <>
+        <button type="button" aria-expanded={expandedTouched.has(node.key)} onClick={() => toggleTouched(node.key)}>
+          <span aria-hidden="true">{expandedTouched.has(node.key) ? '▾' : '▸'}</span><span>{node.name}</span>
+        </button>
+        {expandedTouched.has(node.key) ? renderTouched(node.children) : null}
+      </>}
+    </li>)}
+  </ul>;
   return <main className="workspace-screen">
     <header className="workspace-header">
       <button ref={backButton} type="button" onClick={back}>‹ {file && !initialFile ? initial === 'files' ? 'Files' : 'Changes' : 'Chat'}</button>
-      <strong>{file?.data.path?.split('/').pop() ?? (initialFile ? 'Preview' : initial === 'files' ? 'Files' : 'Changes')}</strong>
+      <strong>{file?.data.path?.split(/[\\/]/).pop() ?? (initialFile ? 'Preview' : initial === 'files' ? 'Files' : 'Changes')}</strong>
       <button type="button" disabled={!connected || loading} onClick={refresh}>Refresh</button>
     </header>
     {!file && workspaceName ? <div className="workspace-meta">{workspaceName}</div> : null}
@@ -240,7 +306,25 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
         {file.next !== null ? <button type="button" disabled={loading || !connected} onClick={loadMore}>Load more content</button> : null}
       </div>
     </> : <div className="workspace-content" ref={scrollRef}>
-      {initial === 'files' ? renderEntries('') : <>
+      {initial === 'files' ? <>
+        <section className="workspace-file-tree" aria-label="Current folder">
+          <h2>Current folder</h2>
+          {workspacePath ? <p className="workspace-tree-path">{workspacePath}</p> : null}
+          <button type="button" className="workspace-tree-root" aria-expanded={expandedFolders.has('')}
+            disabled={loading || !connected && !folders['']} onClick={() => toggleFolder('')}>
+            <span aria-hidden="true">{expandedFolders.has('') ? '▾' : '▸'}</span><span>{workspaceName ?? 'Workspace'}</span>
+          </button>
+          {expandedFolders.has('') ? renderFolder('') : null}
+        </section>
+        <section className="workspace-file-tree" aria-label="Agent-touched files">
+          <h2>Agent-touched files</h2>
+          <p className="workspace-tree-path">Read or written by this session, including permitted external files. All previews are read-only.</p>
+          {renderTouched(touched)}
+          {files?.cursor ? <button type="button" disabled={loading || !connected}
+            onClick={() => void run((signal) => fetchTouched(signal, true))}>Load more touched files</button> : null}
+          {files && !files.entries?.length && !files.cursor && !loading ? <p>No permitted session-touched files to show.</p> : null}
+        </section>
+      </> : <>
         {changes?.base ? <p className="workspace-meta">HEAD {changes.base.slice(0, 8)} → working files</p> : null}
         <ul className="workspace-tree">{(changes?.entries ?? []).map((entry) => <li key={entry.path}>
           <button type="button" aria-label={`${entry.status} ${entry.path}`} disabled={loading || !connected} onClick={() => openChange(entry)}>
@@ -249,7 +333,7 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
           </button>
         </li>)}</ul>
         {changes?.cursor ? <button type="button" disabled={loading || !connected} onClick={() => void loadChanges(true)}>Load more changes</button> : null}
-        {changes && !changes.entries?.length && !changes.cursor && !loading ? <p>No changes in this workspace.</p> : null}
+        {changes && !changes.entries?.length && !changes.cursor && !loading ? <p>No changes in the session-touched workspace files.</p> : null}
       </>}
     </div>}
   </main>;

@@ -35,7 +35,7 @@ import {
   voiceMode,
   invokeCommand,
   RECENT_TURNS_DEFAULT,
-  WORKSPACE_CAPABILITY,
+  SESSION_FILES_CAPABILITY,
 } from '@aasis21/weft-shared';
 import type {
   EventEnvelope,
@@ -402,8 +402,8 @@ export class SessionRuntime {
     if (!connection || session?.connection.status !== 'live') {
       return Promise.reject(new Error('Laptop offline. Reconnect to load workspace content.'));
     }
-    if (!session.workspaceCapabilities?.includes(WORKSPACE_CAPABILITY)) {
-      return Promise.reject(new Error('Workspace previews require an updated Copilot and Weft on this laptop.'));
+    if (!session.workspaceCapabilities?.includes(SESSION_FILES_CAPABILITY)) {
+      return Promise.reject(new Error('Session-file previews require working host policy and an updated Copilot and Weft on this laptop.'));
     }
     let client = this.workspaceClients.get(channelId);
     if (!client) {

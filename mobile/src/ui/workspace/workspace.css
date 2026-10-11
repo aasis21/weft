@@ -9,6 +9,12 @@
 .workspace-tree .workspace-tree { margin-left:12px; border-left:1px solid var(--border,#263449); padding-left:8px; }
 .workspace-tree button { display:flex; gap:10px; text-align:left; border:0; width:100%; min-height:42px; }
 .workspace-tree button span:last-child { min-width:0; overflow-wrap:anywhere; }
+.workspace-file-detail { display:flex; flex-direction:column; gap:4px; min-width:0; overflow-wrap:anywhere; }
+.workspace-file-access { font-size:12px; color:var(--muted,#8d9eb6); }
+.workspace-file-tree + .workspace-file-tree { margin-top:20px; padding-top:16px; border-top:1px solid var(--border,#263449); }
+.workspace-file-tree h2 { margin:0 0 8px; font-size:15px; }
+.workspace-tree-path { margin:0 0 8px; font-size:12px; color:var(--muted,#8d9eb6); overflow-wrap:anywhere; }
+.workspace-tree-root { display:flex; gap:10px; text-align:left; width:100%; }
 .workspace-meta { padding:8px 16px; font-size:12px; color:var(--muted,#8d9eb6); overflow-wrap:anywhere; }
 .workspace-meta span { margin-right:12px; }
 .workspace-modes { display:flex; gap:6px; margin-top:8px; }

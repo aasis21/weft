@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { EnvelopeBase, EventEnvelope } from '@aasis21/weft-shared';
+import { stateSnapshot, WORKSPACE_CAPABILITY } from '@aasis21/weft-shared';
 import * as B from '@/test/helpers/builders';
 import { emptySession, type Session, type SessionMeta } from '../model';
 import { applyEnvelope, appendUser, makeUserItem, markHistoryLoading } from '../reducers/applyEnvelope';
@@ -23,6 +24,16 @@ function reduceAll(session: Session, messages: EventEnvelope[]): Session {
 }
 
 describe('session applyEnvelope', () => {
+  it('clears and restores workspace capability when the host policy changes', () => {
+    const session = makeSession();
+    applyEnvelope(session, stateSnapshot({ capabilities: [WORKSPACE_CAPABILITY] }));
+    expect(session.workspaceCapabilities).toEqual([WORKSPACE_CAPABILITY]);
+    applyEnvelope(session, stateSnapshot({ capabilities: [] }));
+    expect(session.workspaceCapabilities).toEqual([]);
+    applyEnvelope(session, stateSnapshot({ capabilities: [WORKSPACE_CAPABILITY] }));
+    expect(session.workspaceCapabilities).toEqual([WORKSPACE_CAPABILITY]);
+  });
+
   it('preserves a phone label until Copilot reports a genuinely changed title', () => {
     const session = makeSession('id-1', {
       title: 'Phone label',

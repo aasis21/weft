@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import type { WorkspaceCommand, WorkspaceData } from '@aasis21/weft-shared';
 import { WorkspaceScreen } from '../WorkspaceScreen';
@@ -12,26 +12,88 @@ const preview = (path: string, text = 'first\nsecond\n', format: 'source' | 'htm
   capturedAt: 1234, text, offset: 0, nextOffset: null,
 });
 describe('workspace viewer', () => {
-  it('loads only root names until a folder or file is tapped and restores navigation on Back', async () => {
+  it('shows independent current-folder and touched trees, fetches folders lazily and restores both on Back', async () => {
     const request = vi.fn(async (command: WorkspaceCommand): Promise<WorkspaceData> => {
-      if (command.action === 'list') return { action: 'list', entries: command.path === ''
-        ? [{ path: 'docs', name: 'docs', kind: 'folder' }]
-        : [{ path: 'docs/file.md', name: 'file.md', kind: 'file' }], cursor: null };
+      if (command.action === 'list') return { action: 'list', scope: command.scope ?? 'workspace', entries:
+        command.scope === 'touched' ? [{ path: 'docs/file.md', name: 'file.md', kind: 'file', access: 'written' }]
+        : command.path ? [{ path: 'docs/file.md', name: 'file.md', kind: 'file' }, { path: 'docs/unread.md', name: 'unread.md', kind: 'file' }]
+        : [{ path: 'docs', name: 'docs', kind: 'folder' }], cursor: null };
       if (command.action === 'open') return preview(command.path, '# Read me', 'markdown');
       return { action: 'close' };
     });
     const onBack = vi.fn();
-    render(<WorkspaceScreen initial="files" connected request={request} onBack={onBack} />);
-    await screen.findByRole('button', { name: /docs/ });
-    expect(request).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: /docs/ }));
-    await screen.findByRole('button', { name: /file.md/ });
+    render(<WorkspaceScreen initial="files" connected request={request} onBack={onBack} workspacePath={'C:\\repo'} workspaceName="repo" />);
+    const current = within(screen.getByRole('region', { name: 'Current folder' }));
+    const touched = within(screen.getByRole('region', { name: 'Agent-touched files' }));
+    await touched.findByRole('button', { name: 'docs' });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(current.getByText('C:\\repo')).toBeInTheDocument();
+    fireEvent.click(touched.getByRole('button', { name: 'docs' }));
+    expect(touched.getByText('Written')).toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(2);
+    fireEvent.click(current.getByRole('button', { name: 'docs' }));
+    await current.findByRole('button', { name: 'docs/unread.md' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).not.toBeDisabled());
+    expect(request).toHaveBeenLastCalledWith({ action: 'list', scope: 'workspace', path: 'docs' }, expect.any(AbortSignal));
+    expect(touched.queryByRole('button', { name: 'docs/unread.md' })).not.toBeInTheDocument();
     expect(request.mock.calls.some(([command]) => command.action === 'open')).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: /file.md/ }));
+    fireEvent.click(current.getByRole('button', { name: 'docs/unread.md' }));
     await screen.findByRole('heading', { name: 'Read me' });
     fireEvent.click(screen.getByRole('button', { name: '‹ Files' }));
-    expect(screen.getByRole('button', { name: /file.md/ })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Current folder' })).getByRole('button', { name: 'docs/unread.md' })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Agent-touched files' })).getByRole('button', { name: 'docs/file.md' })).toBeInTheDocument();
     expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it('opens an external touched path exactly and does not browse its parent directory', async () => {
+    const path = 'C:\\Users\\demo\\reports\\outside.md';
+    const request = vi.fn(async (command: WorkspaceCommand): Promise<WorkspaceData> => {
+      if (command.action === 'list') return { action: 'list', scope: command.scope ?? 'workspace', entries:
+        command.scope === 'touched' ? [{ path, name: 'outside.md', kind: 'file', access: 'read-written', external: true }] : [], cursor: null };
+      if (command.action === 'open') return preview(path, '# Outside workspace', 'markdown');
+      return { action: 'close' };
+    });
+    render(<WorkspaceScreen initial="files" connected request={request} onBack={vi.fn()} />);
+    const touched = within(screen.getByRole('region', { name: 'Agent-touched files' }));
+    await touched.findByRole('button', { name: 'Outside workspace' });
+    for (const folder of ['Outside workspace', 'C:', 'Users', 'demo', 'reports']) {
+      fireEvent.click(touched.getByRole('button', { name: folder }));
+    }
+    expect(touched.getByText('Read and written · Outside workspace')).toBeInTheDocument();
+    expect(request.mock.calls.filter(([command]) => command.action === 'list')).toHaveLength(2);
+    fireEvent.click(touched.getByRole('button', { name: path }));
+    await screen.findByRole('heading', { name: 'Outside workspace' });
+    expect(request).toHaveBeenCalledWith({ action: 'open', path, format: 'file' }, expect.any(AbortSignal));
+    expect(request.mock.calls.filter(([command]) => command.action === 'list')).toHaveLength(2);
+    expect(request.mock.calls.some(([command]) => command.action === 'list' && command.path !== '')).toBe(false);
+  });
+
+  it('paginates each tree independently and keeps both visible if Refresh fails', async () => {
+    let failRefresh = false;
+    const request = vi.fn(async (command: WorkspaceCommand): Promise<WorkspaceData> => {
+      if (command.action !== 'list') return { action: 'close' };
+      if (failRefresh) throw new Error('Copilot policy is unavailable.');
+      const touched = command.scope === 'touched';
+      const path = `${touched ? 'touched' : 'current'}${command.cursor ? '-more' : ''}.txt`;
+      return { action: 'list', scope: command.scope ?? 'workspace', entries: [{ path, name: path, kind: 'file' }],
+        cursor: command.cursor ? null : touched ? 'touched-page' : 'folder-page' };
+    });
+    render(<WorkspaceScreen initial="files" connected request={request} onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Load more touched files' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Load more touched files' }));
+    await screen.findByRole('button', { name: 'touched-more.txt' });
+    expect(request).toHaveBeenLastCalledWith({ action: 'list', scope: 'touched', path: '', cursor: 'touched-page' }, expect.any(AbortSignal));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Load more folder entries' }));
+    await screen.findByRole('button', { name: 'current-more.txt' });
+    expect(request).toHaveBeenLastCalledWith({ action: 'list', scope: 'workspace', path: '', cursor: 'folder-page' }, expect.any(AbortSignal));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).not.toBeDisabled());
+    failRefresh = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Copilot policy is unavailable.');
+    expect(screen.getByRole('button', { name: 'current-more.txt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'touched-more.txt' })).toBeInTheDocument();
   });
 
   it('opens a file reference directly without reading directory contents', async () => {
@@ -118,6 +180,7 @@ describe('file links and HTML isolation', () => {
     expect(fileReference('C:\\repo\\my%20file.md')).toEqual({ path: 'C:\\repo\\my file.md' });
     expect(referencedFilePath('docs/guide.md', { path: '../README.md', line: 2 })).toBe('README.md#L2');
     expect(referencedFilePath('guide.md', { path: '../outside.md' })).toBe('../outside.md');
+    expect(referencedFilePath('guide.md', { path: 'C:\\reports\\outside.md', line: 2 })).toBe('C:\\reports\\outside.md#L2');
     for (const input of ['https://example.com/a.md', 'javascript:alert(1)', '//server/a.txt', 'data:text/html,x', 'npm run build']) expect(fileReference(input)).toBeNull();
     const open = vi.fn();
     render(<Markdown text={'[Open](src/file.ts#L42)\n\n`src/file.ts`\n\n[Unsafe](javascript:alert(1))'} onOpenFile={open} />);

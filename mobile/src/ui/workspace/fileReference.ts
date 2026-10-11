@@ -19,7 +19,7 @@ export function fileReference(href: string): FileReference | null {
 }
 
 export function referencedFilePath(currentFile: string, reference: FileReference): string {
-  if (/^(?:[a-z]:[\\/]|\/)/i.test(reference.path)) return reference.path;
+  if (/^(?:[a-z]:[\\/]|\/)/i.test(reference.path)) return reference.path + (reference.line ? `#L${reference.line}` : '');
   const parts = currentFile.replace(/\\/g, '/').split('/').slice(0, -1);
   for (const part of reference.path.replace(/\\/g, '/').split('/')) {
     if (!part || part === '.') continue;

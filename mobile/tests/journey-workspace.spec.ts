@@ -12,15 +12,34 @@ test('Files, chat file links, and Changes use the same on-demand viewer', async 
   await page.getByRole('menuitem', { name: 'Files', exact: true }).click();
   const workspace = page.locator('.workspace-screen');
   await expect(workspace).toBeVisible();
-  await workspace.getByRole('button', { name: /reports/ }).click();
-  await workspace.getByRole('button', { name: /summary.html/ }).click();
+  const current = workspace.getByRole('region', { name: 'Current folder' });
+  const touched = workspace.getByRole('region', { name: 'Agent-touched files' });
+  await expect(current).toBeVisible();
+  await expect(touched).toBeVisible();
+  await current.getByRole('button', { name: 'reports', exact: true }).click();
+  await current.getByRole('button', { name: 'reports/summary.html', exact: true }).click();
   await expect(workspace.locator('iframe')).toBeVisible();
   await expect(workspace.frameLocator('iframe').getByRole('heading', { name: 'Demo report' })).toBeVisible();
   await expect(workspace.locator('iframe')).toHaveAttribute('sandbox', '');
   await workspace.getByRole('button', { name: '‹ Files', exact: true }).click();
-  await workspace.getByRole('button', { name: /README.md/ }).click();
+  await touched.getByRole('button', { name: 'README.md', exact: true }).click();
   await workspace.getByRole('button', { name: 'report', exact: true }).click();
   await expect(workspace.frameLocator('iframe').getByRole('heading', { name: 'Demo report' })).toBeVisible();
+  await workspace.getByRole('button', { name: '‹ Files', exact: true }).click();
+  await current.getByRole('button', { name: 'docs', exact: true }).click();
+  await current.getByRole('button', { name: 'docs/guide.md', exact: true }).click();
+  await expect(workspace.getByRole('heading', { name: 'Workspace guide' })).toBeVisible();
+  await workspace.getByRole('button', { name: '‹ Files', exact: true }).click();
+  await expect(touched.getByRole('button', { name: 'docs/guide.md', exact: true })).toHaveCount(0);
+  let external = touched;
+  for (const folder of ['Outside workspace', 'C:', 'Users', 'demo', 'reports']) {
+    const button = external.getByRole('button', { name: folder, exact: true });
+    await button.click();
+    external = button.locator('..');
+  }
+  await external.getByRole('button', { name: 'C:\\Users\\demo\\reports\\outside.md', exact: true }).click();
+  await expect(workspace.getByRole('heading', { name: 'Outside workspace', exact: true })).toBeVisible();
+  await expect(workspace.getByText('outside.md', { exact: true })).toBeVisible();
   await workspace.getByRole('button', { name: '‹ Files', exact: true }).click();
   await workspace.getByRole('button', { name: '‹ Chat', exact: true }).click();
   await page.getByRole('button', { name: 'Session menu', exact: true }).click();

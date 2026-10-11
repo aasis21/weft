@@ -174,6 +174,7 @@ export async function startExtensionBootstrap({
           requestId: { type: "string" },
           action: { type: "string", enum: ["list", "changes", "open", "diff"] },
           path: { type: "string" },
+          scope: { type: "string", enum: ["workspace", "touched"], description: "For listing requests, identifies the current-folder or agent-touched tree." },
         },
         required: ["requestId", "action", "path"],
       },

@@ -33,8 +33,14 @@
 ## Report a problem
 
 **Files or Changes unavailable:** update both endpoints and Copilot. Workspace
-previews require host read-policy support and a live session. Denied/excluded files
-stay inaccessible; reconnect after a workspace change. Expired snapshots need
+previews require working host read-policy evaluation, not just an SDK method, and a
+live session. If Copilot cannot evaluate content exclusions, restart or update
+Copilot and reconnect; re-pairing or allowing all tools does not fix this. Weft
+keeps previews disabled until the host can verify policy. Denied/excluded files
+stay inaccessible. Files separates **Current folder** browsing inside the workspace
+from **Agent-touched files**; external previews require an exact recorded path and a
+current host policy decision. Update both endpoints for the session-files capability.
+Reconnect after a workspace change. Expired snapshots need
 Refresh. Binary, oversized, or non-UTF-8 files produce explicit errors rather than
 partial previews. Approvals can be answered inside the workspace viewer.
 

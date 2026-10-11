@@ -6,6 +6,7 @@ export class WorkspaceClient {
     resolve(data: WorkspaceData): void; reject(error: Error): void;
     cleanup(): void;
     action: WorkspaceCommand['action'];
+    scope?: 'workspace' | 'touched';
   }>();
   constructor(private readonly send: (message: EventEnvelope) => Promise<void>) {}
 
@@ -28,7 +29,8 @@ export class WorkspaceClient {
         signal?.removeEventListener('abort', cancel);
       };
       signal?.addEventListener('abort', cancel, { once: true });
-      this.pending.set(requestId, { resolve, reject, cleanup, action: command.action });
+      this.pending.set(requestId, { resolve, reject, cleanup, action: command.action,
+        ...(command.action === 'list' && command.scope ? { scope: command.scope } : {}) });
       void this.send(workspaceRequest({ ...command, requestId })).catch(() => {
         const entry = this.pending.get(requestId);
         entry?.cleanup();
@@ -51,7 +53,7 @@ export class WorkspaceClient {
     entry.cleanup();
     this.pending.delete(value.requestId);
     if (value.error) entry.reject(new Error(value.error.message));
-    else if (value.data?.action === entry.action) entry.resolve(value.data);
+    else if (value.data?.action === entry.action && (entry.scope === undefined || value.data.scope === entry.scope)) entry.resolve(value.data);
     else entry.reject(new Error('The laptop returned an unexpected workspace response. Retry.'));
   }
 

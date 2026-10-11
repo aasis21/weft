@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, JSX, TouchEvent as ReactTouchEvent } from 'react';
 import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
-import { WORKSPACE_CAPABILITY } from '@aasis21/weft-shared';
+import { SESSION_FILES_CAPABILITY } from '@aasis21/weft-shared';
 import type { WorkspaceCommand, WorkspaceData } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
@@ -290,7 +290,7 @@ export function SessionScreen({
   const [debugOpen, setDebugOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceRoute, setWorkspaceRoute] = useState<{ initial: 'files' | 'changes'; file?: string } | null>(null);
-  const workspaceSupported = active.workspaceCapabilities?.includes(WORKSPACE_CAPABILITY) && !!onWorkspaceRequest;
+  const workspaceSupported = active.workspaceCapabilities?.includes(SESSION_FILES_CAPABILITY) && !!onWorkspaceRequest;
   useEffect(() => setWorkspaceRoute(null), [activeId]);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voxOpen, setVoxOpen] = useState(false);
@@ -1088,6 +1088,7 @@ export function SessionScreen({
       {workspaceRoute && onWorkspaceRequest ? <Suspense fallback={<main className="workspace-screen" role="status">Opening workspace…</main>}>
         <WorkspaceScreen initial={workspaceRoute.initial} initialFile={workspaceRoute.file}
           workspaceName={meta.cwd?.split(/[\\/]/).filter(Boolean).pop()}
+          workspacePath={meta.cwd ?? undefined}
           connected={responsive} request={onWorkspaceRequest} onBack={() => setWorkspaceRoute(null)}
           approvalControls={timeline.approvals.length ? <section className="workspace-approvals" aria-label="Copilot approvals">
             {timeline.approvals.map((approval) => <div key={approval.requestId}>

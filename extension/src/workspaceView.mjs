@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstat, realpath, opendir, open } from "node:fs/promises";
-import { resolve, relative, join, isAbsolute, sep, extname, basename } from "node:path";
+import { lstat, realpath, open, opendir } from "node:fs/promises";
+import { resolve, relative, join, isAbsolute, sep, extname, basename, parse } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { WORKSPACE_LIMITS as LIMITS, validWorkspaceRequest } from "@aasis21/weft-shared";
+import { createSessionFiles, SessionFilesError } from "./sessionFiles.mjs";
 
 const exec = promisify(execFile);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -23,7 +24,8 @@ export class WorkspaceError extends Error {
 }
 const fail = (code, message) => { throw new WorkspaceError(code, message); };
 
-export async function createWorkspaceView({ session, requestPermission, clock = Date.now } = {}) {
+export async function createWorkspaceView({ session, requestPermission, clock = Date.now,
+  sessionFiles = createSessionFiles({ session }) } = {}) {
   if (!session?.rpc?.contentExclusion?.checkPaths ||
       !session?.rpc?.permissions?.paths?.isPathWithinAllowedDirectories ||
       !session?.rpc?.permissions?.paths?.list || !requestPermission) {
@@ -39,6 +41,8 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
   let changeList = null;
   let closed = false;
   let busy = false;
+  const displayPath = (path) => within(root, path)
+    ? relative(root, path).split(sep).join("/") || "." : path;
 
   async function check(paths) {
     if (closed) fail("unavailable", "The workspace connection ended.");
@@ -49,18 +53,23 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
     }
     const allowedPaths = [];
     for (const path of paths) {
-      if (!within(root, path) || blocked(relative(root, path))) fail("denied", "The requested path is not available.");
+      if ((!within(root, path) && !sessionFiles.has(path)) || blocked(path)) fail("denied", "The requested path is not available.");
       const result = await session.rpc.permissions.paths.isPathWithinAllowedDirectories({ path });
       if (typeof result?.allowed !== "boolean") fail("unavailable", "Copilot read-policy support is unavailable.");
       allowedPaths.push(result.allowed);
     }
-    const result = await session.rpc.contentExclusion.checkPaths({ paths });
-    if (result?.available !== true || result.checks?.length !== paths.length) {
-      fail("unavailable", "Copilot content-exclusion policy is unavailable. No files were read.");
+    const permitted = paths.filter((_, i) => allowedPaths[i]);
+    if (!permitted.length) return paths.map(() => false);
+    const result = await session.rpc.contentExclusion.checkPaths({ paths: permitted });
+    if (result?.available !== true || result.checks?.length !== permitted.length) {
+      fail("unavailable", "This Copilot session cannot evaluate content exclusions. Restart or update Copilot, then reconnect. No files were read; Weft cannot bypass this check.");
     }
+    let index = 0;
     return paths.map((path, i) => {
-      if (!same(path, result.checks[i]?.path ?? "")) fail("unavailable", "Copilot returned an incomplete read-policy result.");
-      return result.checks[i].excluded === false && allowedPaths[i];
+      if (!allowedPaths[i]) return false;
+      const checked = result.checks[index++];
+      if (!same(path, checked?.path ?? "")) fail("unavailable", "Copilot returned an incomplete read-policy result.");
+      return checked.excluded === false;
     });
   }
   async function pathFor(input, deleted = false) {
@@ -68,15 +77,19 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       fail("denied", "Alternate file streams are not supported.");
     }
     if (/^(?:\\\\|\/\/)/.test(input) || /^[a-z]+:/i.test(input) && !/^[a-z]:[\\/]/i.test(input)) {
-      fail("denied", "Only paths inside this session workspace can be opened.");
+      fail("denied", "Only workspace paths or exact local session-touched files can be opened.");
     }
     const segments = input.split(/[\\/]/);
     if (segments.includes("..")) fail("denied", "The requested path is not available.");
     const path = isAbsolute(input) ? resolve(input) : resolve(root, input.replace(/[\\/]/g, sep));
-    if (!within(root, path)) fail("denied", "Only paths inside this session workspace can be opened.");
+    if (!within(root, path)) {
+      await sessionFiles.sync();
+      if (!sessionFiles.has(path)) fail("denied", "This outside-workspace file has not been read or written by this session.");
+    }
     if (!(await check([path]))[0]) fail("denied", "This path is denied or excluded by Copilot policy.");
-    const parts = relative(root, path).split(sep).filter(Boolean);
-    let walked = root;
+    const start = within(root, path) ? root : parse(path).root;
+    const parts = relative(start, path).split(sep).filter(Boolean);
+    let walked = start;
     for (let i = 0; i < parts.length; i++) {
       walked = join(walked, parts[i]);
       try {
@@ -88,18 +101,19 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       }
     }
     const canonical = await realpath(deleted ? join(path, "..") : path);
-    if (!withinRootAllowed(canonical)) fail("denied", "The requested path left the session workspace.");
+    if (blocked(canonical) || !same(canonical, resolve(deleted ? join(path, "..") : path))) {
+      fail("denied", "The requested path is not a canonical session file.");
+    }
     return path;
   }
-  function withinRootAllowed(path) { return within(root, path) && !blocked(relative(root, path)); }
-  async function authorize(action, path) {
+  async function authorize(action, path, scope) {
     const id = randomUUID();
-    const record = { action, path, granted: false };
+    const record = { action, path, scope, granted: false };
     pending.set(id, record);
     let timer;
     try {
       await Promise.race([
-        requestPermission({ requestId: id, action, path: relative(root, path).split(sep).join("/") || "." }),
+        requestPermission({ requestId: id, action, path: displayPath(path), ...(scope ? { scope } : {}) }),
         new Promise((_, reject) => {
           timer = setTimeout(() => reject(new WorkspaceError("timeout", "Workspace approval timed out. Retry when ready.")), 55_000);
           timer.unref?.();
@@ -108,11 +122,15 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       if (!record.granted || closed) fail("denied", "Workspace access was not approved.");
     } finally { clearTimeout(timer); pending.delete(id); }
   }
-  async function grant({ requestId, action, path }) {
+  async function grant({ requestId, action, path, scope }) {
     const record = pending.get(requestId);
-    if (!record || record.action !== action ||
-        path !== (relative(root, record.path).split(sep).join("/") || ".")) {
+    if (!record || record.action !== action || record.scope !== scope ||
+        path !== displayPath(record.path)) {
       fail("denied", "This workspace request is no longer pending.");
+    }
+    if (!within(root, record.path) || record.action === "diff") {
+      await sessionFiles.sync();
+      if (!sessionFiles.has(record.path)) fail("denied", "This session file is no longer recorded.");
     }
     if (!(await check([record.path]))[0]) fail("denied", "This path is excluded by Copilot policy.");
     record.granted = true;
@@ -132,6 +150,14 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       if (error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") fail("too-large", "Git output exceeds the preview limit.");
       fail("unavailable", "Git comparison is unavailable in this workspace.");
     }
+  }
+  async function isFileTarget(path, base) {
+    try { return (await lstat(path)).isFile(); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    const name = relative(root, path).split(sep).join("/");
+    const records = (await git(["ls-tree", "-z", base, "--", name])).split("\0");
+    return records.some((record) => /^100(?:644|755) blob [a-f0-9]+\t/.test(record) &&
+      record.slice(record.indexOf("\t") + 1) === name);
   }
   function prune() {
     for (const [id, value] of previews) if (clock() - value.capturedAt >= LIMITS.ttlMs) {
@@ -153,24 +179,43 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       text, offset, nextOffset: index < snapshot.text.length ? index : null };
   }
   async function list(input) {
+    if (input.scope === "touched") return listTouched(input);
     const path = await pathFor(input.path);
+    if (!within(root, path)) fail("denied", "Outside-workspace folders cannot be browsed.");
     if (!(await lstat(path)).isDirectory()) fail("invalid-request", "Select a directory.");
-    await authorize("list", path);
+    await authorize("list", path, "workspace");
     const names = [];
-    let seen = 0;
+    let count = 0;
     const directory = await opendir(path);
     for await (const entry of directory) {
-      if (++seen > LIMITS.directoryEntries) fail("too-large", "This directory has too many entries. Choose a narrower folder.");
-      if (!blocked(entry.name) && !/[\0\r\n]/.test(entry.name) && (entry.isDirectory() || entry.isFile()) && entry.name.length <= 255) {
-        names.push({ name: entry.name, kind: entry.isDirectory() ? "folder" : "file",
-          path: relative(root, join(path, entry.name)).split(sep).join("/") });
-      }
+      if (++count > LIMITS.directoryEntries) fail("too-large", "This folder has too many entries. Select a narrower folder.");
+      if (blocked(entry.name) || /[\0\r\n]/.test(entry.name) || entry.name.length > 255 ||
+          !entry.isFile() && !entry.isDirectory()) continue;
+      names.push({ name: entry.name, kind: entry.isDirectory() ? "folder" : "file", path: displayPath(join(path, entry.name)) });
     }
     await pathFor(input.path);
-    names.sort((a, b) => (b.kind === "folder") - (a.kind === "folder") || a.name.localeCompare(b.name));
-    const stamp = hash(JSON.stringify(names)).slice(0, 16);
+    return listPage(input, names, "workspace", displayPath(path) === "." ? "" : displayPath(path));
+  }
+  async function listTouched(input) {
+    if (!["", "."].includes(input.path)) fail("denied", "The touched tree lists recorded files, not their parent folders.");
+    await sessionFiles.sync();
+    await pathFor(".");
+    await authorize("list", root, "touched");
+    await sessionFiles.sync();
+    const names = [];
+    for (const entry of sessionFiles.entries()) {
+      if (blocked(entry.path) || basename(entry.path).length > 255) continue;
+      names.push({ name: basename(entry.path), kind: "file", path: displayPath(entry.path),
+        external: !within(root, entry.path), access: entry.read && entry.written ? "read-written" :
+          entry.written ? "written" : "read" });
+    }
+    return listPage(input, names, "touched", "");
+  }
+  async function listPage(input, names, scope, path) {
+    names.sort((a, b) => (b.kind === "folder") - (a.kind === "folder") || a.path.localeCompare(b.path));
+    const stamp = hash(JSON.stringify({ scope, path, names })).slice(0, 16);
     const [previous, position] = (input.cursor ?? `${stamp}:0`).split(":");
-    if (previous !== stamp || !/^\d+$/.test(position ?? "")) fail("changed", "The folder changed. Refresh its listing.");
+    if (previous !== stamp || !/^\d+$/.test(position ?? "")) fail("changed", "This file listing changed. Refresh.");
     const start = Number(position);
     if (!Number.isSafeInteger(start) || start > names.length) fail("invalid-request", "Invalid folder cursor.");
     const candidates = [];
@@ -178,21 +223,28 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       if (Buffer.byteLength(JSON.stringify([...candidates, entry])) > LIMITS.pageBytes) break;
       candidates.push(entry);
     }
-    const allowed = await check(candidates.map((entry) => join(root, entry.path)));
-    return { action: "list", path: relative(root, path).split(sep).join("/"),
-      entries: candidates.filter((_, i) => allowed[i]),
+    const entries = [];
+    for (const entry of candidates) {
+      try {
+        const target = await pathFor(entry.path), info = await lstat(target);
+        if (scope === "touched" && !sessionFiles.has(target)) continue;
+        if (entry.kind === "file" ? info.isFile() : info.isDirectory()) entries.push(entry);
+      } catch (error) {
+        if (!["denied", "ENOENT", "missing"].includes(error.code)) throw error;
+      }
+    }
+    return { action: "list", path, scope, entries,
       cursor: start + candidates.length < names.length ? `${stamp}:${start + candidates.length}` : null };
   }
   async function changes(input) {
+    await sessionFiles.sync();
     await pathFor(".");
     await authorize("changes", root);
     if (!input.cursor) {
       const base = (await git(["rev-parse", "--verify", "HEAD"])).trim();
       if (!/^[a-f0-9]{40,64}$/.test(base)) fail("unavailable", "This repository has no HEAD commit.");
-      const tracked = new Set([
-        ...(await git(["ls-files", "--cached", "-z", "--", "."])).split("\0"),
-        ...(await git(["ls-tree", "-r", "--name-only", "-z", base, "--", "."])).split("\0"),
-      ].filter((path) => path && !blocked(path) && !/[\0\r\n]/.test(path)));
+      const tracked = new Set(sessionFiles.entries().filter((entry) =>
+        within(root, entry.path) && !blocked(entry.path)).map((entry) => relative(root, entry.path).split(sep).join("/")));
       if (tracked.size > LIMITS.directoryEntries) fail("too-large", "Too many workspace files. Choose a narrower workspace for Changes.");
       const readable = [];
       const candidates = [...tracked];
@@ -201,7 +253,10 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
         const allowed = await check(batch.map((path) => join(root, path)));
         for (let n = 0; n < batch.length; n++) {
           if (!allowed[n]) continue;
-          try { await pathFor(batch[n], true); readable.push(batch[n]); }
+          try {
+            const path = await pathFor(batch[n], true);
+            if (await isFileTarget(path, base)) readable.push(batch[n]);
+          }
           catch (error) { if (error.code !== "denied" && error.code !== "missing" && error.code !== "ENOENT") throw error; }
         }
       }
@@ -217,7 +272,8 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
         if (within(root, absolute) && !blocked(path) && !/[\0\r\n]/.test(path)) entries.push({ path, name: basename(path),
           kind: "file", status: status[0], ...(renamed ? { oldPath: first } : {}) });
       }
-      for (const path of (await git(["ls-files", "--others", "--exclude-standard", "-z", "--", "."])).split("\0").filter(Boolean)) {
+      for (const path of readable.length
+        ? (await git(["ls-files", "--others", "--exclude-standard", "-z", "--", ...readable])).split("\0").filter(Boolean) : []) {
         if (!blocked(path) && !/[\0\r\n]/.test(path)) entries.push({ path, name: basename(path), kind: "file", status: "?" });
       }
       if (entries.length > LIMITS.directoryEntries) fail("too-large", "Too many changed files. Use a narrower workspace.");
@@ -245,6 +301,8 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
     prune();
     if (previews.size >= LIMITS.previews) fail("too-large", "Close a preview before opening another.");
     const diff = input.format === "diff", path = await pathFor(input.path, diff);
+    if (diff && !within(root, path)) fail("unsupported", "Git diffs are available only for touched files inside this workspace.");
+    if (diff && !sessionFiles.has(path)) fail("denied", "Changes is limited to session-touched workspace files.");
     if (!diff && /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|docx|xlsx|pptx|exe|dll|wasm|mp[34])$/i.test(path)) {
       fail("unsupported", "This file type does not have a text preview.");
     }
@@ -255,9 +313,13 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       base = input.base;
       if (!base) fail("invalid-request", "Refresh Changes before opening a diff.");
       if ((await git(["rev-parse", "--verify", base + "^{commit}"])).trim() !== base) fail("changed", "The diff baseline is unavailable. Refresh Changes.");
+      if (!(await isFileTarget(path, base))) fail("unsupported", "Directory diffs are not supported. Select a session-touched file.");
       const renamed = changeList?.base === base && changeList.entries.find((entry) =>
         join(root, entry.path) === path && entry.oldPath);
-      if (renamed) authorizedPaths.push(await pathFor(renamed.oldPath, true));
+      if (renamed) {
+        if (!sessionFiles.has(join(root, renamed.oldPath))) fail("denied", "This renamed session file is no longer recorded.");
+        authorizedPaths.push(await pathFor(renamed.oldPath, true));
+      }
       const stamps = await Promise.all(authorizedPaths.map(fileStamp));
       text = await git(["diff", "--relative", "--no-ext-diff", "--no-textconv", renamed ? "--find-renames" : "--no-renames", "--unified=3", base, "--",
         relative(root, path), ...(renamed ? [renamed.oldPath] : [])]);
@@ -296,14 +358,14 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       } finally { await file.close(); }
     }
     await pathFor(input.path, diff);
-    for (const authorized of authorizedPaths.slice(1)) await pathFor(relative(root, authorized), true);
+    for (const authorized of authorizedPaths.slice(1)) await pathFor(authorized, true);
     const totalLines = text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0;
     if (totalLines > LIMITS.lines) fail("too-large", "This file exceeds the preview line limit.");
-    const snapshot = { id: randomUUID(), text, path, authorizedPaths, revision: hash(text), capturedAt: clock() };
+    const snapshot = { id: randomUUID(), text, path, authorizedPaths, requireTouched: diff, revision: hash(text), capturedAt: clock() };
     snapshot.timer = setTimeout(() => previews.delete(snapshot.id), LIMITS.ttlMs);
     snapshot.timer.unref?.();
     previews.set(snapshot.id, snapshot);
-    return { ...page(snapshot, 0), action: "open", path: relative(root, path).split(sep).join("/"),
+    return { ...page(snapshot, 0), action: "open", path: displayPath(path),
       format, capturedAt: snapshot.capturedAt, totalLines, base };
   }
   async function fileStamp(path) {
@@ -326,21 +388,29 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
     if (busy) fail("busy", "Another workspace request is in progress.");
     busy = true;
     try {
+      if (input.action === "open" && input.format === "diff") await sessionFiles.sync();
       if (input.action === "list") return await list(input);
       if (input.action === "changes") return await changes(input);
       if (input.action === "open") return await capture(input);
       prune();
       const snapshot = previews.get(input.previewId);
       if (!snapshot) fail("expired", "This preview expired. Refresh to load it again.");
-      for (const path of snapshot.authorizedPaths) await pathFor(relative(root, path), true);
+      if (snapshot.requireTouched) {
+        await sessionFiles.sync();
+        if (snapshot.authorizedPaths.some((path) => !sessionFiles.has(path))) fail("denied", "This session diff is no longer recorded.");
+      }
+      for (const path of snapshot.authorizedPaths) await pathFor(path, true);
       return page(snapshot, input.offset);
     } catch (error) {
-      if (error instanceof WorkspaceError) throw error;
+      if (error instanceof WorkspaceError || error instanceof SessionFilesError) throw error;
       if (error.code === "ENOENT") fail("missing", "The requested file or directory no longer exists.");
       fail("unavailable", "The workspace could not be read.");
     } finally { busy = false; }
   }
-  return { handle, grant, close() {
+  return { handle, grant, async checkAvailable() {
+    await sessionFiles.sync();
+    if (!(await check([root]))[0]) fail("denied", "This workspace is denied or excluded by Copilot policy.");
+  }, close() {
     closed = true;
     for (const snapshot of previews.values()) clearTimeout(snapshot.timer);
     previews.clear(); pending.clear(); changeList = null;
