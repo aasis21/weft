@@ -27,14 +27,22 @@ See [diagnostic scope and retention](https://aasis21.github.io/weft/#diagnostics
 ## Use Weft in the GitHub Copilot app
 
 Local Copilot app sessions use the same Weft extension and encrypted connection as CLI
-sessions. Ask Copilot to **open Weft pairing**: the `weft_pair` tool opens a side-panel
+sessions. Run **`/weft`** or ask Copilot to **open Weft pairing**: both open a side-panel
 canvas with a graphical QR, a copy-code fallback, and live connection status. The canvas
 is loaded only when requested. Closing it does not disconnect the phone; reopening it
 does not replace an already-connected phone. **New pairing code** requires confirmation
 before replacing that connection.
 
 CLI users can continue to use `/weft`. Hosts without canvas support fall back to the
-terminal QR. The extension does not depend on the app exposing custom slash commands.
+terminal QR. Repeated `/weft` focuses an existing Weft panel, including one opened
+manually. On app versions that do not dispatch extension slash commands, ask Copilot
+to open Weft pairing instead.
+The panel identifies the current session, workspace, branch, selected model,
+interaction mode, activity, laptop, and connected phone. Live metadata refreshes
+while it is open; unavailable fields are marked explicitly rather than guessed.
+These details are displayed only in the local panel, not added to relay diagnostics.
+The panel tab uses the session name, and Session ID and Started are always visible
+in the session details rather than hidden in a disclosure.
 For Dev Tunnel, start the shared relay with `weft devtunnel start` first; the panel
 reports setup errors and lets you retry with a different per-session transport without
 changing the saved laptop configuration.

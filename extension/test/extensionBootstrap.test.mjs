@@ -170,7 +170,11 @@ test("app pairing is lazy, uses a canvas, and closes only its panel", async () =
     createCanvas: (definition) => definition,
     loadPairingCanvas: async () => {
       loads++;
-      return { url: "http://127.0.0.1:1234/panel/", close: async () => { closes++; }, setError() {} };
+      return {
+        url: "http://127.0.0.1:1234/panel/",
+        getTitle: async () => "Weft | App session",
+        close: async () => { closes++; }, setError() {},
+      };
     },
   });
   assert.equal(loads, 0);
@@ -178,7 +182,8 @@ test("app pairing is lazy, uses a canvas, and closes only its panel", async () =
   assert.equal(loads, 0, "the renderer remains lazy until the runtime opens the panel");
   assert.equal(opens[0].canvasId, "weft-pairing");
   const canvas = harness.calls.configs[0].canvases[0];
-  await canvas.open({ instanceId: "panel", input: {} });
+  const opened = await canvas.open({ instanceId: "panel", input: {} });
+  assert.equal(opened.title, "Weft | App session");
   await canvas.open({ instanceId: "panel", input: {} });
   assert.equal(loads, 1);
   assert.equal(harness.calls.activeLoads.length, 1);
@@ -199,6 +204,36 @@ test("older SDKs and CLI hosts keep a terminal pairing path", async () => {
   assert.deepEqual(harness.calls.activeCalls[0], [
     "activate", { reason: "command", context: { args: "supabase" }, showQr: true },
   ]);
+  await bootstrap.close();
+});
+
+test("/weft uses the app canvas and focuses a panel that was opened manually", async () => {
+  const harness = createHarness();
+  harness.session.capabilities = { ui: { canvases: true } };
+  const opens = [];
+  harness.session.rpc = { canvas: { open: async (input) => opens.push(input) } };
+  const bootstrap = await startExtensionBootstrap({
+    ...harness,
+    createCanvas: (definition) => definition,
+    loadPairingCanvas: async () => ({
+      url: "http://127.0.0.1:1234/panel/",
+      getTitle: async () => "Weft | App session",
+      close: async () => {}, setError() {},
+    }),
+  });
+  const canvas = harness.calls.configs[0].canvases[0];
+  await canvas.open({ instanceId: "manual-weft-panel", input: {} });
+  await harness.calls.configs[0].commands[0].handler({ args: "" });
+  assert.deepEqual(opens[0], {
+    canvasId: "weft-pairing", instanceId: "manual-weft-panel", input: {},
+  });
+  await harness.calls.configs[0].commands[0].handler({ args: " supabase " });
+  assert.equal(opens[1].instanceId, "manual-weft-panel");
+  assert.deepEqual(opens[1].input, { transport: "supabase" });
+  assert.ok(harness.calls.activeCalls.some(([name, options]) =>
+    name === "preparePairing" && options.transport === "supabase"));
+  assert.equal(harness.calls.activeCalls.filter(([name, options]) =>
+    name === "activate" && options.showQr === true).length, 0);
   await bootstrap.close();
 });
 

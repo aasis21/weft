@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPairingCanvasServer } from "../src/pairingCanvas.mjs";
+import { createPairingCanvasServer, readCanvasSessionDetails } from "../src/pairingCanvas.mjs";
 
 async function harness(t, overrides = {}) {
   let current = {
@@ -34,12 +34,26 @@ test("canvas serves a graphical QR and exact copy code only to its private route
   const page = await fetch(h.url);
   const html = await page.text();
   assert.match(html, /Copy pairing code/);
+  assert.match(html, /<dt>Session ID<\/dt><dd id="session-id"/);
+  assert.match(html, /<dt>Started<\/dt><dd id="started"/);
+  assert.doesNotMatch(html, /<details\b|<summary\b/);
   assert.doesNotMatch(html, /test-grant/);
   assert.equal(page.headers.get("cache-control"), "no-store");
   const state = await h.state();
   assert.match(state.qr, /^data:image\/png;base64,/);
   assert.equal(JSON.parse(state.code).token, "test-grant");
   assert.equal((await fetch(h.origin)).status, 404);
+});
+
+test("the panel title identifies the session and falls back when it has no name", async (t) => {
+  const named = await harness(t, {
+    session: {
+      rpc: { name: { get: async () => ({ name: "Canvas improvements" }) } },
+    },
+  });
+  assert.equal(await named.getTitle(), "Weft | Canvas improvements");
+  const unnamed = await harness(t);
+  assert.equal(await unnamed.getTitle(), "Weft | Continue on your phone");
 });
 
 test("connected and expired states never expose an unusable grant", async (t) => {
@@ -79,4 +93,42 @@ test("transport validation and setup failures are explicit and recoverable", asy
   const failed = await h.pair({ transport: "devtunnel" });
   assert.equal(failed.status, 400);
   assert.match((await failed.json()).error, /devtunnel start/);
+});
+
+test("session details use live metadata with a saved branch and never copy arbitrary runtime data", async () => {
+    const details = await readCanvasSessionDetails({
+      sessionId: "session-test",
+      rpc: {
+        name: { get: async () => ({ name: "App compatibility" }) },
+        metadata: {
+          snapshot: async () => ({
+            summary: "Fallback title", workingDirectory: "C:\\repos\\axon",
+            currentMode: "interactive", selectedModel: "fallback-model",
+            startTime: "2026-10-10T20:00:00Z",
+            providerConfig: { apiKey: "do-not-expose" },
+          }),
+          activity: async () => ({ hasActiveWork: true, abortable: true }),
+        },
+        model: { getCurrent: async () => ({ modelId: "gpt-test", reasoningEffort: "high" }) },
+      },
+    }, async () => ({ title: "Saved title", branch: "main", cwd: "C:\\old" }));
+    assert.equal(details.title, "App compatibility");
+    assert.equal(details.cwd, "C:\\repos\\axon");
+    assert.equal(details.branch, "main");
+    assert.equal(details.model, "gpt-test");
+    assert.equal(details.busy, true);
+    assert.equal(details.mode, "interactive");
+    assert.doesNotMatch(JSON.stringify(details), /do-not-expose|providerConfig/);
+});
+
+test("missing live details fall back explicitly without pretending the session is idle", async () => {
+    const details = await readCanvasSessionDetails({
+      sessionId: "session-test",
+      rpc: { metadata: { snapshot: async () => { throw new Error("private transport details"); } } },
+    }, async () => ({ title: "Saved title", branch: "saved", cwd: "C:\\saved" }));
+    assert.equal(details.title, "Saved title");
+    assert.equal(details.busy, null);
+    assert.equal(details.cwd, "C:\\saved");
+    assert.match(details.warning, /unavailable/);
+    assert.doesNotMatch(details.warning, /private transport/);
 });

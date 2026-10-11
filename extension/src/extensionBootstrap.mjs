@@ -115,7 +115,7 @@ export async function startExtensionBootstrap({
     open: async ({ instanceId, input }) => {
       let panel = pairingPanels.get(instanceId);
       if (!panel) {
-        panel = loadPairingCanvas({ preparePairing, status: pairingStatus }).catch((error) => {
+        panel = loadPairingCanvas({ session, preparePairing, status: pairingStatus }).catch((error) => {
           pairingPanels.delete(instanceId);
           throw error;
         });
@@ -124,10 +124,11 @@ export async function startExtensionBootstrap({
       const server = await panel;
       try {
         await preparePairing({ transport: input?.transport });
+        server.setError(null);
       } catch (error) {
         server.setError(error.message);
       }
-      return { title: "Weft - pair your phone", url: server.url };
+      return { title: await server.getTitle(), url: server.url };
     },
     onClose: async ({ instanceId }) => {
       const panel = pairingPanels.get(instanceId);
@@ -135,6 +136,22 @@ export async function startExtensionBootstrap({
       if (panel) await (await panel).close();
     },
   }) : null;
+
+  const showPairing = async (context = {}) => {
+    const transport = context.args?.trim();
+    if (pairingCanvas && (session.capabilities?.ui?.canvases || pairingPanels.size > 0)) {
+      const instanceId = pairingPanels.keys().next().value ?? "weft-phone-pairing";
+      if (pairingPanels.has(instanceId) && transport) await preparePairing({ transport });
+      await session.rpc.canvas.open({
+        canvasId: "weft-pairing",
+        instanceId,
+        input: transport ? { transport } : {},
+      });
+      return "Weft pairing is open in the side panel. Scan the QR or copy its code to the phone.";
+    }
+    await activate({ reason: "command", context, showQr: true });
+    return "Weft pairing is shown in the session. CLI users can also run /weft.";
+  };
 
   const session = await joinSession({
     streaming: true,
@@ -147,18 +164,7 @@ export async function startExtensionBootstrap({
         properties: { transport: { type: "string", enum: ["supabase", "devtunnel"] } },
         additionalProperties: false,
       },
-      handler: async (args = {}) => {
-        if (pairingCanvas && session.capabilities?.ui?.canvases) {
-          await session.rpc.canvas.open({
-            canvasId: "weft-pairing",
-            instanceId: "weft-phone-pairing",
-            input: args,
-          });
-          return "Weft pairing is open in the side panel. Scan the QR or copy its code to the phone.";
-        }
-        await activate({ reason: "command", context: { args: args.transport ?? "" }, showQr: true });
-        return "Weft pairing is shown in the session. CLI users can also run /weft.";
-      },
+      handler: (args = {}) => showPairing({ args: args.transport ?? "" }),
     }],
     onPermissionRequest: async (request, invocation) => {
       if (!activeRuntime) return { kind: "user-not-available" };
@@ -171,7 +177,7 @@ export async function startExtensionBootstrap({
           "Pair your phone with this Copilot session. Optional transport: /weft [supabase|devtunnel].",
         handler: async (context) => {
           try {
-            return await activate({ reason: "command", context, showQr: true });
+            return await showPairing(context);
           } catch (error) {
             session.log?.(`Weft: ${error?.message ?? error}`, {
               level: "warning",

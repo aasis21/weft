@@ -807,6 +807,7 @@ function status() {
   return {
     state: currentPeerPub ? "active" : pairingStop ? "pairing-ready" : "activating",
     paired: Boolean(pairingGate?.claimedPeerPublicKeyB64),
+    phoneName: currentPeerName,
     pairingPayload,
     sessionId: session.sessionId || null,
     pid: process.pid,

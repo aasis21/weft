@@ -22,7 +22,8 @@ Station on a headless box, or to manage the relay independently).
 
 ## Inside the GitHub Copilot app
 
-Ask to **open Weft pairing**. Call the extension's `weft_pair` tool when available;
+Run **`/weft`** to open or focus the Weft canvas, or ask to **open Weft pairing**.
+Call the extension's `weft_pair` tool when available;
 it opens the `weft-pairing` canvas on hosts that support canvases and falls back to
 the terminal QR on CLI-only hosts. Never copy pairing credentials into generated
 files, diagnostic logs, or an agent response. The panel renders the graphical QR
