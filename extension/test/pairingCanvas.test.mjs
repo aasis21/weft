@@ -34,6 +34,10 @@ test("canvas serves a graphical QR and exact copy code only to its private route
   const page = await fetch(h.url);
   const html = await page.text();
   assert.match(html, /Copy pairing code/);
+  assert.match(html, /<title>Weft \| Phone companion<\/title>/);
+  assert.match(html, /<h1>Continue on your phone<\/h1>/);
+  assert.match(html, /<dt>Session<\/dt><dd id="session-title"/);
+  assert.doesNotMatch(html, /document\.title\s*=/);
   assert.match(html, /<dt>Session ID<\/dt><dd id="session-id"/);
   assert.match(html, /<dt>Started<\/dt><dd id="started"/);
   assert.doesNotMatch(html, /<details\b|<summary\b/);
@@ -45,15 +49,15 @@ test("canvas serves a graphical QR and exact copy code only to its private route
   assert.equal((await fetch(h.origin)).status, 404);
 });
 
-test("the panel title identifies the session and falls back when it has no name", async (t) => {
+test("the panel title stays user-facing regardless of the conversation name", async (t) => {
   const named = await harness(t, {
     session: {
       rpc: { name: { get: async () => ({ name: "Canvas improvements" }) } },
     },
   });
-  assert.equal(await named.getTitle(), "Weft | Canvas improvements");
+  assert.equal(await named.getTitle(), "Weft | Phone companion");
   const unnamed = await harness(t);
-  assert.equal(await unnamed.getTitle(), "Weft | Continue on your phone");
+  assert.equal(await unnamed.getTitle(), "Weft | Phone companion");
 });
 
 test("connected and expired states never expose an unusable grant", async (t) => {

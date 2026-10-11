@@ -172,7 +172,7 @@ test("app pairing is lazy, uses a canvas, and closes only its panel", async () =
       loads++;
       return {
         url: "http://127.0.0.1:1234/panel/",
-        getTitle: async () => "Weft | App session",
+        getTitle: async () => "Weft | Phone companion",
         close: async () => { closes++; }, setError() {},
       };
     },
@@ -183,7 +183,7 @@ test("app pairing is lazy, uses a canvas, and closes only its panel", async () =
   assert.equal(opens[0].canvasId, "weft-pairing");
   const canvas = harness.calls.configs[0].canvases[0];
   const opened = await canvas.open({ instanceId: "panel", input: {} });
-  assert.equal(opened.title, "Weft | App session");
+  assert.equal(opened.title, "Weft | Phone companion");
   await canvas.open({ instanceId: "panel", input: {} });
   assert.equal(loads, 1);
   assert.equal(harness.calls.activeLoads.length, 1);
@@ -217,7 +217,7 @@ test("/weft uses the app canvas and focuses a panel that was opened manually", a
     createCanvas: (definition) => definition,
     loadPairingCanvas: async () => ({
       url: "http://127.0.0.1:1234/panel/",
-      getTitle: async () => "Weft | App session",
+      getTitle: async () => "Weft | Phone companion",
       close: async () => {}, setError() {},
     }),
   });

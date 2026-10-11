@@ -158,10 +158,7 @@ export async function createPairingCanvasServer({ session, preparePairing, statu
   server.unref();
   return {
     url: `${origin}${prefix}/`,
-    async getTitle() {
-      const details = await sessionDetails();
-      return details.title ? `Weft | ${details.title}` : "Weft | Continue on your phone";
-    },
+    getTitle() { return "Weft | Phone companion"; },
     setError(message) { setupError = message; },
     close: () => new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -173,7 +170,7 @@ export async function createPairingCanvasServer({ session, preparePairing, statu
 export function renderPairingHtml() {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weft | Continue on your phone</title>
+<title>Weft | Phone companion</title>
 <style>
 body { margin:0; padding:24px; background:var(--background-color-default,#fff); color:var(--text-color-default,#1f2328); font-family:var(--font-sans,system-ui,-apple-system,"Segoe UI",sans-serif); font-size:var(--text-body-medium,14px); line-height:1.5; }
 main { max-width:700px; margin:auto; } h1 { margin:0; font-size:25px; line-height:1.25; overflow-wrap:anywhere; }
@@ -206,12 +203,13 @@ button { cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
 </style></head><body><main>
 <header class="brand"><span class="wordmark"><span class="mark" aria-hidden="true">W</span>Weft</span>
 <span id="version" class="eyebrow">SESSION COMPANION</span></header>
-<div class="eyebrow">THIS COPILOT SESSION</div>
-<h1 id="session-title">Loading session details...</h1>
+<div class="eyebrow">YOUR COPILOT SESSION</div>
+<h1>Continue on your phone</h1>
 <p>Continue this session on your phone. Same conversation, same workspace.</p>
 <section class="session-card" aria-label="Session details">
 <div class="controls"><span id="activity" class="badge">Activity unavailable</span><span id="mode" class="badge">Mode unavailable</span><span id="device" class="badge">This laptop</span></div>
 <dl class="session-grid">
+<div class="full"><dt>Session</dt><dd id="session-title">Loading session details...</dd></div>
 <div class="full"><dt>Workspace</dt><dd id="workspace" class="mono">Unavailable</dd></div>
 <div><dt>Branch</dt><dd id="branch">Unavailable</dd></div>
 <div><dt>Model</dt><dd id="model">Unavailable</dd></div>
@@ -249,7 +247,6 @@ function render(next) {
   state=next;
   const session=next.session||{};
   $('session-title').textContent=session.title||'Copilot session';
-  document.title=session.title?'Weft | '+session.title:'Weft | Continue on your phone';
   $('workspace').textContent=session.cwd||'Unavailable';
   $('branch').textContent=session.branch||'Unavailable';
   $('model').textContent=[session.model,session.reasoning].filter(Boolean).join(' / ')||'Unavailable';
