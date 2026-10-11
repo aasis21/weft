@@ -281,7 +281,7 @@ node "%~dp0weft.mjs" %*
         } else {
             Warn "no transport configured yet - run: weft set-transport supabase --url <url> --anon-key <key>"
         }
-    } else { Info 'Not installing locally (pass -Install to update ~/.copilot/extensions/weft and reload the running Copilot CLI)' }
+    } else { Info 'Not installing locally (pass -Install to update ~/.copilot/extensions/weft and reload the Copilot session)' }
 
     if ($Push) {
         Step 'git push (current branch)'

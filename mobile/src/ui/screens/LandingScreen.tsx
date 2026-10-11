@@ -395,8 +395,9 @@ export function LandingScreen({
       <section className="landing-steps" id="get-started" aria-label="How it works" tabIndex={-1}>
         <div className="product-section-heading">
           <p className="product-kicker">One laptop. One phone. Your workflow.</p>
-          <h2>From your terminal to your phone.</h2>
-          <p>Use a laptop with Node.js 20+ and an installed, signed-in GitHub Copilot CLI.
+          <h2>From Copilot to your phone.</h2>
+          <p>Use Node.js 20+ and a signed-in Copilot CLI for Device Station launches, or
+            pair an existing local GitHub Copilot app session directly.
             Keep it awake and connected while you work remotely.</p>
           <a href={`${DOCS}#quickstart`}>Full setup guide →</a>
         </div>
@@ -478,11 +479,11 @@ export function LandingScreen({
         <div className="product-faq">
           <details>
             <summary>What do I need to get started?</summary>
-            <p>A Windows, macOS, or Linux laptop with Node.js 20+ and a signed-in GitHub Copilot CLI,
-              plus a phone with a current browser. Install Weft on the laptop, run <code>weft start</code>,
-              and scan its QR from your phone. No phone download or separate Weft account is needed;
-              you still need access to GitHub Copilot. Want a look first? Choose Try the demo above,
-              with no pairing or changes to your files.</p>
+            <p>Node.js 20+, access to Copilot, and a phone with a current browser.
+              For Device Station launches, install a signed-in Copilot CLI and run <code>weft start</code>.
+              In an existing local GitHub Copilot app session, open Weft pairing instead.
+              Scan the QR from your phone. No phone download or separate Weft account is needed.
+              Try the demo first without pairing or changing your files.</p>
           </details>
           <details>
             <summary>Where does my work run? Can I leave my desk?</summary>
@@ -490,7 +491,7 @@ export function LandingScreen({
               Weft brings the conversation and permission requests to your phone; it does not
               move your development environment to the cloud. You can use a different Wi-Fi network
               or mobile data, as long as both devices can reach the relay. Keep the laptop awake,
-              online, and the Device Station terminal open.</p>
+              online, and the paired Copilot session or Device Station running.</p>
             <p>With terminal access enabled, Open terminal creates or resumes one real laptop shell,
               shared with its local window. Leaving the phone terminal screen keeps that shell running;
               confirmed Close ends it. The initial workspace is not a sandbox.</p>

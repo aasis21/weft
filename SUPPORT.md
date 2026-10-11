@@ -4,7 +4,7 @@
 
 1. Check the installed laptop version with `weft version`.
 2. Run `weft update --check`; if an update is available, run `weft update` and restart
-   Copilot CLI or Device Station.
+   Device Station and restart or reload the Copilot session (CLI or app).
 3. Close and reopen the PWA so the browser can activate the current deployment.
 4. Re-run pairing. For a persistent Device Station pairing that may be stale, use
    `weft rotate-pairing` and scan the new QR.
@@ -15,10 +15,11 @@
 
 - **The phone cannot discover, start, resume, or activate sessions:** run `weft start`
   and leave Device Station open. Phone automation is unavailable without Station.
-- **You only want the current terminal:** invoke `/weft` in that Copilot session and
-  scan its QR. This direct pairing does not require Device Station.
+- **You only want the current session:** `/weft` shows a terminal QR in CLI or a
+  pairing canvas in the local Copilot app. If the command is unavailable, ask Copilot
+  to open Weft pairing. Direct pairing does not require Device Station.
 - **Opening a running session starts another terminal:** update and restart Device
-  Station and Copilot CLI, then retry Open. A compatible live session should be
+  Station and restart or reload the Copilot session, then retry Open. A compatible live session should be
   activated in place; do not manually start another Resume while ownership is uncertain.
 - **You ran `/clear`:** the old phone attachment is intentionally disconnected. The
   replacement session is dormant; open it through Station or invoke `/weft` again.
@@ -35,7 +36,7 @@ Use [GitHub Issues](https://github.com/aasis21/weft/issues/new/choose) for repro
 non-sensitive bugs and feature requests. Include:
 
 - phone model, operating system, browser or native app, and Weft version;
-- laptop operating system, Copilot CLI version, and `weft version`;
+- laptop operating system, Copilot client (CLI or app) and its version, and `weft version`;
 - transport: hosted Supabase, self-hosted Supabase, or dev tunnel;
 - concise reproduction steps, expected behavior, and actual behavior;
 - sanitized diagnostics from **Trouble connecting?** when relevant.

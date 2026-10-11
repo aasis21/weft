@@ -70,7 +70,7 @@
       <section id="overview" aria-labelledby="page-title">
         <p class="eyebrow">Setup &amp; everyday use</p>
         <h1 id="page-title">Weft documentation</h1>
-        <p class="lead">Everything you need to use GitHub Copilot CLI from your phone, with the work still running on your laptop.</p>
+        <p class="lead">Use GitHub Copilot CLI or local Copilot app sessions from your phone, with the work still running on your laptop.</p>
         <div class="guide-grid">
           <a class="guide-card" href="#quickstart"><span class="card-label">First connection</span><strong>Install and pair <span aria-hidden="true">&#8594;</span></strong><span>Prepare the laptop, start Weft, and scan from your phone.</span></a>
           <a class="guide-card" href="#troubleshooting"><span class="card-label">Something is wrong</span><strong>Find the right fix <span aria-hidden="true">&#8594;</span></strong><span>Choose your symptom before resetting or reinstalling anything.</span></a>
@@ -83,9 +83,9 @@
         <h2 id="requirements-title"><a class="heading-link" href="#requirements">Before you install</a></h2>
         <p>Weft has three parts. The <strong>Device Station</strong> is the <code>weft start</code> process on your laptop. The <strong>web app</strong> is the phone interface. A <strong>relay</strong> connects them over the internet; session traffic is encrypted between the paired endpoints.</p>
         <dl class="facts">
-          <div><dt>Laptop</dt><dd>Windows with PowerShell, or macOS / Linux with Bash and <code>curl</code>. Install <strong>Node.js 20 or newer</strong> and <a href="https://github.com/github/copilot-cli">GitHub Copilot CLI</a>. Sign in to Copilot with an account that can use it.</dd></div>
+          <div><dt>Laptop</dt><dd><strong>Node.js 20 or newer</strong>, PowerShell or Bash, and access to Copilot. Device Station launches require an installed, signed-in <a href="https://github.com/github/copilot-cli">Copilot CLI</a>; existing local Copilot app sessions can pair directly.</dd></div>
           <div><dt>Phone</dt><dd>A current browser with JavaScript, Web Crypto, and browser storage. Allow camera access when you scan a QR. No Weft account or app-store download is required.</dd></div>
-          <div><dt>Network</dt><dd>Both devices must reach the relay. Different Wi-Fi networks or phone mobile data are fine. Keep the laptop awake and the Device Station terminal open while working remotely.</dd></div>
+          <div><dt>Network</dt><dd>Both devices must reach the relay. Different Wi-Fi networks or phone mobile data are fine. Keep the laptop awake and the paired Copilot session or Device Station running.</dd></div>
         </dl>
         <p>You do not need to clone this repository, build Weft, create a Supabase account, or set up a dev tunnel for the default installation. Those are <a href="#development">developer</a> and <a href="#transports">relay-operator</a> tasks.</p>
         <p class="note">Weft is not remote desktop software. It connects to Copilot sessions and offers a <a href="#open-terminal">shared terminal</a> on supported laptops, enabled by default with a configuration opt-out; it does not provide a general-purpose file browser. The hosted PWA is the supported phone distribution. Weft does not currently publish an Android APK.</p>
@@ -95,7 +95,7 @@
         <span class="legacy-anchor" id="install"></span>
         <h2 id="quickstart-title"><a class="heading-link" href="#quickstart">Quickstart</a></h2>
         <p><strong>Outcome:</strong> your phone can see the laptop in Weft and start a Copilot session. Run shell commands on the laptop, not in the phone's chat composer.</p>
-        <p>First, open <code>copilot</code> on the laptop and complete sign-in. Confirm it can start a session, then return to your normal shell. If Copilot does not work locally, fix that before pairing Weft.</p>
+        <p>For Device Station launches, first open <code>copilot</code> and complete sign-in. Confirm it works locally, then return to your shell. Already using the local Copilot app? Use <a href="#single-session">direct session pairing</a> instead.</p>
         <h3 id="install-laptop"><a class="heading-link" href="#install-laptop">1. Install on your laptop</a></h3>
         <p>Choose your operating system. These commands download and execute the installer; review the <a href="https://useweft.netlify.app/install.ps1">PowerShell script</a> or <a href="https://useweft.netlify.app/install.sh">Bash script</a> first if your environment requires it.</p>
         <div class="code-example"><div class="code-label">Windows &middot; PowerShell</div><pre tabindex="0" role="region" aria-label="Windows install command"><code>irm https://useweft.netlify.app/install.ps1 | iex</code></pre></div>
@@ -129,7 +129,7 @@
         <p>If your folder is missing, <a href="#projects">register it on the laptop</a> and refresh the project list. The phone does not create a missing laptop directory for you.</p>
         <h3 id="resume-session"><a class="heading-link" href="#resume-session">Resume instead of starting over</a></h3>
         <p>Choose <strong>Resume Copilot</strong> on the device. The <strong>Resume a session</strong> view loads available laptop sessions while connected. Choose a folder and session, review permissions, and confirm. Resume can include folders from the laptop's session history as well as registered projects.</p>
-        <p>If the phone already drives that session, the action opens it instead of starting a duplicate. If the laptop reports it is already attached elsewhere, review the warning before choosing <strong>Close it and resume anyway</strong>.</p>
+        <p>Verified running CLI or local app sessions offer <strong>Connect</strong> and activate in place. The list refreshes on reconnect and foreground return; use Refresh or All folders if needed. Review any takeover warning before replacing another phone.</p>
         <p>For a slow New or Resume launch, use its <strong>Try again</strong> action to reconnect to that launch. Repeatedly starting new launches can create duplicates.</p>
         <h3 id="session-permissions"><a class="heading-link" href="#session-permissions">Choose permissions deliberately</a></h3>
         <p>The launch form offers <strong>Default</strong> and <strong>Allow all</strong>. Default uses Copilot's normal permission behavior. <strong>Allow all lets tools, file paths, and URLs proceed without confirmation</strong>; enable it only when that level of access is intentional. These are permission choices, not interactive / plan / autopilot modes.</p>
@@ -147,8 +147,8 @@
           <figcaption>A permission request in the session thread. Review the action before answering. <a href="assets/session-transcript.webp">View the full screenshot</a> or <a href="assets/session-chat.webp">another session view</a>.</figcaption>
         </figure>
         <h3 id="single-session"><a class="heading-link" href="#single-session">Mirror one existing Copilot session</a></h3>
-        <p>Enter <code>/weft</code> <strong>inside an active Copilot CLI session</strong> to mirror that session rather than launching one from Device Station. Scan its QR. If a paired station advertises it under <strong>Offered sessions</strong>, you can join that offer without scanning another QR.</p>
-        <p>A direct session pairing has its own fresh channel and key and ends with the session. Use <code>/weft supabase</code> or <code>/weft devtunnel</code> only when choosing a per-session relay override.</p>
+        <p><code>/weft</code> shows a terminal QR in CLI or a pairing canvas in the local GitHub Copilot app. If the app does not expose the command, ask Copilot to <strong>open Weft pairing</strong>. Scan the QR or join an offered session through Device Station.</p>
+        <p>Direct pairing ends with the session. <code>/weft supabase</code> or <code>/weft devtunnel</code> chooses a per-session relay override. Local app sessions are supported; cloud and remote-host app sessions are not discovered on this laptop.</p>
         <h3 id="session-status"><a class="heading-link" href="#session-status">Find existing work</a></h3>
         <p>The device view groups work under <strong>Active Copilot sessions</strong> and <strong>Inactive Copilot sessions</strong>. A saved transcript is not proof of a live connection. <strong>Archived</strong> means the phone is not keeping a live socket for that session; reopen it to reconnect. <strong>Offline</strong> indicates a connection problem; use the recovery banner above the session composer.</p>
         <p>The device's quick actions include <strong>Start Copilot</strong>, <strong>Resume Copilot</strong>, <strong>Clipboard</strong>, <strong>Keep Awake</strong>, and <strong>Open terminal</strong>. Clipboard transfers text only when requested; Keep Awake temporarily prevents system sleep. Each utility is enabled only when the connected laptop supports it.</p>
@@ -214,7 +214,7 @@ weft update</code></pre></div>
         <ol>
           <li><strong>Check:</strong> <code>weft version</code> shows the installed version; <code>weft update --check</code> compares it with the hosted release without installing.</li>
           <li><strong>Update the laptop:</strong> <code>weft update</code> downloads and verifies the code bundles and usage skill against the published SHA-256 manifest. It preserves configuration, projects, logs, and persistent pairing material under <code>~/.weft/</code>.</li>
-          <li><strong>Restart:</strong> stop and restart Device Station or Copilot CLI so the running process uses the new code.</li>
+          <li><strong>Reload:</strong> restart Device Station and restart CLI sessions or reload extensions in the Copilot app to use the new code.</li>
           <li><strong>Refresh the phone:</strong> reload the web app, or close and reopen the installed PWA. Do not clear its storage just to refresh the UI.</li>
         </ol>
         <h3 id="versions"><a class="heading-link" href="#versions">Compare phone and laptop versions</a></h3>
@@ -342,7 +342,7 @@ weft update</code></pre></div>
 
       <section id="commands" aria-labelledby="commands-title">
         <h2 id="commands-title"><a class="heading-link" href="#commands">Command reference</a></h2>
-        <p>Run <code>weft</code> commands in your <strong>laptop shell</strong>. Run <code>/weft</code> only <strong>inside Copilot CLI</strong>. Neither belongs in the phone's prompt composer.</p>
+        <p>Run <code>weft</code> commands in your <strong>laptop shell</strong>. Run <code>/weft</code> inside a <strong>Copilot CLI or local Copilot app session</strong>. Neither belongs in the phone's prompt composer.</p>
         <p class="note"><code>&lt;value&gt;</code> means required; <code>[option]</code> means optional. Replace placeholders without typing the brackets. For alternatives separated by <code>|</code>, choose one value.</p>
         <h3 id="connection-commands"><a class="heading-link" href="#connection-commands">Connection &amp; pairing</a></h3>
         <div class="table-wrap" tabindex="0" role="region" aria-label="Connection and pairing commands">

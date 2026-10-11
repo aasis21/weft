@@ -2,7 +2,7 @@
   "name": "Weft",
   "short_name": "Weft",
   "id": "/",
-  "description": "Pair your phone with live GitHub Copilot CLI sessions over an end-to-end encrypted connection.",
+  "description": "Connect your phone to GitHub Copilot CLI or local Copilot app sessions over an end-to-end encrypted connection.",
   "lang": "en-US",
   "dir": "ltr",
   "start_url": "/",

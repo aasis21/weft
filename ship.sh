@@ -214,7 +214,7 @@ if [ "$INSTALL" -eq 1 ]; then
     warn "no transport configured yet - run: weft set-transport supabase --url <url> --anon-key <key>"
   fi
 else
-  info "not installing locally (pass --install to update ~/.copilot/extensions/weft and reload the running Copilot CLI)"
+  info "not installing locally (pass --install to update ~/.copilot/extensions/weft and reload the Copilot session)"
 fi
 
 if [ "$PUSH" -eq 1 ]; then

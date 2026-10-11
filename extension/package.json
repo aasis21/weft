@@ -3,7 +3,7 @@
   "version": "0.2.33",
   "private": true,
   "type": "module",
-  "description": "Weft Copilot CLI extension with a dormant bootstrap and lazy active runtime. Source in src/, bundled by esbuild with @github/copilot-sdk external.",
+  "description": "Weft session extension for Copilot CLI and local Copilot app sessions. Dormant bootstrap, lazy active runtime, and host-provided @github/copilot-sdk.",
   "license": "Apache-2.0",
   "scripts": {
     "build": "node esbuild.config.mjs",

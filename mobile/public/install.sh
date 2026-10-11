@@ -166,7 +166,7 @@ case "$(node -p 'process.platform')" in
   darwin) ok "Native PTY runtime installed for this Node.js architecture (no compiler required)." ;;
   *) warn "Native terminal support is not distributed for this platform; ordinary Weft features remain available." ;;
 esac
-ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for the Copilot CLI agent)"
+ok "SKILL.md -> $SKILL_DIR  (how-to-use skill for Copilot CLI and the app)"
 
 # ---------------------------------------------------------------------------
 # Step 3: apply the transport choice to ~/.weft/weft.config.json - the ONLY place the extension
@@ -294,12 +294,12 @@ esac
 # ---------------------------------------------------------------------------
 step 6 "Done"
 echo ""
-echo "  $(bold '1.') Start Copilot CLI in any repo (run $(cyan '/weft') to show the QR)."
+echo "  $(bold '1.') Run $(cyan '/weft') in Copilot CLI, or open Weft pairing in a local Copilot app session."
 echo "  $(bold '2.') Open $(cyan 'https://useweft.netlify.app') on your phone and scan the QR."
 echo "  $(bold '3.') Trigger a Copilot action and approve / deny from your phone."
 echo ""
 echo "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
-echo "  (no Copilot CLI open, just this)? Open a new terminal and run: $(cyan 'weft start')"
+echo "  (requires an installed, signed-in CLI)? Open a new terminal and run: $(cyan 'weft start')"
 echo ""
 if [ "$TRANSPORT" = "devtunnel" ]; then
   echo "  Using devtunnel: provision/check/tear down the shared relay any time, independent"

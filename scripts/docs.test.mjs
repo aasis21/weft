@@ -97,6 +97,12 @@ test("handbook includes operating-system setup, recovery, limitations, and all t
     "service-role key", "namespace", "private keys", "metadata", "does not currently publish",
   ]) assert.ok(content.includes(required), `Missing essential documentation: ${required}`);
   assert.ok(document.querySelector('a[href="https://useweft.netlify.app"]'));
+  const pairing = document.querySelector("#single-session").nextElementSibling.textContent;
+  assert.match(pairing, /terminal QR in CLI or a pairing canvas in the local GitHub Copilot app/);
+  assert.match(pairing, /open Weft pairing/);
+  const requirements = document.querySelector("#requirements").textContent;
+  assert.match(requirements, /Device Station launches require an installed, signed-in Copilot CLI/);
+  assert.match(document.querySelector("#sessions").textContent, /cloud and remote-host app sessions are not discovered/);
   for (const guide of ["setup", "advanced", "pairing", "hosting", "security", "releases", "mode-switching", "event-envelope", "terminal"]) {
     assert.ok(document.querySelector(`#guides a[href="https://github.com/aasis21/weft/blob/main/docs/${guide}.md"]`));
     assert.match(readFileSync(resolve(docs, `${guide}.md`), "utf8"), /https:\/\/aasis21\.github\.io\/weft\/#/);

@@ -810,7 +810,7 @@ export class SessionRuntime {
           statusSet({
             id: channelId,
             status: 'error',
-            error: 'Copilot terminal offline — reopen it on your laptop and scan the new QR.',
+            error: 'Copilot session offline — reopen it on your laptop and pair again.',
           }),
         );
         if (s.connection.busy) this.store.dispatch(busySet({ id: channelId, busy: false }));

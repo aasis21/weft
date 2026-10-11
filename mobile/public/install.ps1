@@ -192,7 +192,7 @@ try {
 $skillDir = Join-Path $env:USERPROFILE '.copilot\skills\weft-how-to-use'
 Ok "Required release bundles -> $InstallDir"
 Ok 'Native PTY runtime installed for this Node.js architecture (no compiler required).'
-Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for the Copilot CLI agent)')"
+Ok "SKILL.md -> $skillDir  $(Dim '(how-to-use skill for Copilot CLI and the app)')"
 
 # ---------------------------------------------------------------------------------------------
 # Step 3: apply the transport choice to ~/.weft/weft.config.json — the ONLY place the extension
@@ -311,12 +311,12 @@ if ($pathEntries -notcontains $InstallDir) {
 # ---------------------------------------------------------------------------------------------
 StepHeader 6 $TOTAL_STEPS 'Done'
 Write-Host ''
-Write-Host "  $(Bold '1.') Start Copilot CLI in any repo (run $(Cyan '/weft') to show the QR)."
+Write-Host "  $(Bold '1.') Run $(Cyan '/weft') in Copilot CLI, or open Weft pairing in a local Copilot app session."
 Write-Host "  $(Bold '2.') Open $(Cyan 'https://useweft.netlify.app') on your phone and scan the QR."
 Write-Host "  $(Bold '3.') Trigger a Copilot action and approve / deny from your phone."
 Write-Host ''
 Write-Host "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
-Write-Host "  (no Copilot CLI open, just this)? Open a new terminal and run: $(Cyan 'weft start')"
+Write-Host "  (requires an installed, signed-in CLI)? Open a new terminal and run: $(Cyan 'weft start')"
 Write-Host ''
 if ($Transport -eq 'devtunnel') {
     Write-Host "  Using devtunnel: provision/check/tear down the shared relay any time, independent"

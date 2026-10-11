@@ -1,15 +1,14 @@
 ---
 name: weft-how-to-use
-description: Pair a phone to a running GitHub Copilot CLI session with Weft — show/refresh the QR code, pick a transport (Supabase realtime or a self-hosted Microsoft Dev Tunnel), manage the shared devtunnel relay, and run/manage the standalone `weft` Device Station CLI outside of any Copilot session. Use when the user asks to "pair my phone", "show the Weft QR", "switch Weft transport", "start/check/stop the weft devtunnel", "run weft standalone", or asks why `/weft` or `weft` isn't working.
+description: Pair a phone to GitHub Copilot CLI or local Copilot app sessions with Weft. Show/refresh a terminal QR or app canvas, manage Supabase or Dev Tunnel transport, and run the standalone Device Station. Use for "pair my phone", "open Weft pairing", "show the Weft QR", "switch Weft transport", "run weft standalone", or troubleshooting `/weft` and `weft`.
 ---
 
-# Weft — pair your phone to a Copilot CLI session
+# Weft — pair your phone to Copilot
 
-Weft lets a phone (the Weft mobile web app or APK) observe and approve a running
-Copilot CLI session in real time: tool-call notifications, approval prompts, and a live
-transcript. It ships as a Copilot CLI **extension** (`/weft` inside a session) plus a
-standalone **`weft` CLI** (works with no Copilot session at all — e.g. to run a Device
-Station on a headless box, or to manage the relay independently).
+Weft lets the phone PWA follow and control GitHub Copilot CLI or local Copilot app
+sessions: prompts, tool activity, approvals, and a live transcript. It ships as a
+session **extension** (`/weft`) plus a standalone **`weft` CLI** for Device Station
+and relay management. Station launches new sessions through an installed CLI.
 
 ## Inside a Copilot CLI session — `/weft`
 

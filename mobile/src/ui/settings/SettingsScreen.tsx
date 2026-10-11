@@ -246,7 +246,7 @@ export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: Setting
             {mismatched ? (
               <p className="settings-about-warn" role="status">
                 A paired laptop is on a different build than this phone. Run <code>weft update</code>,
-                restart Copilot CLI or Device Station, then reload this app.{' '}
+                restart Device Station and restart or reload your Copilot session, then reload this app.{' '}
                 <a
                   href="https://github.com/aasis21/weft/blob/main/docs/releases.md"
                   target="_blank"

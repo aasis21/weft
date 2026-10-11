@@ -13,7 +13,7 @@ Supabase project or phone; it does not prove cross-device connectivity.
 - [Prerequisites and dependencies](#prerequisites)
 - [Local validation](#verify-everything-no-network-no-phone)
 - [Demo and simulator](#run-the-mobile-demosimulator)
-- [Install and pair a source build](#run-the-real-extension-under-copilot-cli-the-real-test)
+- [Install and pair a source build](#run-the-real-extension-under-copilot-cli-or-the-local-app)
 - [Deployments](#shipping-it-environments)
 - [Custom Supabase](#wire-your-own-supabase-project)
 - [Dev Tunnel lifecycle](#pairing-with-the-devtunnel-transport)
@@ -23,8 +23,8 @@ Supabase project or phone; it does not prove cross-device connectivity.
 - Node.js 20 or newer.
 - For the hosted web app and demo: a current browser.
 - Only for building the native Android shell: Android Studio + Android SDK.
-- The Copilot CLI extension uses `@github/copilot-sdk`, which the CLI provides at
-  runtime — you do **not** install it to run the extension under `copilot`.
+- The session extension uses `@github/copilot-sdk`, supplied by the CLI or Copilot app
+  host at runtime. Device Station launches require an installed, signed-in CLI.
 
 ## Install
 
@@ -93,14 +93,14 @@ In the app choose **Try the demo**. It stands up a fake laptop side in-process
 assistant/tool events, an approval card, heartbeats, and reflects mode changes — all
 application payloads travel over AES-256-GCM.
 
-## Run the real extension under Copilot CLI (the "real" test)
+## Run the real extension under Copilot CLI (or the local app)
 
 The source installer writes code into your personal Copilot extensions directory.
 Review it before running it in a managed environment.
 
 **1. Install the extension** (builds + copies the dormant `extension.mjs` bootstrap, lazy
 `activeRuntime.mjs`, and on-demand `pairingCanvas.mjs` into
-`~/.copilot/extensions/weft/`, where the CLI auto-discovers it — that directory holds
+`~/.copilot/extensions/weft/`, discovered by CLI and local app sessions — that directory holds
 installed **code only**):
 
 ```sh
@@ -148,10 +148,10 @@ For a source-built phone UI, use your HTTPS development deployment instead.
 Device Station must remain running for phone-driven project/session discovery, Start,
 Open/Resume, and activation of dormant sessions. If the selected Copilot session is
 already open, Station uses its user-local lifecycle endpoint to activate that exact
-terminal process; it does not launch a second `copilot --resume`.
+session runtime, including a local Copilot app session; it does not launch a second `copilot --resume`.
 
-To pair only the current terminal, invoke `/weft` inside that Copilot session and scan
-its QR. This is an explicit direct-session path and does not require Device Station.
+To pair only the current session, `/weft` shows a terminal QR in CLI or a canvas in
+the local Copilot app. You can also ask Copilot to open Weft pairing. Station is not required.
 After either path pairs, active prompts, events, approvals, streaming, and terminal data
 flow directly between the phone and session over the encrypted relay, bypassing Station
 and the local lifecycle endpoint.
@@ -220,7 +220,7 @@ The check is read-only and also reports mandatory files that need repair at the 
 version. The update uses the bundle set declared by the published release manifest,
 verifies every downloaded file, replaces installed code and the Weft skill transactionally,
 and preserves `~/.weft/` configuration, registered projects, and persistent pairing
-material. Restart Copilot CLI or Device Station after updating. PWA updates arrive through
+material. Restart Station and restart or reload the Copilot session after updating. PWA updates arrive through
 the browser; close and reopen the installed PWA if a newly published version is not visible.
 
 Notification behavior depends on the browser and operating system. Exercise permission

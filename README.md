@@ -12,9 +12,9 @@
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](#develop-locally)
 [![PWA](https://img.shields.io/badge/phone-PWA-5A0FC8?logo=pwa&logoColor=white)](https://useweft.netlify.app)
 
-Weft turns your phone into a secure control surface for GitHub Copilot CLI. Follow live
-work, send prompts, approve tool calls, resume sessions, and open a shared terminal while
-the actual process keeps running on your laptop.
+Weft turns your phone into a secure control surface for GitHub Copilot CLI and local
+GitHub Copilot app sessions. Follow live work, send prompts, approve tool calls, and
+connect to existing sessions while the actual process keeps running on your laptop.
 
 [**Open the app**](https://useweft.netlify.app) ·
 [**Read the docs**](https://aasis21.github.io/weft/) ·
@@ -75,9 +75,10 @@ while you use the phone.
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.
 
-**GitHub Copilot app:** ask Copilot to **open Weft pairing** for a graphical QR and
-connection status in the side panel. Or connect to a running local app session from
-the phone's **Resume** screen. CLI `/weft` remains available.
+**Already in Copilot?** `/weft` shows a terminal QR in CLI or a pairing canvas in the
+local Copilot app; asking to **open Weft pairing** works too. Device Station's Resume
+screen can connect to local app sessions, but it launches new sessions through CLI.
+Cloud and remote-host app sessions are not discovered on this laptop.
 
 ## Product tour
 
@@ -168,14 +169,14 @@ Read the full [security model](docs/security.md), [privacy policy](PRIVACY.md), 
 
 ```
 +------------------------------+        +------------------------------+        +-------------------------------+
-| Weft Mobile                  |        |   Encrypted relay            |        |  Laptop terminal              |
-| (React PWA + Capacitor)      |        |   Supabase or Dev Tunnel     |        |  copilot (parent)             |
+| Weft Mobile                  |        |   Encrypted relay            |        |  Laptop Copilot host          |
+| (React PWA + Capacitor)      |        |   Supabase or Dev Tunnel     |        |  CLI or local app (parent)    |
 |                              |        |   private:weft:<channelId>   |        |   └─ extension.mjs (child)    |
 |  • scans QR (channel + grant)|  WSS   |   • in-memory pub/sub        |  WSS   |   • joinSession()             |
 |  • ECDH → AES-256-GCM        | <----> |   • zero DB persistence      | <----> |   • onPermissionRequest→relay |
 |  • decrypts token stream     |        |   • RLS-gated private chan   |        |   • on(assistant.message)→push|
 |  • native-style approval UI  |        |                              |        |   • session.send(phone prompt)|
-|  • prompt + mode controls    |        |                              |        |   • QR via session.log()      |
+|  • prompt + mode controls    |        |                              |        |   • terminal QR / app canvas  |
 +------------------------------+        +------------------------------+        +-------------------------------+
         all payloads E2E-encrypted; Supabase sees ciphertext only
 ```
@@ -184,7 +185,7 @@ Three layers, one monorepo:
 
 | Workspace | What it is |
 |---|---|
-| `extension/` | The Copilot CLI extension (`joinSession`) + a local test **harness** that mimics the phone with no Supabase needed. |
+| `extension/` | The CLI/app session extension (`joinSession`) + a local test **harness** that mimics the phone with no Supabase needed. |
 | `shared/` | Contracts imported by **both** ends: message schema, E2E crypto (ECDH→AES-GCM), and pluggable local, Supabase, and WebSocket relay transports. |
 | `mobile/` | React + Vite + Capacitor app shipped as the supported **PWA** ([useweft.netlify.app](https://useweft.netlify.app)), with in-browser camera QR scanning and an Android development shell. |
 
@@ -202,8 +203,8 @@ Three layers, one monorepo:
 - **Local continuity.** The phone stores session metadata, transcript history, preferences,
   and pairing keys locally. Persistent Device Station keys and configuration stay under
   `~/.weft/` on the laptop. Removing a session deletes its locally cached phone transcript.
-- **stdout is sacred.** The CLI reserves stdout for JSON-RPC; all extension UX uses
-  `session.log()`.
+- **stdout is sacred.** The host reserves stdout for JSON-RPC; extension UX uses
+  `session.log()` or the pairing canvas.
 
 ---
 
@@ -212,10 +213,10 @@ Three layers, one monorepo:
 - The extension is authored in `extension/src/` and bundled (esbuild) to a single
   `extension/dist/extension.mjs` plus the lazily imported `extension/dist/activeRuntime.mjs`
   and on-demand `extension/dist/pairingCanvas.mjs`.
-  `@github/copilot-sdk` is marked **external** (the CLI provides
+  `@github/copilot-sdk` is marked **external** (the Copilot host provides
   it at runtime); everything else (e.g. `@supabase/supabase-js`, `shared/`) is bundled in.
-- Install copies `extension/dist/` into `~/.copilot/extensions/weft/`, where Copilot CLI
-  auto-discovers it (see `setup.*` / `install.*`) — that directory holds installed **code
+- Install copies `extension/dist/` into `~/.copilot/extensions/weft/`, discovered by CLI
+  and local app sessions (see `setup.*` / `install.*`) — that directory holds installed **code
   only**. All user config lives separately in `~/.weft/`: `weft.config.json` (registered
   projects, transport choice, device name) and `supabase.json` (relay URL + anon key). There
   is no `.env` / env-var override — reinstalling or rebuilding never touches either file, so

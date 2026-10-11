@@ -74,6 +74,9 @@ describe('LandingScreen install command tabs accessibility', () => {
     expect(items[1]).toHaveTextContent('Run weft start');
     expect(items[2]).toHaveTextContent('Scan with your phone');
     expect(within(steps).queryByText(/\/weft/)).not.toBeInTheDocument();
+    const setup = screen.getByRole('region', { name: 'How it works' });
+    expect(setup).toHaveTextContent(/signed-in Copilot CLI for Device Station launches/);
+    expect(setup).toHaveTextContent(/existing local GitHub Copilot app session directly/);
   });
 
   it('links to the public trust and support documents', async () => {

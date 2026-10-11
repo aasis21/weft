@@ -2,7 +2,7 @@
   "name": "weft",
   "version": "0.2.33",
   "private": true,
-  "description": "Weft — your Copilot command center. Mobile app that binds to live Copilot CLI sessions via a session-bound CLI extension + Supabase Realtime relay.",
+  "description": "Weft — mobile companion for GitHub Copilot CLI and local Copilot app sessions over an end-to-end encrypted relay.",
   "type": "module",
   "license": "Apache-2.0",
   "workspaces": [

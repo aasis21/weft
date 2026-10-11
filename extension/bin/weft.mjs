@@ -1385,13 +1385,13 @@ async function update(cmdArgs = []) {
       const repairs = installationRepairReasons(manifest);
       if (repairs.length) {
         console.log(`${c.yellow("Repair required:")} Weft ${current} is current, but ${repairs.join(", ")} is missing or corrupt.`);
-        console.log("Run `weft update`, then restart Copilot CLI / the Device Station.");
+        console.log("Run `weft update`, then restart Device Station and restart or reload Copilot (CLI or app).");
       } else {
         console.log(`${c.green("Up to date.")} Weft ${current} is the current hosted release.`);
       }
     } else if (order < 0) {
       console.log(`${c.yellow("Update available:")} ${current} → ${manifest.version}`);
-      console.log("Run `weft update`, then restart Copilot CLI / the Device Station.");
+      console.log("Run `weft update`, then restart Device Station and restart or reload Copilot (CLI or app).");
     } else {
       console.log(`${c.yellow("Development build:")} local Weft ${current} is newer than hosted ${manifest.version}.`);
     }

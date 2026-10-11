@@ -111,7 +111,7 @@ test("weft update --check reports an available hosted update without installing"
   const stdout = await runUpdateCheck(hostedVersion);
 
   assert.match(stdout, new RegExp(`Update available: ${currentVersion.replaceAll(".", "\\.")} → ${hostedVersion.replaceAll(".", "\\.")}`));
-  assert.match(stdout, /Run `weft update`, then restart Copilot CLI \/ the Device Station\./);
+  assert.match(stdout, /Run `weft update`, then restart Device Station and restart or reload Copilot \(CLI or app\)\./);
 });
 
 test("weft update --check reports a newer local development build without installing", async () => {

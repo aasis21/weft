@@ -1,6 +1,6 @@
 # Weft privacy notice
 
-Weft connects a phone to GitHub Copilot CLI sessions running on a laptop. It is
+Weft connects a phone to GitHub Copilot CLI and local Copilot app sessions on a laptop. It is
 designed so relay infrastructure does not receive plaintext session content.
 
 ## Data stored on your devices

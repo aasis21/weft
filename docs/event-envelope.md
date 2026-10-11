@@ -151,5 +151,5 @@ registered for its `eventType`.
   envelope types, and message factories.
 - `shared/pairing.mjs` establishes the session key.
 - `shared/channel.mjs` encrypts, sequences, validates, and dispatches envelopes.
-- `extension/src/relay.mjs` translates Copilot CLI events into shared messages.
+- `extension/src/relay.mjs` translates Copilot runtime events into shared messages.
 - `mobile/src/session/` applies messages to the phone session state.

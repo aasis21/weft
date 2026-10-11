@@ -10,7 +10,7 @@ weft update --check
 weft update
 ```
 
-Then restart Copilot CLI or Device Station and reproduce the issue. PWA users should
+Then restart Device Station and restart or reload the Copilot session (CLI or app). PWA users should
 close and reopen the installed app so the browser can activate the current deployment.
 
 ## Report a vulnerability privately

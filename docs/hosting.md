@@ -74,7 +74,7 @@ addresses, and channel identifiers.
 ## Configuring the extension's transport
 
 Unlike the mobile build (which takes no env config at all — the relay URL + anon key travel
-in the pairing QR the phone scans), the Copilot CLI extension has **no env var / `.env`**
+in the pairing QR the phone scans), the Copilot session extension has **no env var / `.env`**
 for this either — it is configured via two small files in `~/.weft/`:
 
 - `~/.weft/weft.config.json` — the transport **pointer** (`{"transport": {"kind":

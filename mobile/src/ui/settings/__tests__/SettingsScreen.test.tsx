@@ -80,6 +80,7 @@ describe('SettingsScreen', () => {
     // The phone is on the dev/test build, the laptop claims 0.9.1 — the mismatch is the single most
     // common cause of "paired but nothing happens", so it is stated rather than left to be diffed.
     expect(screen.getByRole('status')).toHaveTextContent(/different build/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/restart or reload your Copilot session/);
     expect(within(screen.getByRole('status')).getByRole('link', { name: 'Update guide' })).toHaveAttribute(
       'href',
       'https://github.com/aasis21/weft/blob/main/docs/releases.md',

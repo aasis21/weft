@@ -33,8 +33,8 @@ before replacing them in one transaction. This also repairs a same-version insta
 when an older updater omitted a newly introduced bundle or a required file is missing or
 corrupt. It does not remove or overwrite `~/.weft/` configuration, registered projects,
 logs, or persistent pairing material.
-Restart Copilot CLI or Device Station after updating; an already-running process does
-not switch to the downloaded code automatically.
+Restart Device Station and restart CLI sessions or reload extensions in the Copilot app
+after updating; running processes do not switch to the downloaded code automatically.
 
 An ordinary update does not require fresh pairing. Do not use `weft clean-install`
 to update: that command deletes configuration and pairing data as well as code.

@@ -142,7 +142,7 @@ export async function startDemoSession(): Promise<DemoSession> {
           {
             turnIndex: 0,
             role: 'assistant',
-            text: 'Weft mirrors your live `copilot` terminal session to your phone over an E2E-encrypted relay.',
+            text: 'Weft connects your phone to Copilot CLI or local Copilot app sessions over an E2E-encrypted relay.',
             ts: Date.now() - 599_000,
           },
         ],

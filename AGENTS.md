@@ -6,14 +6,14 @@ phone, and keep changes focused.
 
 ## Product overview
 
-Weft turns a phone into a mobile interface for a computer running GitHub Copilot CLI.
+Weft turns a phone into a mobile interface for GitHub Copilot CLI and local Copilot app sessions.
 It is not a remote desktop. The laptop remains a normal computer while the phone offers
 purpose-built views for devices, projects, sessions, approvals, chat, and system status.
 
 The repository is a Node.js monorepo:
 
 - `shared/` defines the encrypted channel and protocol messages used by both endpoints.
-- `extension/` contains the Copilot CLI extension, standalone `weft` Device Station,
+- `extension/` contains the CLI/app session extension, standalone `weft` Device Station,
   relay integration, Windows telemetry, and command-line tooling.
 - `mobile/` contains the React/Vite/Capacitor phone application and hosted PWA.
 - `docs/` contains setup, architecture, pairing, hosting, release, and support guidance.
@@ -22,7 +22,7 @@ The repository is a Node.js monorepo:
 The real-time path is:
 
 ```text
-Copilot CLI / Device Station
+Copilot CLI / local Copilot app session / Device Station
   -> encrypted SecureChannel messages
   -> Supabase Realtime or Microsoft Dev Tunnel relay
   -> phone runtime and Redux state
@@ -107,7 +107,7 @@ weft update --check
 weft update
 ```
 
-Restart `weft start` or Copilot CLI afterward. A fresh installation and QR re-pairing
+Restart Device Station and restart or reload the Copilot session afterward. A fresh installation and QR re-pairing
 are not required: the updater preserves transport configuration, registered projects,
 logs, and persistent pairing material under `~/.weft/`.
 
