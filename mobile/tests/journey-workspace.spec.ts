@@ -1,0 +1,33 @@
+import { test, expect } from '@playwright/test';
+
+test('Files, chat file links, and Changes use the same on-demand viewer', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
+  await expect(page.locator('.status-title')).toContainText('Demo session');
+  await page.getByRole('button', { name: 'Demo report', exact: true }).click();
+  const direct = page.locator('.workspace-screen');
+  await expect(direct.frameLocator('iframe').getByRole('heading', { name: 'Demo report' })).toBeVisible();
+  await direct.getByRole('button', { name: '‹ Chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Session menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Files', exact: true }).click();
+  const workspace = page.locator('.workspace-screen');
+  await expect(workspace).toBeVisible();
+  await workspace.getByRole('button', { name: /reports/ }).click();
+  await workspace.getByRole('button', { name: /summary.html/ }).click();
+  await expect(workspace.locator('iframe')).toBeVisible();
+  await expect(workspace.frameLocator('iframe').getByRole('heading', { name: 'Demo report' })).toBeVisible();
+  await expect(workspace.locator('iframe')).toHaveAttribute('sandbox', '');
+  await workspace.getByRole('button', { name: '‹ Files', exact: true }).click();
+  await workspace.getByRole('button', { name: /README.md/ }).click();
+  await workspace.getByRole('button', { name: 'report', exact: true }).click();
+  await expect(workspace.frameLocator('iframe').getByRole('heading', { name: 'Demo report' })).toBeVisible();
+  await workspace.getByRole('button', { name: '‹ Files', exact: true }).click();
+  await workspace.getByRole('button', { name: '‹ Chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Session menu', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Changes', exact: true }).click();
+  await workspace.getByRole('button', { name: /M src\/app.ts/ }).click();
+  await expect(workspace.locator('.workspace-diff')).toContainText('-export const version = 1');
+  await expect(workspace.locator('.workspace-diff')).toContainText('+export const version = 2');
+  await expect(workspace.locator('.workspace-diff .insert')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

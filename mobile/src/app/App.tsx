@@ -4,6 +4,7 @@ import type { PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import type { StartMode } from '@/ui/screens/StartSessionScreen';
+import type { WorkspaceCommand } from '@aasis21/weft-shared';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { sessionAccess, sessionRuntime } from '@/session/runtime/instance';
 import {
@@ -42,6 +43,10 @@ function loadingScreen(label: string): JSX.Element {
 
 export default function App(): JSX.Element {
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
+  const requestWorkspace = useCallback((command: WorkspaceCommand, signal?: AbortSignal) => {
+    if (!snapshot.activeId) return Promise.reject(new Error('Select a session first.'));
+    return sessionRuntime.requestWorkspace(snapshot.activeId, command, signal);
+  }, [snapshot.activeId]);
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startDeviceId, setStartDeviceId] = useState<string | undefined>(undefined);
@@ -542,6 +547,7 @@ export default function App(): JSX.Element {
 
   const sessionScreen = (
     <SessionScreen
+      onWorkspaceRequest={requestWorkspace}
       active={active}
       sessions={snapshot.sessions}
       activeId={active.meta.channelId}

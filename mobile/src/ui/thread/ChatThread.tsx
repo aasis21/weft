@@ -15,6 +15,7 @@ import { ToolCard } from './ToolCard';
 import '@/ui/styles/thread-extras.css';
 
 interface ChatThreadProps {
+  onOpenFile?: ((href: string) => void) | undefined;
   items: TimelineItem[];
   /** Deprecated paginated history store retained for compatibility with SessionScreen props. */
   history?: HistoryItem[];
@@ -150,7 +151,7 @@ function selectionWithin(container: Node | null): string | null {
   return container.contains(range.commonAncestorContainer) ? text : null;
 }
 
-export function ChatThread({ items, streaming = false, busy = false, intent = null, thinkingSince = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, streaming = false, busy = false, intent = null, thinkingSince = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey, onOpenFile }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -724,7 +725,7 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
               onTouchMove={cancelLongPress}
               onTouchCancel={cancelLongPress}
             >
-              <Markdown text={item.text} />
+              <Markdown text={item.text} onOpenFile={onOpenFile} />
               {caret ? <span className="caret" aria-hidden="true" /> : null}
             </div>
           </div>

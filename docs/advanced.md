@@ -61,6 +61,23 @@ local laptop.
 
 ## Register and maintain projects
 
+The session menu's **Files** and **Changes** views are read-only and workspace-scoped.
+Folder expansion fetches names only; tapping a file or Markdown file link fetches a
+revision-labelled preview. Markdown, text/source, and self-contained HTML are supported;
+HTML scripts, forms, and external assets are disabled. **Refresh** captures the latest
+version; loaded content remains visible offline, but fetching more requires reconnection.
+Changes compares staged and unstaged working files against a pinned HEAD commit;
+untracked files appear as New. No staging, reverting, or file editing is provided.
+
+Workspace reads use Copilot's native approval pipeline, allowed-directory policy,
+and content-exclusion checks. Older hosts without those checks do not advertise this
+feature. Denied names and contents are not sent. Each text file is capped at 2 MiB or
+20,000 lines, HTML and patches at 1 MiB; transfers are bounded pages. Temporary
+snapshots expire after five minutes and are not persisted by Weft. Preview requests,
+contents, and patches are excluded from diagnostic logs.
+Changes checks candidate paths before running Git diffs; workspaces with more than
+4,000 candidates or an oversized path list must be narrowed rather than scanned without limits.
+
 A project is a named existing directory on the laptop, not a copy uploaded to the phone.
 The device dashboard groups these registrations under **Copilot workspaces**; the CLI
 continues to use `project` in its commands.

@@ -32,6 +32,12 @@
 
 ## Report a problem
 
+**Files or Changes unavailable:** update both endpoints and Copilot. Workspace
+previews require host read-policy support and a live session. Denied/excluded files
+stay inaccessible; reconnect after a workspace change. Expired snapshots need
+Refresh. Binary, oversized, or non-UTF-8 files produce explicit errors rather than
+partial previews. Approvals can be answered inside the workspace viewer.
+
 Use [GitHub Issues](https://github.com/aasis21/weft/issues/new/choose) for reproducible,
 non-sensitive bugs and feature requests. Include:
 

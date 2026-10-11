@@ -35,6 +35,7 @@ import {
   voiceMode,
   invokeCommand,
   RECENT_TURNS_DEFAULT,
+  WORKSPACE_CAPABILITY,
 } from '@aasis21/weft-shared';
 import type {
   EventEnvelope,
@@ -53,6 +54,8 @@ import type {
   SpawnPairingMsg,
   SpawnResultMsg,
   StateSnapshotMsg,
+  WorkspaceCommand,
+  WorkspaceData,
 } from '@aasis21/weft-shared';
 import {
   connectDevice as connectDeviceSession,
@@ -111,6 +114,7 @@ import {
   notifySessionEnded,
 } from '@/lib/notifications';
 import { App } from '@capacitor/app';
+import { WorkspaceClient } from './workspaceClient';
 
 import { makeStore, type AppStore, type RuntimeDeps } from '@/app/store';
 import type { TransportRegistry } from '@/services/transport/registry';
@@ -390,6 +394,28 @@ function reportedTitle(message: EventEnvelope): string | undefined {
  * `getSnapshot` = the `selectManagerSnapshot` reprojection.
  */
 export class SessionRuntime {
+  private readonly workspaceClients = new Map<string, WorkspaceClient>();
+
+  requestWorkspace(channelId: string, command: WorkspaceCommand, signal?: AbortSignal): Promise<WorkspaceData> {
+    const session = this.session(channelId);
+    const connection = this.controllers.get(channelId)?.client;
+    if (!connection || session?.connection.status !== 'live') {
+      return Promise.reject(new Error('Laptop offline. Reconnect to load workspace content.'));
+    }
+    if (!session.workspaceCapabilities?.includes(WORKSPACE_CAPABILITY)) {
+      return Promise.reject(new Error('Workspace previews require an updated Copilot and Weft on this laptop.'));
+    }
+    let client = this.workspaceClients.get(channelId);
+    if (!client) {
+      client = new WorkspaceClient(async (message) => {
+        const current = this.controllers.get(channelId)?.client;
+        if (!current || this.session(channelId)?.connection.status !== 'live') throw new Error('Offline');
+        await current.send(message);
+      });
+      this.workspaceClients.set(channelId, client);
+    }
+    return client.request(command, signal);
+  }
   private readonly store: AppStore;
   private readonly registry: TransportRegistry;
   private readonly clock: () => number;
@@ -758,6 +784,8 @@ export class SessionRuntime {
 
   // --- connecting / attaching ----------------------------------------------------------------------
   private attach(channelId: string, client: WeftClient): void {
+    this.workspaceClients.get(channelId)?.dispose();
+    this.workspaceClients.delete(channelId);
     const ctrl = this.controllers.get(channelId);
     if (!ctrl || !this.session(channelId)) {
       void client.close().catch(() => {});
@@ -961,6 +989,10 @@ export class SessionRuntime {
     // Ignore a message that decrypted after its channel was superseded (reconnect) or cooled to cold:
     // acting on it could set a stale card back to 'live' with no live connection.
     if (ctrl.client !== client) return;
+    if (message.eventSubtype === SUBTYPE.CONTROL.WORKSPACE_RESULT && message.eventType === EVENT_TYPE.CONTROL) {
+      this.workspaceClients.get(channelId)?.receive(message.msg);
+      return;
+    }
 
     // Stamp a phone-local receipt time the instant we receive the envelope. All downstream
     // elapsed-time math (heartbeat liveness in applyEnvelope, witnessed-silence) uses THIS, never
@@ -3163,6 +3195,8 @@ export class SessionRuntime {
 
   /** Tear down every socket, timer, and listener. Called when the app (or a test harness) shuts down. */
   dispose(): void {
+    for (const client of this.workspaceClients.values()) client.dispose();
+    this.workspaceClients.clear();
     for (const waiters of this.lifecycleWaiters.values()) {
       for (const waiter of waiters) {
         clearTimeout(waiter.timer);

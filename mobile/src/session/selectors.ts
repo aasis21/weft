@@ -63,6 +63,7 @@ export function toTimelineState(session: Session): TimelineState {
 export function toSessionView(session: Session): SessionView {
   return {
     meta: { ...session.meta },
+    ...(session.workspaceCapabilities ? { workspaceCapabilities: session.workspaceCapabilities } : {}),
     status: session.connection.status,
     timeline: toTimelineState(session),
     ...(session.unread ? { unread: true } : {}),

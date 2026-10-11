@@ -1,6 +1,7 @@
 export * from "./messages";
 export * from "./commands";
 export * from "./history";
+export * from "./workspace";
 export * from "./crypto";
 export * from "./pairing";
 export { SecureChannel } from "./channel";

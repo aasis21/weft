@@ -43,6 +43,9 @@ AES-256-GCM encryption.
   names, browser tabs, executable paths, or private session content.
 - Preserve `~/.weft/` configuration and persistent pairing data during installs,
   updates, and releases.
+- Workspace previews may transfer explicitly requested, policy-approved paths,
+  contents, and diffs over the paired encrypted channel. Never put them in
+  diagnostic logs or bypass the host's read permissions and content exclusions.
 - Add focused tests near changed behavior. Update user documentation when commands,
   storage, privacy, compatibility, or security behavior changes.
 - Use an OpenSpec change for substantial product, lifecycle, or protocol work.

@@ -26,6 +26,11 @@ import {
   stateSnapshot,
   getPhoneCommand,
   validatePhoneCommandInput,
+  WORKSPACE_CAPABILITY,
+  WORKSPACE_LIMITS,
+  workspaceResult,
+  validWorkspaceRequest,
+  WORKSPACE_CODES,
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
@@ -359,6 +364,7 @@ export async function attachRelay({
   heartbeatMs = DEFAULT_HEARTBEAT_MS,
   permissionRelay,
   onConnectionLost,
+  workspaceView,
 } = {}) {
   if (!session) throw new Error("weft relay: session is required");
   if (!channel) throw new Error("weft relay: channel is required");
@@ -424,7 +430,12 @@ export async function attachRelay({
     }
   };
 
-  await sendSafe(channelUp(cwd, lastTitle));
+  const workspaceCapabilities = workspaceView &&
+    session.rpc?.contentExclusion?.checkPaths && session.rpc?.tools?.execute &&
+    session.rpc?.permissions?.paths?.list &&
+    session.rpc?.permissions?.paths?.isPathWithinAllowedDirectories
+    ? [WORKSPACE_CAPABILITY] : [];
+  await sendSafe(channelUp(cwd, lastTitle, workspaceCapabilities));
   // This session is now attached to a phone. Publish that, so a RESUME_SESSION arriving at the
   // station for this same CLI session can be answered with "it's already running" instead of
   // forking a second `copilot --resume` onto it. Refreshed on every beat below so the station can
@@ -521,6 +532,35 @@ export async function attachRelay({
 
   unsubscribers.push(
     channel.onEvent(EVENT_TYPE.CONTROL, (msg) => {
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.WORKSPACE_REQUEST) {
+        void (async () => {
+          const input = msg.msg;
+          if (!validWorkspaceRequest(input)) {
+            if (!stopped) await sendSafe(workspaceResult({
+              requestId: typeof input?.requestId === "string" ? input.requestId.slice(0, 96) : "invalid",
+              error: { code: "invalid-request", message: "Invalid workspace request." },
+            }));
+            return;
+          }
+          let response;
+          try {
+            if (!workspaceView) throw new Error("unsupported");
+            const view = await workspaceView();
+            response = workspaceResult({ requestId: input.requestId, data: await view.handle(input) });
+            if (Buffer.byteLength(JSON.stringify(response)) > WORKSPACE_LIMITS.frameBytes) {
+              response = workspaceResult({ requestId: input.requestId,
+                error: { code: "too-large", message: "The requested page is too large. Choose a narrower view." } });
+            }
+          } catch (error) {
+            const known = WORKSPACE_CODES.includes(error.code);
+            response = workspaceResult({ requestId: input.requestId,
+              error: { code: known ? error.code : "unavailable",
+                message: known ? error.message : "Workspace preview is unavailable. Update Copilot and Weft." } });
+          }
+          if (!stopped) await sendSafe(response);
+        })();
+        return;
+      }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.MODE) {
         void applyMode(session, msg.msg?.mode, logger, sendSafe);
         return;
@@ -550,7 +590,7 @@ export async function attachRelay({
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
-        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger });
+        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, capabilities: workspaceCapabilities });
       }
     }),
   );
@@ -580,6 +620,7 @@ export async function attachRelay({
 }
 
 async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus) {
+  if (event?.data?.toolName === "weft_workspace_access") return;
   if (!event?.type) return;
   const data = event.data ?? {};
   // Diagnostic hatch. Several SDK events are declared in the type catalog but only actually emitted
@@ -764,7 +805,7 @@ async function serveRecentTurns(turnBuffer, req, sendSafe, logger) {
  * or MID-TURN join immediately shows the truth (working vs ready, current mode, latest turn cursor)
  * and re-renders any prompts still pending on the terminal — instead of waiting for the next event.
  */
-async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger }) {
+async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, capabilities }) {
   try {
     const [activity, mode, latestTurnIndex] = await Promise.all([
       readSessionActivity(session),
@@ -773,6 +814,7 @@ async function serveStateSnapshot({ session, sessionId, approvals, elicitations,
     ]);
     await sendSafe(
       stateSnapshot({
+        ...(capabilities?.length ? { capabilities } : {}),
         // A one-shot connect snapshot defaults to idle when the host can't tell us (null).
         busy: activity?.busy ?? false,
         abortable: activity?.abortable ?? false,

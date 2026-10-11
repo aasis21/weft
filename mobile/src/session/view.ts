@@ -9,6 +9,7 @@ export type { SessionMeta, SessionStatus };
  * kept structurally identical to the pre-refactor manager view so the UI is untouched by the port.
  */
 export interface SessionView {
+  workspaceCapabilities?: string[];
   meta: SessionMeta;
   status: SessionStatus;
   /** The flat timeline the thread renders (items + history + mode + cwd/title). */

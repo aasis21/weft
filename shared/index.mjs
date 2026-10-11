@@ -3,6 +3,7 @@
 export * from "./messages.mjs";
 export * from "./commands.mjs";
 export * from "./history.mjs";
+export * from "./workspace.mjs";
 export * from "./crypto.mjs";
 export * from "./pairing.mjs";
 export { SecureChannel } from "./channel.mjs";

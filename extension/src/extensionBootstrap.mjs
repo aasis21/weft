@@ -165,6 +165,22 @@ export async function startExtensionBootstrap({
         additionalProperties: false,
       },
       handler: (args = {}) => showPairing({ args: args.transport ?? "" }),
+    }, {
+      name: "weft_workspace_access",
+      description: "Authorize one read-only workspace request from your paired Weft phone. Does not return file content or change files. Only handles requests already pending in Weft.",
+      parameters: {
+        type: "object", additionalProperties: false,
+        properties: {
+          requestId: { type: "string" },
+          action: { type: "string", enum: ["list", "changes", "open", "diff"] },
+          path: { type: "string" },
+        },
+        required: ["requestId", "action", "path"],
+      },
+      handler: async (args) => {
+        if (!activeRuntime) throw new Error("No paired workspace request is pending.");
+        return activeRuntime.grantWorkspaceAccess(args);
+      },
     }],
     onPermissionRequest: async (request, invocation) => {
       if (!activeRuntime) return { kind: "user-not-available" };

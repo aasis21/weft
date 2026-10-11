@@ -88,6 +88,8 @@ export const SUBTYPE = Object.freeze({
   ELICITATION_RESPONSE: Object.freeze({ RESPONSE: "response" }),
   CONTROL: Object.freeze({
     CHANNEL_UP: "channel_up",
+    WORKSPACE_REQUEST: "workspace_request",
+    WORKSPACE_RESULT: "workspace_result",
     SESSION_META: "session_meta",
     CHANNEL_DOWN: "channel_down",
     HEARTBEAT: "heartbeat",
@@ -470,8 +472,10 @@ export const elicitationComplete = (requestId, action) =>
  * Ext -> phone: the channel is live. channelId/sessionId now travel on the ENVELOPE (stamped by the
  * channel), so this only carries the session's cwd + CLI chat title (summary).
  */
-export const channelUp = (cwd, title) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CHANNEL_UP, { cwd, title });
+export const channelUp = (cwd, title, capabilities) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CHANNEL_UP, {
+    cwd, title, ...(capabilities ? { capabilities } : {}),
+  });
 /** Lightweight, post-start metadata refresh (ext -> phone): the latest CLI title (and cwd). */
 export const sessionMeta = (title, cwd) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_META, { title, cwd });
@@ -533,6 +537,7 @@ export const stateSnapshot = ({
   latestTurnIndex = null,
   approvals = [],
   elicitations = [],
+  capabilities,
 } = {}) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.STATE_SNAPSHOT, {
     busy: Boolean(busy),
@@ -541,6 +546,7 @@ export const stateSnapshot = ({
     latestTurnIndex,
     approvals,
     elicitations,
+    ...(capabilities ? { capabilities } : {}),
   });
 
 // ---- factories (phone-launched sessions #156, all ride CONTROL) ------------

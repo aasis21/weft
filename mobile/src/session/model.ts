@@ -246,6 +246,7 @@ export interface SessionRequests {
 }
 
 export interface Session {
+  workspaceCapabilities?: string[];
   id: string;
   meta: SessionMeta;
   unread: boolean;

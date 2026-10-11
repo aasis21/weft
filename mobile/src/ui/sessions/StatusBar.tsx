@@ -27,6 +27,8 @@ function CompassGlyph(): JSX.Element {
 }
 
 interface StatusBarProps {
+  onOpenFiles?(): void;
+  onOpenChanges?(): void;
   title: string;
   cwd: string | null;
   status: SessionStatus;
@@ -79,6 +81,8 @@ export function StatusBar({
   onGoHome,
   onOpenDebug,
   desktopDocked = false,
+  onOpenFiles,
+  onOpenChanges,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -252,6 +256,10 @@ export function StatusBar({
           </button>
           {menuOpen ? (
             <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
+              {onOpenFiles ? <button type="button" role="menuitem" className="bar-menu-item"
+                onClick={() => { setMenuOpen(false); onOpenFiles(); }}>Files</button> : null}
+              {onOpenChanges ? <button type="button" role="menuitem" className="bar-menu-item"
+                onClick={() => { setMenuOpen(false); onOpenChanges(); }}>Changes</button> : null}
               {onRename ? (
                 <button
                   type="button"

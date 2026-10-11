@@ -23,11 +23,13 @@ import {
   toolStart,
   userMessage,
   waitForPeer,
+  WORKSPACE_CAPABILITY,
 } from '@aasis21/weft-shared';
 import type { ApprovalDecision, ElicitationResponse, ModeChange, PromptMessage } from '@aasis21/weft-shared';
 import { pairSession } from './weftClient';
 import type { WeftClient } from './weftClient';
 import { startDemoStation } from './demoStation';
+import { attachDemoWorkspace } from './demoWorkspace';
 
 export interface DemoSession {
   client: WeftClient;
@@ -82,6 +84,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   };
 
   const unsubs = [
+    attachDemoWorkspace(extension),
     extension.onEvent(EVENT_TYPE.PROMPT, (message) => {
       const prompt = message as PromptMessage;
       void extension.send(logLine('info', `Prompt injected from phone: "${prompt.msg.text}"`));
@@ -131,7 +134,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   ];
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
-  push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session')));
+  push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session', [WORKSPACE_CAPABILITY])));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>
@@ -158,7 +161,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   push(900, () =>
     extension.send(
       assistantMessage(
-        "Hi — I'm your live `copilot` session, mirrored to your phone. Let me check the mobile build.",
+        "Hi — I'm your live `copilot` session, mirrored to your phone. Open the [Demo report](reports/summary.html) to try a file preview. Let me check the mobile build.",
         'demo-1',
       ),
     ),

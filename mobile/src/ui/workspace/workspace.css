@@ -1,0 +1,26 @@
+.workspace-screen { position:fixed; inset:0; z-index:30; display:flex; flex-direction:column; background:var(--bg,#0a0e14); color:var(--text,#e6edf3); padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
+.workspace-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border,#263449); }
+.workspace-header strong { min-width:0; overflow-wrap:anywhere; }
+.workspace-screen button { font:inherit; color:inherit; background:transparent; border:1px solid var(--border,#263449); border-radius:8px; padding:8px 12px; cursor:pointer; }
+.workspace-screen button:disabled { opacity:.5; cursor:default; }
+.workspace-screen button:focus-visible { outline:2px solid var(--accent,#77ddd2); outline-offset:2px; }
+.workspace-content { flex:1; min-height:0; overflow:auto; padding:12px 16px; overscroll-behavior:contain; }
+.workspace-tree { list-style:none; margin:0; padding:0; }
+.workspace-tree .workspace-tree { margin-left:12px; border-left:1px solid var(--border,#263449); padding-left:8px; }
+.workspace-tree button { display:flex; gap:10px; text-align:left; border:0; width:100%; min-height:42px; }
+.workspace-tree button span:last-child { min-width:0; overflow-wrap:anywhere; }
+.workspace-meta { padding:8px 16px; font-size:12px; color:var(--muted,#8d9eb6); overflow-wrap:anywhere; }
+.workspace-meta span { margin-right:12px; }
+.workspace-modes { display:flex; gap:6px; margin-top:8px; }
+.workspace-modes [aria-pressed=true] { border-color:var(--accent,#77ddd2); color:var(--accent,#77ddd2); }
+.workspace-notice,.workspace-error { margin:0; padding:10px 16px; font-size:13px; }
+.workspace-error { background:#48252c; display:flex; align-items:center; gap:10px; }
+.workspace-content iframe { border:0; width:100%; height:100%; min-height:480px; background:white; }
+.workspace-source,.workspace-diff { margin:0; font:12px/1.6 ui-monospace,Consolas,monospace; white-space:pre; overflow:auto; tab-size:4; }
+.workspace-source div,.workspace-diff div { min-height:1.6em; }
+.workspace-line { display:inline-block; min-width:3em; margin-right:12px; color:var(--muted,#8d9eb6); user-select:none; }
+.workspace-diff .insert { background:#163b30; }
+.workspace-diff .delete { background:#48252c; }
+.workspace-approvals { max-height:40vh; overflow:auto; padding:12px 16px; background:var(--panel,#111a26); border-bottom:1px solid var(--border,#263449); }
+.workspace-approvals pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.workspace-approvals button { margin:4px; }

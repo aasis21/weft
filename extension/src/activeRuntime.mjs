@@ -21,6 +21,7 @@ import {
   readIdentityFile,
 } from "./handoffIdentity.mjs";
 import { updateLaunchOperation } from "./launchOperations.mjs";
+import { createWorkspaceView } from "./workspaceView.mjs";
 
 export function activationControllerDecision({
   controllerDeviceId = null,
@@ -176,6 +177,16 @@ let currentPeerDeviceId = handedOffIdentity?.controllerDeviceId ?? null;
 let currentPeerName = handedOffIdentity?.controllerName ?? null;
 let pairChain = Promise.resolve();
 let pairingGrantRefreshTimer = null;
+let workspace = null;
+async function workspaceView() {
+  if (!workspace) workspace = createWorkspaceView({
+    session,
+    requestPermission: (argumentsValue) => session.rpc.tools.execute({
+      name: "weft_workspace_access", arguments: argumentsValue,
+    }),
+  }).catch((error) => { workspace = null; throw error; });
+  return workspace;
+}
 
 function schedulePairingGrantRefresh() {
   if (!durableLaunchHandoff || !pairingPayload?.expiresAt || currentPeerPub || shuttingDown) return;
@@ -486,6 +497,12 @@ async function reconnectRelay() {
 // reconnect and a user-requested `/weft <transport>` switch — `reason` is only used for the
 // relay's own stop() bookkeeping/logging.
 async function teardownRelay(reason) {
+  const previousWorkspace = workspace;
+  workspace = null;
+  if (previousWorkspace) {
+    try { (await previousWorkspace).close(); }
+    catch { /* Initialization failures are already surfaced by the requesting view. */ }
+  }
   pairingGeneration++;
   const previousRelay = relayHandle;
   const previousStop = pairingStop;
@@ -564,6 +581,7 @@ async function attachForPeer(transport, { key, peer }) {
     channel,
     logger: (message, options) => session.log?.(message, options),
   });
+  permissionRelay = permissions;
   // SupabaseTransport is subscribe-order independent (single catch-all broadcast listener +
   // internal dispatch), so attachRelay may register SecureChannel handlers after the channel is
   // already connected without losing events.
@@ -573,9 +591,11 @@ async function attachForPeer(transport, { key, peer }) {
     channelId,
     permissionRelay: permissions,
     onConnectionLost: requestReconnect,
+    workspaceView,
   });
   if (shuttingDown || transport !== activeTransport) {
     permissions.close();
+    if (permissionRelay === permissions) permissionRelay = null;
     await relay.stop("pairing-replaced", { closeTransport: false });
     return;
   }
@@ -630,6 +650,7 @@ async function attachForPeer(transport, { key, peer }) {
 async function shutdown(reason, { preserveIdentity = false } = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
+  if (workspace) (await workspace).close();
   if (pairingGrantRefreshTimer) clearTimeout(pairingGrantRefreshTimer);
   pairingGrantRefreshTimer = null;
   if (!preserveIdentity && durableLaunchHandoff && !currentPeerPub) {
@@ -848,6 +869,7 @@ return Object.freeze({
   activate,
   showPairing,
   preparePairing,
+  async grantWorkspaceAccess(args) { return (await workspaceView()).grant(args); },
   status,
   replaceController,
   quiesce: (reason = "quiesce") => shutdown(reason),

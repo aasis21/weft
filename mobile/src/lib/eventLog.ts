@@ -37,6 +37,10 @@ function keyFor(channelId: string): string {
 }
 
 export function redactClipboardEvent(event: DebugEvent): DebugEvent {
+  if ((event.eventType === 'control' && event.eventSubtype.startsWith('workspace_')) ||
+      JSON.stringify(event.msg ?? {}).includes('"weft_workspace_access"')) {
+    return { ...event, msg: { private: true } };
+  }
   return event.eventType === 'control' && event.eventSubtype.startsWith('clipboard_')
     ? { ...event, msg: { redacted: true } }
     : event;

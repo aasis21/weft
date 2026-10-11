@@ -82,3 +82,12 @@
   height: auto;
   border-radius: 8px;
 }
+.workspace-file-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent, #77ddd2);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}

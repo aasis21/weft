@@ -1,6 +1,22 @@
-import { Fragment, useCallback, useMemo, useState } from 'react';
+import { Fragment, createContext, useContext, useCallback, useMemo, useState } from 'react';
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import '@/ui/styles/markdown-code.css';
+import { fileReference } from '@/ui/workspace/fileReference';
+
+const FileContext = createContext<{ onOpenFile?: ((href: string) => void) | undefined; allowImages: boolean }>({ allowImages: true });
+function MarkdownLink({ href, label }: { href: string; label: string }): JSX.Element {
+  const { onOpenFile } = useContext(FileContext);
+  if (onOpenFile && fileReference(href)) {
+    return <button type="button" className="workspace-file-link" onClick={() => onOpenFile(href)}>{label}</button>;
+  }
+  return SAFE_URL.test(href)
+    ? <a href={href} target="_blank" rel="noreferrer noopener">{label}</a>
+    : <>{label}</>;
+}
+function MarkdownImage({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const { allowImages } = useContext(FileContext);
+  return allowImages ? <img src={src} alt={alt} loading="lazy" /> : <span>[Image: {alt || 'external image'}; not loaded]</span>;
+}
 
 /**
  * Minimal, dependency-free, XSS-safe Markdown -> React renderer.
@@ -163,17 +179,15 @@ function renderInline(text: string, keyBase: string): ReactNode[] {
     } else if (tok.startsWith('![')) {
       const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(tok);
       if (im && /^https?:/i.test(im[2].trim())) {
-        out.push(<img key={key} src={im[2].trim()} alt={im[1]} loading="lazy" />);
+        out.push(<MarkdownImage key={key} src={im[2].trim()} alt={im[1]} />);
       } else {
         out.push(im ? im[1] || tok : tok);
       }
     } else if (tok.startsWith('[')) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
-      if (lm && SAFE_URL.test(lm[2].trim())) {
+      if (lm) {
         out.push(
-          <a key={key} href={lm[2].trim()} target="_blank" rel="noreferrer noopener">
-            {lm[1]}
-          </a>,
+          <MarkdownLink key={key} href={lm[2].trim()} label={lm[1]} />,
         );
       } else {
         out.push(lm ? lm[1] : tok);
@@ -362,7 +376,9 @@ function renderList(lines: string[], start: number, blockKey: string): { element
   return parseLevel(start, indent, ordered, blockKey);
 }
 
-export function Markdown({ text }: { text: string }): JSX.Element {
+export function Markdown({ text, onOpenFile, allowImages = true }: {
+  text: string; onOpenFile?: ((href: string) => void) | undefined; allowImages?: boolean;
+}): JSX.Element {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const blocks: JSX.Element[] = [];
   let i = 0;
@@ -466,5 +482,5 @@ export function Markdown({ text }: { text: string }): JSX.Element {
     );
   }
 
-  return <>{blocks}</>;
+  return <FileContext.Provider value={{ onOpenFile, allowImages }}>{blocks}</FileContext.Provider>;
 }

@@ -32,6 +32,13 @@ after three days unless a live runtime or unresolved operation still references 
 A `/weft` pairing inside one Copilot session uses an ephemeral identity that ends with
 that session.
 
+Files and Changes transfer workspace names only when browsed, and selected file
+contents or patches only when opened or refreshed. Copilot's native approval,
+directory grants, and content-exclusion checks apply. Laptop preview snapshots are bounded,
+held in memory, and expire after five minutes; Weft does not persist preview content
+or include preview requests and responses in diagnostic logs. HTML previews are
+isolated from Weft storage and disable scripts, forms, and external requests.
+
 A dormant extension publishes local presence and holds one idle local named pipe or
 Unix-domain socket, but performs no remote/network access, cryptography, QR generation,
 logging, diagnostics, polling, heartbeat, retry timer, or other timer. The

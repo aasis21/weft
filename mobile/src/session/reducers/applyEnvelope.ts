@@ -256,6 +256,9 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           applyStateSnapshot(session, message.msg, message.ts, beatTs);
           return;
         case SUBTYPE.CONTROL.CHANNEL_UP:
+          session.workspaceCapabilities = Array.isArray(message.msg.capabilities)
+            ? message.msg.capabilities.filter((item): item is string => typeof item === 'string')
+            : [];
           if (message.sessionId && message.sessionId !== 'unknown-session') session.meta.sessionId = message.sessionId;
           session.meta.cwd = message.msg.cwd ?? session.meta.cwd;
           applyReportedTitle(session, message.msg.title);
@@ -599,6 +602,7 @@ function highestTurnIndex(items: HistoryItem[]): number | null {
 }
 
 function applyStateSnapshot(session: Session, snap: StateSnapshotMsg, ts: number, beatTs: number): void {
+  if (Array.isArray(snap.capabilities)) session.workspaceCapabilities = snap.capabilities.filter((item): item is string => typeof item === 'string');
   // Only honor an explicit boolean (mirrors HEARTBEAT); a null/absent busy must never clear a live
   // turn mid-flight (#99).
   if (typeof snap.busy === 'boolean') {

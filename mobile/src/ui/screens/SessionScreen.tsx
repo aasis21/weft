@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, JSX, TouchEvent as ReactTouchEvent } from 'react';
 import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
+import { WORKSPACE_CAPABILITY } from '@aasis21/weft-shared';
+import type { WorkspaceCommand, WorkspaceData } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { ChatThread } from '@/ui/thread/ChatThread';
@@ -19,6 +21,7 @@ import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
 const ExploreScreen = lazy(() =>
   import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
 );
+const WorkspaceScreen = lazy(() => import('@/ui/workspace/WorkspaceScreen').then((module) => ({ default: module.WorkspaceScreen })));
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -202,6 +205,7 @@ function formatDuration(ms: number): string {
 }
 
 interface SessionScreenProps {
+  onWorkspaceRequest?: ((command: WorkspaceCommand, signal?: AbortSignal) => Promise<WorkspaceData>) | undefined;
   active: SessionView;
   sessions: SessionView[];
   activeId: string;
@@ -280,10 +284,14 @@ export function SessionScreen({
   onRetrySpawn,
   onGoHome,
   onLoadEarlier,
+  onWorkspaceRequest,
 }: SessionScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceRoute, setWorkspaceRoute] = useState<{ initial: 'files' | 'changes'; file?: string } | null>(null);
+  const workspaceSupported = active.workspaceCapabilities?.includes(WORKSPACE_CAPABILITY) && !!onWorkspaceRequest;
+  useEffect(() => setWorkspaceRoute(null), [activeId]);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voxOpen, setVoxOpen] = useState(false);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
@@ -610,6 +618,7 @@ export function SessionScreen({
     drawerOpen ||
     debugOpen ||
     settingsOpen ||
+    workspaceRoute !== null ||
     voiceOpen ||
     voxOpen ||
     confirmRemoveId !== null ||
@@ -735,8 +744,8 @@ export function SessionScreen({
     >
       <div
         className="session-surface"
-        aria-hidden={exploreOpen || undefined}
-        {...(exploreOpen ? { inert: '' as unknown as boolean } : {})}
+        aria-hidden={exploreOpen || workspaceRoute !== null || undefined}
+        {...(exploreOpen || workspaceRoute ? { inert: '' as unknown as boolean } : {})}
       >
       {isDesktopWide ? (
         sidebarCollapsed ? (
@@ -773,6 +782,10 @@ export function SessionScreen({
       ) : null}
       <div className="weft-content-col">
       <StatusBar
+        {...(workspaceSupported ? {
+          onOpenFiles: () => setWorkspaceRoute({ initial: 'files' }),
+          onOpenChanges: () => setWorkspaceRoute({ initial: 'changes' }),
+        } : {})}
         title={meta.title}
         cwd={meta.cwd}
         status={status}
@@ -841,6 +854,7 @@ export function SessionScreen({
 
       <main className="thread-scroll">
         <ChatThread
+          onOpenFile={workspaceSupported ? (href) => setWorkspaceRoute({ initial: 'files', file: href }) : undefined}
           items={timeline.items}
           history={timeline.history}
           streaming={status === 'live'}
@@ -1071,6 +1085,20 @@ export function SessionScreen({
       </div>
       </div>
 
+      {workspaceRoute && onWorkspaceRequest ? <Suspense fallback={<main className="workspace-screen" role="status">Opening workspace…</main>}>
+        <WorkspaceScreen initial={workspaceRoute.initial} initialFile={workspaceRoute.file}
+          workspaceName={meta.cwd?.split(/[\\/]/).filter(Boolean).pop()}
+          connected={responsive} request={onWorkspaceRequest} onBack={() => setWorkspaceRoute(null)}
+          approvalControls={timeline.approvals.length ? <section className="workspace-approvals" aria-label="Copilot approvals">
+            {timeline.approvals.map((approval) => <div key={approval.requestId}>
+              <strong>Copilot approval: {approval.toolName}</strong>
+              <pre>{JSON.stringify(approval.toolArgs, null, 2)}</pre>
+              {approval.options.map((option) => <button type="button" key={option.id} disabled={!responsive}
+                onClick={() => onApprove(approval.requestId, option.id)}>{option.label}</button>)}
+              {timeline.approvalErrors[approval.requestId] ? <p role="alert">{timeline.approvalErrors[approval.requestId]}</p> : null}
+            </div>)}
+          </section> : null} />
+      </Suspense> : null}
       {discoverPreview ? (
         <div
           className={`discover-edge-preview${discoverPreview.settling ? ' settling' : ''}`}

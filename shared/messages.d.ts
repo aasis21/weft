@@ -70,6 +70,8 @@ export const SUBTYPE: {
   readonly ELICITATION_RESPONSE: { readonly RESPONSE: "response" };
   readonly CONTROL: {
     readonly CHANNEL_UP: "channel_up";
+    readonly WORKSPACE_REQUEST: "workspace_request";
+    readonly WORKSPACE_RESULT: "workspace_result";
     readonly SESSION_META: "session_meta";
     readonly CHANNEL_DOWN: "channel_down";
     readonly HEARTBEAT: "heartbeat";
@@ -250,6 +252,7 @@ export interface ElicitationCompleteMsg {
   action?: ElicitationAction;
 }
 export interface ChannelUpMsg {
+  capabilities?: string[];
   cwd?: string;
   /** CLI chat summary ("title"); may be empty until the CLI derives one. */
   title?: string;
@@ -303,6 +306,7 @@ export interface RecentTurnsMsg {
 }
 export type StateRequestMsg = Record<string, never>;
 export interface StateSnapshotMsg {
+  capabilities?: string[];
   /** A turn is in flight (agent working). */
   busy: boolean;
   /** The in-flight work can be stopped (drives the Stop control at connect time). */
@@ -769,6 +773,8 @@ export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
 
 /** The discriminated union of every encrypted (post-pairing) envelope. */
 export type EventEnvelope =
+  | import("./workspace").WorkspaceRequest
+  | import("./workspace").WorkspaceResult
   | AssistantMessage
   | AssistantDelta
   | Intent
@@ -882,7 +888,7 @@ export function elicitationComplete(
   requestId: string,
   action?: ElicitationAction
 ): ElicitationComplete;
-export function channelUp(cwd?: string, title?: string): ChannelUp;
+export function channelUp(cwd?: string, title?: string, capabilities?: string[]): ChannelUp;
 export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function channelDown(reason?: string): ChannelDown;
 export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
@@ -903,6 +909,7 @@ export function recentTurnsRequest(limit?: number): RecentTurnsRequest;
 export function recentTurns(items: RecentTurnItem[]): RecentTurns;
 export function stateRequest(): StateRequest;
 export function stateSnapshot(snapshot?: {
+  capabilities?: string[];
   busy?: boolean;
   abortable?: boolean;
   mode?: SessionMode | null;
