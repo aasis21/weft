@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { WORKSPACE_LIMITS as LIMITS, validWorkspaceRequest } from "@aasis21/weft-shared";
 import { createSessionFiles, SessionFilesError } from "./sessionFiles.mjs";
+import { loadFileSharingPolicy, FileSharingError } from "./transportConfig.mjs";
 
 const exec = promisify(execFile);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -25,7 +26,7 @@ export class WorkspaceError extends Error {
 const fail = (code, message) => { throw new WorkspaceError(code, message); };
 
 export async function createWorkspaceView({ session, requestPermission, clock = Date.now,
-  sessionFiles = createSessionFiles({ session }) } = {}) {
+  sessionFiles = createSessionFiles({ session }), configBaseDir } = {}) {
   if (!session?.rpc?.contentExclusion?.checkPaths ||
       !session?.rpc?.permissions?.paths?.isPathWithinAllowedDirectories ||
       !session?.rpc?.permissions?.paths?.list || !requestPermission) {
@@ -41,6 +42,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
   let changeList = null;
   let closed = false;
   let busy = false;
+  let sharingPolicy = null;
   const displayPath = (path) => within(root, path)
     ? relative(root, path).split(sep).join("/") || "." : path;
 
@@ -51,9 +53,14 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
     if (!same(resolve(current.primary ?? ""), primary) || !same(await realpath(primary), root)) {
       fail("changed", "The session workspace changed. Reconnect before browsing.");
     }
+    if (!sharingPolicy) sharingPolicy = loadFileSharingPolicy({ baseDir: configBaseDir })
+      .catch((error) => { sharingPolicy = null; throw error; });
+    const shared = await (await sharingPolicy).allows(paths);
     const allowedPaths = [];
-    for (const path of paths) {
+    for (let i = 0; i < paths.length; i++) {
+      const path = paths[i];
       if ((!within(root, path) && !sessionFiles.has(path)) || blocked(path)) fail("denied", "The requested path is not available.");
+      if (!shared[i]) { allowedPaths.push(false); continue; }
       const result = await session.rpc.permissions.paths.isPathWithinAllowedDirectories({ path });
       if (typeof result?.allowed !== "boolean") fail("unavailable", "Copilot read-policy support is unavailable.");
       allowedPaths.push(result.allowed);
@@ -128,6 +135,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
         path !== displayPath(record.path)) {
       fail("denied", "This workspace request is no longer pending.");
     }
+    sharingPolicy = null;
     if (!within(root, record.path) || record.action === "diff") {
       await sessionFiles.sync();
       if (!sessionFiles.has(record.path)) fail("denied", "This session file is no longer recorded.");
@@ -300,9 +308,13 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
   async function capture(input) {
     prune();
     if (previews.size >= LIMITS.previews) fail("too-large", "Close a preview before opening another.");
-    const diff = input.format === "diff", path = await pathFor(input.path, diff);
-    if (diff && !within(root, path)) fail("unsupported", "Git diffs are available only for touched files inside this workspace.");
-    if (diff && !sessionFiles.has(path)) fail("denied", "Changes is limited to session-touched workspace files.");
+    const diff = input.format === "diff";
+    if (diff) {
+      const target = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path.replace(/[\\/]/g, sep));
+      if (!within(root, target)) fail("unsupported", "Git diffs are available only for touched files inside this workspace.");
+      if (!sessionFiles.has(target)) fail("denied", "Changes is limited to session-touched workspace files.");
+    }
+    const path = await pathFor(input.path, diff);
     if (!diff && /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|docx|xlsx|pptx|exe|dll|wasm|mp[34])$/i.test(path)) {
       fail("unsupported", "This file type does not have a text preview.");
     }
@@ -387,6 +399,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
     if (closed) fail("unavailable", "The workspace connection ended.");
     if (busy) fail("busy", "Another workspace request is in progress.");
     busy = true;
+    sharingPolicy = null;
     try {
       if (input.action === "open" && input.format === "diff") await sessionFiles.sync();
       if (input.action === "list") return await list(input);
@@ -402,14 +415,15 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       for (const path of snapshot.authorizedPaths) await pathFor(path, true);
       return page(snapshot, input.offset);
     } catch (error) {
-      if (error instanceof WorkspaceError || error instanceof SessionFilesError) throw error;
+      if (error instanceof WorkspaceError || error instanceof SessionFilesError || error instanceof FileSharingError) throw error;
       if (error.code === "ENOENT") fail("missing", "The requested file or directory no longer exists.");
       fail("unavailable", "The workspace could not be read.");
-    } finally { busy = false; }
+    } finally { busy = false; sharingPolicy = null; }
   }
   return { handle, grant, async checkAvailable() {
-    await sessionFiles.sync();
+    sharingPolicy = null;
     if (!(await check([root]))[0]) fail("denied", "This workspace is denied or excluded by Copilot policy.");
+    await sessionFiles.sync();
   }, close() {
     closed = true;
     for (const snapshot of previews.values()) clearTimeout(snapshot.timer);

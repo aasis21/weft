@@ -32,8 +32,15 @@
 
 ## Report a problem
 
-**Files or Changes unavailable:** update both endpoints and Copilot. Workspace
-previews require working host read-policy evaluation, not just an SDK method, and a
+**Files or Changes unavailable:** sharing first requires `files.enabled: true`
+and named `files.roots` in the existing
+central `~/.weft/weft.config.json`. Missing settings leave sharing disabled; a
+root outside the list or matching `files.exclude` stays inaccessible. Exact Git
+repository roots cover verified registered worktrees, not unrelated sibling folders.
+Disabled sharing or an intentionally unshared/excluded working folder quietly
+hides Files/Changes and file-preview links, without chat warnings or approval prompts.
+Malformed settings or unverifiable worktree membership produce explicit errors.
+Previews also require working host read-policy evaluation, not just an SDK method, and a
 live session. If Copilot cannot evaluate content exclusions, restart or update
 Copilot and reconnect; re-pairing or allowing all tools does not fix this. Weft
 keeps previews disabled until the host can verify policy. Denied/excluded files

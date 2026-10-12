@@ -44,6 +44,11 @@ recursive crawl. Exact outside-workspace paths can be shown
 only when current host permissions and exclusions permit them. Shell commands,
 failed reads, and path mentions do not grant external preview access; no separate file
 history or file contents are persisted by Weft.
+Sharing is disabled unless enabled in the existing central `weft.config.json`.
+Named allowed roots bound both trees and previews; Git repository roots include
+only verified registered worktrees of the same repository. Optional root-relative
+exclusions apply across those checkouts and cannot be bypassed with overlapping
+root grants. Configuration and worktree membership are rechecked for new requests.
 
 A dormant extension publishes local presence and holds one idle local named pipe or
 Unix-domain socket, but performs no remote/network access, cryptography, QR generation,

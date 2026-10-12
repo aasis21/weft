@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Single source of truth for the user's transport CHOICE: ~/.weft/weft.config.json is a small
-// pointer file that only records which transport kind the user picked. The transport's own
+// Central user configuration: ~/.weft/weft.config.json holds transport, pairing, device,
+// terminal, and file-sharing settings. The transport's own
 // connection details live in a sibling file named after the transport itself:
 //   - kind: "supabase"  → ~/.weft/supabase.json  ({url, anonKey})
 //   - kind: "devtunnel" → ~/.weft/devtunnel.json (runtime registry written by the relay child,
@@ -13,12 +13,17 @@
 // user's choice or credentials. The config file is always read fresh; nothing here falls back to
 // process.env.
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { realpath, lstat } from "node:fs/promises";
+import { join, resolve, relative, isAbsolute, parse, sep, dirname } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { weftHome } from "./projects.mjs";
 
 const STORE_FILE = "weft.config.json";
 const SUPABASE_CREDS_FILE = "supabase.json";
+const exec = promisify(execFile);
 
 function storePath(baseDir) {
   return join(weftHome(baseDir), STORE_FILE);
@@ -82,6 +87,233 @@ export function isTerminalEnabled({ baseDir } = {}) {
     throw new Error("Weft: terminal.enabled in weft.config.json must be true or false.");
   }
   return terminal.enabled !== false;
+}
+
+export class FileSharingError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+const fileConfigError = (message) => {
+  throw new FileSharingError("unavailable", `Weft: ${message} in files configuration. Fix ~/.weft/weft.config.json before sharing files.`);
+};
+const pathKey = (path) => process.platform === "win32" ? path.toLowerCase() : path;
+const isInside = (root, path) => {
+  const child = relative(root, path);
+  return child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+};
+
+function matchFileSegment(pattern, name) {
+  const points = [...name];
+  let matches = new Array(points.length + 1).fill(false);
+  matches[0] = true;
+  for (const char of pattern) {
+    if (char === "*") {
+      for (let i = 1; i <= points.length; i++) matches[i] ||= matches[i - 1];
+    } else {
+      const next = new Array(points.length + 1).fill(false);
+      for (let i = 1; i <= points.length; i++) {
+        next[i] = matches[i - 1] && (char === "?" || char === points[i - 1]);
+      }
+      matches = next;
+    }
+  }
+  return matches[points.length];
+}
+
+function exclusionPattern(value) {
+  if (typeof value !== "string" || !value || value.length > 256 ||
+      /[\0\r\n\\[\]{}!()]/.test(value) || isAbsolute(value) ||
+      value.split("/").some((part) => !part || part === "." || part === ".." || part.includes("**") && part !== "**")) {
+    fileConfigError("Use root-relative exclude patterns with /, *, ? and whole-segment ** only");
+  }
+  const pattern = pathKey(value).split("/");
+  return { test(path) {
+    const parts = pathKey(path).split("/").filter(Boolean);
+    let matches = new Array(parts.length + 1).fill(false);
+    matches[0] = true;
+    for (const segment of pattern) {
+      if (segment === "**") {
+        for (let i = 1; i <= parts.length; i++) matches[i] ||= matches[i - 1];
+      } else {
+        const next = new Array(parts.length + 1).fill(false);
+        for (let i = 1; i <= parts.length; i++) {
+          next[i] = matches[i - 1] && matchFileSegment(segment, parts[i - 1]);
+        }
+        matches = next;
+      }
+    }
+    return matches[parts.length];
+  } };
+}
+
+function validateFileSharingConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      Object.keys(value).some((key) => !["enabled", "roots", "exclude"].includes(key)) ||
+      value.enabled !== undefined && typeof value.enabled !== "boolean") {
+    fileConfigError("Expected enabled (boolean), roots and exclude");
+  }
+  const roots = value.roots ?? [], exclude = value.exclude ?? [];
+  if (!Array.isArray(roots) || roots.length > 32 || !Array.isArray(exclude) || exclude.length > 64) {
+    fileConfigError("At most 32 roots and 64 exclusion patterns are supported");
+  }
+  if (value.enabled === true && !roots.length) fileConfigError("At least one explicit root is required when enabled");
+  const names = new Set(), paths = new Set();
+  const normalizedRoots = roots.map((root) => {
+    if (!root || typeof root !== "object" || Array.isArray(root) ||
+        Object.keys(root).some((key) => !["name", "path"].includes(key)) ||
+        typeof root.name !== "string" || !root.name.trim() || root.name.trim().length > 60 ||
+        /[\0\r\n]/.test(root.name) || typeof root.path !== "string" ||
+        root.path.length > 2048 || !isAbsolute(root.path) || /[\0\r\n]/.test(root.path) ||
+        /^(?:\\\\|\/\/)/.test(root.path)) fileConfigError("Each root requires a name and an absolute local directory path");
+    if (process.platform === "win32" && (root.path.replace(/^[a-z]:/i, "").includes(":") ||
+        root.path.split(/[\\/]/).some((part) => /[. ]$/.test(part)))) {
+      fileConfigError("Root paths cannot contain alternate streams or trailing-dot/space aliases");
+    }
+    const name = root.name.trim(), path = resolve(root.path), key = pathKey(path);
+    if (key === pathKey(parse(path).root) || key === pathKey(resolve(homedir()))) {
+      fileConfigError("Share a narrower directory, not an entire drive or home directory");
+    }
+    if (names.has(name.toLowerCase()) || paths.has(key)) fileConfigError("Root names and paths must be unique");
+    names.add(name.toLowerCase()); paths.add(key);
+    return { name, path };
+  });
+  for (const pattern of exclude) exclusionPattern(pattern);
+  return { enabled: value.enabled === true, roots: normalizedRoots, exclude: [...exclude] };
+}
+
+export function loadFileSharingConfig({ baseDir } = {}) {
+  let config;
+  try { config = loadConfig({ baseDir, strict: true }); }
+  catch { fileConfigError("Cannot read a valid central user configuration"); }
+  return config.files === undefined ? { enabled: false, roots: [], exclude: [] } :
+    validateFileSharingConfig(config.files);
+}
+
+export function saveFileSharingConfig(value, { baseDir } = {}) {
+  const files = validateFileSharingConfig(value);
+  const config = loadConfig({ baseDir, strict: true });
+  writeConfig({ ...config, files }, { baseDir });
+  return files;
+}
+
+async function canonicalSharedDirectory(path) {
+  let canonical, info;
+  try { canonical = await realpath(path); info = await lstat(path); }
+  catch { fileConfigError("A configured root is missing or inaccessible"); }
+  if (!info.isDirectory() || info.isSymbolicLink() || pathKey(canonical) !== pathKey(path)) {
+    fileConfigError("Roots must be canonical directories without symbolic-link aliases");
+  }
+  return canonical;
+}
+
+async function gitSharingMetadata(root, args) {
+  try {
+    const { stdout } = await exec("git", ["--no-pager", "--literal-pathspecs",
+      "-c", "core.fsmonitor=false", "-C", root, ...args], {
+      windowsHide: true, timeout: 5000, maxBuffer: 1024 * 1024, encoding: "buffer",
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
+    });
+    return new TextDecoder("utf-8", { fatal: true }).decode(stdout);
+  } catch { fileConfigError("Git worktree membership could not be verified"); }
+}
+
+async function gitSharingIdentity(root) {
+  const values = (await gitSharingMetadata(root, [
+    "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir",
+  ])).trimEnd().split(/\r?\n/);
+  if (values.length !== 2 || !isAbsolute(values[0]) || !isAbsolute(values[1])) {
+    fileConfigError("Git returned an invalid repository identity");
+  }
+  try { return { top: await realpath(values[0]), common: await realpath(values[1]) }; }
+  catch { fileConfigError("Git repository identity paths are unavailable"); }
+}
+
+async function registeredSharingWorktrees(root) {
+  try { await lstat(join(root, ".git")); }
+  catch (error) {
+    if (error.code === "ENOENT") return [];
+    fileConfigError("Git repository metadata is inaccessible");
+  }
+  const identity = await gitSharingIdentity(root);
+  if (pathKey(identity.top) !== pathKey(root)) return [];
+  const records = (await gitSharingMetadata(root, ["worktree", "list", "--porcelain", "-z"]))
+    .split("\0\0").filter(Boolean);
+  if (records.length > 128) fileConfigError("A repository has too many registered worktrees");
+  const roots = [];
+  let foundRoot = false;
+  for (const record of records) {
+    const fields = record.split("\0").filter(Boolean), first = fields[0];
+    if (!first?.startsWith("worktree ")) fileConfigError("Git returned an invalid worktree registry");
+    if (fields.some((field) => field === "bare" || field.startsWith("prunable"))) continue;
+    const path = first.slice("worktree ".length);
+    const validated = validateFileSharingConfig({ enabled: true, roots: [{ name: "Worktree", path }] }).roots[0].path;
+    const canonical = await canonicalSharedDirectory(validated);
+    const actual = await gitSharingIdentity(canonical);
+    if (pathKey(actual.top) !== pathKey(canonical) || pathKey(actual.common) !== pathKey(identity.common)) {
+      fileConfigError("A registered worktree no longer belongs to its configured repository");
+    }
+    if (pathKey(canonical) === pathKey(root)) foundRoot = true;
+    roots.push(canonical);
+  }
+  if (!foundRoot) fileConfigError("The configured root is missing from its Git worktree registry");
+  return roots;
+}
+
+export async function loadFileSharingPolicy({ baseDir } = {}) {
+  const config = loadFileSharingConfig({ baseDir });
+  const revision = JSON.stringify(config);
+  if (!config.enabled) {
+    throw new FileSharingError("denied", "File sharing is disabled. Configure files.enabled and explicit files.roots in ~/.weft/weft.config.json.");
+  }
+  const roots = new Map();
+  for (const root of config.roots) {
+    const canonical = await canonicalSharedDirectory(root.path);
+    roots.set(pathKey(canonical), canonical);
+    for (const worktree of await registeredSharingWorktrees(canonical)) roots.set(pathKey(worktree), worktree);
+    if (roots.size > 128) fileConfigError("Too many effective shared roots");
+  }
+  const excluded = config.exclude.map(exclusionPattern);
+  return { async allows(paths) {
+    if (JSON.stringify(loadFileSharingConfig({ baseDir })) !== revision) {
+      throw new FileSharingError("changed", "File-sharing settings changed. Retry with the current policy.");
+    }
+    const allowed = [];
+    for (const path of paths) {
+      if (typeof path !== "string" || !isAbsolute(path) || /[\0\r\n]/.test(path) || /^(?:\\\\|\/\/)/.test(path) ||
+          process.platform === "win32" && (path.replace(/^[a-z]:/i, "").includes(":") ||
+          path.split(/[\\/]/).some((part) => /[. ]$/.test(part)))) {
+        allowed.push(false); continue;
+      }
+      const target = resolve(path), containing = [...roots.values()].filter((root) => isInside(root, target));
+      let excludedPath = !containing.length || containing.some((root) => {
+        const parts = relative(root, target).split(sep).filter(Boolean);
+        for (let i = 0; i <= parts.length; i++) {
+          const name = parts.slice(0, i).join("/");
+          if (excluded.some((pattern) => pattern.test(name))) return true;
+        }
+        return false;
+      });
+      if (!excludedPath) {
+        let ancestor = target;
+        for (;;) {
+          try {
+            const canonical = await realpath(ancestor);
+            excludedPath = pathKey(canonical) !== pathKey(ancestor);
+            break;
+          } catch (error) {
+            if (error.code !== "ENOENT") fileConfigError("A requested shared path could not be verified");
+            if (dirname(ancestor) === ancestor) { excludedPath = true; break; }
+            ancestor = dirname(ancestor);
+          }
+        }
+      }
+      allowed.push(!excludedPath);
+    }
+    return allowed;
+  } };
+}
+
+export async function checkFileSharingPaths(paths, options = {}) {
+  return (await loadFileSharingPolicy(options)).allows(paths);
 }
 
 /** Atomically overwrite weft.config.json with `config`. */

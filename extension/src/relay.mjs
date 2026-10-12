@@ -38,9 +38,10 @@ import { createRecentTurns } from "./recentTurns.mjs";
 import { clearAttachedSession, recordAttachedSession } from "./attachedSessions.mjs";
 import { WorkspaceError } from "./workspaceView.mjs";
 import { SessionFilesError } from "./sessionFiles.mjs";
+import { FileSharingError } from "./transportConfig.mjs";
 
 const knownWorkspaceError = (error) =>
-  (error instanceof WorkspaceError || error instanceof SessionFilesError) && WORKSPACE_CODES.includes(error.code);
+  (error instanceof WorkspaceError || error instanceof SessionFilesError || error instanceof FileSharingError) && WORKSPACE_CODES.includes(error.code);
 
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const SEND_FAILURE_RECONNECT_THRESHOLD = 6;
@@ -455,6 +456,10 @@ export async function attachRelay({
       workspaceWarning = null;
       return [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY];
     } catch (error) {
+      if (knownWorkspaceError(error) && error.code === "denied") {
+        workspaceWarning = null;
+        return [];
+      }
       const message = `Files and Changes unavailable: ${knownWorkspaceError(error)
         ? error.message : "Copilot could not verify workspace read policy. Restart or update Copilot, then reconnect. No files were read."}`;
       if (message !== workspaceWarning) {

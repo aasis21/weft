@@ -87,6 +87,38 @@ have previews, not Git diffs. Lists are capped at 4,000 files, and Git checks on
 policy-approved touched workspace paths. Workspace previews need not have been
 touched; outside-workspace previews always require an exact session record.
 
+File sharing defaults to off. Merge this section into the existing central
+`~/.weft/weft.config.json`; keep its transport, pairing, terminal, and other fields:
+
+```json
+{
+  "files": {
+    "enabled": true,
+    "roots": [
+      { "name": "Project", "path": "C:\\Work\\project" },
+      { "name": "Reports", "path": "C:\\Work\\reports" }
+    ],
+    "exclude": ["**/secrets/**", "**/*.pem"]
+  }
+}
+```
+
+Roots must be narrow, absolute, canonical local directories, not a drive or home
+directory. An exact Git repository root automatically covers its registered
+worktrees after verifying their common repository identity; subfolder grants do
+not expand to the whole repository. New and removed worktrees take effect on the
+next request. Worktree grants are derived, never duplicated into the config.
+Exclude patterns are root-relative in every checkout and support `/`, `*`, `?`,
+and whole-segment `**`; exclusions always win, including across overlapping roots.
+Read-only access, protected-file blocking, and symlink-escape prevention are fixed
+rules, not configuration switches. Invalid settings fail explicitly. Settings are
+preserved during updates and reread for new requests, including preview pages.
+These local sharing grants supplement, not replace, Copilot's host permissions
+and content-exclusion checks; they do not fix an unavailable host-policy service.
+Disabled sharing or a working folder not allowed by the policy quietly hides the
+file controls; it does not add chat warnings. Invalid configuration and unexpected
+host failures remain explicit, as do errors after a user requests a file.
+
 A project is a named existing directory on the laptop, not a copy uploaded to the phone.
 The device dashboard groups these registrations under **Copilot workspaces**; the CLI
 continues to use `project` in its commands.

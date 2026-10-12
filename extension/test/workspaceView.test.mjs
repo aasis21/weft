@@ -7,9 +7,12 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createWorkspaceView } from "../src/workspaceView.mjs";
 import { WORKSPACE_LIMITS } from "@aasis21/weft-shared";
+import { saveFileSharingConfig } from "../src/transportConfig.mjs";
 
 async function fixture(t, options = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "weft-workspace-")));
+  const configBaseDir = join(root, ".weft");
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }] }, { baseDir: configBaseDir });
   t.after(() => rm(root, { recursive: true, force: true }));
   const excluded = new Set(), denied = new Set(), checked = [], approvals = [], events = [];
   let available = true, approve = true, primary = root, time = Date.now();
@@ -29,7 +32,7 @@ async function fixture(t, options = {}) {
   } };
   let view;
   view = await createWorkspaceView({
-    session, clock: () => time,
+    session, clock: () => time, configBaseDir,
     requestPermission: async (args) => {
       approvals.push(args);
       if (approve) await view.grant(args);
@@ -47,17 +50,18 @@ async function fixture(t, options = {}) {
     } });
   };
   const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", windowsHide: true });
-  return { root, session, view, request, file, git, checked, excluded, denied, approvals, events,
+  return { root, configBaseDir, session, view, request, file, git, checked, excluded, denied, approvals, events,
     policy(value) { available = value; }, approve(value) { approve = value; },
     primary(value) { primary = value; }, tick(value) { time += value; } };
 }
 
 test("keeps current-folder and session-touched listings separate, lazy and policy-filtered", async (t) => {
   const f = await fixture(t);
+  f.git("init", "--quiet");
   await f.file("folder/nested.md", "# nested");
   await f.file("root.txt", "not in the listing");
   await f.file(".env", "never shared");
-  await f.file(".git/config", "never shared");
+  await f.file(".git/private-data", "never shared");
   await f.file("restricted.md", "never shared");
   f.excluded.add(join(f.root, "restricted.md"));
   await writeFile(join(f.root, "untouched.md"), "never shared");
@@ -242,7 +246,7 @@ test("nested workspace diffs never expose sibling repository paths", async (t) =
     contentExclusion: { checkPaths: async ({ paths }) => ({ available: true, checks: paths.map((path) => ({ path, excluded: false })) }) },
   } };
   let view;
-  view = await createWorkspaceView({ session, requestPermission: (args) => view.grant(args) });
+  view = await createWorkspaceView({ session, configBaseDir: f.configBaseDir, requestPermission: (args) => view.grant(args) });
   t.after(() => view.close());
   const changes = await view.handle({ requestId: "nested", action: "changes" });
   assert.deepEqual(changes.entries.map((entry) => entry.path), ["deleted.txt", "inside.txt"]);
@@ -276,6 +280,8 @@ test("external session files are exact, read-only targets with current permissio
   const other = await realpath(await mkdtemp(join(tmpdir(), "weft-session-external-")));
   t.after(() => rm(other, { recursive: true, force: true }));
   const path = join(other, "report.md"), untouched = join(other, "untouched.md");
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root },
+    { name: "External", path: other }] }, { baseDir: f.configBaseDir });
   await writeFile(path, "outside\n".repeat(1000));
   await writeFile(untouched, "never shared");
   f.events.push({ type: "tool.execution_complete", data: { success: true, toolCallId: "external",
@@ -308,7 +314,10 @@ test("Changes ignores files never touched by this session even if their Git stat
   await writeFile(join(f.root, "other.txt"), "private\n");
   const changes = await f.request({ action: "changes" });
   assert.deepEqual(changes.entries.map((entry) => entry.path), ["owned.txt"]);
+  const checks = f.checked.length, approvals = f.approvals.length;
   await assert.rejects(f.request({ action: "open", path: "other.txt", format: "diff", base: changes.base }), { code: "denied" });
+  assert.equal(f.checked.length, checks);
+  assert.equal(f.approvals.length, approvals);
 });
 
 test("a successful directory view never authorizes its children or a directory-wide Git diff", async (t) => {
@@ -342,4 +351,45 @@ test("current-folder browsing does not read session history and rechecks policy 
   await assert.rejects(f.request({ action: "open", path: "untouched.txt" }), { code: "denied" });
   assert.deepEqual((await f.request({ action: "list", scope: "workspace", path: "" })).entries, []);
   await assert.rejects(f.request({ action: "list", scope: "touched", path: "" }), { code: "unavailable" });
+});
+
+test("central file-sharing policy applies to both trees, diff requests and retained preview pages", async (t) => {
+  const f = await fixture(t);
+  await f.file("visible.md", "content\n".repeat(1000));
+  await f.file("private/hidden.md", "private");
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root }],
+    exclude: ["private/**"] }, { baseDir: f.configBaseDir });
+  for (const scope of ["workspace", "touched"]) {
+    const listing = await f.request({ action: "list", scope, path: "" });
+    assert.equal(listing.entries.some((entry) => entry.path.startsWith("private")), false);
+  }
+  await assert.rejects(f.request({ action: "open", path: "private/hidden.md" }), { code: "denied" });
+  const opened = await f.request({ action: "open", path: "visible.md" });
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root }],
+    exclude: ["visible.md"] }, { baseDir: f.configBaseDir });
+  await assert.rejects(f.request({ action: "page", previewId: opened.previewId, offset: opened.nextOffset }), { code: "denied" });
+  saveFileSharingConfig({ enabled: false, roots: [] }, { baseDir: f.configBaseDir });
+  const checks = f.checked.length;
+  await assert.rejects(f.view.checkAvailable(), { code: "denied" });
+  await assert.rejects(f.request({ action: "list", path: "" }), { code: "denied" });
+  await assert.rejects(f.request({ action: "changes" }), { code: "denied" });
+  assert.equal(f.checked.length, checks);
+});
+
+test("one central Git-root grant covers a session running in its registered worktree", async (t) => {
+  const f = await fixture(t);
+  f.git("init", "--quiet");
+  await f.file("report.md", "base\n");
+  f.git("add", "."); f.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "base");
+  const container = await realpath(await mkdtemp(join(tmpdir(), "weft-worktree-session-")));
+  const linked = join(container, "linked");
+  f.git("worktree", "add", "--quiet", "--detach", linked);
+  t.after(() => rm(container, { recursive: true, force: true }));
+  f.primary(linked);
+  const session = f.session;
+  let view;
+  view = await createWorkspaceView({ session, configBaseDir: f.configBaseDir, requestPermission: (args) => view.grant(args) });
+  t.after(() => view.close());
+  const result = await view.handle({ requestId: "worktree-open", action: "open", path: "report.md" });
+  assert.equal(result.text, await readFile(join(linked, "report.md"), "utf8"));
 });

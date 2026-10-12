@@ -47,6 +47,9 @@ connect to existing sessions while the actual process keeps running on your lapt
 trees: browse workspace folders lazily or see files this session read or wrote,
 including permitted external paths. Changes shows touched workspace files' Git diffs.
 Both trees and chat file links use the same read-only, on-demand viewer.
+Opt in through `files` in the central `~/.weft/weft.config.json`, with explicit
+named roots and optional exclusions. An allowed Git repository root includes its
+verified registered worktrees; host permissions and exclusions still apply.
 
 Weft is not a remote desktop and it does not move your workspace to the cloud. Copilot and
 your tools continue to run under your account on the laptop; the phone provides a focused,
