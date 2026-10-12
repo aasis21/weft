@@ -227,34 +227,68 @@ async function gitSharingIdentity(root) {
   catch { fileConfigError("Git repository identity paths are unavailable"); }
 }
 
-async function registeredSharingWorktrees(root) {
-  try { await lstat(join(root, ".git")); }
-  catch (error) {
-    if (error.code === "ENOENT") return [];
-    fileConfigError("Git repository metadata is inaccessible");
+async function registeredSharingWorktrees(root, issues, requestedPaths, registries, checkedWorktrees) {
+  const key = pathKey(root);
+  if (!registries.has(key)) {
+    const loading = (async () => {
+      try { await lstat(join(root, ".git")); }
+      catch (error) {
+        if (error.code === "ENOENT") return null;
+        fileConfigError("Git repository metadata is inaccessible");
+      }
+      const identity = await gitSharingIdentity(root);
+      if (pathKey(identity.top) !== key) return null;
+      const raw = (await gitSharingMetadata(root, ["worktree", "list", "--porcelain", "-z"]))
+        .split("\0\0").filter(Boolean);
+      if (raw.length > 128) fileConfigError("A repository has too many registered worktrees");
+      const records = [];
+      for (const record of raw) {
+        const fields = record.split("\0").filter(Boolean), first = fields[0];
+        if (!first?.startsWith("worktree ")) {
+          issues.push({ path: root, message: "Git returned an invalid worktree registry entry." });
+          continue;
+        }
+        if (fields.some((field) => field === "bare" || field.startsWith("prunable"))) continue;
+        const path = first.slice("worktree ".length);
+        if (!isAbsolute(path) || /[\0\r\n]/.test(path)) {
+          issues.push({ path: root, message: "Git returned an invalid worktree path." });
+          continue;
+        }
+        records.push(path);
+      }
+      if (!records.some((path) => pathKey(resolve(path)) === key)) {
+        fileConfigError("The configured root is missing from its Git worktree registry");
+      }
+      return { identity, records };
+    })().catch((error) => {
+      if (!(error instanceof FileSharingError)) throw error;
+      issues.push({ path: root, message: error.message });
+      return null;
+    });
+    registries.set(key, loading);
   }
-  const identity = await gitSharingIdentity(root);
-  if (pathKey(identity.top) !== pathKey(root)) return [];
-  const records = (await gitSharingMetadata(root, ["worktree", "list", "--porcelain", "-z"]))
-    .split("\0\0").filter(Boolean);
-  if (records.length > 128) fileConfigError("A repository has too many registered worktrees");
+  const registry = await registries.get(key);
+  if (!registry) return [];
   const roots = [];
-  let foundRoot = false;
-  for (const record of records) {
-    const fields = record.split("\0").filter(Boolean), first = fields[0];
-    if (!first?.startsWith("worktree ")) fileConfigError("Git returned an invalid worktree registry");
-    if (fields.some((field) => field === "bare" || field.startsWith("prunable"))) continue;
-    const path = first.slice("worktree ".length);
-    const validated = validateFileSharingConfig({ enabled: true, roots: [{ name: "Worktree", path }] }).roots[0].path;
-    const canonical = await canonicalSharedDirectory(validated);
-    const actual = await gitSharingIdentity(canonical);
-    if (pathKey(actual.top) !== pathKey(canonical) || pathKey(actual.common) !== pathKey(identity.common)) {
-      fileConfigError("A registered worktree no longer belongs to its configured repository");
+  for (const path of registry.records) {
+    const candidate = resolve(path);
+    if (pathKey(candidate) === key || !requestedPaths.some((target) => isInside(candidate, target))) continue;
+    const candidateKey = JSON.stringify([key, pathKey(candidate)]);
+    if (checkedWorktrees.has(candidateKey)) continue;
+    checkedWorktrees.add(candidateKey);
+    try {
+      const validated = validateFileSharingConfig({ enabled: true, roots: [{ name: "Worktree", path }] }).roots[0].path;
+      const canonical = await canonicalSharedDirectory(validated);
+      const actual = await gitSharingIdentity(canonical);
+      if (pathKey(actual.top) !== pathKey(canonical) || pathKey(actual.common) !== pathKey(registry.identity.common)) {
+        fileConfigError("A registered worktree no longer belongs to its configured repository");
+      }
+      roots.push(canonical);
+    } catch (error) {
+      if (!(error instanceof FileSharingError)) throw error;
+      issues.push({ path, message: error.message });
     }
-    if (pathKey(canonical) === pathKey(root)) foundRoot = true;
-    roots.push(canonical);
   }
-  if (!foundRoot) fileConfigError("The configured root is missing from its Git worktree registry");
   return roots;
 }
 
@@ -264,17 +298,30 @@ export async function loadFileSharingPolicy({ baseDir } = {}) {
   if (!config.enabled) {
     throw new FileSharingError("denied", "File sharing is disabled. Configure files.enabled and explicit files.roots in ~/.weft/weft.config.json.");
   }
-  const roots = new Map();
+  const roots = new Map(), configuredRoots = [], worktreeIssues = [],
+    registries = new Map(), checkedWorktrees = new Set();
   for (const root of config.roots) {
     const canonical = await canonicalSharedDirectory(root.path);
     roots.set(pathKey(canonical), canonical);
-    for (const worktree of await registeredSharingWorktrees(canonical)) roots.set(pathKey(worktree), worktree);
-    if (roots.size > 128) fileConfigError("Too many effective shared roots");
+    configuredRoots.push(canonical);
   }
   const excluded = config.exclude.map(exclusionPattern);
-  return { async allows(paths) {
+  return { worktreeIssues, async allows(paths) {
     if (JSON.stringify(loadFileSharingConfig({ baseDir })) !== revision) {
       throw new FileSharingError("changed", "File-sharing settings changed. Retry with the current policy.");
+    }
+    const outside = paths.filter((path) => typeof path === "string" && isAbsolute(path) &&
+      !/[\0\r\n]/.test(path) && !/^(?:\\\\|\/\/)/.test(path))
+      .map((path) => resolve(path)).filter((path) => ![...roots.values()].some((root) => isInside(root, path)));
+    if (outside.length) {
+      for (const canonical of configuredRoots) {
+        for (const worktree of await registeredSharingWorktrees(canonical, worktreeIssues, outside, registries, checkedWorktrees)) {
+          if (roots.has(pathKey(worktree))) continue;
+          if (roots.size >= 128) {
+            worktreeIssues.push({ path: worktree, message: "The effective sharing-root limit was reached. This worktree is not shared." });
+          } else roots.set(pathKey(worktree), worktree);
+        }
+      }
     }
     const allowed = [];
     for (const path of paths) {

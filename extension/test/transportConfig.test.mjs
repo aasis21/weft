@@ -321,7 +321,51 @@ test("worktree registry entries are revalidated against the current repository i
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Repo", path: repo }] }, { baseDir: weftHome });
   rmSync(join(linked, ".git"));
   git("init", "--quiet", linked);
-  await assert.rejects(checkFileSharingPaths([join(linked, "file.md")], { baseDir: weftHome }), /no longer belongs/);
+  const policy = await loadFileSharingPolicy({ baseDir: weftHome });
+  assert.deepEqual(await policy.allows([join(linked, "file.md"), join(repo, "file.md")]), [false, true]);
+  assert.equal(policy.worktreeIssues.length, 1);
+  assert.equal(policy.worktreeIssues[0].path, linked.replace(/\\/g, "/"));
+  assert.match(policy.worktreeIssues[0].message, /no longer belongs/);
+});
+
+test("a broken worktree pointer cannot block healthy worktrees or another explicit root", async () => {
+  const root = await realpath(weftHome), repo = join(root, "repo"), healthy = join(root, "healthy"),
+    broken = join(root, "broken"), other = join(root, "other");
+  const git = (...args) => execFileSync("git", args, { windowsHide: true, encoding: "utf8" });
+  git("init", "--quiet", repo);
+  git("-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "base");
+  git("-C", repo, "worktree", "add", "--quiet", "--detach", healthy);
+  git("-C", repo, "worktree", "add", "--quiet", "--detach", broken);
+  const originalPointer = readFileSync(join(broken, ".git"), "utf8");
+  rmSync(join(broken, ".git"));
+  writeFileSync(join(broken, ".git"), `gitdir: ${join(root, "missing-git-directory")}\n`);
+  mkdirSync(other);
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Repo", path: repo }, { name: "Other", path: other }],
+    exclude: ["**/secrets/**"] }, { baseDir: weftHome });
+  const policy = await loadFileSharingPolicy({ baseDir: weftHome });
+  assert.deepEqual(await policy.allows([
+    join(repo, "file.md"), join(healthy, "file.md"), join(broken, "file.md"),
+    join(other, "file.md"), join(healthy, "secrets", "key.txt"),
+  ]), [true, true, false, true, false]);
+  assert.equal(policy.worktreeIssues.length, 1);
+  assert.equal(policy.worktreeIssues[0].path, broken.replace(/\\/g, "/"));
+  rmSync(join(broken, ".git"));
+  writeFileSync(join(broken, ".git"), originalPointer);
+  const repaired = await loadFileSharingPolicy({ baseDir: weftHome });
+  assert.deepEqual(await repaired.allows([join(broken, "file.md")]), [true]);
+  assert.deepEqual(repaired.worktreeIssues, []);
+});
+
+test("invalid optional Git metadata disables inheritance but not explicitly granted directories", async () => {
+  const root = await realpath(weftHome), shared = join(root, "shared");
+  mkdirSync(shared);
+  writeFileSync(join(shared, ".git"), "gitdir: missing-git-directory\n");
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Explicit", path: shared }] }, { baseDir: weftHome });
+  const policy = await loadFileSharingPolicy({ baseDir: weftHome });
+  assert.deepEqual(await policy.allows([join(shared, "file.md")]), [true]);
+  assert.deepEqual(policy.worktreeIssues, []);
+  assert.deepEqual(await policy.allows([join(root, "unregistered", "file.md")]), [false]);
+  assert.equal(policy.worktreeIssues.length, 1);
 });
 
 test("file sharing rejects missing roots and symbolic-link root aliases", async (t) => {

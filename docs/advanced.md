@@ -108,6 +108,9 @@ directory. An exact Git repository root automatically covers its registered
 worktrees after verifying their common repository identity; subfolder grants do
 not expand to the whole repository. New and removed worktrees take effect on the
 next request. Worktree grants are derived, never duplicated into the config.
+Broken or mismatched worktree registrations do not block explicit roots or healthy
+worktrees. They receive no inherited grant; local extension diagnostics record
+only the issue count, without sending worktree paths or warnings to phone chat.
 Exclude patterns are root-relative in every checkout and support `/`, `*`, `?`,
 and whole-segment `**`; exclusions always win, including across overlapping roots.
 Read-only access, protected-file blocking, and symlink-escape prevention are fixed

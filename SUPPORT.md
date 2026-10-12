@@ -39,7 +39,9 @@ root outside the list or matching `files.exclude` stays inaccessible. Exact Git
 repository roots cover verified registered worktrees, not unrelated sibling folders.
 Disabled sharing or an intentionally unshared/excluded working folder quietly
 hides Files/Changes and file-preview links, without chat warnings or approval prompts.
-Malformed settings or unverifiable worktree membership produce explicit errors.
+Malformed settings produce explicit errors. Broken worktree registrations are
+isolated: verified roots still work, while unverified worktrees are not shared.
+A count-only warning is recorded locally, not added to phone chat.
 Previews also require working host read-policy evaluation, not just an SDK method, and a
 live session. If Copilot cannot evaluate content exclusions, restart or update
 Copilot and reconnect; re-pairing or allowing all tools does not fix this. Weft

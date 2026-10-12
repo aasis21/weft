@@ -43,6 +43,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
   let closed = false;
   let busy = false;
   let sharingPolicy = null;
+  let worktreeWarningSignature = null;
   const displayPath = (path) => within(root, path)
     ? relative(root, path).split(sep).join("/") || "." : path;
 
@@ -55,7 +56,14 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
     }
     if (!sharingPolicy) sharingPolicy = loadFileSharingPolicy({ baseDir: configBaseDir })
       .catch((error) => { sharingPolicy = null; throw error; });
-    const shared = await (await sharingPolicy).allows(paths);
+    const policy = await sharingPolicy, shared = await policy.allows(paths);
+    if (!closed && policy.worktreeIssues.length) {
+      const signature = hash(JSON.stringify(policy.worktreeIssues));
+      if (signature !== worktreeWarningSignature) {
+        process.stderr.write(`Weft: ${policy.worktreeIssues.length} worktree grants could not be verified or added; they remain unshared. Verified roots remain available.\n`);
+        worktreeWarningSignature = signature;
+      }
+    }
     const allowedPaths = [];
     for (let i = 0; i < paths.length; i++) {
       const path = paths[i];

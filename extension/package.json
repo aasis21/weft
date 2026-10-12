@@ -1,6 +1,6 @@
 {
   "name": "@aasis21/weft-extension",
-  "version": "0.2.36",
+  "version": "0.2.37",
   "private": true,
   "type": "module",
   "description": "Weft session extension for Copilot CLI and local Copilot app sessions. Dormant bootstrap, lazy active runtime, and host-provided @github/copilot-sdk.",

@@ -393,3 +393,30 @@ test("one central Git-root grant covers a session running in its registered work
   const result = await view.handle({ requestId: "worktree-open", action: "open", path: "report.md" });
   assert.equal(result.text, await readFile(join(linked, "report.md"), "utf8"));
 });
+
+test("broken worktree diagnostics are count-only, deduplicated and do not block valid previews", async (t) => {
+  const f = await fixture(t);
+  f.git("init", "--quiet");
+  await f.file("report.md", "visible\n");
+  f.git("add", "."); f.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "base");
+  const container = await realpath(await mkdtemp(join(tmpdir(), "weft-broken-sharing-"))), broken = join(container, "broken");
+  t.after(() => rm(container, { recursive: true, force: true }));
+  f.git("worktree", "add", "--quiet", "--detach", broken);
+  await rm(join(broken, ".git"));
+  await writeFile(join(broken, ".git"), "gitdir: missing-directory\n");
+  f.events.push({ type: "tool.execution_complete", data: { success: true, toolCallId: "broken-worktree",
+    fileEdits: [{ path: join(broken, "report.md"), kind: "edit" }] } });
+  const warnings = [], original = process.stderr.write;
+  t.mock.method(process.stderr, "write", function (value, ...args) {
+    if (String(value).startsWith("Weft:")) { warnings.push(String(value)); return true; }
+    return original.call(this, value, ...args);
+  });
+  assert.equal((await f.request({ action: "open", path: "report.md" })).text, "visible\n");
+  assert.deepEqual(warnings, []);
+  await assert.rejects(f.request({ action: "open", path: join(broken, "report.md") }), { code: "denied" });
+  await assert.rejects(f.request({ action: "open", path: join(broken, "report.md") }), { code: "denied" });
+  assert.equal((await f.request({ action: "open", path: "report.md" })).text, "visible\n");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /1 worktree grants could not be verified/);
+  assert.doesNotMatch(warnings[0], /weft-broken-sharing|broken|report\.md|visible/);
+});
