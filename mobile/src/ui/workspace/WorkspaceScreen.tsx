@@ -6,6 +6,7 @@ import { Markdown } from '@/ui/thread/Markdown';
 import { fileReference, referencedFilePath } from './fileReference';
 import { htmlPreview } from './htmlPreview';
 import { diffRows } from './diffRows';
+import { FolderGlyph, FileGlyph, FolderChevron } from './fileGlyphs';
 import './workspace.css';
 
 interface Props {
@@ -226,10 +227,10 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
       void run((signal) => fetchFolder(signal, path));
     }
   };
-  const fileButton = (entry: WorkspaceEntry): JSX.Element => <button type="button" aria-label={entry.path}
+  const fileButton = (entry: WorkspaceEntry): JSX.Element => <button type="button" className="workspace-tree-row" aria-label={entry.path}
     disabled={loading || !connected} onClick={() => void openFile(entry.path)}>
-    <span aria-hidden="true">·</span><span className="workspace-file-detail">
-      <span>{entry.name}</span>
+    <span className="workspace-tree-spacer" aria-hidden="true" /><FileGlyph /><span className="workspace-file-detail">
+      <span className="workspace-entry-name">{entry.name}</span>
       {entry.access ? <span className="workspace-file-access">{entry.access === 'read-written' ? 'Read and written' : entry.access === 'written' ? 'Written' : 'Read'}
         {entry.external ? ' · Outside workspace' : ''}</span> : null}
     </span>
@@ -237,9 +238,9 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
   const renderFolder = (path: string): JSX.Element => <ul className="workspace-tree">
     {(folders[path]?.entries ?? []).map((entry) => <li key={entry.path}>
       {entry.kind === 'folder' ? <>
-        <button type="button" aria-label={entry.path} aria-expanded={expandedFolders.has(entry.path)}
+        <button type="button" className="workspace-tree-row" aria-label={entry.path} aria-expanded={expandedFolders.has(entry.path)}
           disabled={loading || !connected && !folders[entry.path]} onClick={() => toggleFolder(entry.path)}>
-          <span aria-hidden="true">{expandedFolders.has(entry.path) ? '▾' : '▸'}</span><span>{entry.name}</span>
+          <FolderChevron /><FolderGlyph open={expandedFolders.has(entry.path)} /><span className="workspace-entry-name">{entry.name}</span>
         </button>
         {expandedFolders.has(entry.path) ? renderFolder(entry.path) : null}
       </> : fileButton(entry)}
@@ -252,8 +253,8 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
   const renderTouched = (nodes: TouchedNode[]): JSX.Element => <ul className="workspace-tree">
     {nodes.map((node) => <li key={node.key}>
       {node.entry ? fileButton(node.entry) : <>
-        <button type="button" aria-expanded={expandedTouched.has(node.key)} onClick={() => toggleTouched(node.key)}>
-          <span aria-hidden="true">{expandedTouched.has(node.key) ? '▾' : '▸'}</span><span>{node.name}</span>
+        <button type="button" className="workspace-tree-row" aria-expanded={expandedTouched.has(node.key)} onClick={() => toggleTouched(node.key)}>
+          <FolderChevron /><FolderGlyph open={expandedTouched.has(node.key)} /><span className="workspace-entry-name">{node.name}</span>
         </button>
         {expandedTouched.has(node.key) ? renderTouched(node.children) : null}
       </>}
@@ -310,11 +311,13 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
         <section className="workspace-file-tree" aria-label="Current folder">
           <h2>Current folder</h2>
           {workspacePath ? <p className="workspace-tree-path">{workspacePath}</p> : null}
-          <button type="button" className="workspace-tree-root" aria-expanded={expandedFolders.has('')}
-            disabled={loading || !connected && !folders['']} onClick={() => toggleFolder('')}>
-            <span aria-hidden="true">{expandedFolders.has('') ? '▾' : '▸'}</span><span>{workspaceName ?? 'Workspace'}</span>
-          </button>
-          {expandedFolders.has('') ? renderFolder('') : null}
+          <ul className="workspace-tree"><li>
+            <button type="button" className="workspace-tree-row workspace-tree-root" aria-expanded={expandedFolders.has('')}
+              disabled={loading || !connected && !folders['']} onClick={() => toggleFolder('')}>
+              <FolderChevron /><FolderGlyph open={expandedFolders.has('')} /><span className="workspace-entry-name">{workspaceName ?? 'Workspace'}</span>
+            </button>
+            {expandedFolders.has('') ? renderFolder('') : null}
+          </li></ul>
         </section>
         <section className="workspace-file-tree" aria-label="Agent-touched files">
           <h2>Agent-touched files</h2>
@@ -327,9 +330,10 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
       </> : <>
         {changes?.base ? <p className="workspace-meta">HEAD {changes.base.slice(0, 8)} → working files</p> : null}
         <ul className="workspace-tree">{(changes?.entries ?? []).map((entry) => <li key={entry.path}>
-          <button type="button" aria-label={`${entry.status} ${entry.path}`} disabled={loading || !connected} onClick={() => openChange(entry)}>
-            <span>{entry.status === '?' ? 'New' : entry.status}</span>
-            <span>{entry.oldPath ? `${entry.oldPath} → ` : ''}{entry.path}</span>
+          <button type="button" className="workspace-change-row" aria-label={`${entry.status} ${entry.path}`} disabled={loading || !connected} onClick={() => openChange(entry)}>
+            <FileGlyph />
+            <span className="workspace-file-detail"><span className="workspace-entry-name">{entry.oldPath ? `${entry.oldPath} → ` : ''}{entry.path}</span>
+              <span className="workspace-file-access">{entry.status === '?' ? 'New' : entry.status}</span></span>
           </button>
         </li>)}</ul>
         {changes?.cursor ? <button type="button" disabled={loading || !connected} onClick={() => void loadChanges(true)}>Load more changes</button> : null}

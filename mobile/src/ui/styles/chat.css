@@ -340,6 +340,8 @@
   text-align: left;
 }
 .bar-menu-item:hover { background: var(--bg); }
+.bar-menu-item.bar-menu-item-with-icon { display:flex; align-items:center; gap:8px; }
+.bar-menu-item-with-icon svg { flex:none; display:block; }
 .bar-menu-item.danger { color: var(--error); }
 @keyframes weft-pop {
   from { opacity: 0; transform: translateY(-4px); }

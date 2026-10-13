@@ -36,6 +36,23 @@ function renderStatusBar(props: Partial<ComponentProps<typeof StatusBar>> = {}) 
 }
 
 describe('StatusBar', () => {
+  it('adds decorative icons to file actions without changing menu names or callbacks', async () => {
+    const user = userEvent.setup();
+    const onOpenFiles = vi.fn(), onOpenChanges = vi.fn();
+    renderStatusBar({ onOpenFiles, onOpenChanges });
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    const files = screen.getByRole('menuitem', { name: 'Files' });
+    const changes = screen.getByRole('menuitem', { name: 'Changes' });
+    expect(files.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(changes.querySelector('svg')).toHaveAttribute('focusable', 'false');
+    await user.click(files);
+    expect(onOpenFiles).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Changes' }));
+    expect(onOpenChanges).toHaveBeenCalledTimes(1);
+  });
+
   it('renders title, cwd title attribute, and status line classes', () => {
     const { container } = renderStatusBar({ status: 'connecting' });
 

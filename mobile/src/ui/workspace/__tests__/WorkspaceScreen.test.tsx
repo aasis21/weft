@@ -28,11 +28,22 @@ describe('workspace viewer', () => {
     await touched.findByRole('button', { name: 'docs' });
     expect(request).toHaveBeenCalledTimes(2);
     expect(current.getByText('C:\\repo')).toBeInTheDocument();
+    const root = current.getByRole('button', { name: 'repo' });
+    const docs = current.getByRole('button', { name: 'docs' });
+    expect(root.querySelector('.workspace-folder-icon')).toHaveAttribute('aria-hidden', 'true');
+    expect(root.closest('li')).toContainElement(docs);
+    expect(docs.closest('ul')?.parentElement).toBe(root.closest('li'));
+    expect(docs.querySelector('.workspace-folder-icon')).toHaveAttribute('focusable', 'false');
     fireEvent.click(touched.getByRole('button', { name: 'docs' }));
     expect(touched.getByText('Written')).toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(2);
     fireEvent.click(current.getByRole('button', { name: 'docs' }));
     await current.findByRole('button', { name: 'docs/unread.md' });
+    const child = current.getByRole('button', { name: 'docs/unread.md' });
+    expect(docs.closest('li')).toContainElement(child);
+    expect(child.querySelector('.workspace-file-icon')).toHaveAttribute('aria-hidden', 'true');
+    expect(child.querySelector('.workspace-entry-name')).toHaveTextContent('unread.md');
+    expect(docs).toHaveAttribute('aria-expanded', 'true');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).not.toBeDisabled());
     expect(request).toHaveBeenLastCalledWith({ action: 'list', scope: 'workspace', path: 'docs' }, expect.any(AbortSignal));
     expect(touched.queryByRole('button', { name: 'docs/unread.md' })).not.toBeInTheDocument();
@@ -57,8 +68,13 @@ describe('workspace viewer', () => {
     const touched = within(screen.getByRole('region', { name: 'Agent-touched files' }));
     await touched.findByRole('button', { name: 'Outside workspace' });
     for (const folder of ['Outside workspace', 'C:', 'Users', 'demo', 'reports']) {
-      fireEvent.click(touched.getByRole('button', { name: folder }));
+      const button = touched.getByRole('button', { name: folder });
+      expect(button.querySelector('.workspace-folder-icon')).toHaveAttribute('aria-hidden', 'true');
+      fireEvent.click(button);
     }
+    const externalFile = touched.getByRole('button', { name: path });
+    expect(touched.getByRole('button', { name: 'reports' }).closest('li')).toContainElement(externalFile);
+    expect(externalFile.querySelector('.workspace-file-icon')).toHaveAttribute('focusable', 'false');
     expect(touched.getByText('Read and written · Outside workspace')).toBeInTheDocument();
     expect(request.mock.calls.filter(([command]) => command.action === 'list')).toHaveLength(2);
     fireEvent.click(touched.getByRole('button', { name: path }));

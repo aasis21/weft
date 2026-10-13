@@ -65,7 +65,9 @@ The session menu's **Files** has two independent trees. **Current folder** expan
 the session workspace one level at a time, fetching names only. **Agent-touched files**
 groups files successfully read or written in this session, including exact permitted
 paths outside the workspace. Its folders are virtual groupings, not permission to
-browse external directories. Tapping a file in either tree or a Markdown file link fetches a
+browse external directories. Both trees use folder/file icons, indented child rows,
+and branch guide lines; expanded folders show an open-folder icon. Tapping a file
+in either tree or a Markdown file link fetches a
 revision-labelled preview. Markdown, text/source, and self-contained HTML are supported;
 HTML scripts, forms, and external assets are disabled. **Refresh** captures the latest
 version; loaded content remains visible offline, but fetching more requires reconnection.

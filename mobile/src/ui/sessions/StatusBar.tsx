@@ -3,6 +3,7 @@ import type { JSX, KeyboardEvent } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
 import { deriveStatus, type ComposerActivity } from './sessionStatus';
+import { FolderGlyph, ChangesGlyph } from '@/ui/workspace/fileGlyphs';
 
 /** Viewfinder-with-QR mark: the header action opens the camera to scan a pairing code. */
 function ScanGlyph(): JSX.Element {
@@ -256,10 +257,10 @@ export function StatusBar({
           </button>
           {menuOpen ? (
             <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
-              {onOpenFiles ? <button type="button" role="menuitem" className="bar-menu-item"
-                onClick={() => { setMenuOpen(false); onOpenFiles(); }}>Files</button> : null}
-              {onOpenChanges ? <button type="button" role="menuitem" className="bar-menu-item"
-                onClick={() => { setMenuOpen(false); onOpenChanges(); }}>Changes</button> : null}
+              {onOpenFiles ? <button type="button" role="menuitem" className="bar-menu-item bar-menu-item-with-icon"
+                onClick={() => { setMenuOpen(false); onOpenFiles(); }}><FolderGlyph /><span>Files</span></button> : null}
+              {onOpenChanges ? <button type="button" role="menuitem" className="bar-menu-item bar-menu-item-with-icon"
+                onClick={() => { setMenuOpen(false); onOpenChanges(); }}><ChangesGlyph /><span>Changes</span></button> : null}
               {onRename ? (
                 <button
                   type="button"
