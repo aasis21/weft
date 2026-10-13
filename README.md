@@ -49,7 +49,9 @@ including permitted external paths. Changes shows touched workspace files' Git d
 Both trees and chat file links use the same read-only, on-demand viewer.
 Opt in through `files` in the central `~/.weft/weft.config.json`, with explicit
 named roots and optional exclusions. An allowed Git repository root includes its
-verified registered worktrees; host permissions and exclusions still apply.
+verified registered worktrees. Weft exclusions, host directory permissions and
+native approvals apply; file sharing does not depend on Copilot's experimental
+content-exclusion API.
 
 Weft is not a remote desktop and it does not move your workspace to the cloud. Copilot and
 your tools continue to run under your account on the laptop; the phone provides a focused,

@@ -45,7 +45,10 @@ AES-256-GCM encryption.
   updates, and releases.
 - Workspace previews may transfer explicitly requested, policy-approved paths,
   contents, and diffs over the paired encrypted channel. Never put them in
-  diagnostic logs or bypass the host's read permissions and content exclusions.
+  diagnostic logs. Enforce the central Weft sharing roots and exclusions, the
+  host's directory permissions, and native approvals. File sharing does not use
+  the experimental `contentExclusion.checkPaths` API or inherit organization
+  exclusion rules automatically; never override an actual permission denial.
 - Add focused tests near changed behavior. Update user documentation when commands,
   storage, privacy, compatibility, or security behavior changes.
 - Use an OpenSpec change for substantial product, lifecycle, or protocol work.

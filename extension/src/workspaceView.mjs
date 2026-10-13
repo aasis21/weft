@@ -27,8 +27,7 @@ const fail = (code, message) => { throw new WorkspaceError(code, message); };
 
 export async function createWorkspaceView({ session, requestPermission, clock = Date.now,
   sessionFiles = createSessionFiles({ session }), configBaseDir } = {}) {
-  if (!session?.rpc?.contentExclusion?.checkPaths ||
-      !session?.rpc?.permissions?.paths?.isPathWithinAllowedDirectories ||
+  if (!session?.rpc?.permissions?.paths?.isPathWithinAllowedDirectories ||
       !session?.rpc?.permissions?.paths?.list || !requestPermission) {
     fail("unsupported", "Update Copilot: workspace read-policy support is unavailable.");
   }
@@ -73,19 +72,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       if (typeof result?.allowed !== "boolean") fail("unavailable", "Copilot read-policy support is unavailable.");
       allowedPaths.push(result.allowed);
     }
-    const permitted = paths.filter((_, i) => allowedPaths[i]);
-    if (!permitted.length) return paths.map(() => false);
-    const result = await session.rpc.contentExclusion.checkPaths({ paths: permitted });
-    if (result?.available !== true || result.checks?.length !== permitted.length) {
-      fail("unavailable", "This Copilot session cannot evaluate content exclusions. Restart or update Copilot, then reconnect. No files were read; Weft cannot bypass this check.");
-    }
-    let index = 0;
-    return paths.map((path, i) => {
-      if (!allowedPaths[i]) return false;
-      const checked = result.checks[index++];
-      if (!same(path, checked?.path ?? "")) fail("unavailable", "Copilot returned an incomplete read-policy result.");
-      return checked.excluded === false;
-    });
+    return allowedPaths;
   }
   async function pathFor(input, deleted = false) {
     if (process.platform === "win32" && input.replace(/^[a-z]:/i, "").includes(":")) {
@@ -101,7 +88,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       await sessionFiles.sync();
       if (!sessionFiles.has(path)) fail("denied", "This outside-workspace file has not been read or written by this session.");
     }
-    if (!(await check([path]))[0]) fail("denied", "This path is denied or excluded by Copilot policy.");
+    if (!(await check([path]))[0]) fail("denied", "This path is not shared or its read permission was denied.");
     const start = within(root, path) ? root : parse(path).root;
     const parts = relative(start, path).split(sep).filter(Boolean);
     let walked = start;
@@ -148,7 +135,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
       await sessionFiles.sync();
       if (!sessionFiles.has(record.path)) fail("denied", "This session file is no longer recorded.");
     }
-    if (!(await check([record.path]))[0]) fail("denied", "This path is excluded by Copilot policy.");
+    if (!(await check([record.path]))[0]) fail("denied", "This path is not shared or its read permission was denied.");
     record.granted = true;
     return "Workspace read authorized. No file content is included in this tool result.";
   }
@@ -430,7 +417,7 @@ export async function createWorkspaceView({ session, requestPermission, clock = 
   }
   return { handle, grant, async checkAvailable() {
     sharingPolicy = null;
-    if (!(await check([root]))[0]) fail("denied", "This workspace is denied or excluded by Copilot policy.");
+    if (!(await check([root]))[0]) fail("denied", "This workspace is not shared or its read permission was denied.");
     await sessionFiles.sync();
   }, close() {
     closed = true;

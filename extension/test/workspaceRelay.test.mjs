@@ -46,14 +46,17 @@ test("encrypted workspace round trip reads policy-approved snapshots while Stop 
         list: async () => ({ primary: root }),
         isPathWithinAllowedDirectories: async () => ({ allowed: true }),
       } },
-      contentExclusion: { checkPaths: async ({ paths }) => ({ available: true,
-        checks: paths.map((path) => ({ path, excluded: false })) }) },
       tools: { execute: async ({ name, arguments: args }) => {
         assert.equal(name, "weft_workspace_access"); approvals++;
         return view.grant(args);
       } },
     },
   };
+  let experimentalReads = 0;
+  Object.defineProperty(session.rpc, "contentExclusion", { get() {
+    experimentalReads++;
+    throw new Error("Do not consult the experimental exclusion API.");
+  } });
   view = await createWorkspaceView({ session, configBaseDir, requestPermission: (args) =>
     session.rpc.tools.execute({ name: "weft_workspace_access", arguments: args }) });
   const relay = await attachRelay({ session, channel: hostChannel, channelId, heartbeatMs: 100000,
@@ -78,10 +81,11 @@ test("encrypted workspace round trip reads policy-approved snapshots while Stop 
   for (let n = 0; n < 100 && !aborts; n++) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(aborts, 1);
   assert.equal(approvals, 2);
+  assert.equal(experimentalReads, 0);
   assert.doesNotMatch(JSON.stringify(wire), /Private synthetic report|report\.md/);
 });
 
-test("workspace capabilities follow real policy readiness and recover without breaking chat controls", async (t) => {
+test("workspace capabilities follow sharing grants and directory permissions without the experimental exclusion API", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "weft-workspace-policy-")));
   const configBaseDir = join(root, ".weft");
   saveFileSharingConfig({ enabled: false, roots: [] }, { baseDir: configBaseDir });
@@ -99,7 +103,7 @@ test("workspace capabilities follow real policy readiness and recover without br
   const emit = (message) => {
     for (const handler of handlers.get(message.eventType) ?? []) handler(message);
   };
-  let available = false, broken = false, approvals = 0, aborts = 0, policyChecks = 0, historyReads = 0, view;
+  let allowed = true, broken = false, approvals = 0, aborts = 0, pathChecks = 0, historyReads = 0, view;
   const session = {
     sessionId: "synthetic-workspace-policy", cwd: root, on: () => () => {}, log() {},
     rpc: {
@@ -110,13 +114,11 @@ test("workspace capabilities follow real policy readiness and recover without br
       abort: async () => { aborts++; },
       permissions: { paths: {
         list: async () => ({ primary: root }),
-        isPathWithinAllowedDirectories: async () => ({ allowed: true }),
-      } },
-      contentExclusion: { checkPaths: async ({ paths }) => {
-        policyChecks++;
-        if (broken) throw Object.assign(new Error("synthetic-private-host-detail"), { code: "unavailable" });
-        return { available: available || paths.length === 0,
-          checks: available ? paths.map((path) => ({ path, excluded: false })) : [] };
+        isPathWithinAllowedDirectories: async () => {
+          pathChecks++;
+          if (broken) throw Object.assign(new Error("synthetic-private-host-detail"), { code: "unavailable" });
+          return { allowed };
+        },
       } },
       tools: { execute: async ({ arguments: args }) => { approvals++; return view.grant(args); } },
     },
@@ -128,7 +130,7 @@ test("workspace capabilities follow real policy readiness and recover without br
   t.after(async () => { view.close(); await relay.stop(); });
   assert.deepEqual(sent.find((message) => message.eventSubtype === "channel_up").msg.capabilities, []);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
-  assert.equal(policyChecks, 0);
+  assert.equal(pathChecks, 0);
   assert.equal(historyReads, 0);
   assert.equal(approvals, 0);
 
@@ -150,24 +152,26 @@ test("workspace capabilities follow real policy readiness and recover without br
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }], exclude: ["**"] }, { baseDir: configBaseDir });
   assert.deepEqual((await snapshot()).capabilities, []);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
-  assert.equal(policyChecks, 0);
+  assert.equal(pathChecks, 0);
   assert.equal(historyReads, 0);
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }] }, { baseDir: configBaseDir });
-  await snapshot();
-  assert.match(sent.find((message) => message.eventSubtype === "log").msg.message, /Restart or update Copilot/);
-  await snapshot();
-  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 1);
-  available = true;
   assert.deepEqual((await snapshot()).capabilities, [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY]);
+  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   saveFileSharingConfig({ enabled: false, roots: [] }, { baseDir: configBaseDir });
   assert.deepEqual((await snapshot()).capabilities, []);
-  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 1);
+  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }] }, { baseDir: configBaseDir });
-  available = false;
+  allowed = false;
   assert.deepEqual((await snapshot()).capabilities, []);
+  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
+  allowed = true;
+  assert.deepEqual((await snapshot()).capabilities, [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY]);
   broken = true;
   assert.deepEqual((await snapshot()).capabilities, []);
   assert.doesNotMatch(JSON.stringify(sent), /synthetic-private-host-detail/);
+  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 1);
+  await snapshot();
+  assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 1);
   await writeFile(join(configBaseDir, "weft.config.json"), '{"files":{"enabled":"invalid"}}');
   assert.deepEqual((await snapshot()).capabilities, []);
   assert.match(sent.filter((message) => message.eventSubtype === "log").at(-1).msg.message, /files configuration/);

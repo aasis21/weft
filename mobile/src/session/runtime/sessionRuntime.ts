@@ -403,7 +403,7 @@ export class SessionRuntime {
       return Promise.reject(new Error('Laptop offline. Reconnect to load workspace content.'));
     }
     if (!session.workspaceCapabilities?.includes(SESSION_FILES_CAPABILITY)) {
-      return Promise.reject(new Error('Session-file previews require working host policy and an updated Copilot and Weft on this laptop.'));
+      return Promise.reject(new Error('Session-file previews require an allowed Weft sharing root, host directory permissions, and an updated Copilot and Weft.'));
     }
     let client = this.workspaceClients.get(channelId);
     if (!client) {

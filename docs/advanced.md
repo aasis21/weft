@@ -72,9 +72,11 @@ version; loaded content remains visible offline, but fetching more requires reco
 Changes compares session-touched workspace files against a pinned HEAD commit;
 untracked files appear as New. No staging, reverting, or file editing is provided.
 
-Workspace reads use Copilot's native approval pipeline, allowed-directory policy,
-and content-exclusion checks. Older hosts without those checks do not advertise this
-feature. A prior read/write is not permanent permission. Denied names and contents
+Workspace reads use Weft's explicit sharing roots and exclusions, Copilot's native
+approval pipeline, and allowed-directory permissions. Older hosts without directory
+permission/approval support do not advertise the feature. The experimental
+`contentExclusion.checkPaths` API is not required or called. A prior read/write is
+not permanent permission. Denied names and contents
 are not sent. Each text file is capped at 2 MiB or
 20,000 lines, HTML and patches at 1 MiB; transfers are bounded pages. Temporary
 snapshots expire after five minutes and are not persisted by Weft. Preview requests,
@@ -116,8 +118,10 @@ and whole-segment `**`; exclusions always win, including across overlapping root
 Read-only access, protected-file blocking, and symlink-escape prevention are fixed
 rules, not configuration switches. Invalid settings fail explicitly. Settings are
 preserved during updates and reread for new requests, including preview pages.
-These local sharing grants supplement, not replace, Copilot's host permissions
-and content-exclusion checks; they do not fix an unavailable host-policy service.
+These sharing grants supplement Copilot's directory permissions and native
+approvals. Repository/organization content-exclusion rules are not automatically
+imported; reflect applicable sharing restrictions in `files.exclude` and grant
+only roots you are authorized to share.
 Disabled sharing or a working folder not allowed by the policy quietly hides the
 file controls; it does not add chat warnings. Invalid configuration and unexpected
 host failures remain explicit, as do errors after a user requests a file.

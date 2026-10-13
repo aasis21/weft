@@ -1,6 +1,6 @@
 {
   "name": "weft",
-  "version": "0.2.37",
+  "version": "0.2.38",
   "private": true,
   "description": "Weft — mobile companion for GitHub Copilot CLI and local Copilot app sessions over an end-to-end encrypted relay.",
   "type": "module",

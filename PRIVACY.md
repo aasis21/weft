@@ -33,15 +33,15 @@ A `/weft` pairing inside one Copilot session uses an ephemeral identity that end
 that session.
 
 Files and Changes transfer workspace or session-touched names only when requested, and selected file
-contents or patches only when opened or refreshed. Copilot's native approval,
-directory grants, and content-exclusion checks apply. Laptop preview snapshots are bounded,
+contents or patches only when opened or refreshed. Weft's configured sharing roots
+and exclusions, Copilot's native approval, and directory grants apply. Laptop preview snapshots are bounded,
 held in memory, and expire after five minutes; Weft does not persist preview content
 or include preview requests and responses in diagnostic logs. HTML previews are
 isolated from Weft storage and disable scripts, forms, and external requests.
 Files separates lazy current-folder browsing from an agent-touched tree rebuilt
 from Copilot's successful file-tool events and committed edit metadata, without a
 recursive crawl. Exact outside-workspace paths can be shown
-only when current host permissions and exclusions permit them. Shell commands,
+only when current sharing rules and host directory permissions permit them. Shell commands,
 failed reads, and path mentions do not grant external preview access; no separate file
 history or file contents are persisted by Weft.
 Sharing is disabled unless enabled in the existing central `weft.config.json`.
@@ -49,6 +49,10 @@ Named allowed roots bound both trees and previews; Git repository roots include
 only verified registered worktrees of the same repository. Optional root-relative
 exclusions apply across those checkouts and cannot be bypassed with overlapping
 root grants. Configuration and worktree membership are rechecked for new requests.
+Weft file sharing does not call Copilot's experimental content-exclusion API or
+automatically synchronize repository/organization exclusion rules. Configure
+`files.exclude` and grant only roots you are authorized to share; existing host
+permission denials are still enforced.
 
 A dormant extension publishes local presence and holds one idle local named pipe or
 Unix-domain socket, but performs no remote/network access, cryptography, QR generation,

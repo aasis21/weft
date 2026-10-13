@@ -14,7 +14,7 @@ async function fixture(t, options = {}) {
   const configBaseDir = join(root, ".weft");
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }] }, { baseDir: configBaseDir });
   t.after(() => rm(root, { recursive: true, force: true }));
-  const excluded = new Set(), denied = new Set(), checked = [], approvals = [], events = [];
+  const denied = new Set(), checked = [], approvals = [], events = [];
   let available = true, approve = true, primary = root, time = Date.now();
   const session = { rpc: {
     eventLog: { read: async ({ cursor, max }) => {
@@ -23,11 +23,10 @@ async function fixture(t, options = {}) {
     } },
     permissions: { paths: {
       list: async () => ({ primary }),
-      isPathWithinAllowedDirectories: async ({ path }) => ({ allowed: !denied.has(path) }),
-    } },
-    contentExclusion: { checkPaths: async ({ paths }) => {
-      checked.push(...paths);
-      return { available, checks: available ? paths.map((path) => ({ path, excluded: excluded.has(path) })) : [] };
+      isPathWithinAllowedDirectories: async ({ path }) => {
+        checked.push(path);
+        return available ? { allowed: !denied.has(path) } : {};
+      },
     } },
   } };
   let view;
@@ -50,7 +49,7 @@ async function fixture(t, options = {}) {
     } });
   };
   const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", windowsHide: true });
-  return { root, configBaseDir, session, view, request, file, git, checked, excluded, denied, approvals, events,
+  return { root, configBaseDir, session, view, request, file, git, checked, denied, approvals, events,
     policy(value) { available = value; }, approve(value) { approve = value; },
     primary(value) { primary = value; }, tick(value) { time += value; } };
 }
@@ -63,7 +62,8 @@ test("keeps current-folder and session-touched listings separate, lazy and polic
   await f.file(".env", "never shared");
   await f.file(".git/private-data", "never shared");
   await f.file("restricted.md", "never shared");
-  f.excluded.add(join(f.root, "restricted.md"));
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root }],
+    exclude: ["restricted.md"] }, { baseDir: f.configBaseDir });
   await writeFile(join(f.root, "untouched.md"), "never shared");
   const page = await f.request({ action: "list", scope: "touched", path: "" });
   assert.deepEqual(page.entries.map((entry) => entry.path), ["folder/nested.md", "root.txt"]);
@@ -206,20 +206,23 @@ test("native listing approval cannot switch a pending request to the other tree"
   await f.request({ action: "list", scope: "touched", path: "" });
 });
 
-test("availability checks a real workspace path without reading or requesting approval", async (t) => {
+test("availability and reads do not require or invoke the experimental exclusion API", async (t) => {
   const f = await fixture(t);
-  f.session.rpc.contentExclusion.checkPaths = async ({ paths }) =>
-    ({ available: paths.length === 0, checks: [] });
-  await assert.rejects(f.view.checkAvailable(), {
-    code: "unavailable", message: /Restart or update Copilot/,
-  });
-  assert.equal(f.approvals.length, 0);
-  f.session.rpc.contentExclusion.checkPaths = async ({ paths }) =>
-    ({ available: true, checks: paths.map((path) => ({ path, excluded: false })) });
+  await f.file("report.md", "allowed preview");
   await f.view.checkAvailable();
+  assert.equal(f.approvals.length, 0);
+  let exclusionReads = 0;
+  Object.defineProperty(f.session.rpc, "contentExclusion", { get() {
+    exclusionReads++;
+    throw new Error("The experimental API must not be consulted.");
+  } });
+  await f.view.checkAvailable();
+  assert.deepEqual((await f.request({ action: "list", path: "" })).entries.map((entry) => entry.path), ["report.md"]);
+  assert.equal((await f.request({ action: "open", path: "report.md" })).text, "allowed preview");
+  assert.equal(exclusionReads, 0);
   f.denied.add(f.root);
   await assert.rejects(f.view.checkAvailable(), { code: "denied" });
-  assert.equal(f.approvals.length, 0);
+  assert.equal(f.approvals.length, 2);
 });
 
 test("policy changes revoke existing snapshot pages and omit denied entries", async (t) => {
@@ -229,7 +232,8 @@ test("policy changes revoke existing snapshot pages and omit denied entries", as
   f.denied.add(join(f.root, "denied.txt"));
   assert.equal((await f.request({ action: "list", path: "" })).entries.some((entry) => entry.name === "denied.txt"), false);
   const opened = await f.request({ action: "open", path: "visible.txt" });
-  f.excluded.add(join(f.root, "visible.txt"));
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root }],
+    exclude: ["visible.txt"] }, { baseDir: f.configBaseDir });
   await assert.rejects(f.request({ action: "page", previewId: opened.previewId, offset: opened.nextOffset }), { code: "denied" });
 });
 
@@ -243,7 +247,6 @@ test("nested workspace diffs never expose sibling repository paths", async (t) =
   const session = { rpc: {
     eventLog: f.session.rpc.eventLog,
     permissions: { paths: { list: async () => ({ primary }), isPathWithinAllowedDirectories: async () => ({ allowed: true }) } },
-    contentExclusion: { checkPaths: async ({ paths }) => ({ available: true, checks: paths.map((path) => ({ path, excluded: false })) }) },
   } };
   let view;
   view = await createWorkspaceView({ session, configBaseDir: f.configBaseDir, requestPermission: (args) => view.grant(args) });
@@ -271,7 +274,8 @@ test("renamed-file diffs authorize both paths and revoked old paths cannot be pa
   const diff = await f.request({ action: "open", path: "new.txt", format: "diff", base: changes.base });
   assert.match(diff.text, /old.txt/);
   assert.ok(diff.nextOffset !== null);
-  f.excluded.add(join(f.root, "old.txt"));
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root }],
+    exclude: ["old.txt"] }, { baseDir: f.configBaseDir });
   await assert.rejects(f.request({ action: "page", previewId: diff.previewId, offset: diff.nextOffset }), { code: "denied" });
 });
 
@@ -297,9 +301,12 @@ test("external session files are exact, read-only targets with current permissio
   await assert.rejects(f.request({ action: "list", path: other }), { code: "denied" });
   assert.deepEqual((await f.request({ action: "list", scope: "workspace", path: "" })).entries, []);
   await assert.rejects(f.request({ action: "open", path, format: "diff", base: "a".repeat(40) }), { code: "unsupported" });
-  f.excluded.add(path);
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root },
+    { name: "External", path: other }], exclude: ["report.md"] }, { baseDir: f.configBaseDir });
   await assert.rejects(f.request({ action: "page", previewId: opened.previewId, offset: opened.nextOffset }), { code: "denied" });
-  f.excluded.delete(path); f.denied.add(path);
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root },
+    { name: "External", path: other }] }, { baseDir: f.configBaseDir });
+  f.denied.add(path);
   assert.deepEqual((await f.request({ action: "list", scope: "touched", path: "" })).entries, []);
   await assert.rejects(f.request({ action: "open", path }), { code: "denied" });
 });
@@ -347,7 +354,8 @@ test("current-folder browsing does not read session history and rechecks policy 
   const current = await f.request({ action: "list", scope: "workspace", path: "" });
   assert.deepEqual(current.entries.map((entry) => entry.path), ["untouched.txt"]);
   assert.equal((await f.request({ action: "open", path: "untouched.txt" })).text, "current folder only");
-  f.excluded.add(join(f.root, "untouched.txt"));
+  saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: f.root }],
+    exclude: ["untouched.txt"] }, { baseDir: f.configBaseDir });
   await assert.rejects(f.request({ action: "open", path: "untouched.txt" }), { code: "denied" });
   assert.deepEqual((await f.request({ action: "list", scope: "workspace", path: "" })).entries, []);
   await assert.rejects(f.request({ action: "list", scope: "touched", path: "" }), { code: "unavailable" });

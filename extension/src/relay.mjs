@@ -438,7 +438,7 @@ export async function attachRelay({
   };
 
   const supportsWorkspacePolicy = workspaceView &&
-    session.rpc?.contentExclusion?.checkPaths && session.rpc?.tools?.execute &&
+    session.rpc?.tools?.execute &&
     session.rpc?.permissions?.paths?.list &&
     session.rpc?.permissions?.paths?.isPathWithinAllowedDirectories;
   let workspaceWarning = null;
@@ -461,7 +461,7 @@ export async function attachRelay({
         return [];
       }
       const message = `Files and Changes unavailable: ${knownWorkspaceError(error)
-        ? error.message : "Copilot could not verify workspace read policy. Restart or update Copilot, then reconnect. No files were read."}`;
+        ? error.message : "Workspace sharing checks could not complete. Reconnect or update Weft and Copilot. No files were read."}`;
       if (message !== workspaceWarning) {
         workspaceWarning = message;
         await sendSafe(logLine("warning", message));
