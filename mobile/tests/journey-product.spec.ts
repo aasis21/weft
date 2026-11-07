@@ -37,7 +37,7 @@ test('setup deep links work after app mount and large text reflows', async ({ pa
   await page.setViewportSize({ width: 640, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/#get-started');
-  await expect(page.getByRole('heading', { name: 'From your terminal to your phone.' })).toBeInViewport();
+  await expect(page.getByRole('heading', { name: 'From Copilot to your phone.' })).toBeInViewport();
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
   const overflowingCards = await page.locator('.step-card, .do-card').evaluateAll(
     (cards) => cards.filter((card) => card.scrollWidth > card.clientWidth + 1).length,
