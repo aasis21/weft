@@ -545,3 +545,36 @@ export function saveDeviceName(name, { baseDir } = {}) {
   writeConfig({ ...config, deviceName: trimmed }, { baseDir });
   return trimmed;
 }
+
+/** Validate an entire management edit before a single atomic configuration write. */
+export function saveManagementSettings(patch, { baseDir } = {}) {
+  const config = loadConfig({ baseDir, strict: true });
+  const next = { ...config };
+  if (patch.deviceName !== undefined) {
+    if (typeof patch.deviceName !== "string" || !patch.deviceName.trim() || patch.deviceName.trim().length > MAX_DEVICE_NAME_LENGTH) {
+      throw new Error("Device name must contain 1 to 60 characters.");
+    }
+    next.deviceName = patch.deviceName.trim();
+  }
+  if (patch.permissionMode !== undefined) {
+    if (!["default", "allow-all"].includes(patch.permissionMode)) throw new Error("Invalid permission mode.");
+    next.launch = { ...config.launch, defaultPermissionMode: patch.permissionMode };
+  }
+  if (patch.pairingMode !== undefined) {
+    if (!["persistent", "ephemeral"].includes(patch.pairingMode)) throw new Error("Invalid pairing mode.");
+    next.pairing = { ...config.pairing, persistent: patch.pairingMode === "persistent" };
+  }
+  if (patch.terminalEnabled !== undefined) {
+    if (typeof patch.terminalEnabled !== "boolean") throw new Error("Invalid terminal access setting.");
+    next.terminal = { ...config.terminal, enabled: patch.terminalEnabled };
+  }
+  if (patch.files !== undefined) next.files = validateFileSharingConfig(patch.files);
+  if (patch.transport !== undefined) {
+    if (!patch.transport || typeof patch.transport !== "object" ||
+        Object.keys(patch.transport).some((key) => key !== "kind") ||
+        !["supabase", "devtunnel", "clear"].includes(patch.transport.kind)) throw new Error("Invalid transport.");
+    if (patch.transport.kind === "clear") delete next.transport;
+    else next.transport = { kind: patch.transport.kind };
+  }
+  writeConfig(next, { baseDir });
+}

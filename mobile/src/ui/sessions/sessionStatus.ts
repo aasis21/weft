@@ -9,8 +9,8 @@ import type { TimelineState } from '@/lib/timeline';
  * (see applyEnvelope.noteBusySignal). Shared by the main SessionScreen (Stop control) AND the
  * sidebar/header pill so they can never disagree.
  */
-export function isWorking(timeline: Pick<TimelineState, 'busy' | 'items'>): boolean {
-  return timeline.busy || timeline.items.some((i) => i.kind === 'tool' && i.status === 'running');
+export function isWorking(timeline: Pick<TimelineState, 'busy' | 'items' | 'compact'>): boolean {
+  return timeline.busy || (!timeline.compact && timeline.items.some((i) => i.kind === 'tool' && i.status === 'running'));
 }
 
 

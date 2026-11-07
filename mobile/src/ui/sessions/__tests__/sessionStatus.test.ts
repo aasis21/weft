@@ -23,6 +23,10 @@ describe('isWorking (shared main-screen/sidebar busy derivation)', () => {
   it('falls back to a still-running tool even when busy is false (missed ACTIVITY edge)', () => {
     expect(isWorking({ busy: false, items: [tool('running')] })).toBe(true);
   });
+  it('prefers authoritative compact idle over stale cached running tools', () => {
+    expect(isWorking({ busy: false, compact: true, items: [tool('running')] })).toBe(false);
+    expect(isWorking({ busy: true, compact: true, items: [tool('running')] })).toBe(true);
+  });
   it('is false when idle with only settled tools', () => {
     expect(isWorking({ busy: false, items: [tool('success'), tool('error')] })).toBe(false);
   });

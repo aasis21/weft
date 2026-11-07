@@ -45,6 +45,8 @@ export function createReconnectingSocket(url, {
   pingIntervalMs = 30_000,
   minBackoffMs = 1_000,
   maxBackoffMs = 30_000,
+  connectTimeoutMs = 20_000,
+  pongTimeoutMs = 10_000,
 } = {}) {
   const listeners = { open: new Set(), message: new Set(), close: new Set(), error: new Set() };
   let ws = null;
@@ -52,6 +54,8 @@ export function createReconnectingSocket(url, {
   let backoff = minBackoffMs;
   let reconnectTimer = null;
   let pingTimer = null;
+  let connectTimer = null;
+  let pongTimer = null;
 
   function emit(type, event) {
     for (const handler of listeners[type] ?? []) {
@@ -66,19 +70,42 @@ export function createReconnectingSocket(url, {
   function clearPing() {
     if (pingTimer) clearInterval(pingTimer);
     pingTimer = null;
+    clearTimeout(pongTimer);
+    pongTimer = null;
+    clearTimeout(connectTimer);
+    connectTimer = null;
   }
 
   // Deliberately REF'd (no unref): a live ping both keeps the tunnel/relay from idle-closing the
   // socket AND keeps the station process in the event loop between beats — see the module doc.
-  function startPing() {
+  function startPing(socket) {
     clearPing();
     pingTimer = setInterval(() => {
+      if (socket !== ws || pongTimer) return;
       try {
-        ws?.ping?.();
+        if (!socket.ping) return;
+        pongTimer = setTimeout(() => fail(socket, "pong timeout"), pongTimeoutMs);
+        socket.ping();
       } catch {
-        // Best-effort keepalive; a failed ping just means the next close/reconnect cycle runs.
+        fail(socket, "ping failed");
       }
+
     }, pingIntervalMs);
+  }
+
+  function fail(socket, reason) {
+    if (closedByUser || socket !== ws) return;
+    clearPing();
+    ws = null;
+    try {
+      if (socket.terminate) socket.terminate();
+      else socket.close();
+    } catch (error) {
+      logTransport("transport.close_failed", { error: error.name }, { level: "warn" });
+    }
+    logTransport("transport.disconnected", { kind: "devtunnel", reason }, { level: "warn" });
+    emit("close", { reason });
+    scheduleReconnect();
   }
 
   // Deliberately REF'd (no unref): holds the event loop open during the gap between a dropped
@@ -105,31 +132,43 @@ export function createReconnectingSocket(url, {
       return;
     }
     ws = socket;
+    connectTimer = setTimeout(() => fail(socket, "connect timeout"), connectTimeoutMs);
+    const onPong = () => {
+      if (socket !== ws || closedByUser) return;
+      clearTimeout(pongTimer);
+      pongTimer = null;
+    };
+    if (socket.on) socket.on("pong", onPong);
+    else socket.addEventListener("pong", onPong);
 
     socket.addEventListener("open", () => {
-      if (closedByUser) return;
+      if (closedByUser || socket !== ws) return;
+      clearTimeout(connectTimer);
+      connectTimer = null;
       backoff = minBackoffMs; // Reset backoff on a healthy connection.
-      startPing();
+      startPing(socket);
       logTransport("transport.connected", { kind: "devtunnel" });
       emit("open", {});
     });
     socket.addEventListener("message", (e) => {
-      if (closedByUser) return;
+      if (closedByUser || socket !== ws) return;
       emit("message", e);
     });
     socket.addEventListener("close", (e) => {
+      if (closedByUser || socket !== ws) return;
       clearPing();
-      if (closedByUser) return;
+      ws = null;
       logTransport("transport.disconnected", { kind: "devtunnel", reason: e?.reason || "close" }, { level: "warn" });
       emit("close", e);
       scheduleReconnect();
     });
     socket.addEventListener("error", (e) => {
-      if (closedByUser) return;
+      if (closedByUser || socket !== ws) return;
       // `ws` always follows an 'error' with a 'close', which is what drives the reconnect — so we
       // only surface the error here and let the close handler schedule the retry (avoids racing
       // two reconnect timers for a single failure).
       emit("error", e);
+      fail(socket, "socket error");
     });
   }
 

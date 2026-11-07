@@ -15,6 +15,8 @@ interface SessionsStore {
 
 /** A joined session: the ECDH pairing material plus light display metadata. */
 export interface StoredSession {
+  /** Negotiated intentional heartbeat silence is not an archive/delete signal. */
+  attention?: boolean;
   pairing: StoredPairing;
   /** The durable Copilot session id this card mirrors (learned from channel_up). Used to dedupe
    *  cards across channels/resumes. Optional: older stored entries won't have it. */
@@ -275,6 +277,7 @@ export async function patchSession(
       | 'sessionId'
       | 'lastEventAt'
       | 'lastHeartbeatAt'
+      | 'attention'
       | 'lastSubscribedAt'
       | 'pinned'
       | 'unread'

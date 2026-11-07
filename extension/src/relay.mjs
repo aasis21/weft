@@ -32,6 +32,10 @@ import {
   workspaceResult,
   validWorkspaceRequest,
   WORKSPACE_CODES,
+  ATTENTION_CAPABILITY,
+  watchState,
+  sessionStatus,
+  recovery,
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
@@ -39,6 +43,9 @@ import { clearAttachedSession, recordAttachedSession } from "./attachedSessions.
 import { WorkspaceError } from "./workspaceView.mjs";
 import { SessionFilesError } from "./sessionFiles.mjs";
 import { FileSharingError } from "./transportConfig.mjs";
+import { createAttentionLease } from "./pairedEndpoint.mjs";
+import { createSessionRecovery } from "./sessionRecovery.mjs";
+import { appendSessionLog } from "./sessionLog.mjs";
 
 const knownWorkspaceError = (error) =>
   (error instanceof WorkspaceError || error instanceof SessionFilesError || error instanceof FileSharingError) && WORKSPACE_CODES.includes(error.code);
@@ -114,11 +121,13 @@ export function createPermissionRelay({
   channel,
   logger = () => {},
 } = {}) {
-  if (!channel) throw new Error("weft relay: channel is required");
   const pending = new Map();
-  let loggedShellApprovalShape = false;
-
-  const unsubscribe = channel.onEvent(EVENT_TYPE.DECISION, (msg) => {
+  let available = () => true;
+  let unsubscribe = null;
+  function rebind(next) {
+    unsubscribe?.();
+    channel = next;
+    unsubscribe = channel?.onEvent(EVENT_TYPE.DECISION, (msg) => {
     if (msg?.eventSubtype !== SUBTYPE.DECISION.APPROVAL_DECISION) return;
     const decision = msg.msg;
     const entry = pending.get(decision.requestId);
@@ -127,29 +136,28 @@ export function createPermissionRelay({
     entry.resolve(permissionResultFromDecision(decision));
     // Echo a completion so any OTHER device still showing this banner dismisses it too.
     void channel.send(approvalComplete(decision.requestId, decision.optionId)).catch(() => {});
-  });
+    });
+  }
+  rebind(channel);
 
   async function onPermissionRequest(request, invocation = {}) {
+    if (!channel || !available()) return { kind: "user-not-available" };
     const requestId = randomUUID();
     const toolName = inferToolName(request);
-    if (!loggedShellApprovalShape && isShellToolName(toolName)) {
-      loggedShellApprovalShape = true;
-      logger(`Weft debug: shell approval request shape ${safeJson({ request, invocation })}`, {
-        level: "info",
-        ephemeral: false,
-      });
-    }
     const toolArgs = inferToolArgs(request, invocation);
     const options = inferOptions(request);
     // Keep the exact payload we sent so a late-joining phone can have it replayed verbatim
     // in a state snapshot (same requestId → its decision still resolves this pending entry).
     const payload = approvalRequest(requestId, toolName, toolArgs, options);
 
-    await channel.send(payload);
-
-    return await new Promise((resolve) => {
+    const result = new Promise((resolve) => {
       pending.set(requestId, { resolve, request, invocation, payload });
     });
+    try { await channel.send(payload); }
+    catch (error) {
+      appendSessionLog("approval.delivery_failed", { error: error.message }, { level: "warn" });
+    }
+    return result;
   }
 
   /** The still-pending approval prompts, as flat approvalRequest PAYLOADS (msg), so a phone
@@ -169,7 +177,7 @@ export function createPermissionRelay({
     }
   }
 
-  return { onPermissionRequest, snapshotPending, close };
+  return { onPermissionRequest, snapshotPending, close, rebind, setAvailability: (fn) => { available = fn; } };
 }
 
 /**
@@ -194,7 +202,6 @@ export function createElicitationRelay({
   channel,
   logger = () => {},
 } = {}) {
-  if (!channel) throw new Error("weft relay: channel is required");
   const pending = new Map();
   const respond = pickElicitationResponder(session, logger);
   let releaseInterest = () => {};
@@ -204,7 +211,11 @@ export function createElicitationRelay({
     releaseInterest = release;
   });
 
-  const unsubscribe = channel.onEvent(EVENT_TYPE.ELICITATION_RESPONSE, (msg) => {
+  let unsubscribe = null;
+  function rebind(next) {
+    unsubscribe?.();
+    channel = next;
+    unsubscribe = channel?.onEvent(EVENT_TYPE.ELICITATION_RESPONSE, (msg) => {
     if (msg?.eventSubtype !== SUBTYPE.ELICITATION_RESPONSE.RESPONSE) return;
     const answer = msg.msg;
     const entry = pending.get(answer.requestId);
@@ -219,14 +230,14 @@ export function createElicitationRelay({
     }
     // Feed the phone's answer back into the runtime. success === false means another client
     // (typically the terminal) already answered — harmless, the phone form is already dismissed.
-    void Promise.resolve(respond(answer.requestId, elicitResultFromResponse(answer))).then((accepted) => {
-      if (accepted === false) {
-        logger("Weft: ask_user was already answered before the phone's reply arrived.", {
-          level: "info",
-        });
-      }
+      void Promise.resolve(respond(answer.requestId, elicitResultFromResponse(answer))).then((accepted) => {
+        if (accepted === false) {
+          logger("Weft: ask_user was already answered before the phone's reply arrived.", { level: "info" });
+        }
+      }).catch((error) => logger(`Weft ask_user response failed: ${error.message}`, { level: "warning" }));
     });
-  });
+  }
+  rebind(channel);
 
   async function offer(data = {}) {
     const requestId = data.requestId;
@@ -241,8 +252,8 @@ export function createElicitationRelay({
       data.toolCallId,
       data.url,
     );
-    await channel.send(payload);
     pending.set(requestId, { payload });
+    if (channel) await channel.send(payload);
   }
 
   /** The still-open ask_user prompts, as flat elicitationRequest PAYLOADS (msg), so a phone
@@ -256,7 +267,7 @@ export function createElicitationRelay({
     if (!requestId) return;
     clearPending(requestId);
     // Dismiss any open form on the phone (the request was answered here or at the terminal).
-    await channel.send(elicitationComplete(requestId, data.action));
+    if (channel) await channel.send(elicitationComplete(requestId, data.action));
   }
 
   function clearPending(requestId) {
@@ -273,7 +284,7 @@ export function createElicitationRelay({
     }
   }
 
-  return { offer, complete, snapshotPending, close };
+  return { offer, complete, snapshotPending, close, rebind };
 }
 
 /**
@@ -285,7 +296,6 @@ export function createExitPlanModeRelay({
   channel,
   logger = () => {},
 } = {}) {
-  if (!channel) throw new Error("weft relay: channel is required");
   const pending = new Map();
   const respond = pickExitPlanModeResponder(session, logger);
   let releaseInterest = () => {};
@@ -294,7 +304,11 @@ export function createExitPlanModeRelay({
     releaseInterest = release;
   });
 
-  const unsubscribe = channel.onEvent(EVENT_TYPE.DECISION, (msg) => {
+  let unsubscribe = null;
+  function rebind(next) {
+    unsubscribe?.();
+    channel = next;
+    unsubscribe = channel?.onEvent(EVENT_TYPE.DECISION, (msg) => {
     if (msg?.eventSubtype !== SUBTYPE.DECISION.APPROVAL_DECISION) return;
     const decision = msg.msg;
     const entry = pending.get(decision.requestId);
@@ -308,16 +322,16 @@ export function createExitPlanModeRelay({
       );
       return;
     }
-    void Promise.resolve(respond(decision.requestId, exitPlanResponseFromOption(decision.optionId))).then(
-      (accepted) => {
-        if (accepted === false) {
-          logger("Weft: plan-exit request was already answered before the phone's reply arrived.", {
-            level: "info",
-          });
-        }
-      },
-    );
-  });
+      void Promise.resolve(respond(decision.requestId, exitPlanResponseFromOption(decision.optionId))).then(
+        (accepted) => {
+          if (accepted === false) {
+            logger("Weft: plan-exit request was already answered before the phone's reply arrived.", { level: "info" });
+          }
+        },
+      ).catch((error) => logger(`Weft plan-exit response failed: ${error.message}`, { level: "warning" }));
+    });
+  }
+  rebind(channel);
 
   async function offer(data = {}) {
     const requestId = data.requestId;
@@ -332,15 +346,15 @@ export function createExitPlanModeRelay({
       },
       options,
     );
-    await channel.send(payload);
     pending.set(requestId, { payload });
+    if (channel) await channel.send(payload);
   }
 
   async function complete(data = {}) {
     const requestId = data.requestId;
     if (!requestId) return;
     clearPending(requestId);
-    await channel.send(approvalComplete(requestId, data.selectedAction ?? (data.approved ? "approved" : "rejected")));
+    if (channel) await channel.send(approvalComplete(requestId, data.selectedAction ?? (data.approved ? "approved" : "rejected")));
   }
 
   function snapshotPending() {
@@ -361,7 +375,7 @@ export function createExitPlanModeRelay({
     }
   }
 
-  return { offer, complete, snapshotPending, close };
+  return { offer, complete, snapshotPending, close, rebind };
 }
 
 export async function attachRelay({
@@ -372,11 +386,10 @@ export async function attachRelay({
   permissionRelay,
   onConnectionLost,
   workspaceView,
+  recoveryStore,
 } = {}) {
   if (!session) throw new Error("weft relay: session is required");
-  if (!channel) throw new Error("weft relay: channel is required");
-
-  await channel.connect?.();
+  await channel?.connect?.();
 
   const sessionId = session.sessionId ?? session.id ?? "unknown-session";
   const cwd = session.cwd ?? session.workingDirectory ?? process.cwd();
@@ -384,9 +397,24 @@ export async function attachRelay({
   // refreshed on every heartbeat and re-sent (as session_meta) when it changes.
   let lastTitle = await fetchTitle(session);
   const logger = (message, options = {}) => logToSession(session, message, options);
+  let journal = recoveryStore;
+  if (!journal) {
+    try {
+      journal = await createSessionRecovery({
+        sessionId, onIssue: () => logger("Weft catch-up cache was reset; older missed events may be unavailable.", { level: "warning", ephemeral: false }),
+      });
+    } catch (error) {
+      logger("Weft durable catch-up is unavailable; live pairing continues with memory-only catch-up. Check access to ~/.weft.", { level: "warning", ephemeral: false });
+      appendSessionLog("recovery.storage_unavailable", { error: error.name }, { level: "error" });
+      journal = await createSessionRecovery({ sessionId, persist: false });
+    }
+  }
+  const attention = createAttentionLease();
+  const wireSubscriptions = [];
   const approvals =
     permissionRelay ??
     createPermissionRelay({ channel, logger });
+  approvals.setAvailability?.(() => attention.level !== "off");
   const elicitations = createElicitationRelay({ session, channel, logger });
   const exitPlans = createExitPlanModeRelay({ session, channel, logger });
   // In-memory recent-turns buffer: captures FULL assistant text live (the CLI store drops it for
@@ -401,6 +429,7 @@ export async function attachRelay({
   }
   const unsubscribers = [];
   let stopped = false;
+  let attached = false;
   let consecutiveSendFailures = 0;
   let connectionLostNotified = false;
   // Voice Mode (#176): while on, each relayed phone prompt is prefixed with a directive telling
@@ -418,13 +447,50 @@ export async function attachRelay({
   // `thinkingId` is the reasoning block currently streaming, or null. Both are re-sent as a pair on
   // every change so the phone never has to merge partial updates.
   const agentStatus = { text: null, thinkingId: null };
+  let lastBusy = null;
+  let recoveryWarning = false;
+  let captureChain = Promise.resolve();
+  const outbound = [];
+  let deliveryGeneration = 0;
+  let delivering = false;
+  let needsCatchUp = false;
+  let lastPeerContactAt = null;
 
-  const sendSafe = async (msg) => {
+  const captureMessage = async (msg) => {
+    if (msg.eventType === EVENT_TYPE.STREAM && msg.eventSubtype === SUBTYPE.STREAM.ACTIVITY) lastBusy = msg.msg.busy;
+    try {
+      const captured = await journal.capture(msg);
+      if (captured) msg = captured;
+    } catch (error) {
+      if (!recoveryWarning) {
+        recoveryWarning = true;
+        logger("Weft catch-up could not be saved; recovery may have gaps.", { level: "warning", ephemeral: false });
+      }
+      appendSessionLog("recovery.save_failed", { error: error.message }, { level: "error" });
+    }
+    return msg;
+  };
+  const sendSafe = async (msg, target = channel, capture = true) => {
+    if (capture) msg = await captureMessage(msg);
+    if (!channel || target !== channel) return;
+    const level = attention.level;
+    if ([EVENT_TYPE.STREAM, EVENT_TYPE.APPROVAL, EVENT_TYPE.ELICITATION].includes(msg.eventType) && level !== "detail") {
+      if (level === "compact" && msg.eventSubtype !== SUBTYPE.STREAM.ASSISTANT_DELTA && msg.eventSubtype !== SUBTYPE.STREAM.INTENT) {
+        msg = sessionStatus({
+          busy: lastBusy, epoch: journal.epoch, cursor: journal.cursor,
+          pendingApprovals: approvals.snapshotPending().length + exitPlans.snapshotPending().length,
+          pendingForms: elicitations.snapshotPending().length,
+        });
+      } else return;
+    }
+    if (msg.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT && level === "off") return;
     try {
       await channel.send(msg);
+      if (target !== channel || stopped) return;
       consecutiveSendFailures = 0;
       connectionLostNotified = false;
     } catch (err) {
+      if (target !== channel || stopped) return;
       consecutiveSendFailures += 1;
       if (
         consecutiveSendFailures >= SEND_FAILURE_RECONNECT_THRESHOLD &&
@@ -437,13 +503,57 @@ export async function attachRelay({
     }
   };
 
+  const sendEvent = async (message) => {
+    const msg = await captureMessage(message);
+    if (!channel || stopped || attention.level === "off") return;
+    const last = outbound.at(-1);
+    if (
+      msg.eventSubtype === SUBTYPE.STREAM.ASSISTANT_DELTA &&
+      last?.msg.eventSubtype === msg.eventSubtype && last.msg.msg.messageId === msg.msg.messageId &&
+      Buffer.byteLength(last.msg.msg.content + msg.msg.content) <= 32 * 1024
+    ) {
+      last.msg = { ...last.msg, msg: { ...last.msg.msg, content: last.msg.msg.content + msg.msg.content } };
+    } else outbound.push({ msg, target: channel });
+    if (outbound.length > 64) {
+      const delta = outbound.findIndex((item) => item.msg.eventSubtype === SUBTYPE.STREAM.ASSISTANT_DELTA);
+      outbound.splice(delta >= 0 ? delta : 0, 1);
+      needsCatchUp = true;
+    }
+    startDelivery();
+  };
+
+  function startDelivery() {
+    if (delivering) return;
+    delivering = true;
+    const generation = deliveryGeneration;
+    void (async () => {
+      while (!stopped && generation === deliveryGeneration && outbound.length) {
+        const item = outbound.shift();
+        await sendSafe(item.msg, item.target, false);
+      }
+      if (needsCatchUp && !stopped && generation === deliveryGeneration && channel && attention.level !== "off") {
+        needsCatchUp = false;
+        await sendSafe(sessionStatus({
+          busy: lastBusy, epoch: journal.epoch, cursor: journal.cursor,
+          pendingApprovals: approvals.snapshotPending().length + exitPlans.snapshotPending().length,
+          pendingForms: elicitations.snapshotPending().length,
+        }));
+      }
+    })().catch((error) => appendSessionLog("delivery.failed", { error: error.name }, { level: "error" }))
+      .finally(() => {
+        if (generation !== deliveryGeneration) return;
+        delivering = false;
+        if (!stopped && outbound.length) startDelivery();
+      });
+  }
+
   const supportsWorkspacePolicy = workspaceView &&
     session.rpc?.tools?.execute &&
     session.rpc?.permissions?.paths?.list &&
     session.rpc?.permissions?.paths?.isPathWithinAllowedDirectories;
   let workspaceWarning = null;
   async function readWorkspaceCapabilities() {
-    if (!supportsWorkspacePolicy) return [];
+    if (!supportsWorkspacePolicy) return [ATTENTION_CAPABILITY];
     let timer;
     try {
       await Promise.race([
@@ -454,11 +564,11 @@ export async function attachRelay({
         }),
       ]);
       workspaceWarning = null;
-      return [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY];
+      return [ATTENTION_CAPABILITY, WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY];
     } catch (error) {
       if (knownWorkspaceError(error) && error.code === "denied") {
         workspaceWarning = null;
-        return [];
+        return [ATTENTION_CAPABILITY];
       }
       const message = `Files and Changes unavailable: ${knownWorkspaceError(error)
         ? error.message : "Workspace sharing checks could not complete. Reconnect or update Weft and Copilot. No files were read."}`;
@@ -466,10 +576,9 @@ export async function attachRelay({
         workspaceWarning = message;
         await sendSafe(logLine("warning", message));
       }
-      return [];
+      return [ATTENTION_CAPABILITY];
     } finally { clearTimeout(timer); }
   }
-  await sendSafe(channelUp(cwd, lastTitle, await readWorkspaceCapabilities()));
   // This session is now attached to a phone. Publish that, so a RESUME_SESSION arriving at the
   // station for this same CLI session can be answered with "it's already running" instead of
   // forking a second `copilot --resume` onto it. Refreshed on every beat below so the station can
@@ -481,10 +590,11 @@ export async function attachRelay({
       // best-effort — losing the guard is never worth failing the session over.
     }
   };
-  markAttached();
+  if (channel) markAttached();
   const heartbeatTimer = setInterval(() => {
     void (async () => {
-      markAttached();
+      if (attached) markAttached();
+      if (!channel || attention.level === "off") return;
       // Carry the store's latest turn_index so a connected phone keeps a fresh forward cursor
       // (readLatestTurnIndex is best-effort and returns null on any read failure), plus the
       // authoritative busy flag so a dropped assistant.idle self-corrects within one beat.
@@ -515,13 +625,22 @@ export async function attachRelay({
   if (typeof session.on === "function") {
     unsubscribers.push(
       session.on((event) =>
-        void handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus),
+        {
+          captureChain = captureChain.then(() =>
+            handleSessionEvent(event, sendEvent, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus, captureMessage),
+          ).catch((error) => appendSessionLog("session.capture_failed", { error: error.name }, { level: "error" }));
+        },
       ),
     );
   }
 
-  unsubscribers.push(
+  function bindSubscriptions() {
+  if (!channel) return;
+  const boundChannel = channel;
+  const reply = (message) => sendSafe(message, boundChannel);
+  wireSubscriptions.push(
     channel.onEvent(EVENT_TYPE.PROMPT, (msg) => {
+      lastPeerContactAt = Date.now();
       if (msg?.eventSubtype !== SUBTYPE.PROMPT.PROMPT || typeof msg.msg?.text !== "string") return;
       const body = msg.msg;
       // Voice Mode (#176): prepend a spoken-response directive so the agent replies for LISTENING.
@@ -564,13 +683,29 @@ export async function attachRelay({
     }),
   );
 
-  unsubscribers.push(
+  wireSubscriptions.push(
     channel.onEvent(EVENT_TYPE.CONTROL, (msg) => {
+      lastPeerContactAt = Date.now();
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.WATCH_REQUEST) {
+        void (async () => {
+          const ack = attention.update(msg.msg);
+          if (ack) await reply(watchState(ack.watchId, ack.level, ack.leaseMs));
+        })().catch((error) => logger(`Weft watch request failed: ${error.message}`, { level: "warning" }));
+        return;
+      }
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.RECOVERY_REQUEST) {
+        void (async () => {
+          await captureChain;
+          const page = await journal.page(msg.msg?.epoch, msg.msg?.cursor, msg.msg?.limit);
+          await reply(recovery(page.items, page.epoch, page.cursor, page.hasMore, page.gap));
+        })().catch((error) => logger(`Weft catch-up request failed: ${error.message}`, { level: "warning" }));
+        return;
+      }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.WORKSPACE_REQUEST) {
         void (async () => {
           const input = msg.msg;
           if (!validWorkspaceRequest(input)) {
-            if (!stopped) await sendSafe(workspaceResult({
+            if (!stopped) await reply(workspaceResult({
               requestId: typeof input?.requestId === "string" ? input.requestId.slice(0, 96) : "invalid",
               error: { code: "invalid-request", message: "Invalid workspace request." },
             }));
@@ -591,24 +726,24 @@ export async function attachRelay({
               error: { code: known ? error.code : "unavailable",
                 message: known ? error.message : "Workspace preview is unavailable. Update Copilot and Weft." } });
           }
-          if (!stopped) await sendSafe(response);
+          if (!stopped) await reply(response);
         })();
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.MODE) {
-        void applyMode(session, msg.msg?.mode, logger, sendSafe);
+        void applyMode(session, msg.msg?.mode, logger, reply);
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.INTERRUPT) {
-        void applyInterrupt(session, logger, sendSafe);
+        void applyInterrupt(session, logger, reply);
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.HISTORY_REQUEST) {
-        void serveHistory(sessionId, msg.msg, sendSafe, logger);
+        void serveHistory(sessionId, msg.msg, reply, logger);
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.RECENT_TURNS_REQUEST) {
-        void serveRecentTurns(turnBuffer, msg.msg, sendSafe, logger);
+        void serveRecentTurns(turnBuffer, msg.msg, reply, logger);
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.VOICE_MODE) {
@@ -620,18 +755,54 @@ export async function attachRelay({
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.INVOKE_COMMAND) {
-        void applyCommand(session, msg.msg, logger, sendSafe);
+        void applyCommand(session, msg.msg, logger, reply);
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
-        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, readWorkspaceCapabilities });
+        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe: reply, logger, readWorkspaceCapabilities, busyFallback: lastBusy });
       }
     }),
   );
+  }
+
+  function detach() {
+    lastPeerContactAt = null;
+    deliveryGeneration++;
+    outbound.length = 0;
+    delivering = false;
+    needsCatchUp = false;
+    for (const unsubscribe of wireSubscriptions.splice(0)) unsubscribe?.();
+    approvals.rebind?.(null);
+    elicitations.rebind?.(null);
+    exitPlans.rebind?.(null);
+    channel = null;
+    attention.reset();
+  }
+
+  async function rebind(next) {
+    detach();
+    channel = next;
+    if (!channel || stopped) return;
+    const boundChannel = channel;
+    const deliveryChannel = {
+      onEvent: (...args) => boundChannel.onEvent(...args),
+      send: (msg) => channel === boundChannel ? sendEvent(msg) : Promise.resolve(),
+    };
+    approvals.rebind?.(deliveryChannel);
+    elicitations.rebind?.(deliveryChannel);
+    exitPlans.rebind?.(deliveryChannel);
+    bindSubscriptions();
+    await sendSafe(channelUp(cwd, lastTitle, await readWorkspaceCapabilities()), boundChannel);
+    if (channel !== boundChannel || stopped) return;
+    attached = true;
+    markAttached();
+  }
 
   async function stop(reason = "extension_shutdown", { closeTransport = true } = {}) {
     if (stopped) return;
     stopped = true;
+    deliveryGeneration++;
+    outbound.length = 0;
     clearInterval(heartbeatTimer);
     try {
       clearAttachedSession(sessionId);
@@ -639,6 +810,8 @@ export async function attachRelay({
       // best-effort — a stale entry self-prunes on pid death anyway.
     }
     for (const unsubscribe of unsubscribers.splice(0)) unsubscribe?.();
+    await captureChain;
+    for (const unsubscribe of wireSubscriptions.splice(0)) unsubscribe?.();
     approvals.close?.();
     elicitations.close?.();
     exitPlans.close?.();
@@ -646,14 +819,18 @@ export async function attachRelay({
     // session end (the new phone uses a different key and couldn't read it) nor close the channel.
     if (closeTransport) {
       await sendSafe(channelDown(reason));
-      await channel.close?.();
+      await channel?.close?.();
     }
+    await journal.close();
   }
 
-  return { stop, onPermissionRequest: approvals.onPermissionRequest };
+  if (channel) await rebind(channel);
+  return { stop, detach, rebind, onPermissionRequest: approvals.onPermissionRequest,
+    managementStatus: () => ({ watchLevel: attention.level, title: lastTitle, lastPeerContactAt,
+      connected: !channel ? false : lastPeerContactAt && Date.now() - lastPeerContactAt < 120_000 ? true : null }) };
 }
 
-async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus) {
+async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus, captureMessage) {
   if (event?.data?.toolName === "weft_workspace_access") return;
   if (!event?.type) return;
   const data = event.data ?? {};
@@ -737,7 +914,10 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       // consumes the phone-prompt match used only for the terminal-echo decision below.
       turnBuffer?.recordUser(text, event.ts ?? Date.now(), event.id);
       const origin = promptOrigin?.classify(text) ?? "terminal";
-      if (origin === "phone") break;
+      if (origin === "phone") {
+        await captureMessage?.(userMessage(text, "phone", event.id));
+        break;
+      }
       await sendSafe(userMessage(text, "terminal", event.id));
       break;
     }
@@ -802,6 +982,9 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
     case "session.log":
       await sendSafe(logLine(data.level ?? "info", data.message ?? data.content ?? ""));
       break;
+    case "session.error":
+      await sendSafe(logLine("error", "Copilot reported a session error. Check the local session for details."));
+      break;
     case "session.mode_changed":
       await sendSafe(modeChange(data.newMode ?? data.mode));
       break;
@@ -839,7 +1022,7 @@ async function serveRecentTurns(turnBuffer, req, sendSafe, logger) {
  * or MID-TURN join immediately shows the truth (working vs ready, current mode, latest turn cursor)
  * and re-renders any prompts still pending on the terminal — instead of waiting for the next event.
  */
-async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, readWorkspaceCapabilities }) {
+async function serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe, logger, readWorkspaceCapabilities, busyFallback = null }) {
   try {
     const [activity, mode, latestTurnIndex, capabilities] = await Promise.all([
       readSessionActivity(session),
@@ -851,7 +1034,7 @@ async function serveStateSnapshot({ session, sessionId, approvals, elicitations,
       stateSnapshot({
         capabilities,
         // A one-shot connect snapshot defaults to idle when the host can't tell us (null).
-        busy: activity?.busy ?? false,
+        busy: activity?.busy ?? busyFallback ?? false,
         abortable: activity?.abortable ?? false,
         mode,
         latestTurnIndex,
@@ -1175,14 +1358,6 @@ function previewToolResult(data = {}) {
     "";
   const text = typeof source === "string" ? source : JSON.stringify(source);
   return text.length > 2_000 ? `${text.slice(0, 2_000)}…` : text;
-}
-
-function safeJson(value) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "[unserializable]";
-  }
 }
 
 /** Shape the phone's response into the SDK's ElicitResult ({ action, content? }). */

@@ -86,7 +86,7 @@ export async function createLifecycleEndpoint(
     handlers = {},
     endpoint = runtimeEndpointAddress(identity?.runtimeInstanceId),
   },
-  { maxFrameBytes = MAX_LIFECYCLE_FRAME_BYTES, connectionTimeoutMs = 5_000 } = {},
+  { maxFrameBytes = MAX_LIFECYCLE_FRAME_BYTES, connectionTimeoutMs = 5_000, keepAlive = false } = {},
 ) {
   if (!identity || !capability) throw new Error("identity and capability are required");
   const sockets = new Set();
@@ -170,7 +170,7 @@ export async function createLifecycleEndpoint(
     server.once("listening", onListening);
     server.listen(endpoint);
   });
-  server.unref();
+  if (!keepAlive) server.unref();
   return {
     endpoint,
     get closed() {

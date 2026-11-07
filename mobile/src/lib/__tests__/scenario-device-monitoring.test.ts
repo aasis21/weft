@@ -8,6 +8,7 @@ import { registry } from '@/test/helpers/fakeWeftClient';
 import { makeManager } from '@/test/helpers/makeManager';
 import { loadDevices } from '@/lib/devices';
 import * as B from '@/test/helpers/builders';
+import { ATTENTION_CAPABILITY, WATCH_RENEW_MS } from '@aasis21/weft-shared';
 
 function listenerQr(channelId: string): string {
   return JSON.stringify({
@@ -55,6 +56,37 @@ describe('scenario: device monitoring', () => {
   afterEach(() => {
     h?.dispose();
     vi.useRealTimers();
+  });
+
+  it('leases Station compact by default, details only for monitoring, and stops all refresh on hide', async () => {
+    await h!.init();
+    await h!.manager.addByQr(listenerQr('listener-attention'));
+    const client = registry.get('listener-attention')!;
+    client.emit(B.projectList([], 'Devbox', null, [ATTENTION_CAPABILITY, 'device-monitor-v1']));
+    expect(client.sentOfKind('control.watch_request').at(-1)?.level).toBe('compact');
+    h!.manager.startDeviceMonitoring('listener-attention');
+    expect(client.sentOfKind('control.watch_request').at(-1)?.level).toBe('detail');
+    window.dispatchEvent(new Event('pagehide'));
+    expect(client.sentOfKind('control.watch_request').at(-1)?.level).toBe('off');
+    expect(client.sentOfKind('control.device_monitor_stop')).toHaveLength(1);
+    client.clearSent();
+    await vi.advanceTimersByTimeAsync(WATCH_RENEW_MS * 4);
+    expect(client.sentOfKind('control.watch_request')).toHaveLength(0);
+    expect(client.sentOfKind('control.device_monitor_start')).toHaveLength(0);
+    expect(h!.snapshot().devices[0]?.connected).toBe(true);
+    window.dispatchEvent(new Event('pageshow'));
+    expect(client.sentOfKind('control.watch_request').at(-1)?.level).toBe('compact');
+  });
+
+  it('removes a native foreground listener even when its registration settles after disposal', async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+    let register!: (handle: { remove: typeof remove }) => void;
+    vi.mocked(App.addListener).mockImplementationOnce(() => new Promise((resolve) => { register = resolve; }));
+    await h!.init();
+    h!.dispose();
+    register({ remove });
+    await h!.flush();
+    expect(remove).toHaveBeenCalledOnce();
   });
 
   it('gates by capability, renews one lease, stops it, and accepts only ordered matching snapshots', async () => {

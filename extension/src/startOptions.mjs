@@ -7,6 +7,8 @@ export function parseStartOptions(args = []) {
       options.help = true;
     } else if (arg === "--new-device" || arg === "--rotate-pairing") {
       options.newDevice = true;
+    } else if (arg === "--foreground") {
+      options.foreground = true;
     } else if (arg === "--allow-terminal") {
       throw new Error("Terminal access is enabled by default. Configure terminal.enabled in ~/.weft/weft.config.json, then run `weft start` without --allow-terminal.");
     } else {

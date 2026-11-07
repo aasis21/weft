@@ -6,6 +6,7 @@ export type TimerName =
   | 'confirm' // host-confirmation deadline (HOST_CONFIRM_MS)
   | 'settle' // bounded post-Live skeleton grace (INITIAL_HISTORY_GRACE_MS)
   | 'history' // recent-turns/history reply fail-safe (HISTORY_REQUEST_TIMEOUT_MS)
+  | 'recovery'
   | 'save' // coalesced transcript persist (PERSIST_THROTTLE_MS)
   | 'meta' // coalesced presence persist (META_PERSIST_THROTTLE_MS)
   | 'eventSave' // coalesced debug-log persist (PERSIST_THROTTLE_MS)

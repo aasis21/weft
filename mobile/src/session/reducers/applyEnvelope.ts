@@ -115,6 +115,11 @@ export function setUserFailed(session: Session, id: string, failed: boolean): vo
 }
 
 export function appendNotice(session: Session, level: LogLineMsg['level'], text: string, ts: number, id = `notice-${ts}`): void {
+  const existing = session.transcript.items.find((item) => item.id === id);
+  if (existing?.kind === 'notice') {
+    existing.text = text;
+    return;
+  }
   session.transcript.items = cap([...session.transcript.items, { kind: 'notice', id, level, text, ts }]);
 }
 
@@ -171,6 +176,7 @@ function clearAgentStatus(session: Session): void {
 }
 
 export function applyEnvelope(session: Session, message: EventEnvelope): void {
+  if (session.connection.compact) session.connection.compact = false;
   // Liveness clock: phone-local receipt time (set at the runtime edge) so heartbeat freshness is
   // measured against the SAME clock the watchdog uses (`this.clock()`). Never `message.ts` here —
   // that's the laptop's clock and cross-clock skew would flap the session idle/offline. Falls back
@@ -253,6 +259,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           applyRecentTurns(session, message.msg);
           return;
         case SUBTYPE.CONTROL.STATE_SNAPSHOT:
+          session.connection.pendingApprovals = message.msg.approvals.length;
+          session.connection.pendingForms = message.msg.elicitations.length;
           applyStateSnapshot(session, message.msg, message.ts, beatTs);
           return;
         case SUBTYPE.CONTROL.CHANNEL_UP:
@@ -318,7 +326,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
 }
 
 function upsertAssistant(session: Session, message: AssistantMessage): void {
-  const id = message.msg.messageId ?? `assistant-${message.ts}`;
+  const id = message.msg.messageId ?? (message.recoveryEpoch && message.recoverySequence
+    ? `recovery:${message.recoveryEpoch}:${message.recoverySequence}` : `assistant-${message.ts}`);
   const index = session.transcript.items.findIndex((item) => item.id === id && item.kind === 'assistant');
   if (index === -1) {
     session.transcript.items = cap([...session.transcript.items, { kind: 'assistant', id, text: message.msg.content, ts: message.ts }]);
@@ -378,7 +387,9 @@ function completeTool(session: Session, message: ToolComplete): void {
 }
 
 function pushNotice(session: Session, message: LogLine): void {
-  appendNotice(session, message.msg.level, message.msg.message, message.ts);
+  appendNotice(session, message.msg.level, message.msg.message, message.ts,
+    message.recoveryEpoch && message.recoverySequence
+      ? `recovery:${message.recoveryEpoch}:${message.recoverySequence}` : undefined);
 }
 
 /** Compare prompt text across the wire loosely — whitespace and line endings don't survive the
@@ -418,7 +429,8 @@ function promptAbsorbs(existing: string, incoming: string): boolean {
  * genuinely repeated message still shows twice (#193).
  */
 function appendUserEcho(session: Session, message: UserMessageEcho): void {
-  const id = `umsg-${message.msg.id ?? message.ts}`;
+  const id = `umsg-${message.msg.id ?? (message.recoveryEpoch && message.recoverySequence
+    ? `recovery:${message.recoveryEpoch}:${message.recoverySequence}` : message.ts)}`;
   if (session.transcript.items.some((item) => item.id === id)) return;
   const twin = session.transcript.items.find(
     (item): item is UserItem =>
@@ -435,6 +447,31 @@ function appendUserEcho(session: Session, message: UserMessageEcho): void {
     ...session.transcript.items,
     { kind: 'user', id, text: message.msg.text, ts: message.ts, origin: message.msg.origin ?? 'terminal' },
   ]);
+}
+
+/** Recovery can arrive after a live tail; retain native identities and journal ordering. */
+export function orderRecoveredEnvelope(session: Session, message: EventEnvelope): void {
+  if (!message.recoveryEpoch || !message.recoverySequence || message.eventType !== EVENT_TYPE.STREAM) return;
+  const stable = `recovery:${message.recoveryEpoch}:${message.recoverySequence}`;
+  let id: string | undefined;
+  switch (message.eventSubtype) {
+    case SUBTYPE.STREAM.ASSISTANT_MESSAGE: id = message.msg.messageId ?? stable; break;
+    case SUBTYPE.STREAM.USER_MESSAGE: id = `umsg-${message.msg.id ?? stable}`; break;
+    case SUBTYPE.STREAM.TOOL_START:
+    case SUBTYPE.STREAM.TOOL_COMPLETE: id = message.msg.toolCallId; break;
+    case SUBTYPE.STREAM.LOG: id = stable; break;
+    default: return;
+  }
+  const item = session.transcript.items.find((entry) => entry.id === id);
+  if (item) {
+    item.recoverySequence = item.recoveryEpoch === message.recoveryEpoch
+      ? Math.min(item.recoverySequence ?? message.recoverySequence, message.recoverySequence)
+      : message.recoverySequence;
+    item.recoveryEpoch = message.recoveryEpoch;
+  }
+  session.transcript.items.sort((a, b) =>
+    (a.recoveryEpoch === b.recoveryEpoch && a.recoverySequence && b.recoverySequence
+      ? a.recoverySequence - b.recoverySequence : 0) || a.ts - b.ts);
 }
 
 function applyRecentTurns(session: Session, message: RecentTurnsMsg): void {

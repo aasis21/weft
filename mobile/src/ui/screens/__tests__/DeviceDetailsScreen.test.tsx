@@ -817,6 +817,7 @@ describe('DeviceDetailsScreen monitoring', () => {
       fireEvent.click(trigger);
       fireEvent.change(screen.getByLabelText('Text to send to laptop'), { target: { value: 'private draft' } });
       await act(async () => Promise.resolve());
+      const utilityAppListenerRemove = removers.appStateChange;
       if (eventName === 'visibilitychange') {
         vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
         fireEvent(document, new Event('visibilitychange'));
@@ -824,7 +825,7 @@ describe('DeviceDetailsScreen monitoring', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
       expect(view.props.onCloseDeviceClipboard).toHaveBeenCalledWith('chan-1');
       expect(removers.backButton).toHaveBeenCalled();
-      expect(removers.appStateChange).toHaveBeenCalled();
+      expect(utilityAppListenerRemove).toHaveBeenCalled();
       expect(trigger).toHaveFocus();
     });
   });

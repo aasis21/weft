@@ -13,7 +13,10 @@ const activeRuntimeOutfile = "dist/activeRuntime.mjs";
 // version with zero runtime file reads (see src/version.mjs). `define` replaces the bare
 // `__WEFT_VERSION__` identifier token with this string literal at build time.
 const version = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim();
-const define = { __WEFT_VERSION__: JSON.stringify(version) };
+const define = {
+  __WEFT_VERSION__: JSON.stringify(version),
+  __WEFT_CONTROL_ICON__: JSON.stringify(readFileSync(new URL("../mobile/public/icon-192.png", import.meta.url)).toString("base64")),
+};
 
 await build({
   entryPoints: ["src/extension.mjs"],

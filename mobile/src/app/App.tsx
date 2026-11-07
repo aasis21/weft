@@ -61,6 +61,16 @@ export default function App(): JSX.Element {
   const [addManual, setAddManual] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const onChatVisibilityChange = useCallback((id: string | null): void => {
+    sessionRuntime.setChatVisible(id);
+  }, []);
+  useEffect(() => {
+    if (!snapshot.ready || adding || starting || showLanding || devicesOpen ||
+        deviceDetailsChannelId || terminalChannelId || !snapshot.sessions.length) {
+      sessionRuntime.setChatVisible(null);
+    }
+  }, [snapshot.ready, snapshot.sessions.length, adding, starting, showLanding,
+    devicesOpen, deviceDetailsChannelId, terminalChannelId]);
 
   const removeSession = useCallback((channelId: string): void => {
     const operationId = snapshot.sessions.find((session) => session.meta.channelId === channelId)
@@ -547,6 +557,7 @@ export default function App(): JSX.Element {
 
   const sessionScreen = (
     <SessionScreen
+      onChatVisibilityChange={onChatVisibilityChange}
       onWorkspaceRequest={requestWorkspace}
       active={active}
       sessions={snapshot.sessions}

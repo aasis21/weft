@@ -140,7 +140,10 @@ configured yet.
 Developers who need to build the native shell from source can run `npx cap sync android`
 and use Android Studio, but that build is not a distributed release APK.
 
-**3. Pair and drive it.** Run `weft start` and leave the Device Station terminal open.
+**3. Pair and drive it.** Run `weft start`. On Windows you can close its terminal once
+startup succeeds; Station continues in a manually started per-user background task.
+Use `weft status` and `weft stop` to manage it. For terminal-owned operation, use
+`weft start --foreground`; other platforms retain foreground mode.
 Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
 code. The phone can then start or resume Copilot sessions in registered projects.
 For a source-built phone UI, use your HTTPS development deployment instead.
@@ -164,6 +167,41 @@ as a substitute for diagnosing a relay problem.
 After `/clear`, the replacement Copilot session starts dormant and must be activated
 again through Device Station or a new `/weft` QR.
 See [advanced usage](./advanced.md) for per-session transport overrides.
+
+### Laptop Control Center
+
+After installing your source build, run `weft ui`. The default browser opens a
+private, loopback-only dashboard; all assets are bundled with the CLI, with no
+separate frontend server or repository checkout required. It exposes Station/relay
+start, stop and restart, project registration/defaults, settings, local session
+activation/disconnection, Station-mediated session launch, pairing and update checks.
+
+Opening the dashboard starts only its local host. Viewing sessions does not activate
+them. Closing the page leaves Station, relay and Copilot running; the unused UI host
+expires after five minutes without requests once accepted operations finish.
+`weft ui status` checks the host and `weft ui stop` stops it without touching workloads.
+
+On Windows, normal installation adds **Weft Control Center** to Start.
+`weft ui shortcut` adds a desktop shortcut. Shortcut targets use installed code,
+not a fixed localhost port or pairing URL. Foreground-owned workloads must be managed
+in their owning terminal; the UI does not silently take ownership or kill them.
+Other platforms can use local configuration/session views but retain foreground
+workload commands.
+
+Dev Tunnel sign-in remains an explicit terminal step when required:
+`devtunnel user login -g`. Browser start does not wait on hidden terminal prompts.
+Configuration changes explain restart requirements. Stop Relay and trust replacement
+require confirmation; unregistering a folder removes only its shortcut registration.
+
+Phone connectivity is based on recent authenticated peer traffic, not a saved
+pairing record. When no recent evidence is available, the panel reports unknown;
+watch level and runtime activation are displayed separately. The Control Center
+does not show transcripts or provide an arbitrary command/file browser.
+
+Installer-source overrides, clean-install and actual code updates remain terminal
+operations. Update checks read the published release manifest, not session content.
+Do not use `weft update` to test an unreleased source change; install the source build
+explicitly through the documented source installer.
 
 > The web app is a static build of `mobile/dist`; the docs site is the separate
 > `docs/` tree on GitHub Pages. The phone reads relay details from its pairing QR,
@@ -275,11 +313,11 @@ registry (`~/.weft/devtunnel.json`) and uses whatever's running.
 itself when one isn't already healthy (see
 [Self-provisioning with `weft start`](#self-provisioning-with-weft-start) below).
 
-**Two-terminal flow** (after `weft set-transport devtunnel`):
+**Explicit relay flow** (after `weft set-transport devtunnel`):
 
 ```sh
-# terminal 1 — bring up the shared relay (owns the devtunnel CLI, login, and lifecycle)
-weft devtunnel start          # blocks with a live status line until healthy
+# bring up the shared relay; Windows returns after background readiness
+weft devtunnel start
 
 # terminal 2 — pair as usual; /weft picks up the running relay
 copilot                       # then run /weft inside the session
@@ -287,14 +325,13 @@ copilot                       # then run /weft inside the session
 weft start
 ```
 
-The shared relay is a child of the terminal that ran `weft devtunnel start` — keep that
-terminal open for as long as you want the tunnel up; Ctrl+C (or closing it) stops the
-relay and deletes the cloud tunnel. Every other session on the machine (any Copilot CLI,
-`weft start`, etc.) discovers and reuses it via `~/.weft/devtunnel.json`. Running
-`weft devtunnel start` from a second terminal attaches as a watcher — its Ctrl+C only
-exits the watcher, it doesn't touch the running relay. Use `weft devtunnel status` to
-check whether one's already up before opening a new owning terminal, and
-`weft devtunnel stop` from anywhere to force it down.
+On Windows the shared relay is supervised by a manually started Scheduled Task.
+Closing the launching terminal does not stop it. Repeated starts reuse the workload,
+not competing provisioners. Use `weft devtunnel status` for health and
+`weft devtunnel stop` to disable restart before stopping it.
+Foreground mode (`weft devtunnel start --foreground`) and other platforms retain a
+terminal-owned relay. Every activated session discovers it through
+`~/.weft/devtunnel.json`; `/weft` never starts infrastructure.
 
 If you run `/weft` with `transport = devtunnel` and no relay is running, pairing fails
 fast with an actionable error pointing you at `weft devtunnel start`. This is deliberate
@@ -302,7 +339,20 @@ fast with an actionable error pointing you at `weft devtunnel start`. This is de
 
 ### Self-provisioning with `weft start`
 
-`weft start` on the `devtunnel` transport is single-terminal: before it starts pairing it
+On Windows, `weft start` validates configuration/projects and completes any required
+interactive sign-in, then starts the shared background relay and background Station.
+Neither task has boot/sign-in triggers. A failed workload restarts under the same
+signed-in user's limited permissions. Station stopping leaves the relay available.
+
+The relay manager checks local service health and public forwarding every 30 seconds.
+An unreachable network does not cause endpoint replacement; repeated public rejection
+or a dead relay triggers recovery. Saved tunnel ID and local port are preferred.
+An endpoint change is explicit: `weft status` reports `endpoint-refresh-needed` and
+`weft start` retrieves the updated QR. Direct sessions similarly ask for `/weft` when
+their shared endpoint changes. Ordinary reconnects retain trust and use a fresh secure
+handshake automatically, without scanning.
+
+In foreground mode, `weft start` on the `devtunnel` transport:
 
 1. **reuses** an already-healthy relay from `~/.weft/devtunnel.json` if there is one (and
    then never touches its lifetime — the owning terminal still owns it), otherwise

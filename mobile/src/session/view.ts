@@ -9,6 +9,7 @@ export type { SessionMeta, SessionStatus };
  * kept structurally identical to the pre-refactor manager view so the UI is untouched by the port.
  */
 export interface SessionView {
+  needsAttention?: number;
   workspaceCapabilities?: string[];
   meta: SessionMeta;
   status: SessionStatus;

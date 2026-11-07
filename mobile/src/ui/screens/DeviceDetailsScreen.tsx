@@ -281,7 +281,7 @@ export function DeviceDetailsScreen({
   }, [device.channelId, online, clipboardSupported, keepAwakeSupported]);
 
   useEffect(() => {
-    if (!monitoringSupported || !online) {
+    if (!monitoringSupported || !online || logOpen || settingsOpen || drawerOpen || utility !== null) {
       onStopMonitoring(device.channelId);
       return;
     }
@@ -294,20 +294,33 @@ export function DeviceDetailsScreen({
     };
     syncMonitoring();
     document.addEventListener('visibilitychange', syncMonitoring);
+    const onPageHide = (): void => {
+      appActive = false;
+      onStopMonitoring(device.channelId);
+    };
+    const onPageShow = (): void => {
+      appActive = true;
+      syncMonitoring();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       appActive = isActive;
       syncMonitoring();
     }).then((handle) => {
       if (disposed) void handle.remove();
       else removeAppListener = () => void handle.remove();
-    });
+    }).catch(() => { /* Browser visibility still governs monitoring without a native bridge. */ });
     return () => {
       disposed = true;
       removeAppListener?.();
       document.removeEventListener('visibilitychange', syncMonitoring);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       onStopMonitoring(device.channelId);
     };
-  }, [device.channelId, monitoringSupported, online, onStartMonitoring, onStopMonitoring]);
+  }, [device.channelId, monitoringSupported, online, logOpen, settingsOpen, drawerOpen, utility,
+    onStartMonitoring, onStopMonitoring]);
 
   useEffect(() => {
     if (!menuOpen) return;

@@ -32,6 +32,22 @@ after three days unless a live runtime or unresolved operation still references 
 A `/weft` pairing inside one Copilot session uses an ephemeral identity that ends with
 that session.
 
+An activated session also keeps a local missed-event cache under `~/.weft/recovery/`.
+It contains user messages, completed assistant messages, and generic tool
+started/completed/failed summaries. It excludes token deltas, reasoning, raw tool
+arguments/results, workspace previews, and terminal output. This cache is plaintext
+in the user-private laptop directory, not a diagnostic log; recovery travels only
+over the paired encrypted channel. Retention is three days, up to 2,000 events or
+10 MiB per session, with oldest-cache eviction against a 100 MiB machine budget.
+Removing the recovery directory deletes laptop catch-up without resetting pairing.
+Current approvals and forms are obtained from live session state, not replayed as
+historical actions.
+
+Windows background Station and relay tasks run with the signed-in user's existing
+permissions. They start only when requested, have no boot/sign-in triggers, and
+restart failed workloads. `weft stop` and `weft devtunnel stop` disable their
+respective restart paths before stopping them.
+
 Files and Changes transfer workspace or session-touched names only when requested, and selected file
 contents or patches only when opened or refreshed. Weft's configured sharing roots
 and exclusions, Copilot's native approval, and directory grants apply. Laptop preview snapshots are bounded,
@@ -128,3 +144,20 @@ into its local session data.
 
 See [`docs/security.md`](docs/security.md) for the threat model and
 [`SUPPORT.md`](SUPPORT.md) for cleanup and issue-reporting guidance.
+## Local Control Center
+
+`weft ui` serves an optional laptop management interface on loopback only. Its
+private bootstrap authorizes a same-origin browser session; configuration and
+session-status requests require that authorization. A private host registry lives
+under `~/.weft/control-center.json` and is removed when the host closes.
+
+The dashboard displays local project paths, user-selected session names, connection
+state and configuration to the authorized local browser. Pairing payloads are
+requested only in explicit pairing flows, never general status or diagnostic logs.
+The UI does not upload this data or load third-party scripts. Update checks contact
+the configured Weft release origin. Browser history can retain the private initial
+bootstrap address; treat it as sensitive while that host is running.
+
+The shared management layer uses a local operation lock and existing authenticated
+worker/session control. It adds no remote authority, transcript viewer, arbitrary
+shell endpoint, boot trigger, or always-running tray process.

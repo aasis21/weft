@@ -86,6 +86,18 @@ function renderScreen(status: 'live' | 'connecting' | 'idle' | 'ended') {
   return renderActive(active);
 }
 
+it('reports the mounted chat as detail-visible, but not Explore or a replacing modal', () => {
+  const visible = vi.fn();
+  const view = renderActive(makeSession('live'), { onChatVisibilityChange: visible });
+  expect(visible).toHaveBeenLastCalledWith('session-a');
+  fireEvent.click(screen.getByTestId('status-remove'));
+  expect(visible).toHaveBeenLastCalledWith(null);
+  view.unmount();
+  visible.mockClear();
+  renderActive(makeSession('live'), { exploreOpen: true, onChatVisibilityChange: visible });
+  expect(visible).toHaveBeenLastCalledWith(null);
+});
+
 function renderActive(active: ReturnType<typeof makeSession>, overrides: Partial<Parameters<typeof SessionScreen>[0]> = {}) {
   return render(
     <SessionScreen

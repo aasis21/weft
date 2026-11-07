@@ -205,6 +205,7 @@ function formatDuration(ms: number): string {
 }
 
 interface SessionScreenProps {
+  onChatVisibilityChange?(channelId: string | null): void;
   onWorkspaceRequest?: ((command: WorkspaceCommand, signal?: AbortSignal) => Promise<WorkspaceData>) | undefined;
   active: SessionView;
   sessions: SessionView[];
@@ -251,6 +252,7 @@ interface SessionScreenProps {
 }
 
 export function SessionScreen({
+  onChatVisibilityChange,
   active,
   sessions,
   activeId,
@@ -624,6 +626,15 @@ export function SessionScreen({
     confirmRemoveId !== null ||
     timeline.approvals.length > 0 ||
     timeline.elicitations.length > 0;
+
+  useEffect(() => {
+    // Inline approvals/forms are part of the watched conversation, not navigation away from it.
+    const hidden = exploreOpen || workspaceRoute !== null || settingsOpen || debugOpen ||
+      (!isDesktopWide && drawerOpen) || voiceOpen || voxOpen || confirmRemoveId !== null;
+    onChatVisibilityChange?.(hidden ? null : activeId);
+    return () => onChatVisibilityChange?.(null);
+  }, [activeId, exploreOpen, workspaceRoute, settingsOpen, debugOpen, drawerOpen,
+    isDesktopWide, voiceOpen, voxOpen, confirmRemoveId, onChatVisibilityChange]);
 
   const cancelDiscoverPreview = (): void => {
     discoverGestureRef.current = null;

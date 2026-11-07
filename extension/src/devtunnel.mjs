@@ -458,7 +458,7 @@ export async function healthyRegistryEntry(baseDir, { verifyPublic = false } = {
  * is NOT respawned on retry, only re-polled, since it keeps running/working regardless of how
  * long we watch it.
  */
-export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}) {
+export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry, interactive = true } = {}) {
   // verifyPublic: a relay whose tunnel has stopped forwarding looks perfectly healthy from here
   // (own pid alive, own port listening) but 404s for every phone that dials it. Catching that at
   // the reuse decision is what makes a wedged relay self-heal on the next `weft start` instead of
@@ -476,7 +476,11 @@ export async function ensureDevTunnelRelay({ baseDir, onProgress, onRetry } = {}
         "  3. Re-run `weft devtunnel start`.",
     );
   }
-  await ensureDevTunnelLogin(bin, { onProgress });
+  if (interactive) {
+    await ensureDevTunnelLogin(bin, { onProgress });
+  } else if (!(await isDevTunnelLoggedIn(bin))) {
+    throw new Error("Dev Tunnel sign-in is required. Run `devtunnel user login -g`, then retry the Weft start command.");
+  }
 
   // Stale-but-claiming-alive relay: the registry says a relay is running (pid alive) yet the
   // health probe above failed — e.g. the relay wedged, or its port was taken over. Spawning a

@@ -31,6 +31,7 @@ const runtime = vi.hoisted(() => {
     events: [],
   };
   return {
+    setChatVisible: vi.fn(),
     snapshot: {
       ready: true,
       activeId: 'channel-1',
@@ -51,6 +52,7 @@ vi.mock('@/session/runtime/instance', () => {
       retry: noOp,
     },
     sessionRuntime: {
+      setChatVisible: runtime.setChatVisible,
       subscribe: () => () => {},
       getSnapshot: () => runtime.snapshot,
       init: () => Promise.resolve(),
@@ -125,6 +127,7 @@ vi.mock('@/ui/screens/SessionScreen', () => ({
 }));
 
 beforeEach(() => {
+  runtime.setChatVisible.mockClear();
   window.history.replaceState(null, '');
 });
 

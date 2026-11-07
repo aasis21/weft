@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import {
+  ATTENTION_CAPABILITY,
   DEVICE_CAPABILITY,
   EVENT_TYPE,
   SUBTYPE,
@@ -218,6 +219,7 @@ test("device utility capabilities independently reflect injected platform suppor
       t.after(() => h.listener.stop());
       const list = h.messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST);
       assert.deepEqual(list.msg.capabilities, [
+        ATTENTION_CAPABILITY,
         DEVICE_CAPABILITY.MONITOR_V1,
         ...(clipboardPlatform === "win32" ? [DEVICE_CAPABILITY.CLIPBOARD_V1] : []),
         ...(powerPlatform === "win32" ? [DEVICE_CAPABILITY.KEEP_AWAKE_V1] : []),
@@ -439,6 +441,7 @@ test("emits PROJECT_LIST when the phone pairs", async () => {
   assert.ok(list.msg.deviceName);
   assert.equal(list.msg.deviceId, "test-device");
   assert.deepEqual(list.msg.capabilities, [
+    ATTENTION_CAPABILITY,
     DEVICE_CAPABILITY.MONITOR_V1,
     DEVICE_CAPABILITY.SESSION_ACTIVATION_V1,
   ]);

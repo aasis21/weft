@@ -7,7 +7,6 @@ import {
   randomChannelId,
   buildPairingPayload,
   createPairingGate,
-  listenForPeers,
 } from "@aasis21/weft-shared";
 import { createTransportFromDescriptor, resolveTransportByName, resolveTransport, SUPPORTED_TRANSPORT_NAMES } from "./transportFactory.mjs";
 import { attachRelay, createPermissionRelay } from "./relay.mjs";
@@ -22,6 +21,7 @@ import {
 } from "./handoffIdentity.mjs";
 import { updateLaunchOperation } from "./launchOperations.mjs";
 import { createWorkspaceView } from "./workspaceView.mjs";
+import { openPairedEndpoint } from "./pairedEndpoint.mjs";
 
 export function activationControllerDecision({
   controllerDeviceId = null,
@@ -160,6 +160,10 @@ function buildCurrentPairingPayload() {
 }
 
 let relayHandle = null;
+let relayInitialization = null;
+let endpointTimer = null;
+let checkingEndpoint = false;
+let endpointNeedsRefresh = false;
 let permissionRelay = null;
 let shuttingDown = false;
 let connecting = false;
@@ -232,6 +236,7 @@ const showPairing = async (context) => {
 
 async function preparePairing({ transport, refresh = false } = {}) {
   if (shuttingDown) throw new Error("This Copilot session has ended.");
+  await ensureSessionRelay();
   const paired = Boolean(pairingGate?.claimedPeerPublicKeyB64);
   if (paired && transport && transport !== transportDescriptor?.kind && !refresh) {
     throw new Error("Use New pairing code to confirm changing the connected phone's transport.");
@@ -410,17 +415,13 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
       }
       const transport = createTransportFromDescriptor(transportDescriptor, { channelId });
       try {
-        const listener = await listenForPeers({
+        const listener = await openPairedEndpoint({
           transport,
           keyPair: laptopKeys,
           connect: true,
           channelId,
           pairingGate,
-          onAck: ({ ok, error, peer }) => {
-            process.stderr.write(
-              `Weft: pairing ack ${ok ? "sent" : "failed"} pid=${process.pid} channel=${channelId.slice(0, 8)} peer=${peer.senderName ?? peer.deviceId ?? "unknown"}${error ? ` error=${error.message ?? error}` : ""}\n`,
-            );
-          },
+          onDisconnected: requestReconnect,
           onPeer: (info) => generation === pairingGeneration
             ? onPeerPaired(transport, info)
             : undefined,
@@ -432,9 +433,6 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
         }
         pairingStop = listener.stop;
         activeTransport = transport;
-        activeStatusStop = transport.onStatus?.((status, detail) => {
-          if (status === "disconnected") requestReconnect(detail);
-        }) ?? null;
         appendSessionLog(reconnect ? "pairing.reconnected" : "pairing.ready", { channel: channelId?.slice(0, 8) });
         if (durableLaunchHandoff) {
           await updateLaunchOperation(
@@ -443,31 +441,14 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
             { ownerToken: launchOperationOwnerToken },
           );
         }
-        session.log?.(
-          reconnect
-            ? "Weft: reconnected."
-            : "Weft: pairing channel ready; listening for phone hellos…",
-        );
         return true;
       } catch (err) {
         await closeQuietly(transport);
         if (shuttingDown) return false;
-        if (!identityFileWasPresent && attempt >= maxAttempts) {
+        if (!identityFileWasPresent && attempt === maxAttempts) {
           appendSessionLog("pairing.subscribe_failed", { attempts: attempt, error: err?.message ?? String(err) }, { level: "error" });
-          process.stderr.write(
-            `Weft: encrypted channel not ready after ${attempt} attempts: ${err?.message ?? err}\n`,
-          );
-          session.log?.(
-            `Weft: pairing channel could not subscribe after ${attempt} attempts: ${err?.message ?? err}. Run /weft to retry.`,
-            { level: "warning", ephemeral: false },
-          );
-          return false;
         }
         const backoffMs = Math.min(1500 * 2 ** (attempt - 1), 15_000);
-        session.log?.(
-          `Weft: pairing channel subscribe attempt ${attempt} failed (${err?.message ?? err}); retrying in ${Math.round(backoffMs / 1000)}s…`,
-          { level: "warning", ephemeral: false },
-        );
         await sleep(backoffMs);
       }
     }
@@ -482,8 +463,9 @@ function requestReconnect(detail) {
   if (shuttingDown || reconnecting) return;
   reconnecting = true;
   appendSessionLog("connection.lost", { reason: detail?.reason ?? detail ?? "unknown" }, { level: "warn" });
-  session.log?.("Weft: connection lost, reconnecting…", { level: "warning", ephemeral: false });
-  void reconnectRelay(detail).finally(() => {
+  void reconnectRelay(detail).catch((error) => {
+    appendSessionLog("connection.recovery_failed", { error: error.name }, { level: "error" });
+  }).finally(() => {
     reconnecting = false;
   });
 }
@@ -511,8 +493,6 @@ async function teardownRelay(reason) {
   activeStatusStop = null;
   pairingStop = null;
   activeTransport = null;
-  relayHandle = null;
-  permissionRelay = null;
   currentPeerPub = null;
   currentHandshakeNonce = null;
   try {
@@ -522,9 +502,9 @@ async function teardownRelay(reason) {
   }
   if (previousRelay) {
     try {
-      await previousRelay.stop(reason, { closeTransport: false });
-    } catch {
-      // best-effort; reconnect must continue.
+      previousRelay.detach();
+    } catch (error) {
+      appendSessionLog("connection.detach_failed", { error: error.name, reason }, { level: "error" });
     }
   }
   await closeQuietly(previousTransport);
@@ -536,10 +516,6 @@ async function teardownRelay(reason) {
 function onPeerPaired(transport, info) {
   pairChain = pairChain.then(() => attachForPeer(transport, info)).catch((err) => {
     appendSessionLog("pairing.repair_failed", { error: err?.message ?? String(err) }, { level: "warn" });
-    session.log?.(`Weft: re-pair failed: ${err?.message ?? err}`, {
-      level: "warning",
-      ephemeral: false,
-    });
   });
   return pairChain;
 }
@@ -554,17 +530,9 @@ async function attachForPeer(transport, { key, peer }) {
     return;
   }
 
-  const previous = relayHandle;
-  relayHandle = null;
+  const previousDeviceId = currentPeerDeviceId;
   currentPeerPub = null;
-  if (previous) {
-    // Tear down the old peer's relay but keep the shared transport open for this new phone.
-    try {
-      await previous.stop("repair", { closeTransport: false });
-    } catch {
-      // best-effort; a failed teardown must not block the new pairing.
-    }
-  }
+  await ensureSessionRelay();
   if (shuttingDown || transport !== activeTransport) return;
 
   const channel = new SecureChannel({
@@ -577,35 +545,22 @@ async function attachForPeer(transport, { key, peer }) {
       senderName: "Copilot",
     },
   });
-  const permissions = createPermissionRelay({
-    channel,
-    logger: (message, options) => session.log?.(message, options),
-  });
-  permissionRelay = permissions;
   // SupabaseTransport is subscribe-order independent (single catch-all broadcast listener +
   // internal dispatch), so attachRelay may register SecureChannel handlers after the channel is
   // already connected without losing events.
-  const relay = await attachRelay({
-    session,
-    channel,
-    channelId,
-    permissionRelay: permissions,
-    onConnectionLost: requestReconnect,
-    workspaceView,
-  });
+  const relay = relayHandle;
+  await relay.rebind(channel);
   if (shuttingDown || transport !== activeTransport) {
-    permissions.close();
-    if (permissionRelay === permissions) permissionRelay = null;
-    await relay.stop("pairing-replaced", { closeTransport: false });
+    relay.detach();
     return;
   }
-  permissionRelay = permissions;
   relayHandle = relay;
   relayHandle.session = session;
   currentPeerPub = peer.publicKeyB64;
   currentHandshakeNonce = peer.handshakeNonce ?? null;
   currentPeerDeviceId = peer.deviceId ?? null;
   currentPeerName = peer.senderName ?? null;
+  endpointNeedsRefresh = false;
   if (durableLaunchHandoff) {
     try {
       persistHandoffController(identityFileEnv, {
@@ -626,6 +581,7 @@ async function attachForPeer(transport, { key, peer }) {
         { level: "warning", ephemeral: false },
       );
     }
+
   }
   // The phone has adopted this session — it's no longer a "pending" offer, so withdraw it from the
   // station registry (and the station drops it from its advertised set on its own SESSION_CLAIMED
@@ -640,9 +596,43 @@ async function attachForPeer(transport, { key, peer }) {
   }
   consumeHandoffFile();
   appendSessionLog("device.paired", { phone: peer.senderName ?? peer.deviceId ?? "unknown" });
-  session.log?.(
+  if (!previousDeviceId) session.log?.(
     `${ui.lime("✓ Phone paired")} — ${peer.senderName ?? peer.deviceId ?? "your phone"} is now mirroring this session.`,
   );
+}
+
+async function ensureSessionRelay() {
+  if (relayHandle) return relayHandle;
+  if (!relayInitialization) relayInitialization = (async () => {
+    permissionRelay = createPermissionRelay({
+      channel: null, logger: (message, options) => session.log?.(message, options),
+    });
+    relayHandle = await attachRelay({
+      session, channel: null, channelId, permissionRelay,
+      onConnectionLost: requestReconnect, workspaceView,
+    });
+    relayHandle.session = session;
+    endpointTimer = setInterval(() => {
+      if (shuttingDown || checkingEndpoint || transportDescriptor?.kind !== "devtunnel") return;
+      checkingEndpoint = true;
+      void (async () => {
+        const next = await resolveDevTunnelTransport();
+        if (shuttingDown || next.url === transportDescriptor?.url) return;
+        transportDescriptor = next;
+        pairingPayload = buildCurrentPairingPayload();
+        if (!endpointNeedsRefresh) {
+          endpointNeedsRefresh = true;
+          session.log?.("Weft endpoint changed. Run `/weft` to refresh the pairing code.", { level: "warning", ephemeral: false });
+        }
+        await reconnectRelay();
+      })().catch((error) => {
+        appendSessionLog("endpoint.lookup_unavailable", { error: error.name }, { level: "warn" });
+      }).finally(() => { checkingEndpoint = false; });
+    }, 15_000);
+    endpointTimer.unref?.();
+    return relayHandle;
+  })().finally(() => { relayInitialization = null; });
+  return relayInitialization;
 }
 
 // Tear everything down once: stop the pairing listener, stop the relay (which announces the session
@@ -650,6 +640,9 @@ async function attachForPeer(transport, { key, peer }) {
 async function shutdown(reason, { preserveIdentity = false } = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(endpointTimer);
+  endpointTimer = null;
+  if (relayInitialization) await relayInitialization;
   if (workspace) (await workspace).close();
   if (pairingGrantRefreshTimer) clearTimeout(pairingGrantRefreshTimer);
   pairingGrantRefreshTimer = null;
@@ -672,9 +665,8 @@ async function shutdown(reason, { preserveIdentity = false } = {}) {
     } catch {
       // best-effort
     }
-  } else {
-    await closeQuietly(activeTransport);
   }
+  await closeQuietly(activeTransport);
   await stopDevTunnel().catch(() => {});
 }
 
@@ -782,6 +774,7 @@ async function logPairing(session, payload, { full = false } = {}) {
 }
 
 async function activate({ showQr = false, context = null } = {}) {
+  await ensureSessionRelay();
   const requesterId =
     typeof context?.requesterId === "string" && context.requesterId.trim()
       ? context.requesterId.trim()
@@ -826,12 +819,16 @@ async function activate({ showQr = false, context = null } = {}) {
 
 function status() {
   return {
-    state: currentPeerPub ? "active" : pairingStop ? "pairing-ready" : "activating",
+    state: endpointNeedsRefresh && !currentPeerPub ? "endpoint-refresh-needed" : currentPeerPub ? "active" : pairingStop ? "pairing-ready" : "activating",
     paired: Boolean(pairingGate?.claimedPeerPublicKeyB64),
     phoneName: currentPeerName,
     pairingPayload,
     sessionId: session.sessionId || null,
     pid: process.pid,
+    connected: currentPeerPub ? relayHandle?.managementStatus?.().connected ?? null : false,
+    watchLevel: relayHandle?.managementStatus?.().watchLevel ?? null,
+    title: relayHandle?.managementStatus?.().title ?? null,
+    cwd: session.cwd ?? session.workingDirectory ?? null,
   };
 }
 

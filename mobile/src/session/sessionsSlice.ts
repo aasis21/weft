@@ -17,6 +17,7 @@ import type {
 import type { DeviceHealthCache } from '@/lib/devices';
 import {
   applyEnvelope,
+  orderRecoveredEnvelope,
   appendNotice,
   appendUser,
   dismissApproval,
@@ -75,6 +76,29 @@ function isUnreadActivity(message: EventEnvelope): boolean {
     default:
       return false;
   }
+}
+
+function alreadyRetained(session: Session, message: EventEnvelope): boolean {
+  if (message.eventType === EVENT_TYPE.STREAM) {
+    switch (message.eventSubtype) {
+      case SUBTYPE.STREAM.ASSISTANT_MESSAGE:
+        return session.transcript.items.some((item) => item.kind === 'assistant' &&
+          item.id === message.msg.messageId && item.text === message.msg.content);
+      case SUBTYPE.STREAM.TOOL_START:
+        return session.transcript.items.some((item) => item.kind === 'tool' && item.id === message.msg.toolCallId);
+      case SUBTYPE.STREAM.TOOL_COMPLETE:
+        return session.transcript.items.some((item) => item.kind === 'tool' &&
+          item.id === message.msg.toolCallId && item.status === (message.msg.success ? 'success' : 'error') &&
+          item.resultPreview === message.msg.resultPreview);
+    }
+  }
+  if (message.eventType === EVENT_TYPE.APPROVAL && message.eventSubtype === SUBTYPE.APPROVAL.REQUEST) {
+    return session.requests.approvals.some((request) => request.requestId === message.msg.requestId);
+  }
+  if (message.eventType === EVENT_TYPE.ELICITATION && message.eventSubtype === SUBTYPE.ELICITATION.REQUEST) {
+    return session.requests.elicitations.some((request) => request.requestId === message.msg.requestId);
+  }
+  return false;
 }
 
 function mergeSessions(keep: Session, drop: Session, channelId: string): void {
@@ -463,10 +487,11 @@ const sessionsSlice = createSlice({
       sessionsAdapter.removeOne(state, action.payload);
       if (state.activeId === action.payload) state.activeId = null;
     },
-    sessionActivated(state, action: PayloadAction<string>) {
-      state.activeId = action.payload;
-      const session = state.entities[action.payload];
-      if (session) {
+    sessionActivated(state, action: PayloadAction<string | { id: string; viewed: boolean }>) {
+      const id = typeof action.payload === 'string' ? action.payload : action.payload.id;
+      state.activeId = id;
+      const session = state.entities[id];
+      if (session && (typeof action.payload === 'string' || action.payload.viewed)) {
         session.unread = false;
         session.unreadCount = 0;
       }
@@ -485,13 +510,17 @@ const sessionsSlice = createSlice({
       sessionsAdapter.removeOne(state, duplicate.id);
       if (state.activeId === duplicate.id) state.activeId = incoming.id;
     },
-    envelopeReceived(state, action: PayloadAction<{ id: string; envelope: EventEnvelope }>) {
+    envelopeReceived(state, action: PayloadAction<{ id: string; envelope: EventEnvelope; visible?: boolean; countUnread?: boolean }>) {
       const session = state.entities[action.payload.id];
       if (!session) return;
+      const duplicate = alreadyRetained(session, action.payload.envelope);
+      const compact = session.connection.compact;
       applyEnvelope(session, action.payload.envelope);
-      if (isUnreadActivity(action.payload.envelope)) {
+      if (action.payload.countUnread === false && compact) session.connection.compact = true;
+      orderRecoveredEnvelope(session, action.payload.envelope);
+      if (!duplicate && action.payload.countUnread !== false && isUnreadActivity(action.payload.envelope)) {
         session.lastEventAt = action.payload.envelope.ts;
-        if (action.payload.id !== state.activeId) {
+        if (!(action.payload.visible ?? (action.payload.id === state.activeId))) {
           session.unread = true;
           session.unreadCount += 1;
         } else {
@@ -506,10 +535,25 @@ const sessionsSlice = createSlice({
     },
     noticeAppended(
       state,
-      action: PayloadAction<{ id: string; level: NoticeItem['level']; text: string; ts: number }>,
+      action: PayloadAction<{ id: string; level: NoticeItem['level']; text: string; ts: number; noticeId?: string }>,
     ) {
       const session = state.entities[action.payload.id];
-      if (session) appendNotice(session, action.payload.level, action.payload.text, action.payload.ts);
+      if (session) appendNotice(session, action.payload.level, action.payload.text, action.payload.ts, action.payload.noticeId);
+    },
+    compactStatusReceived(state, action: PayloadAction<{
+      id: string; busy: boolean; unreadCount: number; pendingApprovals: number; pendingForms: number; ts: number;
+    }>) {
+      const session = state.entities[action.payload.id];
+      if (!session) return;
+      session.connection.compact = true;
+      session.connection.busy = action.payload.busy;
+      session.connection.status = 'live';
+      session.connection.error = undefined;
+      session.connection.lastHeartbeat = action.payload.ts;
+      session.connection.pendingApprovals = action.payload.pendingApprovals;
+      session.connection.pendingForms = action.payload.pendingForms;
+      session.unreadCount = action.payload.unreadCount;
+      session.unread = action.payload.unreadCount > 0;
     },
     promptFailed(state, action: PayloadAction<{ id: string; itemId: string; failed: boolean }>) {
       const session = state.entities[action.payload.id];
@@ -719,6 +763,7 @@ export const {
   settlingSet,
   heartbeatSet,
   unreadSet,
+  compactStatusReceived,
   lastEventAtSet,
   titleSet,
   cwdSet,

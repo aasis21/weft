@@ -15,7 +15,8 @@ import {
   deviceHeartbeat,
   deviceSnapshot,
   generateKeyPair,
-  listenForPeers,
+  ATTENTION_CAPABILITY,
+  watchState,
   keepAwakeStatus,
   launchStatus,
   projectList,
@@ -55,6 +56,7 @@ import {
   lifecycleEnvelopeFromSnapshot,
   lifecycleSnapshotFromLaunchRecord,
 } from "./sessionCompatibility.mjs";
+import { createAttentionLease, openPairedEndpoint } from "./pairedEndpoint.mjs";
 
 // Proactive DEVICE_HEARTBEAT cadence: independent of PROJECT_LIST_REQUEST/PROJECT_LIST, so an idle
 // phone (not polling) can still tell the listener process is alive, not just that the transport
@@ -184,6 +186,7 @@ export function createListener({
   let started = false;
   let heartbeatTimer = null;
   let activeMonitor = null;
+  const attention = createAttentionLease();
   let pairingGrantTimer = null;
   // Pending `/weft` session offers relayed to the phone (see pendingSessions.mjs). `claimedOffers`
   // suppresses re-advertising a session the phone already adopted (until its file entry is gone);
@@ -292,7 +295,7 @@ export function createListener({
   };
 
   async function installPairingListener({ connect = false } = {}) {
-    const handle = await listenForPeers({
+    const handle = await openPairedEndpoint({
       transport: listenerTransport,
       keyPair: listenerKeyPair,
       connect,
@@ -301,6 +304,15 @@ export function createListener({
       senderName: listenerDeviceName,
       pairingGate,
       onPeer: bindPeer,
+      onDisconnected: () => {
+        stopHeartbeat();
+        stopMonitoring();
+        terminalHost.disconnectPhone();
+        controlUnsub?.();
+        controlUnsub = null;
+        channel = null;
+        onDeviceDisconnected?.();
+      },
     });
     pairingStop = handle.stop;
   }
@@ -479,6 +491,7 @@ export function createListener({
   function startHeartbeat() {
     stopHeartbeat();
     heartbeatTimer = setInterval(() => {
+      if (attention.level === "off" || !channel) return;
       // Wrapped in try/catch + Promise.resolve().catch() as a hard safety net: a heartbeat
       // failure (dropped channel, transport error, etc.) must never crash the whole station —
       // it should just skip this beat and let the next one retry. A bare `channel?.send(...)
@@ -641,6 +654,7 @@ export function createListener({
       controlUnsub = null;
       channel = null;
     }
+    attention.reset();
     boundPeerPub = peer.publicKeyB64;
     boundPeerDeviceId = peer.deviceId ?? boundPeerDeviceId;
     boundHandshakeNonce = peer.handshakeNonce ?? null;
@@ -699,6 +713,7 @@ export function createListener({
       listenerDeviceName,
       listenerDeviceId,
       [
+        ATTENTION_CAPABILITY,
         DEVICE_CAPABILITY.MONITOR_V1,
         ...(terminalHost.supported ? [DEVICE_CAPABILITY.TERMINAL_V1] : []),
         ...(clipboardApi?.supported === true ? [DEVICE_CAPABILITY.CLIPBOARD_V1] : []),
@@ -713,7 +728,7 @@ export function createListener({
   // dedupe so a fresh bind always gets the full list. Best-effort throughout: a read/send failure
   // just skips this tick; the next bind, PROJECT_LIST_REQUEST, or file-change watch resends.
   async function sendSessionOffers({ force = false } = {}) {
-    if (!channel || stopped) return;
+    if (!channel || stopped || (!force && attention.level === "off")) return;
     let pending = [];
     try {
       pending = (await Promise.resolve(pendingApi.listPendingSessions({ baseDir: connectionsHome }))) ?? [];
@@ -863,7 +878,7 @@ export function createListener({
   }
 
   async function sendLaunchReplays({ force = false } = {}) {
-    if (!channel || stopped) return;
+    if (!channel || stopped || (!force && attention.level === "off")) return;
     let records = [];
     try {
       records = (await Promise.resolve(launchApi.listLaunchOperations({ baseDir: connectionsHome }))) ?? [];
@@ -925,6 +940,17 @@ export function createListener({
 
   async function handleControl(envelope, replyChannel) {
     if (stopped || replyChannel !== channel || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
+    if (envelope.eventSubtype === SUBTYPE.CONTROL.WATCH_REQUEST) {
+      const ack = attention.update(envelope.msg);
+      if (ack) {
+        await replyChannel.send(watchState(ack.watchId, ack.level, ack.leaseMs));
+        if (ack.level !== "off") {
+          await sendSessionOffers({ force: true });
+          await sendLaunchReplays({ force: true });
+        }
+      }
+      return;
+    }
     // Private shell traffic never reaches generic device event or diagnostic hooks.
     if (envelope.eventSubtype === SUBTYPE.CONTROL.TERMINAL_REQUEST) {
       await terminalHost.handle(envelope.msg);
@@ -1103,6 +1129,10 @@ export function createListener({
   const api = {
     start,
     stop,
+    async openLocalSession(intent) {
+      if (!started || stopped || !sessionCoordinator) throw new Error("Station is not ready.");
+      return sessionCoordinator.open({ ...intent, requesterId: "local-control-center" });
+    },
     // Point this listener at a new endpoint mid-run without re-pairing from scratch — see
     // rebindTransport above. Returns `{changed, descriptor, pairingPayload}`; `changed:false`
     // means the resolved transport was identical and nothing was touched.
@@ -1118,6 +1148,9 @@ export function createListener({
     },
     get pairingPayload() {
       return pairingPayload;
+    },
+    get paired() {
+      return Boolean(pairingGate?.claimedPeerPublicKeyB64);
     },
     get heartbeatMs() {
       return heartbeatMs;

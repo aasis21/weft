@@ -28,7 +28,8 @@ class FakeWebSocket {
     this.readyState = WS_CONNECTING;
     this.sent = [];
     this.pings = 0;
-    this.handlers = { open: new Set(), message: new Set(), close: new Set(), error: new Set() };
+    this.handlers = { open: new Set(), message: new Set(), close: new Set(), error: new Set(), pong: new Set() };
+    this.ackPings = true;
     instances.push(this);
   }
   addEventListener(type, handler) {
@@ -42,6 +43,7 @@ class FakeWebSocket {
   }
   ping() {
     this.pings += 1;
+    if (this.ackPings) this._fire("pong", {});
   }
   close() {
     if (this.readyState === WS_CLOSED) return;
@@ -173,4 +175,37 @@ test("close() stops reconnecting and pinging", async () => {
 
   assert.equal(instances.length, socketsAfterClose, "no reconnect after close()");
   assert.equal(instances[0].pings, pingsAfterClose, "no pings after close()");
+});
+
+test("replaces a half-open connection after its connect deadline", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const sock = track(createReconnectingSocket("wss://relay", {
+    WebSocketImpl: FakeWebSocket, connectTimeoutMs: 20, minBackoffMs: 5,
+  }));
+  t.mock.timers.tick(20);
+  t.mock.timers.tick(5);
+  assert.equal(instances.length, 2);
+  instances[1]._open();
+  instances[0]._open();
+  instances[0]._fire("error", {});
+  instances[0]._drop("late close");
+  assert.equal(sock.readyState, WS_OPEN, "late callbacks cannot damage the replacement");
+});
+
+test("missing pong after sleep triggers reconnect; acknowledged pings stay connected", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  track(createReconnectingSocket("wss://relay", {
+    WebSocketImpl: FakeWebSocket, pingIntervalMs: 10, pongTimeoutMs: 20,
+    minBackoffMs: 5,
+  }));
+  instances[0]._open();
+  instances[0].ackPings = false;
+  t.mock.timers.tick(10);
+  t.mock.timers.tick(20);
+  t.mock.timers.tick(5);
+  assert.equal(instances.length, 2);
+  instances[1]._open();
+  t.mock.timers.tick(10);
+  t.mock.timers.tick(20);
+  assert.equal(instances.length, 2);
 });

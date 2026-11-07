@@ -9,6 +9,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   EVENT_TYPE,
@@ -21,14 +24,30 @@ import {
   invokeCommand,
   elicitationResponse,
   approvalDecision,
+  watchRequest,
+  recoveryRequest,
+  assistantMessage,
+  assistantDelta,
+  toolStart,
+  toolComplete,
+  logLine,
 } from "@aasis21/weft-shared";
 import {
-  attachRelay,
+  attachRelay as createRelay,
   createElicitationRelay,
   createExitPlanModeRelay,
   createPermissionRelay,
   createPromptOriginTracker,
 } from "../src/relay.mjs";
+import { createSessionRecovery } from "../src/sessionRecovery.mjs";
+import { createAttentionLease } from "../src/pairedEndpoint.mjs";
+
+async function attachRelay(options) {
+  return createRelay({
+    ...options,
+    recoveryStore: options.recoveryStore ?? await createSessionRecovery({ persist: false }),
+  });
+}
 
 const flush = () => new Promise((r) => setTimeout(r, 15));
 
@@ -136,11 +155,228 @@ async function withRelay(run) {
     heartbeatMs: 10_000_000,
   });
   try {
-    await run({ channel, session });
+    await run({ channel, session, relay });
   } finally {
     await relay.stop("test", { closeTransport: false });
   }
 }
+
+test("attention expires after sleep, respects cooldown, and fences an older watch", () => {
+  let clock = 0;
+  const lease = createAttentionLease({ now: () => clock });
+  assert.equal(lease.level, "detail", "older clients remain supported");
+  lease.update({ watchId: "old", level: "detail" });
+  lease.update({ watchId: "new", level: "compact" });
+  assert.equal(lease.update({ watchId: "old", level: "detail" }), null);
+  assert.equal(lease.update({ watchId: "old", level: "off" }), null);
+  lease.update({ watchId: "new", level: "off" });
+  assert.equal(lease.level, "compact");
+  clock += 5001;
+  assert.equal(lease.level, "off");
+  assert.equal(lease.update({ watchId: "new", level: "detail" }), null, "late renew cannot restart a stopped watch");
+  lease.update({ watchId: "visible", level: "detail" });
+  clock += 60_001;
+  assert.equal(lease.level, "off", "elapsed wall-clock lease expires before wake-up sends");
+});
+
+test("compact watch suppresses tokens and returns committed, scrubbed catch-up", async () => {
+  await withRelay(async ({ session, channel }) => {
+    channel.emit(EVENT_TYPE.CONTROL, watchRequest("compact", "compact"));
+    await flush();
+    channel.sent.length = 0;
+    session.emitEvent({ type: "assistant.message_delta", data: { deltaContent: "token" } });
+    session.emitEvent({ type: "tool.execution_start", data: { toolCallId: "tool", toolName: "shell", arguments: { command: "private command" } } });
+    session.emitEvent({ type: "tool.execution_complete", data: { toolCallId: "tool", toolName: "shell", success: false, error: { message: "private result" } } });
+    session.emitEvent({ type: "assistant.message", id: "answer", data: { content: "Finished" } });
+    await flush();
+    assert.equal(channel.sent.filter((message) => message.eventType === EVENT_TYPE.STREAM).length, 0);
+    assert.ok(channel.sent.some((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS && message.msg.cursor === 3));
+    channel.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    await flush();
+    const page = channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY).msg;
+    assert.equal(page.items.length, 3);
+    assert.ok(!JSON.stringify(page).includes("private command"));
+    assert.ok(!JSON.stringify(page).includes("private result"));
+    assert.deepEqual(page.items[0].message.msg.args, {});
+    assert.equal(page.items[1].message.msg.resultPreview, "Failed");
+    assert.equal(page.items.at(-1).message.msg.content, "Finished");
+    assert.equal(page.items.at(-1).message.recoverySequence, 3);
+  });
+});
+
+test("disconnect keeps capture and pending native approval until a fresh channel answers", async () => {
+  await withRelay(async ({ session, channel, relay }) => {
+    const approval = relay.onPermissionRequest({ kind: "shell", fullCommandText: "npm test" });
+    await flush();
+    const request = channel.sent.find((message) => message.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
+    assert.ok(request);
+    relay.detach();
+    assert.equal((await relay.onPermissionRequest({ kind: "shell" })).kind, "user-not-available");
+    session.emitEvent({ type: "assistant.message", id: "missed", data: { content: "While disconnected" } });
+    const replacement = makeFakeChannel();
+    await relay.rebind(replacement);
+    replacement.emit(EVENT_TYPE.CONTROL, stateRequest());
+    await flush();
+    const snapshot = replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT);
+    assert.equal(snapshot.msg.approvals[0].requestId, request.msg.requestId);
+    channel.emit(EVENT_TYPE.DECISION, approvalDecision(request.msg.requestId, "approve"));
+    assert.equal(snapshot.msg.approvals.length, 1);
+    replacement.emit(EVENT_TYPE.DECISION, approvalDecision(request.msg.requestId, "approve"));
+    assert.equal((await approval).kind, "approve-once");
+    replacement.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    await flush();
+    assert.ok(replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY)
+      .msg.items.some((item) => item.message.msg.content === "While disconnected"));
+  });
+});
+
+test("an old connection cannot deliver its delayed recovery response to a replacement", async () => {
+  const channel = makeFakeChannel();
+  const replacement = makeFakeChannel();
+  const journal = await createSessionRecovery({ persist: false });
+  await journal.capture(assistantMessage("Saved"));
+  let release;
+  let entered;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  const requested = new Promise((resolve) => { entered = resolve; });
+  const page = journal.page.bind(journal);
+  journal.page = async (...args) => {
+    entered();
+    await blocked;
+    return page(...args);
+  };
+  const relay = await attachRelay({
+    session: makeFakeSession(), channel, recoveryStore: journal, heartbeatMs: 10_000_000,
+  });
+  try {
+    channel.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    await requested;
+    await relay.rebind(replacement);
+    release();
+    await flush();
+    assert.ok(!replacement.sent.some((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY));
+    replacement.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    await flush();
+    assert.equal(replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY).msg.items.length, 1);
+  } finally {
+    release();
+    await relay.stop("test", { closeTransport: false });
+  }
+});
+
+test("recovery is durable, paged, bounded, and reports retained-history gaps", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-recovery-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let journal = await createSessionRecovery({ sessionId: "durable", baseDir: dir, maxEvents: 2 });
+  await journal.capture(assistantDelta("not retained"));
+  await journal.capture(toolStart("tool", "shell", { command: "not retained" }));
+  await journal.capture(toolComplete("tool", "shell", false, "not retained"));
+  const live = await journal.capture(assistantMessage("Saved", "answer"));
+  const epoch = live.recoveryEpoch;
+  await journal.close();
+  journal = await createSessionRecovery({ sessionId: "durable", baseDir: dir, maxEvents: 2 });
+  const page = await journal.page(epoch, 0, 1);
+  assert.equal(page.epoch, epoch);
+  assert.equal(page.items.length, 1);
+  assert.equal(page.hasMore, true);
+  assert.equal(page.gap, true);
+  const next = await journal.page(epoch, page.cursor, 1);
+  assert.equal(next.items[0].message.msg.content, "Saved");
+  assert.equal(next.hasMore, false);
+  const contents = await readFile(join(dir, "recovery", (await readdir(join(dir, "recovery")))[0]), "utf8");
+  assert.ok(!contents.includes("not retained"));
+  assert.equal((await journal.page("different-epoch", 100)).gap, true);
+});
+
+test("catch-up bounds large messages, resets corrupt caches explicitly, and ages out events", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-recovery-limits-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let clock = Date.now();
+  let journal = await createSessionRecovery({
+    sessionId: "limits", baseDir: dir, now: () => clock, retentionMs: 1000, maxEventBytes: 1024,
+  });
+  await journal.capture(assistantMessage("x".repeat(10_000), "large"));
+  await journal.capture(logLine("error", "private failure details"));
+  let page = await journal.page(null, 0, 50);
+  assert.ok(page.items[0].message.msg.content.includes("truncated in catch-up"));
+  assert.ok(Buffer.byteLength(JSON.stringify(page.items[0])) < 1024);
+  assert.ok(!JSON.stringify(page).includes("private failure details"));
+  assert.equal(page.gap, true);
+  clock = Date.now() + 2000;
+  page = await journal.page(journal.epoch, 0);
+  assert.equal(page.items.length, 0);
+  assert.equal(page.gap, true);
+  await journal.close();
+  const filename = (await readdir(join(dir, "recovery"))).find((name) => name.endsWith(".json"));
+  await writeFile(join(dir, "recovery", filename), "{broken");
+  const issues = [];
+  journal = await createSessionRecovery({ sessionId: "limits", baseDir: dir, onIssue: (error) => issues.push(error) });
+  assert.equal(issues.length, 1);
+  await journal.capture(assistantMessage("Recovered"));
+  assert.equal((await journal.page(null, 0)).items[0].message.msg.content, "Recovered");
+});
+
+test("machine catch-up budget evicts old caches without resetting the current epoch", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-recovery-budget-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const options = { baseDir: dir, maxBytes: 2048, machineBytes: 3000 };
+  const old = await createSessionRecovery({ ...options, sessionId: "old" });
+  await old.capture(assistantMessage("x".repeat(1200)));
+  await old.close();
+  const current = await createSessionRecovery({ ...options, sessionId: "current" });
+  const epoch = current.epoch;
+  await current.capture(assistantMessage("y".repeat(1200)));
+  await current.close();
+  const files = (await readdir(join(dir, "recovery"))).filter((name) => name.endsWith(".json"));
+  assert.equal(files.length, 1);
+  assert.equal(JSON.parse(await readFile(join(dir, "recovery", files[0]), "utf8")).epoch, epoch);
+  const stale = `${"a".repeat(64)}.json.0.00000000-0000-0000-0000-000000000001.tmp`;
+  const fresh = `${"b".repeat(64)}.json.0.00000000-0000-0000-0000-000000000002.tmp`;
+  await writeFile(join(dir, "recovery", stale), "interrupted save");
+  await writeFile(join(dir, "recovery", fresh), "save in progress");
+  const expired = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+  await utimes(join(dir, "recovery", stale), expired, expired);
+  const resumed = await createSessionRecovery({ ...options, sessionId: "current" });
+  assert.equal(resumed.epoch, epoch);
+  const retained = await readdir(join(dir, "recovery"));
+  assert.ok(!retained.includes(stale), "expired crash leftovers are removed");
+  assert.ok(retained.includes(fresh), "an in-flight atomic save is not removed");
+  await resumed.close();
+});
+
+test("stalled live delivery does not block durable capture or catch-up requests", async () => {
+  await withRelay(async ({ channel, session }) => {
+    let release;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const send = channel.send.bind(channel);
+    channel.send = async (message) => {
+      if (message.eventType === EVENT_TYPE.STREAM) await blocked;
+      await send(message);
+    };
+    try {
+      session.emitEvent({ type: "assistant.message_delta", data: { deltaContent: "in flight", messageId: "slow" } });
+      session.emitEvent({ type: "assistant.message_start", data: {} });
+      session.emitEvent({ type: "assistant.message", id: "slow", data: { content: "Saved before delivery" } });
+      for (let index = 0; index < 80; index++) {
+        session.emitEvent({ type: "assistant.message", id: `queued-${index}`, data: { content: `Queued ${index}` } });
+      }
+      await flush();
+      channel.emit(EVENT_TYPE.CONTROL, recoveryRequest(null, 0, 100));
+      channel.emit(EVENT_TYPE.CONTROL, stateRequest());
+      await flush();
+      const recovered = channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY).msg.items;
+      assert.equal(recovered.length, 81, "trimmed wire frames remain available for replay");
+      assert.ok(recovered.some((item) => item.message.msg.content === "Saved before delivery"));
+      assert.equal(channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT).msg.busy, true);
+      release();
+      await flush();
+      const delivered = channel.sent.filter((message) => message.eventSubtype === SUBTYPE.STREAM.ASSISTANT_MESSAGE);
+      assert.equal(delivered.length, 64, "stalled delivery bounds the pending frame queue");
+      assert.equal(delivered.at(-1).msg.content, "Queued 79");
+      assert.equal(channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS).msg.cursor, 81);
+    } finally { release(); }
+  });
+});
 
 test("relays exit_plan_mode.requested as a three-option approval and answers via the UI RPC", async () => {
   const channel = makeFakeChannel();
@@ -895,7 +1131,7 @@ test("approval requests infer shell commands from nested invocation input before
     const req = channel.sent.find((m) => m.eventSubtype === SUBTYPE.APPROVAL.REQUEST);
     assert.ok(req, "expected an approval request to be sent to the phone");
     assert.deepEqual(req.msg.toolArgs, { command: "npm test -w extension" });
-    assert.equal(logs.filter((entry) => /shell approval request shape/.test(entry.message)).length, 1);
+    assert.equal(logs.length, 0, "raw approval arguments must not be written to host diagnostics");
   } finally {
     relay.close();
   }

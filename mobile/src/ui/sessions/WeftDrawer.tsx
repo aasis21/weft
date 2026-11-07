@@ -348,7 +348,8 @@ export function WeftDrawer({
   const renderRow = (session: SessionView): JSX.Element => {
     const id = session.meta.channelId;
     const isActive = id === activeId;
-    const pending = session.timeline.approvals.length;
+    const pending = session.needsAttention ??
+      (session.timeline.approvals.length + session.timeline.elicitations.length);
     const activity = lastActivity(session);
     const sourceDevice = session.meta.spawnedFromDeviceId
       ? devices?.find((device) => device.deviceId === session.meta.spawnedFromDeviceId)

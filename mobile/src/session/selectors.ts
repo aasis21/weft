@@ -38,6 +38,7 @@ export const selectHistory = (id: string) =>
 
 export function toTimelineState(session: Session): TimelineState {
   return {
+    ...(session.connection.compact ? { compact: true } : {}),
     items: session.transcript.items,
     approvals: session.requests.approvals,
     approvalErrors: session.requests.approvalErrors,
@@ -62,6 +63,8 @@ export function toTimelineState(session: Session): TimelineState {
 
 export function toSessionView(session: Session): SessionView {
   return {
+    needsAttention: (session.connection.pendingApprovals ?? session.requests.approvals.length) +
+      (session.connection.pendingForms ?? session.requests.elicitations.length),
     meta: { ...session.meta },
     ...(session.workspaceCapabilities ? { workspaceCapabilities: session.workspaceCapabilities } : {}),
     status: session.connection.status,

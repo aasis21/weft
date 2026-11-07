@@ -71,9 +71,13 @@ export interface NoticeItem {
   ts: number;
 }
 
-export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem;
+export type TimelineItem = (UserItem | AssistantItem | ToolItem | NoticeItem) & {
+  recoveryEpoch?: string; recoverySequence?: number;
+};
 
 export interface TimelineState {
+  /** Compact status is authoritative; cached running tools must not imply current work. */
+  compact?: boolean;
   items: TimelineItem[];
   approvals: ApprovalRequestMsg[];
   /** Transient per-request decision-send error (requestId -> message). Drives a retry
@@ -708,6 +712,10 @@ function mergePendingById<T extends { requestId: string }>(existing: T[], incomi
 
 /** A serializable snapshot of the durable parts of a timeline (no transient/live fields). */
 export interface PersistedTimeline {
+  recovery?: {
+    epoch: string | null; cursor: number; viewedEpoch: string | null; viewedCursor: number; gapId?: string;
+    summary?: { key: string; sequences: number[]; messages: number; tools: number; failures: number };
+  };
   items: TimelineItem[];
   history: HistoryItem[];
   historyCursor: number | null;

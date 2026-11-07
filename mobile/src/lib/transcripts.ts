@@ -51,15 +51,18 @@ export async function loadTranscript(channelId: string): Promise<PersistedTimeli
 }
 
 /** Persist a channel's transcript. Best-effort. */
-export async function saveTranscript(channelId: string, data: PersistedTimeline): Promise<void> {
+export async function saveTranscript(channelId: string, data: PersistedTimeline, strict = false): Promise<void> {
   if (!channelId) return;
-  if (discarded.has(channelId)) return;
+  if (discarded.has(channelId)) {
+    if (strict) throw new Error('Transcript is no longer retained.');
+    return;
+  }
   const key = keyFor(channelId);
   const value = JSON.stringify({ v: VERSION, savedAt: Date.now(), data } satisfies Envelope);
   try {
     await preferencesStorage.setItem(key, value);
-  } catch {
-    /* best-effort */
+  } catch (error) {
+    if (strict) throw error;
   }
   if (discarded.has(channelId)) await removeStored(key);
 }

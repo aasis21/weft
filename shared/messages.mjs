@@ -87,6 +87,11 @@ export const SUBTYPE = Object.freeze({
   ELICITATION: Object.freeze({ REQUEST: "request", COMPLETE: "complete" }),
   ELICITATION_RESPONSE: Object.freeze({ RESPONSE: "response" }),
   CONTROL: Object.freeze({
+    WATCH_REQUEST: "watch_request",
+    WATCH_STATE: "watch_state",
+    SESSION_STATUS: "session_status",
+    RECOVERY_REQUEST: "recovery_request",
+    RECOVERY: "recovery",
     CHANNEL_UP: "channel_up",
     WORKSPACE_REQUEST: "workspace_request",
     WORKSPACE_RESULT: "workspace_result",
@@ -468,6 +473,23 @@ export const elicitationComplete = (requestId, action) =>
   envelope(EVENT_TYPE.ELICITATION, SUBTYPE.ELICITATION.COMPLETE, { requestId, action });
 
 // ---- factories (control) ---------------------------------------------------
+export const ATTENTION_CAPABILITY = "attention-v1";
+export const WATCH_LEASE_MS = 60_000;
+export const WATCH_RENEW_MS = 20_000;
+export const WATCH_COOLDOWN_MS = 5_000;
+export const watchRequest = (watchId, level, leaseMs = WATCH_LEASE_MS) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.WATCH_REQUEST, { watchId, level, leaseMs });
+export const watchState = (watchId, level, leaseMs) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.WATCH_STATE, { watchId, level, leaseMs });
+export const sessionStatus = ({ busy, epoch, cursor, pendingApprovals, pendingForms }) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_STATUS, {
+    busy, epoch, cursor, pendingApprovals, pendingForms,
+  });
+export const recoveryRequest = (epoch = null, cursor = 0, limit = 50) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RECOVERY_REQUEST, { epoch, cursor, limit });
+export const recovery = (items, epoch, cursor, hasMore = false, gap = false) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RECOVERY, { items, epoch, cursor, hasMore, gap });
+
 /**
  * Ext -> phone: the channel is live. channelId/sessionId now travel on the ENVELOPE (stamped by the
  * channel), so this only carries the session's cwd + CLI chat title (summary).

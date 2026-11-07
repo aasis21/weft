@@ -79,8 +79,18 @@ weft start
 ```
 
 Then open **[useweft.netlify.app](https://useweft.netlify.app)** on your phone, choose
-**Scan QR to pair**, and scan the code shown in the terminal. Leave `weft start` running
-while you use the phone.
+**Scan QR to pair**, and scan the code shown in the terminal. On Windows, Station
+runs in the background and you can close this terminal. Use `weft status` and
+`weft stop` to manage it. Startup is manual, not automatic at boot/sign-in.
+Use `weft start --foreground` for terminal-owned diagnostics; other platforms
+retain foreground operation.
+
+**Laptop Control Center:** run `weft ui` to open a private local dashboard for
+Station/relay controls, projects, settings, pairing, and discoverable Copilot
+sessions. It works with Station stopped and uses the same management layer as the
+CLI. Closing the browser does not stop workloads. Windows installs add a Start menu
+shortcut; `weft ui shortcut` adds a desktop shortcut. `weft ui status` and
+`weft ui stop` manage only the local UI host.
 
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.

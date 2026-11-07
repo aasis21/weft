@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   createLocalTransport, SecureChannel, generateKeyPair, deriveSessionKey, randomChannelId,
-  workspaceRequest, WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY, interrupt, stateRequest,
+  workspaceRequest, ATTENTION_CAPABILITY, WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY, interrupt, stateRequest,
 } from "@aasis21/weft-shared";
 import { createWorkspaceView } from "../src/workspaceView.mjs";
 import { attachRelay } from "../src/relay.mjs";
+import { createSessionRecovery } from "../src/sessionRecovery.mjs";
 import { saveFileSharingConfig } from "../src/transportConfig.mjs";
 
 test("encrypted workspace round trip reads policy-approved snapshots while Stop remains usable", async (t) => {
@@ -60,6 +61,7 @@ test("encrypted workspace round trip reads policy-approved snapshots while Stop 
   view = await createWorkspaceView({ session, configBaseDir, requestPermission: (args) =>
     session.rpc.tools.execute({ name: "weft_workspace_access", arguments: args }) });
   const relay = await attachRelay({ session, channel: hostChannel, channelId, heartbeatMs: 100000,
+    recoveryStore: await createSessionRecovery({ persist: false }),
     workspaceView: async () => view });
   t.after(async () => { view.close(); await relay.stop(); await phoneChannel.close(); });
   async function response(id) {
@@ -126,9 +128,10 @@ test("workspace capabilities follow sharing grants and directory permissions wit
   view = await createWorkspaceView({ session, configBaseDir, requestPermission: (args) =>
     session.rpc.tools.execute({ name: "weft_workspace_access", arguments: args }) });
   const relay = await attachRelay({ session, channel, channelId: "synthetic-policy", heartbeatMs: 100000,
+    recoveryStore: await createSessionRecovery({ persist: false }),
     workspaceView: async () => view });
   t.after(async () => { view.close(); await relay.stop(); });
-  assert.deepEqual(sent.find((message) => message.eventSubtype === "channel_up").msg.capabilities, []);
+  assert.deepEqual(sent.find((message) => message.eventSubtype === "channel_up").msg.capabilities, [ATTENTION_CAPABILITY]);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   assert.equal(pathChecks, 0);
   assert.equal(historyReads, 0);
@@ -148,32 +151,32 @@ test("workspace capabilities follow sharing grants and directory permissions wit
   const narrower = join(root, "allowed-subfolder");
   await mkdir(narrower);
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Narrower", path: narrower }] }, { baseDir: configBaseDir });
-  assert.deepEqual((await snapshot()).capabilities, []);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY]);
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }], exclude: ["**"] }, { baseDir: configBaseDir });
-  assert.deepEqual((await snapshot()).capabilities, []);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY]);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   assert.equal(pathChecks, 0);
   assert.equal(historyReads, 0);
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }] }, { baseDir: configBaseDir });
-  assert.deepEqual((await snapshot()).capabilities, [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY]);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY, WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY]);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   saveFileSharingConfig({ enabled: false, roots: [] }, { baseDir: configBaseDir });
-  assert.deepEqual((await snapshot()).capabilities, []);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY]);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   saveFileSharingConfig({ enabled: true, roots: [{ name: "Workspace", path: root }] }, { baseDir: configBaseDir });
   allowed = false;
-  assert.deepEqual((await snapshot()).capabilities, []);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY]);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 0);
   allowed = true;
-  assert.deepEqual((await snapshot()).capabilities, [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY]);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY, WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY]);
   broken = true;
-  assert.deepEqual((await snapshot()).capabilities, []);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY]);
   assert.doesNotMatch(JSON.stringify(sent), /synthetic-private-host-detail/);
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 1);
   await snapshot();
   assert.equal(sent.filter((message) => message.eventSubtype === "log").length, 1);
   await writeFile(join(configBaseDir, "weft.config.json"), '{"files":{"enabled":"invalid"}}');
-  assert.deepEqual((await snapshot()).capabilities, []);
+  assert.deepEqual((await snapshot()).capabilities, [ATTENTION_CAPABILITY]);
   assert.match(sent.filter((message) => message.eventSubtype === "log").at(-1).msg.message, /files configuration/);
   emit(interrupt());
   for (let n = 0; n < 100 && !aborts; n++) await new Promise((resolve) => setTimeout(resolve, 10));

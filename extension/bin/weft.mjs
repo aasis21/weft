@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname, homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { stdin as input, stdout as output } from "node:process";
@@ -30,6 +31,8 @@ import {
   healthyRegistryEntry,
   probePublicRelay,
   forceStopDevTunnel,
+  findDevTunnelBinary,
+  ensureDevTunnelLogin,
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
 import { loadTransportConfig, isTerminalEnabled } from "../src/transportConfig.mjs";
@@ -38,12 +41,20 @@ import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
 import { resolveVersion } from "../src/version.mjs";
 import { parseStartOptions } from "../src/startOptions.mjs";
+import {
+  backgroundCommand, backgroundTaskOperation, createBackgroundControl,
+  startBackground, stopBackground,
+} from "../src/backgroundLifecycle.mjs";
 import { attachTerminal } from "../src/terminalClient.mjs";
 import { NATIVE_TARGETS, requiredNativeFiles, stageNativeRuntime } from "../../scripts/native-runtime.mjs";
 import { commitStagedFiles } from "../../scripts/install-transaction.mjs";
 import { RELEASE_BUNDLE_NAMES, RELEASE_SKILL_NAME, validateInstallDescriptor } from "../../scripts/release-layout.mjs";
+import { createManagement } from "../src/management.mjs";
+import { openControlCenter, inspectControlCenter, stopControlCenter, createControlCenterHost } from "../src/controlCenter.mjs";
+import { installControlCenterShortcut } from "../src/controlCenterShortcut.mjs";
 
 const [, , command, ...args] = process.argv;
+const management = createManagement({ cliPath: fileURLToPath(import.meta.url) });
 
 // Where the end-user installer drops Weft's code bundles (CODE only — all user data lives in
 // ~/.weft). `weft update` refreshes these in place from the cloud; `weft clean-install` wipes both
@@ -96,10 +107,12 @@ function printFailure(err) {
 process.on("unhandledRejection", (reason) => {
   console.error(`\n${c.red("✗ unhandled rejection (station kept running):")}`, reason?.stack ?? reason);
   appendStationLog("process.unhandled_rejection", { error: reason?.stack ?? String(reason) }, { level: "error" });
+  if (["__background-worker", "__ui-host"].includes(command)) process.exit(1);
 });
 process.on("uncaughtException", (err) => {
   console.error(`\n${c.red("✗ uncaught exception (station kept running):")}`, err?.stack ?? err);
   appendStationLog("process.uncaught_exception", { error: err?.stack ?? String(err) }, { level: "error" });
+  if (["__background-worker", "__ui-host"].includes(command)) process.exit(1);
 });
 
 // Every command runs inside main(), which is CALLED AT THE VERY BOTTOM of this file — never
@@ -120,37 +133,63 @@ async function main() {
     } else if (command === "start") {
       const options = parseStartOptions(args);
       if (options.help) printStartHelp();
-      else await start(options);
+      else await startCommand(options);
+    } else if (command === "stop") {
+      await stationStop();
+    } else if (command === "status") {
+      await stationStatus();
+    } else if (command === "ui") {
+      if (args.length > 1 || args[0] && !["status", "stop", "shortcut"].includes(args[0])) throw new Error("Usage: weft ui [status|stop|shortcut]");
+      if (args[0] === "shortcut") {
+        if (process.platform !== "win32") throw new Error("Windows desktop shortcuts require Windows.");
+        await installControlCenterShortcut({ installDir: extensionInstallDir(), desktop: true });
+        console.log("Weft Control Center desktop shortcut created.");
+      } else
+      if (args[0] === "stop") {
+        await stopControlCenter();
+        console.log("Control Center stopped. Station, relay, and Copilot are unchanged.");
+      } else if (args[0] === "status") {
+        const status = await inspectControlCenter();
+        console.log(status ? `Control Center is running (pid ${status.pid}).` : "Control Center is not running.");
+      } else {
+        await openControlCenter({ cliPath: fileURLToPath(import.meta.url) });
+        console.log("Weft Control Center opened in your browser. Closing it does not stop workloads.");
+      }
+    } else if (command === "__ui-host") {
+      if (args.length !== 1 || !isAbsolute(args[0])) throw new Error("Invalid UI host invocation.");
+      await createControlCenterHost({ baseDir: args[0], cliPath: fileURLToPath(import.meta.url) });
+    } else if (command === "__background-worker") {
+      await backgroundWorker(args);
     } else if (command === "terminal") {
       if (args.length !== 1 || args[0] !== "attach") throw new Error("Usage: weft terminal attach (opened by Station)");
       await attachTerminal();
     } else if (command === "add-project") {
       const [name, path, ...rest] = args;
       if (!name || !path) throw new Error("Usage: weft add-project <name> <path> [--default]");
-      const project = addProject(name, path, { makeDefault: rest.includes("--default") });
+      const project = await management.execute("project.add", { name, path: resolve(path), makeDefault: rest.includes("--default") });
       console.log(`Added project ${project.name}: ${project.path}${project.default ? " (default)" : ""}`);
     } else if (command === "remove-project") {
       const [name] = args;
       if (!name) throw new Error("Usage: weft remove-project <name>");
-      removeProject(name);
+      await management.execute("project.remove", { name, confirmed: true });
       console.log(`Removed project ${name}`);
     } else if (command === "list-projects") {
       printProjects(listProjects());
     } else if (command === "set-default") {
       const [name] = args;
       if (!name) throw new Error("Usage: weft set-default <name>");
-      setDefault(name);
+      await management.execute("project.default", { name });
       console.log(`Default project set to ${name}`);
     } else if (command === "set-transport") {
-      setTransport(args);
+      await setTransport(args);
     } else if (command === "show-transport") {
       showTransport();
     } else if (command === "set-name") {
-      setName(args);
+      await setName(args);
     } else if (command === "show-name") {
       showName();
     } else if (command === "set-permission") {
-      setPermission(args);
+      await setPermission(args);
     } else if (command === "show-permission") {
       showPermission();
     } else if (command === "set-pairing") {
@@ -184,21 +223,19 @@ async function setPairing([mode]) {
   if (mode !== "persistent" && mode !== "ephemeral") {
     throw new Error("Usage: weft set-pairing <persistent|ephemeral>");
   }
-  savePairingMode(mode);
+  await management.execute("settings.save", { pairingMode: mode }, { trustedCli: true });
   if (mode === "persistent") {
     // Mint (or reuse) the persisted identity right away so `weft show-pairing`/`weft start`
     // has something concrete to report immediately, rather than waiting for the next start.
-    await getOrCreatePersistedIdentity();
     console.log("Pairing set to persistent: the same channel + device identity are reused across every 'weft start'.");
     console.log("An already-paired phone will reconnect without rescanning. Run 'weft rotate-pairing' to force a fresh code.");
   } else {
-    clearPersistedIdentity();
     console.log("Pairing set to ephemeral: a fresh channel + key are minted every run.");
   }
 }
 
 async function rotatePairing() {
-  await rotatePersistedIdentity();
+  await management.execute("pairing.rotate", { confirmed: true });
   console.log("Persisted pairing identity rotated — the next 'weft start' will show a new QR to (re)scan.");
 }
 
@@ -206,10 +243,153 @@ async function rotatePairing() {
 // phone or `/weft` session, for first-time setup or troubleshooting. Shares provisioning/
 // discovery logic with the extension (src/devtunnel.mjs) so behavior is identical either way.
 async function devtunnelCommand([sub, ...rest]) {
-  if (sub === "start") return devtunnelStart();
+  if (sub === "start") {
+    if (rest.some((arg) => arg !== "--foreground") || rest.length > 1) {
+      throw new Error("Usage: weft devtunnel start [--foreground]");
+    }
+    if (process.platform !== "win32" || rest.includes("--foreground")) return devtunnelStart();
+    const status = await management.execute("relay.start", {}, { interactive: true });
+    console.log(`Dev Tunnel relay ready in the background: ${status.baseUrl}\nUse \`weft devtunnel stop\` to stop it.`);
+    return;
+  }
+  if (rest.length) throw new Error("Usage: weft devtunnel <start|status|stop>");
   if (sub === "status") return devtunnelStatus();
   if (sub === "stop") return devtunnelStop();
   throw new Error("Usage: weft devtunnel <start|status|stop>");
+}
+
+function backgroundOptions() {
+  return { baseDir: weftHome(), cliPath: fileURLToPath(import.meta.url) };
+}
+
+async function prepareBackgroundRelay() {
+  if (await healthyRegistryEntry(undefined, { verifyPublic: true })) return;
+  const bin = await findDevTunnelBinary();
+  if (!bin) throw new Error("Dev Tunnel CLI is not installed. Install it before starting the relay.");
+  await ensureDevTunnelLogin(bin);
+}
+
+async function startCommand(options) {
+  if (process.platform !== "win32" || options.foreground) return start(options);
+  resolveTransportDescriptor();
+  await ensureAtLeastOneProject();
+  if (options.newDevice) {
+    await management.execute("pairing.replace", { confirmed: true });
+  }
+  const status = await management.execute("station.start", {}, { interactive: true });
+  console.log(`Weft Device Station is running in the background on ${status.deviceName}.`);
+  if (!status.paired) {
+    const pairing = await backgroundCommand("station");
+    console.log(await renderPairingQr(pairing.pairingPayload));
+  }
+  else console.log("Your paired phone reconnects automatically; no new scan is needed.");
+  console.log("You can close this terminal. Use `weft status` or `weft stop` to manage Station.");
+}
+
+function readFileSyncSafe(path) {
+  try { return readFileSync(path, "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return ""; throw error; }
+}
+
+async function stationStatus() {
+  if (process.platform !== "win32") throw new Error("Background Station management is currently supported on Windows. Use foreground Station on this platform.");
+  const status = await backgroundCommand("station");
+  if (status) console.log(`Station: ${status.state}${status.deviceName ? ` (${status.deviceName})` : ""}${status.error ? ` - ${status.error}` : ""}`);
+  else {
+    const task = await backgroundTaskOperation("status", { ...backgroundOptions(), role: "station" });
+    console.log(`Station is not responding. Task: ${task.state}.`);
+  }
+}
+
+async function stationStop() {
+  if (process.platform !== "win32") throw new Error("Use Ctrl+C in the foreground Station terminal on this platform.");
+  const result = await management.execute("station.stop", { confirmed: true });
+  console.log(`Background Station stopped.${result.error ? ` Graceful shutdown failed: ${result.error}` : ""} The shared relay remains available until \`weft devtunnel stop\`.`);
+}
+
+async function backgroundWorker([role, home, ...rest]) {
+  if (process.platform !== "win32" || rest.length || !["station", "relay"].includes(role) || !home || !isAbsolute(home)) {
+    throw new Error("Invalid background worker invocation.");
+  }
+  process.env.WEFT_HOME = home;
+  let state = { state: "starting" };
+  let closing = false;
+  let shutdown = null;
+  let listener = null;
+  const control = await createBackgroundControl(role, {
+    activate: role === "station" ? (intent) => {
+      if (!listener) throw new Error("Station is not ready.");
+      return listener.openLocalSession(intent);
+    } : undefined,
+    status: () => role === "station" && listener && ["ready", "endpoint-refresh-needed"].includes(state.state)
+      ? { ...state, state: listener.paired ? "ready" : state.state, pairingPayload: listener.pairingPayload, paired: listener.paired }
+      : state,
+    stop: async () => {
+      closing = true;
+      state = { state: "stopping" };
+      if (shutdown) await shutdown();
+      if (role === "relay") await forceStopDevTunnel();
+      await control.close();
+      process.exit(0);
+    },
+  });
+  if (role === "station") {
+    try {
+      await start({
+        background: true,
+        onReady: (value, stop) => {
+          listener = value;
+          shutdown = stop;
+          state = { state: "ready", deviceName: value.deviceName };
+        },
+        onEndpointChanged: () => {
+          state = { state: "endpoint-refresh-needed", deviceName: listener?.deviceName };
+        },
+      });
+    } catch (error) {
+      state = { state: "failed", error: error.message };
+      await control.close();
+      throw error;
+    }
+    return;
+  }
+  enableStationLog();
+  let failures = 0;
+  let needsProvision = true;
+  let lastFailure = null;
+  while (!closing) {
+    try {
+      if (needsProvision) {
+        const result = await ensureDevTunnelRelay({ interactive: false });
+        state = { state: "ready", baseUrl: result.baseUrl };
+        needsProvision = false;
+        failures = 0;
+        lastFailure = null;
+      } else {
+        const local = await healthyRegistryEntry();
+        const publicState = local ? await probePublicRelay(local.baseUrl) : "rejected";
+        if (publicState === "ok") {
+          state = { state: "ready", baseUrl: local.baseUrl };
+          failures = 0;
+        } else if (publicState === "unreachable") {
+          state = { state: "waiting-network", baseUrl: local.baseUrl };
+          failures = 0;
+        } else {
+          failures++;
+          state = { state: "recovering", baseUrl: state.baseUrl };
+          needsProvision = failures >= 3;
+        }
+      }
+    } catch (error) {
+      state = { state: "failed", error: error.message.split("\n")[0] };
+      if (state.error !== lastFailure) {
+        appendStationLog("background.relay_recovery_failed", { error: error.name }, { level: "error" });
+        lastFailure = state.error;
+      }
+      needsProvision = true;
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 30_000));
+  }
 }
 
 async function devtunnelStart() {
@@ -320,6 +500,10 @@ async function watchExistingRelay(pid) {
 }
 
 async function devtunnelStatus() {
+  if (process.platform === "win32") {
+    const manager = await backgroundCommand("relay");
+    if (manager) console.log(`Background relay: ${manager.state}${manager.error ? ` - ${manager.error}` : ""}.`);
+  }
   const registryEntry = readRegistry(DEVTUNNEL_REGISTRY_FILE);
   if (!registryEntry) {
     console.log(`${c.yellow("○")} Not running. Run ${c.bold("weft devtunnel start")} to provision it.`);
@@ -362,6 +546,10 @@ async function devtunnelStatus() {
 }
 
 async function devtunnelStop() {
+  if (process.platform === "win32") {
+    const result = await stopBackground("relay", backgroundOptions());
+    if (result.error) console.error(`Background relay required a forced stop: ${result.error}`);
+  }
   const { stopped, entry, preserved } = await forceStopDevTunnel();
   if (!stopped) {
     console.log(c.dim("Nothing was running."));
@@ -420,7 +608,7 @@ function createProvisionStatusLine() {
   };
 }
 
-async function start({ newDevice = false } = {}) {
+async function start({ newDevice = false, background = false, onReady = null, onEndpointChanged = null } = {}) {
   const allowTerminal = isTerminalEnabled();
   const lock = acquireLock();
   let released = false;
@@ -462,6 +650,7 @@ async function start({ newDevice = false } = {}) {
       appendStationLog("heartbeat", {});
     },
     onPairingPayloadChanged: (payload) => {
+      if (background) return;
       void renderPairingQr(payload).then((qr) => {
         status.log(`${c.yellow("Pairing QR refreshed after 10 minutes.")}\n${qr}`);
         appendStationLog("pairing.refreshed", { channel: payload.channelId?.slice(0, 8) });
@@ -501,14 +690,15 @@ async function start({ newDevice = false } = {}) {
   console.log(c.dim("Keep this window open to let your phone connect and drive Copilot sessions."));
   console.log(c.dim(`Diagnostic log: ${stationLogPath()}`));
 
-  await ensureAtLeastOneProject();
+  if (background && listProjects().length === 0) throw new Error("Register a project before starting background Station.");
+  if (!background) await ensureAtLeastOneProject();
 
   // Auto-provision the shared devtunnel relay when that's the configured transport, so `weft
   // start` is genuinely one command: previously it would fail here with "no devtunnel relay is
   // running" and make the user go run `weft devtunnel start` in a second terminal first. If a
   // healthy relay is already up (its own terminal, or another station), we attach to it and
   // leave it alone; if we brought it up, this station owns it and tears it down on shutdown.
-  const ownedRelay = await ensureRelayForTransport();
+  const ownedRelay = background ? { owned: false, failed: false } : await ensureRelayForTransport();
   if (ownedRelay.failed) {
     await listener.stop().catch(() => {});
     release();
@@ -527,6 +717,7 @@ async function start({ newDevice = false } = {}) {
     printFailure(err);
     await listener.stop().catch(() => {});
     release();
+    if (background) throw err;
     process.exitCode = 1;
     return;
   }
@@ -608,11 +799,28 @@ async function start({ newDevice = false } = {}) {
     listener,
     onWaiting: () => status.setConnected(false),
   });
+  let checkingEndpoint = false;
+  const endpointWatchdog = listener.transportDescriptor?.kind === "devtunnel" ? setInterval(() => {
+    if (checkingEndpoint) return;
+    checkingEndpoint = true;
+    void (async () => {
+      const entry = await healthyRegistryEntry();
+      if (!entry || entry.baseUrl === listener.transportDescriptor?.url) return;
+      const result = await listener.rebindTransport({ kind: "devtunnel", url: entry.baseUrl });
+      if (!result.changed) return;
+      onEndpointChanged?.();
+      if (!background) status.log("Weft endpoint changed. Run `weft start` to retrieve an updated pairing QR.");
+      appendStationLog("endpoint.refresh_needed", {}, { level: "warn" });
+    })().catch((error) => appendStationLog("endpoint.rebind_failed", { error: error.name }, { level: "error" }))
+      .finally(() => { checkingEndpoint = false; });
+  }, 15_000) : null;
+  endpointWatchdog?.unref?.();
 
   const shutdown = async (signal) => {
     appendStationLog("station.stop", { signal: signal ?? "exit" });
     status.stop();
     relayWatchdog.stop();
+    clearInterval(endpointWatchdog);
     await listener.stop();
     await releaseOwnedRelay(ownedRelay);
     release();
@@ -621,6 +829,7 @@ async function start({ newDevice = false } = {}) {
   process.once("SIGINT", () => void shutdown("SIGINT"));
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
   process.once("exit", release);
+  onReady?.(listener, shutdown);
   await new Promise(() => {});
 }
 
@@ -1052,7 +1261,7 @@ function describeTransport(descriptor) {
 // this command's usage text or accepted kinds. The transport CHOICE is persisted to the single
 // ~/.weft/weft.config.json file; Supabase creds live separately in ~/.weft/supabase.json so
 // flipping between kinds never destroys stored connection details.
-function setTransport(args) {
+async function setTransport(args) {
   const [kind] = args;
   if (kind === "supabase") {
     // Weft ships with hosted Supabase credentials seeded by the installer, so picking supabase
@@ -1064,9 +1273,9 @@ function setTransport(args) {
           "Re-run the installer to seed them.",
       );
     }
-    saveTransportConfig({ kind: "supabase" });
+    await management.execute("settings.save", { transport: { kind: "supabase" } }, { trustedCli: true });
   } else if (kind === "devtunnel") {
-    saveTransportConfig({ kind: "devtunnel" });
+    await management.execute("settings.save", { transport: { kind: "devtunnel" } }, { trustedCli: true });
     console.log(
       c.dim(
         "Note: requires the `devtunnel` CLI installed and logged in (`devtunnel user login -g`). " +
@@ -1074,7 +1283,7 @@ function setTransport(args) {
       ),
     );
   } else if (kind === "clear") {
-    clearTransportConfig();
+    await management.execute("settings.save", { transport: { kind: "clear" } }, { trustedCli: true });
     console.log("Cleared the configured transport. Run `weft set-transport` again to choose one before pairing.");
     console.log(c.dim(`(Stored supabase credentials at ${supabaseCredentialsPath()} were left in place — delete that file manually to forget them.)`));
     return;
@@ -1102,10 +1311,10 @@ function showTransport() {
 // The display name shown to phones (DEVICES list entry, senderName on every message this
 // listener/CLI sends). Defaults to os.hostname() until the user picks their own via `weft
 // set-name` (offered interactively at install time, defaulting to the machine hostname).
-function setName([...nameParts]) {
+async function setName([...nameParts]) {
   const name = nameParts.join(" ").trim();
   if (!name) throw new Error("Usage: weft set-name <name>");
-  const saved = saveDeviceName(name);
+  const saved = (await management.execute("settings.save", { deviceName: name }, { trustedCli: true })).settings.deviceName;
   console.log(`Device name set to "${saved}". Restart \`weft start\` / /weft for phones to see the new name.`);
 }
 
@@ -1118,12 +1327,12 @@ function showName() {
   }
 }
 
-function setPermission([rawMode]) {
+async function setPermission([rawMode]) {
   const mode = rawMode === "normal" ? "default" : rawMode;
   if (mode !== "default" && mode !== "allow-all") {
     throw new Error("Usage: weft set-permission <default|allow-all>");
   }
-  saveDefaultPermissionMode(mode);
+  await management.execute("settings.save", { permissionMode: mode }, { trustedCli: true });
   console.log(
     `Default session permissions set to ${mode === "allow-all" ? "Allow all" : "Default"}. ` +
     "Reopen Start/Resume on the phone to use it.",
@@ -1356,6 +1565,9 @@ async function install(cmdArgs) {
   console.log(c.dim(`Target: ${extensionInstallDir()}\n`));
   await placeRelease({ fromDir, skillFile });
   ensureWindowsShim(extensionInstallDir());
+  if (!process.env.WEFT_INSTALL_DIR || process.env.WEFT_SHORTCUT_DIR) {
+    await installControlCenterShortcut({ installDir: extensionInstallDir(), directory: process.env.WEFT_SHORTCUT_DIR });
+  }
   console.log(`\n${c.green("Installed code.")} ${c.dim("(PATH + transport config are handled by the installer script.)")}`);
 }
 
@@ -1468,7 +1680,10 @@ function runBootstrapInstaller() {
 
 function usage() {
   console.log(`Usage:
-  weft start [--new-device]
+  weft start [--new-device] [--foreground]
+  weft status
+  weft stop
+  weft ui [status|stop|shortcut]
   weft terminal attach
   weft add-project <name> <path> [--default]
   weft remove-project <name>
@@ -1482,7 +1697,8 @@ function usage() {
   weft show-permission
   weft set-pairing <persistent|ephemeral>
   weft rotate-pairing
-  weft devtunnel <start|status|stop>
+  weft devtunnel start [--foreground]
+  weft devtunnel <status|stop>
   weft version
   weft update [--check]
   weft install [--from <dir>] [--skill <file>]
@@ -1514,16 +1730,17 @@ start with a fresh QR. Run \`weft rotate-pairing\` to rotate without starting, o
 \`weft set-pairing ephemeral\` to mint a new identity on every station start. The in-session
 \`/weft\` command remains per-session and always uses a fresh channel + key.
 
-\`weft start\` brings up whatever the configured transport needs on its own: on the devtunnel
-transport it auto-provisions the shared relay (signing in to dev tunnels for you if needed),
-watches its health while the station runs, and stops it again on exit — unless another terminal
-already owns a healthy relay, in which case it just reuses that one and leaves it running.
+On Windows, \`weft start\` and \`weft devtunnel start\` run in the background through
+manually started, per-user Scheduled Tasks. Closing this terminal does not stop them.
+There are no boot/sign-in triggers. Crashes restart automatically, and the shared relay
+recovers network/tunnel failures, preferring its saved endpoint. First-time sign-in is
+handled before launching the worker.
 
-\`weft devtunnel start\` provisions (or attaches to) the shared devtunnel relay in the
-foreground with a live status line — useful for first-time setup, for keeping the relay up
-across station restarts, or for watching a slow provision independently of any \`/weft\`
-session. \`weft devtunnel status\` reports whether it's currently running; \`weft devtunnel
-stop\` force-tears it down for troubleshooting.
+\`weft stop\` disables Station restart and stops Station; it leaves the shared relay available.
+\`weft devtunnel stop\` disables relay restart and stops the shared relay.
+\`weft status\` and \`weft devtunnel status\` report current health.
+Use \`--foreground\` for terminal-owned diagnostics; other platforms retain foreground mode.
+Direct \`/weft\` connects only its session and never starts Station or a missing relay.
 
 \`weft update\` refreshes just the code bundles (extension + relay + this CLI) and the
 how-to-use skill from the cloud, in place — it never touches ~/.weft, so all your config
@@ -1536,16 +1753,21 @@ function printStartHelp() {
   console.log(`Usage:
   weft start
   weft start --new-device
+  weft start --foreground
 
 Options:
   --new-device       Forget the previously trusted phone, create a fresh persistent
                      pairing identity, and start the Device Station with a new QR.
   --rotate-pairing   Alias for --new-device.
+  --foreground      Keep Station owned by this terminal (the default outside Windows).
+                     Windows normally uses a manually started, user-level background task.
+                     No machine-boot or sign-in startup is registered.
 Terminal access:
   Enabled by default on supported Windows laptops, with your local account permissions.
   To disable, set "terminal": {"enabled": false} in ~/.weft/weft.config.json
   and restart Station. No startup flag is required. The workspace is NOT a sandbox.
-  Closing the laptop terminal or Station ends the shell; leaving the phone page does not.
+  Stopping Station ends the shell; leaving the phone page does not.
+  In foreground mode, closing its terminal also ends Station.
   -h, --help         Show this help without starting the station.
 
 Use plain \`weft start\` when the same phone still has its saved Weft identity; it reconnects
@@ -1557,7 +1779,7 @@ run \`weft update\` once more, then restart Station. No new pairing is required.
 
 If pairing still fails:
   1. Run \`weft show-transport\` and confirm the QR and phone use that transport.
-  2. Keep this terminal open while scanning the newly printed QR.
+  2. Scan the newly printed QR; keep the terminal open only in foreground mode.
   3. Run \`weft update --check\` to confirm the laptop is current.
   4. For devtunnel, run \`weft devtunnel status\`; Supabase needs no local relay.`);
 }

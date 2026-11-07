@@ -63,7 +63,9 @@ export interface NoticeItem {
   ts: number;
 }
 
-export type TimelineItem = UserItem | AssistantItem | ToolItem | NoticeItem;
+export type TimelineItem = (UserItem | AssistantItem | ToolItem | NoticeItem) & {
+  recoveryEpoch?: string; recoverySequence?: number;
+};
 
 export type { ApprovalRequestMsg, ElicitationRequestMsg, HistoryItem, PromptAttachment, SessionMode };
 
@@ -188,6 +190,9 @@ export interface ListenerDeviceState extends RegisteredDevice {
 }
 
 export interface SessionConnection {
+  compact?: boolean;
+  pendingApprovals?: number;
+  pendingForms?: number;
   status: SessionStatus;
   busy: boolean;
   busyFrom: number | null;

@@ -91,6 +91,35 @@ export function selectTunnelBaseUrl(output, relayPort) {
   return selected?.replace(/^https:/, "wss:") ?? null;
 }
 
+export async function resolveSavedTunnelId({ bin, tunnelId, runCommand = run }) {
+  if (!tunnelId) return null;
+  try {
+    await runCommand(bin, ["show", tunnelId]);
+    return tunnelId;
+  } catch (error) {
+    if (/\b404\b|not\s*found|does not exist/i.test(error.message)) return null;
+    throw new Error("The saved Dev Tunnel could not be verified; retrying without replacing its endpoint.", { cause: error });
+  }
+}
+
+export async function recoverRelayPort({
+  port, startServer = startRelayServer,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), retryMs = 1000,
+} = {}) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const relay = startServer({ port });
+    try { await relay.ready; return relay; }
+    catch (error) {
+      await relay.close();
+      if (error.code !== "EADDRINUSE") throw error;
+      if (attempt < 4) await sleep(retryMs);
+    }
+  }
+  const relay = startServer({ port: 0 });
+  await relay.ready;
+  return relay;
+}
+
 export async function main() {
   const baseDir = process.env.WEFT_HOME;
   publishStage("starting-relay");
@@ -109,32 +138,18 @@ export async function main() {
   // created each run and deleted on teardown.
   const persistent = isPersistentPairingEnabled({ baseDir });
   const prior = persistent ? readRegistry(DEVTUNNEL_REGISTRY_FILE, { baseDir }) : null;
-  let reuseTunnelId = prior?.tunnelId ?? null;
+  const reuseTunnelId = await resolveSavedTunnelId({ bin, tunnelId: prior?.tunnelId });
   const desiredPort = Number.isInteger(prior?.relayPort) ? prior.relayPort : null;
 
   // The remembered tunnel may have been deleted out-of-band or expired (Dev Tunnels auto-expire
   // after 30 days idle) — probe it before committing to reuse, and fall back to a fresh create if
   // it's gone.
-  if (reuseTunnelId) {
-    try {
-      await run(bin, ["show", reuseTunnelId]);
-    } catch {
-      reuseTunnelId = null;
-    }
-  }
-
   // Prefer the remembered local port so the public URL is unchanged. If it's occupied by something
   // else, fall back to an OS-assigned port — the URL's port suffix then changes (see the rescan
   // warning the CLI prints when it detects the baseUrl moved).
   let relay;
   if (reuseTunnelId && desiredPort) {
-    try {
-      relay = startRelayServer({ port: desiredPort });
-      await relay.ready;
-    } catch {
-      relay = startRelayServer({ port: 0 });
-      await relay.ready;
-    }
+    relay = await recoverRelayPort({ port: desiredPort });
   } else {
     relay = startRelayServer();
     await relay.ready;
@@ -176,25 +191,30 @@ export async function main() {
         settled = true;
         clearTimeout(timer);
         host.stdout.off("data", onData);
+        host.stderr?.off("data", onStderr);
+        host.stdout.resume();
+        host.stderr?.resume();
         host.off("error", onError);
-        host.off("exit", onExit);
+        host.off("close", onExit);
         if (error) reject(error);
         else resolve(value);
       };
       const onData = (chunk) => {
-        buffer += chunk.toString();
+        buffer = (buffer + chunk.toString()).slice(-64 * 1024);
         const selected = selectTunnelBaseUrl(buffer, relay.port);
         if (selected) finish(null, selected);
       };
       const onError = (error) => finish(error);
       const onExit = (code) =>
         finish(new Error(`devtunnel host exited early (code ${code})${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
+      const onStderr = (chunk) => {
+        stderr = (stderr + chunk.toString()).slice(-64 * 1024);
+      };
       host.stdout.on("data", onData);
-      host.stderr?.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
+      host.stderr?.on("data", onStderr);
       host.once("error", onError);
-      host.once("exit", onExit);
+      // Hosting-failure classification needs stderr, which can arrive after exit.
+      host.once("close", onExit);
       const timer = setTimeout(
         () => finish(new Error("timed out waiting for devtunnel host")),
         HOST_STARTUP_TIMEOUT_MS,
@@ -288,7 +308,7 @@ export async function main() {
     // … expected [host]" — permanently, no matter how long the caller retries. Drop the
     // remembered identity and provision a fresh tunnel instead: the public URL changes (paired
     // phones re-scan) but the relay comes up, rather than hanging until the caller gives up.
-    if (!reuseTunnelId) {
+    if (!reuseTunnelId || !/unauthorized|forbidden|\b40[34]\b|not\s*found|permission denied/i.test(hostErr.message)) {
       await teardown();
       publishFailure(hostErr);
       process.exitCode = 1;

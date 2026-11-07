@@ -1,5 +1,11 @@
 import {
   EVENT_TYPE,
+  ATTENTION_CAPABILITY,
+  WATCH_LEASE_MS,
+  WATCH_RENEW_MS,
+  WATCH_COOLDOWN_MS,
+  watchRequest,
+  recoveryRequest,
   SUBTYPE,
   approvalDecision,
   elicitationResponse,
@@ -39,6 +45,8 @@ import {
 } from '@aasis21/weft-shared';
 import type {
   EventEnvelope,
+  WatchLevel,
+  RecoveryMsg,
   LaunchStatusMsg,
   LifecycleStatusMsg,
   PairingPayload,
@@ -123,6 +131,7 @@ import {
   approvalDismissed,
   approvalRestored,
   busySet,
+  compactStatusReceived,
   coldSet,
   debugAppended,
   deviceDefaultSet,
@@ -462,6 +471,238 @@ export class SessionRuntime {
   // dispatching twice (#88) and lets onMessage strip an already-answered card from a racing state
   // snapshot before the send settles (#79).
   private readonly inFlightDecisions = new Set<string>();
+  private foreground = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+  private visibleChat: string | null | undefined;
+  private disposed = false;
+  private readonly attentionPeers = new Set<string>();
+  private readonly disconnectedPeers = new Set<string>();
+  private readonly watches = new Map<string, { id: string; level: WatchLevel; client: WeftClient }>();
+  private watchTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly watchCooldowns = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly recoveryPositions = new Map<string, NonNullable<import('@/lib/timeline').PersistedTimeline['recovery']>>();
+  private readonly recoveryWrites = new Map<string, Promise<void>>();
+  private readonly recovering = new Set<string>();
+  private readonly historyDeferred = new Set<string>();
+  private readonly recoverySeen = new Map<string, Set<string>>();
+  private readonly recoverySummaries = new Map<string, {
+    key: string; seen: Set<number>; messages: number; tools: number; failures: number;
+  }>();
+
+  /** The shell and chat screen report the actually displayed chat, not the selected card. */
+  setChatVisible(channelId: string | null): void {
+    this.visibleChat = channelId;
+    if (channelId && this.chatIsVisible(channelId) && !this.attentionPeers.has(channelId)) {
+      this.store.dispatch(unreadSet({ id: channelId, on: false }));
+      this.scheduleMetaPersist(channelId);
+    }
+    this.updateWatches();
+    if (channelId && this.attentionPeers.has(channelId)) this.requestRecovery(channelId);
+  }
+
+  private activateSession(channelId: string): void {
+    this.store.dispatch(sessionActivated({
+      id: channelId,
+      viewed: this.foreground && (this.visibleChat === undefined || this.visibleChat === channelId),
+    }));
+  }
+
+  private chatIsVisible(channelId: string): boolean {
+    return this.foreground && (this.visibleChat === undefined ? this.activeId() === channelId : this.visibleChat === channelId);
+  }
+
+  private attentionClient(channelId: string): WeftClient | null {
+    return this.controllers.get(channelId)?.client ?? this.listenerController(channelId)?.client ?? null;
+  }
+
+  private watchLevel(channelId: string): WatchLevel {
+    if (!this.foreground || this.disconnectedPeers.has(channelId)) return 'off';
+    if (this.controllers.has(channelId)) return this.chatIsVisible(channelId) ? 'detail' : 'compact';
+    return this.deviceMonitors.has(channelId) ? 'detail' : 'compact';
+  }
+
+  private updateWatches(force = false): void {
+    if (this.disposed) return;
+    for (const channelId of [...this.attentionPeers].sort((a, b) =>
+      Number(this.chatIsVisible(b)) - Number(this.chatIsVisible(a)))) {
+      const client = this.attentionClient(channelId);
+      if (!client) {
+        this.watches.delete(channelId);
+        const cooldown = this.watchCooldowns.get(channelId);
+        if (cooldown) clearTimeout(cooldown);
+        this.watchCooldowns.delete(channelId);
+        continue;
+      }
+      const level = this.watchLevel(channelId);
+      const previous = this.watches.get(channelId);
+      if (!force && previous?.client === client && previous.level === level) continue;
+      const cooldown = this.watchCooldowns.get(channelId);
+      if (cooldown) clearTimeout(cooldown);
+      this.watchCooldowns.delete(channelId);
+      if (!force && previous?.level === 'detail' && level === 'compact') {
+        this.watchCooldowns.set(channelId, setTimeout(() => {
+          this.watchCooldowns.delete(channelId);
+          this.sendWatch(channelId, client, this.watchLevel(channelId));
+        }, WATCH_COOLDOWN_MS));
+      } else {
+        this.sendWatch(channelId, client, level);
+      }
+    }
+    const watching = this.foreground && [...this.watches.values()].some((watch) => watch.level !== 'off');
+    if (watching && !this.watchTimer) {
+      this.watchTimer = setInterval(() => {
+        for (const [id, watch] of this.watches) {
+          if (watch.level !== 'off' && !this.disconnectedPeers.has(id) && this.attentionClient(id) === watch.client) {
+            void watch.client.send(watchRequest(watch.id, watch.level)).catch(() => {});
+          }
+        }
+      }, WATCH_RENEW_MS);
+    } else if (!watching && this.watchTimer) {
+      clearInterval(this.watchTimer);
+      this.watchTimer = null;
+    }
+  }
+
+  private sendWatch(channelId: string, client: WeftClient, level: WatchLevel): void {
+    const previous = this.watches.get(channelId);
+    const id = previous?.client === client && !(previous.level === 'off' && level !== 'off')
+      ? previous.id : crypto.randomUUID();
+    this.watches.set(channelId, { id, level, client });
+    void client.send(watchRequest(id, level, WATCH_LEASE_MS)).catch(() => {});
+    if (level === 'detail' && this.controllers.has(channelId) &&
+        (previous?.level !== 'detail' || previous.client !== client)) {
+      this.requestState(channelId);
+      this.requestRecovery(channelId);
+    }
+  }
+
+  private negotiateAttention(channelId: string, capabilities?: string[]): void {
+    if (!capabilities) return;
+    const known = this.attentionPeers.has(channelId);
+    if (capabilities.includes(ATTENTION_CAPABILITY)) {
+      this.attentionPeers.add(channelId);
+      if (!known && this.controllers.has(channelId)) void patchSession(channelId, { attention: true });
+      this.updateWatches();
+    } else {
+      this.attentionPeers.delete(channelId);
+      if (known && this.controllers.has(channelId)) void patchSession(channelId, { attention: false });
+      this.watches.delete(channelId);
+    }
+  }
+
+  private requestRecovery(channelId: string): void {
+    if (!this.chatIsVisible(channelId) || this.recovering.has(channelId)) return;
+    const position = this.recoveryPositions.get(channelId);
+    this.recovering.add(channelId);
+    void this.send(channelId, recoveryRequest(position?.epoch ?? null, position?.cursor ?? 0)).catch(() => {
+      this.recovering.delete(channelId);
+    });
+    this.controllers.get(channelId)?.arm('recovery', () => {
+      this.recovering.delete(channelId);
+      if (this.foreground && !this.disconnectedPeers.has(channelId)) this.requestRecovery(channelId);
+    }, WATCH_RENEW_MS);
+  }
+
+  private retainRecovery(channelId: string, data: RecoveryMsg, live = false): void {
+    const pending = this.recoveryWrites.get(channelId) ?? Promise.resolve();
+    let retained = false;
+    const next = pending.then(async () => {
+      const ctrl = this.controllers.get(channelId);
+      if (!ctrl?.client || !this.session(channelId)) return;
+      const previous = this.recoveryPositions.get(channelId) ??
+        { epoch: null, cursor: 0, viewedEpoch: null, viewedCursor: 0 };
+      const cursor = previous.epoch === data.epoch ? previous.cursor : 0;
+      const viewed = previous.viewedEpoch === data.epoch ? previous.viewedCursor : 0;
+      const newItems = data.items.filter((item) => Number.isSafeInteger(item.sequence) && item.sequence > cursor);
+      const unseen = newItems.filter((item) => item.sequence > viewed);
+      const gapId = data.gap ? `recovery-gap:${data.epoch}` : previous.gapId;
+      const anchor = unseen.length ? Math.min(...unseen.map((item) => item.message.ts)) : this.clock();
+      const notice = (id: string, text: string, level: 'info' | 'warning' = 'info', ts = this.clock()): void => {
+        this.store.dispatch(noticeAppended({ id: channelId, noticeId: id, text, level, ts }));
+      };
+      if (data.gap && previous.gapId !== gapId) notice(gapId!, 'Some earlier activity is no longer available.', 'warning', anchor - 0.3);
+      const summaryKey = `${data.epoch}:${viewed}`;
+      if (unseen.length) {
+        notice(`catchup:${summaryKey}`, 'Since last viewed', 'info', anchor - 0.2);
+        let summary = this.recoverySummaries.get(channelId);
+        if (summary?.key !== summaryKey) {
+          const saved = previous.summary?.key === summaryKey ? previous.summary : undefined;
+          summary = {
+            key: summaryKey, seen: new Set(saved?.sequences ?? []),
+            messages: saved?.messages ?? 0, tools: saved?.tools ?? 0, failures: saved?.failures ?? 0,
+          };
+          this.recoverySummaries.set(channelId, summary);
+        }
+        for (const item of unseen) {
+          if (summary.seen.has(item.sequence)) continue;
+          summary.seen.add(item.sequence);
+          if (item.message.eventType !== EVENT_TYPE.STREAM) continue;
+          const sub = item.message.eventSubtype;
+          if (sub === SUBTYPE.STREAM.ASSISTANT_MESSAGE || sub === SUBTYPE.STREAM.USER_MESSAGE) summary.messages++;
+          if (sub === SUBTYPE.STREAM.TOOL_START || sub === SUBTYPE.STREAM.TOOL_COMPLETE) summary.tools++;
+          if ((sub === SUBTYPE.STREAM.TOOL_COMPLETE && !item.message.msg.success) ||
+              (sub === SUBTYPE.STREAM.LOG && item.message.msg.level === 'error')) summary.failures++;
+        }
+        notice(`catchup-summary:${summaryKey}`,
+          `${summary.messages} messages · ${summary.tools} tool updates · ${summary.failures} failures since last viewed`,
+          'info', anchor - 0.1);
+      }
+      for (const item of newItems) {
+        const message = { ...item.message, recoveryEpoch: data.epoch, recoverySequence: item.sequence };
+        // Pending prompts and live state are reconciled only by the current authoritative snapshot.
+        if (message.eventType !== EVENT_TYPE.STREAM || ![
+          SUBTYPE.STREAM.ASSISTANT_MESSAGE, SUBTYPE.STREAM.USER_MESSAGE,
+          SUBTYPE.STREAM.TOOL_START, SUBTYPE.STREAM.TOOL_COMPLETE, SUBTYPE.STREAM.LOG,
+        ].includes(message.eventSubtype as never)) continue;
+        const seen = this.recoverySeen.get(channelId) ?? new Set<string>();
+        seen.add(`${data.epoch}:${item.sequence}`);
+        if (seen.size > 1000) seen.delete(seen.values().next().value!);
+        this.recoverySeen.set(channelId, seen);
+        this.store.dispatch(envelopeReceived({
+          id: channelId, envelope: { ...message, receivedAt: this.clock() },
+          visible: this.chatIsVisible(channelId), countUnread: false,
+        }));
+      }
+      const summary = this.recoverySummaries.get(channelId);
+      const position = {
+        ...previous, epoch: data.epoch, cursor: Math.max(cursor, data.cursor), gapId,
+        summary: summary ? {
+          key: summary.key, sequences: [...summary.seen],
+          messages: summary.messages, tools: summary.tools, failures: summary.failures,
+        } : previous.summary,
+        ...(this.chatIsVisible(channelId) && !data.hasMore && (!live || !this.recovering.has(channelId))
+          ? { viewedEpoch: data.epoch, viewedCursor: Math.max(cursor, data.cursor) } : {}),
+      };
+      const session = this.session(channelId);
+      if (!session) return;
+      await saveTranscript(channelId, { ...toPersisted(toTimelineState(session)), recovery: position }, true);
+      this.recoveryPositions.set(channelId, position);
+      retained = true;
+      if (!data.hasMore) {
+        if (this.chatIsVisible(channelId) && position.viewedEpoch === position.epoch &&
+            position.viewedCursor >= position.cursor) {
+          this.store.dispatch(unreadSet({ id: channelId, on: false }));
+          this.scheduleMetaPersist(channelId);
+        }
+        if (!live) {
+          this.store.dispatch(historyLoadingSet({ id: channelId, loading: false }));
+          this.clearHistoryTimeout(channelId);
+          this.clearSettle(channelId);
+          if (this.chatIsVisible(channelId) && (data.items.length || data.gap)) this.requestState(channelId);
+        }
+      }
+    }).catch(() => {
+      this.store.dispatch(noticeAppended({
+        id: channelId, noticeId: 'recovery-storage-error', level: 'warning',
+        text: 'Could not save catch-up on this device. Reopen the chat to retry.', ts: this.clock(),
+      }));
+    }).finally(() => {
+      if (live) return;
+      this.recovering.delete(channelId);
+      this.controllers.get(channelId)?.clear('recovery');
+      if (retained && data.hasMore && this.chatIsVisible(channelId)) this.requestRecovery(channelId);
+    });
+    this.recoveryWrites.set(channelId, next);
+  }
 
   constructor(store?: AppStore) {
     this.store = store ?? makeStore();
@@ -603,6 +844,12 @@ export class SessionRuntime {
       })),
     );
     const persistedById = new Map(restored.map((r) => [r.channelId, r.persisted]));
+    for (const s of stored) {
+      if (s.attention) this.attentionPeers.add(s.pairing.channelId);
+    }
+    for (const { channelId, persisted } of restored) {
+      if (persisted?.recovery) this.recoveryPositions.set(channelId, persisted.recovery);
+    }
     const eventsById = new Map(restored.map((r) => [r.channelId, r.events]));
 
     const recencyOf = (s: StoredSession): number =>
@@ -684,7 +931,7 @@ export class SessionRuntime {
     if (!activeId && pendingOperations.length > 0) {
       activeId = [...pendingOperations].sort((a, b) => b.createdAt - a.createdAt)[0]?.tempId ?? null;
     }
-    if (activeId) this.store.dispatch(sessionActivated(activeId));
+    if (activeId) this.activateSession(activeId);
     this.store.dispatch(readySet(true));
 
     // Auto-clean storage now that the live set is known: drop orphaned transcripts/event-logs (from
@@ -794,6 +1041,7 @@ export class SessionRuntime {
     const previous = ctrl.client;
     ctrl.detach();
     ctrl.client = client;
+    this.disconnectedPeers.delete(channelId);
     this.registry.adopt(channelId, client);
     if (previous && previous !== client) void previous.close().catch(() => {});
 
@@ -813,8 +1061,12 @@ export class SessionRuntime {
       // boot-probe ordering have a start edge even before the first heartbeat lands.
       this.persistLiveness(channelId, /* flush */ true);
     }
+    this.recovering.delete(channelId);
+    this.updateWatches(true);
     this.requestState(channelId);
-    this.syncHistory(channelId, client);
+    if (this.visibleChat !== undefined && !this.chatIsVisible(channelId) && !this.attentionPeers.has(channelId)) {
+      this.historyDeferred.add(channelId);
+    } else this.syncHistory(channelId, client);
   }
 
   /** Enter unconfirmed 'connecting' and arm the liveness deadline. The single honest-Live guard. */
@@ -898,6 +1150,9 @@ export class SessionRuntime {
       return;
     }
     if (status === 'disconnected') {
+      this.disconnectedPeers.add(channelId);
+      this.recovering.delete(channelId);
+      this.updateWatches();
       if (session.connection.status === 'live' || session.connection.status === 'idle') {
         this.store.dispatch(
           statusSet({ id: channelId, status: 'error', error: 'Connection lost — reconnect to resume.' }),
@@ -906,6 +1161,8 @@ export class SessionRuntime {
       }
       return;
     }
+    this.disconnectedPeers.delete(channelId);
+    this.updateWatches(true);
     if (session.connection.status === 'error') {
       this.beginHostConfirm(channelId, client);
       this.requestState(channelId);
@@ -916,6 +1173,7 @@ export class SessionRuntime {
   private requestState(channelId: string): void {
     const ctrl = this.controllers.get(channelId);
     if (!ctrl || ctrl.ephemeral || !ctrl.client) return;
+    if (this.attentionPeers.has(channelId) && !this.chatIsVisible(channelId)) return;
     void this.send(channelId, stateRequest()).catch(() => {
       // A failed state request must never break the connection; live events still flow.
     });
@@ -925,6 +1183,10 @@ export class SessionRuntime {
     const ctrl = this.controllers.get(channelId);
     const session = this.session(channelId);
     if (!ctrl || !session || ctrl.ephemeral) return;
+    if (this.attentionPeers.has(channelId)) {
+      if (this.chatIsVisible(channelId)) this.requestRecovery(channelId);
+      return;
+    }
     const hasContent = session.history.items.length > 0 || session.transcript.items.length > 0;
     if (!hasContent) {
       this.store.dispatch(historyLoadingSet({ id: channelId, loading: true }));
@@ -989,6 +1251,51 @@ export class SessionRuntime {
     // Ignore a message that decrypted after its channel was superseded (reconnect) or cooled to cold:
     // acting on it could set a stale card back to 'live' with no live connection.
     if (ctrl.client !== client) return;
+    const journalKey = message.recoveryEpoch && Number.isSafeInteger(message.recoverySequence)
+      ? `${message.recoveryEpoch}:${message.recoverySequence}` : null;
+    const seen = this.recoverySeen.get(channelId) ?? new Set<string>();
+    if (journalKey) {
+      const position = this.recoveryPositions.get(channelId);
+      if (seen.has(journalKey) ||
+          (position && position.epoch === message.recoveryEpoch && message.recoverySequence! <= position.cursor)) return;
+      seen.add(journalKey);
+      if (seen.size > 1000) seen.delete(seen.values().next().value!);
+      this.recoverySeen.set(channelId, seen);
+    }
+    let historyJustRequested = false;
+    if (message.eventType === EVENT_TYPE.CONTROL) {
+      if (message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_UP ||
+          message.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT) {
+        this.negotiateAttention(channelId, message.msg.capabilities ?? []);
+        if (this.historyDeferred.delete(channelId)) {
+          this.syncHistory(channelId, client);
+          historyJustRequested = true;
+        }
+      }
+      if (message.eventSubtype === SUBTYPE.CONTROL.RECOVERY) {
+        this.retainRecovery(channelId, message.msg);
+        return;
+      }
+      if (message.eventSubtype === SUBTYPE.CONTROL.WATCH_STATE) {
+        this.confirmHost(channelId, before.connection.status === 'live');
+        return;
+      }
+      if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS) {
+        const status = message.msg;
+        const position = this.recoveryPositions.get(channelId);
+        const viewed = position && position.viewedEpoch === status.epoch ? position.viewedCursor : 0;
+        this.store.dispatch(compactStatusReceived({
+          id: channelId, busy: status.busy,
+          unreadCount: this.chatIsVisible(channelId) ? before.unreadCount : Math.max(0, status.cursor - viewed),
+          pendingApprovals: status.pendingApprovals, pendingForms: status.pendingForms, ts: this.clock(),
+        }));
+        this.confirmHost(channelId, before.connection.status === 'live');
+        this.scheduleMetaPersist(channelId);
+        if (this.chatIsVisible(channelId) &&
+            (!position || position.epoch !== status.epoch || status.cursor > position.cursor)) this.requestRecovery(channelId);
+        return;
+      }
+    }
     if (message.eventSubtype === SUBTYPE.CONTROL.WORKSPACE_RESULT && message.eventType === EVENT_TYPE.CONTROL) {
       this.workspaceClients.get(channelId)?.receive(message.msg);
       return;
@@ -1008,7 +1315,9 @@ export class SessionRuntime {
     const prevRenamed = before.meta.renamed;
 
     this.recordEvent(channelId, 'in', message);
-    this.store.dispatch(envelopeReceived({ id: channelId, envelope: this.filterInFlight(message) }));
+    this.store.dispatch(envelopeReceived({
+      id: channelId, envelope: this.filterInFlight(message), visible: this.chatIsVisible(channelId),
+    }));
 
     if (isUnreadActivity(message)) this.markActivity(channelId);
 
@@ -1044,7 +1353,7 @@ export class SessionRuntime {
       // its history is never asked twice.
       const cur = this.session(channelId);
       const empty = !cur || (cur.history.items.length === 0 && cur.transcript.items.length === 0);
-      if (empty && ctrl.client && !ctrl.ephemeral) this.syncHistory(channelId, ctrl.client);
+      if (empty && ctrl.client && !ctrl.ephemeral && !historyJustRequested) this.syncHistory(channelId, ctrl.client);
     }
 
     // Persist any changed durable metadata as ONE coalesced patch. Separate un-awaited patchSession
@@ -1077,6 +1386,15 @@ export class SessionRuntime {
     }
 
     this.schedulePersist(channelId);
+    if (message.recoveryEpoch && Number.isSafeInteger(message.recoverySequence)) {
+      // A live tail can race replay. Never advance over a missing journal entry.
+      const position = this.recoveryPositions.get(channelId);
+      if (position?.epoch === message.recoveryEpoch && message.recoverySequence === position.cursor + 1) {
+        this.retainRecovery(channelId, {
+          epoch: message.recoveryEpoch, cursor: message.recoverySequence!, items: [], hasMore: false, gap: false,
+        }, true);
+      } else if (this.chatIsVisible(channelId)) this.requestRecovery(channelId);
+    }
   }
 
   /** Collapse a stale duplicate card that reports a sessionId we already track under another channel
@@ -1137,9 +1455,11 @@ export class SessionRuntime {
     // member (an archived session must not be auto-revived on every foreground — the user taps to
     // reconnect). Idempotent: eviction already splices the victim before calling here.
     this.warmLru = this.warmLru.filter((id) => id !== channelId);
+    if (ctrl.client && this.attentionPeers.has(channelId)) this.sendWatch(channelId, ctrl.client, 'off');
     ctrl.dispose();
     this.controllers.delete(channelId);
     this.registry.dispose(channelId);
+    this.updateWatches();
     if (session.connection.status !== 'ended') {
       this.store.dispatch(statusSet({ id: channelId, status: 'idle', error: undefined }));
       this.store.dispatch(coldSet({ id: channelId, on: true }));
@@ -1199,7 +1519,7 @@ export class SessionRuntime {
       ctrl.client = null;
       this.registry.dispose(channelId);
       this.store.dispatch(metaScannedAtSet({ id: channelId, ts: pairing.savedAt ?? this.clock(), transport: pairing.transport?.kind }));
-      if (opts.activate !== false) this.store.dispatch(sessionActivated(channelId));
+      if (opts.activate !== false) this.activateSession(channelId);
       this.attach(channelId, client);
       return channelId;
     }
@@ -1234,7 +1554,7 @@ export class SessionRuntime {
     session.connection.status = 'connecting';
     this.store.dispatch(sessionAdded(session));
     this.controllers.set(channelId, new ChannelController(channelId));
-    if (opts.activate !== false) this.store.dispatch(sessionActivated(channelId));
+    if (opts.activate !== false) this.activateSession(channelId);
     this.attach(channelId, client);
     return channelId;
   }
@@ -1290,7 +1610,7 @@ export class SessionRuntime {
     ctrl.client = demo.client;
     this.controllers.set(channelId, ctrl);
     this.registry.adopt(channelId, demo.client);
-    this.store.dispatch(sessionActivated(channelId));
+    this.activateSession(channelId);
     this.attach(channelId, demo.client);
     if (demo.station) {
       const { pairing, client: stationClient } = demo.station;
@@ -1543,6 +1863,7 @@ export class SessionRuntime {
   }
 
   startDeviceMonitoring(channelId: string): void {
+    if (!this.foreground) return;
     const device = this.device(channelId);
     if (!device?.capabilities?.includes(DEVICE_MONITOR_CAPABILITY)) return;
 
@@ -1565,6 +1886,7 @@ export class SessionRuntime {
       expiresAt: this.clock() + DEVICE_MONITOR_LEASE_MS,
       renewal,
     });
+    this.updateWatches();
     this.store.dispatch(deviceMonitoringStarted({ channelId, monitorId, startedAt: this.clock() }));
     void this.sendDeviceMonitorStart(channelId, monitorId);
   }
@@ -1574,6 +1896,7 @@ export class SessionRuntime {
     if (!lease) return;
     clearInterval(lease.renewal);
     this.deviceMonitors.delete(channelId);
+    this.updateWatches();
     this.deviceHealthCacheWrittenAt.delete(channelId);
     this.store.dispatch(deviceMonitoringStopped({ channelId, monitorId: lease.monitorId }));
 
@@ -1765,7 +2088,7 @@ export class SessionRuntime {
       this.pendingSpawns.delete(requestId);
       await removePendingOperation(requestId);
       this.store.dispatch(sessionRemoved(pending.tempId));
-      if (oldActive === pending.tempId) this.store.dispatch(sessionActivated(pairing.channelId));
+      if (oldActive === pending.tempId) this.activateSession(pairing.channelId);
     } catch (err) {
       await this.setPendingStage(
         pending,
@@ -1809,7 +2132,7 @@ export class SessionRuntime {
       mode: opts.mode,
     };
     this.store.dispatch(sessionAdded(session));
-    this.store.dispatch(sessionActivated(tempId));
+    this.activateSession(tempId);
 
     const pending: PendingSpawn = {
       requestId,
@@ -1914,7 +2237,7 @@ export class SessionRuntime {
       : undefined;
     if (existing) {
       const existingId = existing.meta.channelId;
-      this.store.dispatch(sessionActivated(existingId));
+      this.activateSession(existingId);
       const status = existing.connection.status;
       // Already attached, or on its way: opening it is the whole of what the user asked for. A cold
       // card is excluded even though it reads as `idle` — archiving releases the socket, so idle
@@ -1959,7 +2282,7 @@ export class SessionRuntime {
       mode: opts.mode,
     };
     this.store.dispatch(sessionAdded(session));
-    this.store.dispatch(sessionActivated(tempId));
+    this.activateSession(tempId);
 
     const pending: PendingSpawn = {
       requestId,
@@ -2075,9 +2398,14 @@ export class SessionRuntime {
     const previous = ctrl.client;
     ctrl.detach();
     ctrl.client = client;
+    this.disconnectedPeers.delete(channelId);
+    this.updateWatches(true);
     if (previous && previous !== client) void previous.close().catch(() => {});
     const stopEvents = client.subscribe((message) => this.onListenerMessage(channelId, client, message));
     const stopStatus = client.onStatus((status) => {
+      if (status === 'connected') this.disconnectedPeers.delete(channelId);
+      else this.disconnectedPeers.add(channelId);
+      this.updateWatches(true);
       if (status !== 'connected') this.clearDeviceUtilities(channelId);
       this.store.dispatch(deviceErrorSet({ channelId, connected: status === 'connected' }));
       this.terminals.get(channelId)?.setConnected(status === 'connected');
@@ -2174,6 +2502,7 @@ export class SessionRuntime {
           defaultPermissionMode: msg.defaultPermissionMode ?? 'default',
         }),
       );
+      this.negotiateAttention(channelId, msg.capabilities);
       if (msg.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) this.refreshDeviceKeepAwake(channelId);
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
       // The listener's deviceId is stable across `weft start` restarts even though this
@@ -2290,7 +2619,7 @@ export class SessionRuntime {
         this.store.dispatch(sessionRemoved(pending.tempId));
         const claimedChannelId = msg.payload?.channelId;
         if (claimedChannelId && this.session(claimedChannelId)) {
-          this.store.dispatch(sessionActivated(claimedChannelId));
+          this.activateSession(claimedChannelId);
         }
         return;
       }
@@ -2476,20 +2805,23 @@ export class SessionRuntime {
     if (!session) return;
     const ctrl = this.controllers.get(channelId);
     if (this.activeId() === channelId) {
-      if (session.unread) {
+      if (session.unread && this.chatIsVisible(channelId)) {
         this.store.dispatch(unreadSet({ id: channelId, on: false }));
         if (!ctrl?.ephemeral) void patchSession(channelId, { unread: false, unreadCount: 0 });
       }
       return;
     }
-    this.store.dispatch(sessionActivated(channelId));
+    this.activateSession(channelId);
+    this.updateWatches();
     this.touchWarm(channelId);
     this.ensureConnected(channelId);
     if (!ctrl?.ephemeral) {
       const lastSeenAt = this.clock();
       void (async () => {
         await setLastActiveSessionId(channelId);
-        await patchSession(channelId, { lastSeenAt, unread: false, unreadCount: 0 });
+        await patchSession(channelId, {
+          lastSeenAt, ...(this.chatIsVisible(channelId) ? { unread: false, unreadCount: 0 } : {}),
+        });
       })();
     }
   }
@@ -2533,7 +2865,7 @@ export class SessionRuntime {
     if (wasActive) {
       const nextId = (this.store.getState().sessions.ids[0] as string | undefined) ?? null;
       if (nextId) {
-        this.store.dispatch(sessionActivated(nextId));
+        this.activateSession(nextId);
         this.ensureConnected(nextId);
       }
     }
@@ -2559,6 +2891,7 @@ export class SessionRuntime {
    *  AUTO_DELETE_MS. Sessions we've never witnessed with a pulse yet (either clock missing) are never
    *  eligible, so a freshly-paired card is safe. */
   private isDeleteEligible(s: StoredSession, spareId: string | null): boolean {
+    if (s.attention || this.attentionPeers.has(s.pairing.channelId)) return false;
     if (s.pinned) return false;
     if (s.pairing.channelId === spareId) return false;
     const beat = s.lastHeartbeatAt;
@@ -2601,6 +2934,7 @@ export class SessionRuntime {
    *  have never witnessed with a pulse (either clock missing) is ineligible under both rules — a
    *  freshly-paired card is safe. */
   private isArchiveEligible(s: StoredSession, spareId: string | null): boolean {
+    if (s.attention || this.attentionPeers.has(s.pairing.channelId)) return false;
     if (s.pinned) return false;
     if (s.pairing.channelId === spareId) return false;
     const beat = s.lastHeartbeatAt;
@@ -2906,8 +3240,20 @@ export class SessionRuntime {
       'save',
       () => {
         ctrl.clear('save');
-        const s = this.session(channelId);
-        if (s) void saveTranscript(channelId, toPersisted(toTimelineState(s)));
+        const pending = this.recoveryWrites.get(channelId) ?? Promise.resolve();
+        const write = pending.then(async () => {
+          const s = this.session(channelId);
+          if (s) await saveTranscript(channelId, {
+            ...toPersisted(toTimelineState(s)), recovery: this.recoveryPositions.get(channelId),
+          }, true);
+        }).catch(() => {
+          if (!this.session(channelId)) return;
+          this.store.dispatch(noticeAppended({
+            id: channelId, noticeId: 'recovery-storage-error', level: 'warning',
+            text: 'Could not save this conversation on your device.', ts: this.clock(),
+          }));
+        });
+        this.recoveryWrites.set(channelId, write);
       },
       PERSIST_THROTTLE_MS,
     );
@@ -2967,6 +3313,7 @@ export class SessionRuntime {
    *  app is alive, phone-off time never advances it — that's what makes the delete clock count only
    *  *witnessed* silence, so a still-alive laptop is never auto-deleted. */
   private persistLiveness(channelId: string, flush = false): void {
+    if (this.attentionPeers.has(channelId)) return;
     const ctrl = this.controllers.get(channelId);
     if (ctrl?.ephemeral) return; // never persist ephemeral (unstored) sessions
     const now = this.clock();
@@ -2998,6 +3345,21 @@ export class SessionRuntime {
       for (const session of selectAllSessions(this.store.getState())) {
         const ctrl = this.controllers.get(session.id);
         if (!ctrl || ctrl.ephemeral) continue;
+        // Negotiated peers intentionally have no periodic heartbeat while off/compact.
+        // Transport status and foreground reacquisition, not silence, govern their liveness.
+        if (this.attentionPeers.has(session.id)) {
+          if (this.foreground && session.connection.status === 'error' &&
+              !session.connection.cold && !ctrl.reconnecting) {
+            const lastTry = this.sessionReconnectAt.get(session.id) ?? 0;
+            const failures = this.sessionReconnectFails.get(session.id) ?? 0;
+            if (lastTry === 0 || now - lastTry >= sessionReconnectBackoffMs(failures)) {
+              this.sessionReconnectAt.set(session.id, now);
+              this.sessionReconnectFails.set(session.id, failures + 1);
+              void this.reconnect(session.id);
+            }
+          }
+          continue;
+        }
         // Advance the witness clock for every stored session on every pass, cold ones included.
         // Without this the only writers are subscribe-success, coolDown and pagehide, so a session
         // that can never subscribe never moves `lastSubscribedAt` — its witnessed silence stays
@@ -3078,6 +3440,16 @@ export class SessionRuntime {
       // goes stale, rather than trusting the transport's own connect state alone (a hung/crashed
       // `weft` process can leave the socket looking "connected" — see DEVICE_HEARTBEAT).
       for (const device of this.store.getState().sessions.devices) {
+        if (this.attentionPeers.has(device.channelId)) {
+          const ctrl = this.listenerController(device.channelId);
+          const lastTry = this.deviceReconnectAt.get(device.channelId) ?? 0;
+          if (this.foreground && (!device.connected || !ctrl?.client) && !ctrl?.reconnecting &&
+              now - lastTry >= DEVICE_RECONNECT_BASE_MS) {
+            this.deviceReconnectAt.set(device.channelId, now);
+            void this.connectDevice(device.channelId);
+          }
+          continue;
+        }
         if (device.connected && device.lastSeenAt && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS) {
           this.clearDeviceUtilities(device.channelId);
           this.store.dispatch(deviceErrorSet({ channelId: device.channelId, connected: false }));
@@ -3111,13 +3483,23 @@ export class SessionRuntime {
     // Foregrounding fires visibilitychange AND Capacitor appStateChange (and sometimes `online`)
     // back-to-back; a short leading-edge debounce collapses the overlapping triggers into one pass
     // so each warm session issues at most one state+history sync (#75).
-    if (now - this.lastResumeAt < RESUME_DEBOUNCE_MS) return;
+    if (this.foreground && now - this.lastResumeAt < RESUME_DEBOUNCE_MS) return;
+    this.foreground = true;
+    this.updateWatches(true);
     this.lastResumeAt = now;
     void this.sweepExpired(); // #163: purge witnessed-silence-expired sessions on each foreground
-    for (const channelId of [...this.warmLru]) {
+    for (const channelId of [...this.warmLru].sort((a, b) => Number(this.chatIsVisible(b)) - Number(this.chatIsVisible(a)))) {
       const ctrl = this.controllers.get(channelId);
       const session = this.session(channelId);
       if (!ctrl || !session || ctrl.ephemeral) continue;
+      if (this.attentionPeers.has(channelId)) {
+        if (!ctrl.client || session.connection.status === 'error') void this.reconnect(channelId);
+        else if (this.chatIsVisible(channelId)) {
+          this.requestState(channelId);
+          this.requestRecovery(channelId);
+        }
+        continue;
+      }
       // A session still inside its 30s confirmation window (just created a client) must not be torn
       // down and reconnected — that closes the fresh client, drops a pending host reply, and resets
       // the clock (#125). Let the confirm gate / watchdog resolve it.
@@ -3136,7 +3518,8 @@ export class SessionRuntime {
     // LRU, capped at MAX_DEVICES), so just revive any whose listener client is missing/stale.
     for (const device of this.store.getState().sessions.devices) {
       const ctrl = this.listenerController(device.channelId);
-      const stale = device.lastSeenAt != null && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS;
+      const stale = !this.attentionPeers.has(device.channelId) &&
+        device.lastSeenAt != null && now - device.lastSeenAt > DEVICE_OFFLINE_AFTER_MS;
       if (!ctrl?.client || !device.connected || stale) {
         // Foregrounding resets the backoff ramp: clear the attempt counter + throttle stamp so the
         // returning user gets an immediate attempt-0 reconnect, however relaxed the background ramp
@@ -3158,6 +3541,14 @@ export class SessionRuntime {
    *  may lag by up to LIVENESS_PERSIST_THROTTLE_MS). This keeps witnessed-silence honest across an
    *  app suspend, without waiting for the next foreground tick. */
   private handleHide = (event?: Event): void => {
+    if (event?.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+    this.foreground = false;
+    this.updateWatches();
+    for (const [id, timer] of this.watchCooldowns) {
+      clearTimeout(timer);
+      this.watchCooldowns.delete(id);
+    }
+    for (const channelId of [...this.deviceMonitors.keys()]) this.stopDeviceMonitoring(channelId);
     if (event?.type !== 'visibilitychange' || document.visibilityState === 'hidden') {
       for (const device of this.store.getState().sessions.devices) this.closeDeviceClipboard(device.channelId);
     }
@@ -3172,6 +3563,8 @@ export class SessionRuntime {
     this.resumeCleanups.push(() => window.removeEventListener('online', this.handleResume));
     window.addEventListener('pagehide', this.handleHide);
     this.resumeCleanups.push(() => window.removeEventListener('pagehide', this.handleHide));
+    window.addEventListener('pageshow', this.handleResume);
+    this.resumeCleanups.push(() => window.removeEventListener('pageshow', this.handleResume));
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleResume);
       this.resumeCleanups.push(() => document.removeEventListener('visibilitychange', this.handleResume));
@@ -3186,7 +3579,8 @@ export class SessionRuntime {
       }
     })
       .then((handle) => {
-        this.resumeCleanups.push(() => handle.remove());
+        if (this.disposed) void handle.remove();
+        else this.resumeCleanups.push(() => { void handle.remove(); });
       })
       .catch(() => {
         // No Capacitor App bridge here — the visibility/online triggers already cover the web path.
@@ -3195,6 +3589,12 @@ export class SessionRuntime {
 
   /** Tear down every socket, timer, and listener. Called when the app (or a test harness) shuts down. */
   dispose(): void {
+    this.foreground = false;
+    this.updateWatches();
+    this.disposed = true;
+    if (this.watchTimer) clearInterval(this.watchTimer);
+    for (const timer of this.watchCooldowns.values()) clearTimeout(timer);
+    this.watchCooldowns.clear();
     for (const client of this.workspaceClients.values()) client.dispose();
     this.workspaceClients.clear();
     for (const waiters of this.lifecycleWaiters.values()) {

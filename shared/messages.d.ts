@@ -69,6 +69,11 @@ export const SUBTYPE: {
   readonly ELICITATION: { readonly REQUEST: "request"; readonly COMPLETE: "complete" };
   readonly ELICITATION_RESPONSE: { readonly RESPONSE: "response" };
   readonly CONTROL: {
+    readonly WATCH_REQUEST: "watch_request";
+    readonly WATCH_STATE: "watch_state";
+    readonly SESSION_STATUS: "session_status";
+    readonly RECOVERY_REQUEST: "recovery_request";
+    readonly RECOVERY: "recovery";
     readonly CHANNEL_UP: "channel_up";
     readonly WORKSPACE_REQUEST: "workspace_request";
     readonly WORKSPACE_RESULT: "workspace_result";
@@ -144,6 +149,9 @@ export interface EnvelopeBase {
    *  phone-domain elapsed-time math (heartbeat liveness, witnessed-silence) so a skewed laptop clock
    *  in `ts` can't be compared against the phone's clock. Falls back to `ts` when absent. */
   receivedAt?: number;
+  /** Durable application-journal position, independent of SecureChannel sequencing. */
+  recoveryEpoch?: string;
+  recoverySequence?: number;
   /** Stamped by SecureChannel on publish. */
   channelId?: string;
   sessionId?: string;
@@ -772,7 +780,37 @@ export type PairHello = Envelope<"pair", "hello", PairHelloMsg>;
 export type PairAck = Envelope<"pair", "ack", PairAckMsg>;
 
 /** The discriminated union of every encrypted (post-pairing) envelope. */
+export const ATTENTION_CAPABILITY: "attention-v1";
+export const WATCH_LEASE_MS: 60000;
+export const WATCH_RENEW_MS: 20000;
+export const WATCH_COOLDOWN_MS: 5000;
+export type WatchLevel = "detail" | "compact" | "off";
+export interface WatchMsg { watchId: string; level: WatchLevel; leaseMs: number }
+export interface SessionStatusMsg {
+  busy: boolean; epoch: string; cursor: number; pendingApprovals: number; pendingForms: number;
+}
+export interface RecoveryRequestMsg { epoch: string | null; cursor: number; limit: number }
+export interface RecoveryItem { sequence: number; message: EventEnvelope }
+export interface RecoveryMsg {
+  items: RecoveryItem[]; epoch: string; cursor: number; hasMore: boolean; gap: boolean;
+}
+export type WatchRequest = Envelope<"control", "watch_request", WatchMsg>;
+export type WatchState = Envelope<"control", "watch_state", WatchMsg>;
+export type SessionStatusMessage = Envelope<"control", "session_status", SessionStatusMsg>;
+export type RecoveryRequest = Envelope<"control", "recovery_request", RecoveryRequestMsg>;
+export type Recovery = Envelope<"control", "recovery", RecoveryMsg>;
+export function watchRequest(watchId: string, level: WatchLevel, leaseMs?: number): WatchRequest;
+export function watchState(watchId: string, level: WatchLevel, leaseMs: number): WatchState;
+export function sessionStatus(status: SessionStatusMsg): SessionStatusMessage;
+export function recoveryRequest(epoch?: string | null, cursor?: number, limit?: number): RecoveryRequest;
+export function recovery(items: RecoveryItem[], epoch: string, cursor: number, hasMore?: boolean, gap?: boolean): Recovery;
+
 export type EventEnvelope =
+  | WatchRequest
+  | WatchState
+  | SessionStatusMessage
+  | RecoveryRequest
+  | Recovery
   | import("./workspace").WorkspaceRequest
   | import("./workspace").WorkspaceResult
   | AssistantMessage

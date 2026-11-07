@@ -22,6 +22,35 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { recoverRelayPort, resolveSavedTunnelId } from "../src/relayServerProcess.mjs";
+
+test("saved tunnel lookup replaces only confirmed absence, not network/auth failures", async () => {
+  assert.equal(await resolveSavedTunnelId({ bin: "fake", tunnelId: "saved", runCommand: async () => {} }), "saved");
+  assert.equal(await resolveSavedTunnelId({
+    bin: "fake", tunnelId: "saved", runCommand: async () => { throw new Error("404 Tunnel not found"); },
+  }), null);
+  await assert.rejects(resolveSavedTunnelId({
+    bin: "fake", tunnelId: "saved", runCommand: async () => { throw new Error("Network unreachable"); },
+  }), /without replacing its endpoint/);
+  await assert.rejects(resolveSavedTunnelId({
+    bin: "fake", tunnelId: "saved", runCommand: async () => { throw new Error("Login token expired"); },
+  }), /without replacing its endpoint/);
+});
+
+test("saved relay port is retried before endpoint replacement and unrelated errors surface", async () => {
+  const ports = [];
+  const startServer = ({ port }) => {
+    ports.push(port);
+    return { ready: ports.length < 3 ? Promise.reject(Object.assign(new Error("busy"), { code: "EADDRINUSE" })) : Promise.resolve(),
+      close: async () => {}, port };
+  };
+  assert.equal((await recoverRelayPort({ port: 1234, startServer, sleep: async () => {} })).port, 1234);
+  assert.deepEqual(ports, [1234, 1234, 1234]);
+  await assert.rejects(recoverRelayPort({
+    port: 1234, sleep: async () => {},
+    startServer: () => ({ ready: Promise.reject(Object.assign(new Error("denied"), { code: "EACCES" })), close: async () => {} }),
+  }), /denied/);
+});
 
 // The fake CLI below reports a made-up devtunnels.ms host. That domain wildcard-resolves for real,
 // so the reuse path's public-side health probe would send an actual request to Microsoft's tunnel
@@ -86,7 +115,10 @@ if (cmd === "create" && args.includes("--json")) {
   console.log(JSON.stringify({ tunnel: { tunnelId: "fake-tunnel-id" } }));
   process.exit(0);
 }
-if (cmd === "show") { process.exit(process.env.FAKE_DEVTUNNEL_SHOW_FAILS ? 1 : 0); }
+if (cmd === "show") {
+  if (process.env.FAKE_DEVTUNNEL_SHOW_FAILS) { console.error("404 Tunnel not found"); process.exit(1); }
+  process.exit(0);
+}
 if (cmd === "port") {
   if (stageDelayMs) sleepSync(stageDelayMs);
   const operation = args[1];
@@ -129,7 +161,7 @@ if (cmd === "host") {
   // scope, so \`devtunnel show\` succeeds) but may not HOST it — e.g. it was created under a
   // different account. Fatal and unretryable: the CLI exits instead of printing a URL.
   if (process.env.FAKE_DEVTUNNEL_HOST_DENY_ID && args[1] === process.env.FAKE_DEVTUNNEL_HOST_DENY_ID) {
-    console.error("Tunnel service error: Request not permitted. Unauthorized tunnel access: expected one or more of [host].");
+    await new Promise((resolve) => process.stderr.write("Tunnel service error: Request not permitted. Unauthorized tunnel access: expected one or more of [host].\\n", resolve));
     process.exit(1);
   }
   if (process.env.FAKE_DEVTUNNEL_HOST_FAILS) {

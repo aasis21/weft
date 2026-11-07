@@ -88,6 +88,11 @@ test("opening app pairing preserves a trusted phone; confirmed refresh revokes i
       export const registerPendingSession = () => {};
       export const removePendingSession = () => {};
     `,
+    "./sessionRecovery.mjs": `
+      export const createSessionRecovery = async () => ({
+        epoch: "test", cursor: 0, capture: async () => null, close: async () => {},
+      });
+    `,
   };
   const outfile = join(dir, "active.mjs");
   await build({
