@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getProcessStartTime, verifyProcessIdentity } from "../src/processIdentity.mjs";
+import { getProcessStartTime, verifyProcessIdentity, verifyProcessIdentities } from "../src/processIdentity.mjs";
 
 test("Windows and Unix process start times are normalized to epoch milliseconds", async () => {
   const windows = await getProcessStartTime(42, {
@@ -43,4 +43,27 @@ test("the current process can prove its OS start time", async () => {
   const processStartedAt = await getProcessStartTime(process.pid);
   const verified = await verifyProcessIdentity({ pid: process.pid, processStartedAt });
   assert.equal(verified.live, true);
+});
+
+test("batch verification queries each PID once and preserves reuse and uncertainty checks", async () => {
+  let calls = 0;
+  const result = await verifyProcessIdentities([
+    { pid: 42, processStartedAt: 1000 },
+    { pid: 42, processStartedAt: 9000 },
+    { pid: 43, processStartedAt: 1000 },
+    { pid: 44, processStartedAt: 1000 },
+  ], {
+    platform: "win32", toleranceMs: 10, isAlive: (pid) => pid !== 44,
+    getStartTimes: async (pids) => { calls++; assert.deepEqual(pids, [42, 43]); return [{ pid: 42, startedAt: 1000 }]; },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result[0].live, true);
+  assert.equal(result[1].reason, "pid-reused");
+  assert.equal(result[2].live, null);
+  assert.equal(result[3].reason, "process-exited");
+  const unavailable = await verifyProcessIdentities([{ pid: 42, processStartedAt: 1000 }], {
+    platform: "win32", isAlive: () => true, getStartTimes: async () => { throw new Error("permission denied"); },
+  });
+  assert.equal(unavailable[0].live, null);
+  assert.equal(unavailable[0].reason, "process-unverifiable");
 });

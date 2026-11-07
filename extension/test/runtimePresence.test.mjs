@@ -73,6 +73,27 @@ test("startup atomically publishes one private directory and verified discovery 
   }
 });
 
+test("batch discovery preserves verified endpoint proof and does not contact reused owners", async (t) => {
+  const baseDir = fixture(t);
+  const first = await publishRuntimePresence({ identity: identity({ sessionId: "first" }), endpoint: "first", processStartedAt: 100 }, { baseDir });
+  const second = await publishRuntimePresence({ identity: identity({ sessionId: "second" }), endpoint: "second", processStartedAt: 100 }, { baseDir });
+  t.after(() => { first.close(); second.close(); });
+  let batches = 0;
+  const proven = [];
+  const result = await scanRuntimePresence({
+    baseDir, cleanup: false,
+    verify: async () => assert.fail("Individual process query is not needed."),
+    verifyBatch: async (presences) => { batches++; return presences.map((p) =>
+      p.sessionId === "first" ? { live: true } : { live: false, reason: "pid-reused" }); },
+    probe: async (presence) => { proven.push(presence.sessionId); return true; },
+  });
+  assert.equal(batches, 1);
+  assert.deepEqual(proven, ["first"]);
+  assert.equal(result.status, "single");
+  assert.equal(result.runtimes[0].sessionId, "first");
+  assert.equal(result.rejected[0].reason, "pid-reused");
+});
+
 test("reload presence retains terminal identity but creates a separate runtime directory", async (t) => {
   const baseDir = fixture(t);
   const scope = {};

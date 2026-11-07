@@ -109,6 +109,22 @@ test("interrupted management ownership is explicit and is not automatically dele
   await assert.rejects(withManagementLock(baseDir, async () => {}), /stale lock/);
   assert.ok(await readFile(join(baseDir, "management.lock")));
 });
+
+test("concurrent status polling shares one verified discovery and releases it for fresh polling", async (t) => {
+  const baseDir = await home(t);
+  let calls = 0;
+  const manager = createManagement({ baseDir, platform: "linux", discover: async (options) => {
+    calls++;
+    assert.equal(typeof options.verifyBatch, "function");
+    assert.equal(options.cleanup, false);
+    await new Promise((done) => setTimeout(done, 20));
+    return { status: "none", runtimes: [] };
+  } });
+  await Promise.all([manager.state(), manager.state(), manager.state()]);
+  assert.equal(calls, 1);
+  await manager.state();
+  assert.equal(calls, 2);
+});
 test("shortcut targets the installed CLI, quotes paths, and guards unrelated links", () => {
   const script = shortcutScript({ installDir: "C:\\Weft's Install", directory: "C:\\Test Desktop" });
   assert.match(script, /Weft''s Install/);

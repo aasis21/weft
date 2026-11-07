@@ -65,3 +65,46 @@ export async function verifyProcessIdentity(
     return { live: null, reason: "process-unverifiable", error };
   }
 }
+
+/** Verify a discovery snapshot with one Windows process query, not one shell per runtime. */
+export async function verifyProcessIdentities(presences, {
+  platform = process.platform, isAlive = isPidAlive, toleranceMs = 2_000,
+  getStartTimes = async (pids) => {
+    const script = `@(
+Get-Process -Id @(${pids.join(",")}) -ErrorAction SilentlyContinue | ForEach-Object {
+  try {
+    [pscustomobject]@{pid=$_.Id;startedAt=[DateTimeOffset]::new($_.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()}
+  } catch { }
+}
+) | ConvertTo-Json -Compress`;
+    const { stdout } = await execFileAsync("powershell.exe",
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+      { windowsHide: true, timeout: 5_000, encoding: "utf8" });
+    const value = stdout.trim() ? JSON.parse(stdout) : [];
+    return Array.isArray(value) ? value : [value];
+  },
+} = {}) {
+  if (platform !== "win32") return Promise.all(presences.map((presence) => verifyProcessIdentity(presence, { isAlive, toleranceMs })));
+  const eligible = presences.map((p) => Number.isSafeInteger(p.pid) && p.pid > 0 &&
+    Number.isSafeInteger(p.processStartedAt) && p.processStartedAt > 0);
+  const live = presences.map((p, index) => eligible[index] && isAlive(p.pid));
+  const pids = [...new Set(presences.filter((_, index) => live[index]).map((p) => p.pid))];
+  let times = [], error;
+  if (pids.length) {
+    try { times = await getStartTimes(pids); }
+    catch (failure) { error = failure; }
+  }
+  const actual = new Map(times.filter((p) => Number.isSafeInteger(p?.pid) &&
+    Number.isSafeInteger(p?.startedAt) && p.startedAt > 0).map((p) => [p.pid, p.startedAt]));
+  return presences.map((p, index) => {
+    if (!eligible[index]) return { live: false, reason: "invalid-process-identity" };
+    if (!live[index]) return { live: false, reason: "process-exited" };
+    const startedAt = actual.get(p.pid);
+    if (startedAt === undefined) return isAlive(p.pid)
+      ? { live: null, reason: "process-unverifiable", error }
+      : { live: false, reason: "process-exited" };
+    return Math.abs(startedAt - p.processStartedAt) > toleranceMs
+      ? { live: false, reason: "pid-reused", actualStartedAt: startedAt }
+      : { live: true, actualStartedAt: startedAt };
+  });
+}

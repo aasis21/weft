@@ -679,6 +679,20 @@ No installed-client update, production tunnel/phone pairing, commit, push, or
 deployment was performed. New-session launch is wired through the existing tested
 coordinator; a real user Copilot session was not spawned as a side effect of validation.
 
+Live-laptop follow-up: the first actual dashboard run hit the ten-second client
+deadline because discovering 20 local runtimes ran Windows process-identity queries
+serially (about 21 seconds total). Management discovery now batches process start-time
+verification into one query, retains endpoint proofs/PID-reuse checks, probes Station
+and relay independently in parallel, and coalesces simultaneous status requests.
+Dashboard scans are read-only and do not prune presence directories. The existing
+default discovery path remains unchanged for consumers not requesting batch verification.
+
+After rebuilding and restarting only the UI host, a real authenticated status request
+completed in 5.8 seconds and Chromium verified the live badge, hidden timeout banner,
+20 discovered sessions, and no page errors. Targeted identity/discovery/lifecycle/
+management/host tests passed. This follow-up fix is local and has not been committed
+or pushed; existing Station, relay, pairing, and Copilot installations were unchanged.
+
 ### Product and ownership decisions
 
 - Build an optional whole-laptop Control Center, opened with `weft ui` or a

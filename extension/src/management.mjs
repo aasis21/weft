@@ -19,6 +19,7 @@ import {
 import { readRegistry, isPidAlive } from "./registryFile.mjs";
 import { discoverRuntimeLifecycles, createRuntimeLifecycleClient } from "./runtimeLifecycle.mjs";
 import { resolveVersion } from "./version.mjs";
+import { verifyProcessIdentities } from "./processIdentity.mjs";
 
 export class ManagementError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -136,8 +137,8 @@ export function createManagement({
   }
   async function workloads() {
     const result = {};
-    for (const role of ["station", "relay"]) {
-      if (platform !== "win32") { result[role] = { state: "unsupported", supported: false }; continue; }
+    await Promise.all(["station", "relay"].map(async (role) => {
+      if (platform !== "win32") { result[role] = { state: "unsupported", supported: false }; return; }
       const raw = await background.command(role, "status", null, options);
       if (raw) {
         const { state, error, paired, phoneName, deviceName, baseUrl, pid } = raw;
@@ -146,7 +147,7 @@ export function createManagement({
         const task = await background.task("status", { ...options, role });
         result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true };
       }
-    }
+    }));
     const registry = readRegistry(DEVTUNNEL_REGISTRY_FILE, options);
     if (registry?.alive !== false && isPidAlive(registry?.pid)) {
       const health = await relayHealth(undefined, { baseDir });
@@ -166,7 +167,7 @@ export function createManagement({
     return result;
   }
   async function runtimes() {
-    const discovery = await discover({ baseDir, timeoutMs: 750 });
+    const discovery = await discover({ baseDir, timeoutMs: 750, verifyBatch: verifyProcessIdentities, cleanup: false });
     return { discovery, list: await Promise.all((discovery.runtimes ?? []).map(async (presence) => {
       try {
         const response = await runtimeClient(presence, options).command("status", null, { timeoutMs: 1000 });
@@ -182,7 +183,7 @@ export function createManagement({
     })) };
   }
   async function target(runtimeId) {
-    const discovery = await discover({ baseDir, timeoutMs: 1000 });
+    const discovery = await discover({ baseDir, timeoutMs: 1000, verifyBatch: verifyProcessIdentities, cleanup: false });
     if (["conflict", "uncertain"].includes(discovery.status)) throw new ManagementError("runtime-conflict", "Session identity is uncertain. Refresh before selecting a session.");
     const presence = discovery.runtimes?.find((item) => item.runtimeInstanceId === runtimeId);
     if (!presence) throw new ManagementError("stale-session", "This session is no longer available. Refresh the session list.");
@@ -267,15 +268,20 @@ export function createManagement({
       return { state: status.state, deviceName: status.deviceName, paired: status.paired, baseUrl: status.baseUrl };
     });
   }
-  return {
-    execute, settings, projects: () => listProjects(options),
-    async state() {
+  let pendingState = null;
+  async function readState() {
       const warnings = [];
       const [work, runtime] = await Promise.all([workloads(), runtimes()]);
       if (["conflict", "uncertain"].includes(runtime.discovery.status)) warnings.push("Some session identities could not be verified; uncertain sessions cannot be controlled.");
       const currentSettings = settings();
       return { version: resolveVersion(), checkedAt: Date.now(), platform, deviceName: loadDeviceName(options) ?? hostname(), ...work, projects: listProjects(options),
         settings: currentSettings, settingsRevision: settingsRevision(currentSettings), sessions: runtime.list, warnings };
+  }
+  return {
+    execute, settings, projects: () => listProjects(options),
+    state() {
+      pendingState ??= readState().finally(() => { pendingState = null; });
+      return pendingState;
     },
     async pairing(runtimeId) {
       const response = runtimeId ? await (await target(runtimeId)).command("status", null, { timeoutMs: 2000 }) : null;

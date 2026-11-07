@@ -199,6 +199,7 @@ export async function scanRuntimePresence(
     sessionId = null,
     cleanup = true,
     verify = verifyProcessIdentity,
+    verifyBatch = null,
     probe = null,
   } = {},
 ) {
@@ -212,12 +213,25 @@ export async function scanRuntimePresence(
   }
   const runtimes = [];
   const rejected = [];
+  const prepared = new Map();
+  const processResults = new Map();
+  if (verifyBatch) {
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      let presence;
+      try { presence = readPresence(join(parent, entry.name), baseDir); } catch { continue; }
+      if (presence?.runtimeInstanceId === entry.name) prepared.set(entry.name, presence);
+    }
+    const results = await verifyBatch([...prepared.values()]);
+    if (!Array.isArray(results) || results.length !== prepared.size) throw new Error("Invalid batch process verification result.");
+    [...prepared.keys()].forEach((key, index) => processResults.set(key, results[index]));
+  }
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
     const dir = join(parent, entry.name);
     let presence;
     try {
-      presence = readPresence(dir, baseDir);
+      presence = prepared.get(entry.name) ?? readPresence(dir, baseDir);
     } catch {
       presence = null;
     }
@@ -226,7 +240,7 @@ export async function scanRuntimePresence(
       if (cleanup) rmSync(dir, { recursive: true, force: true });
       continue;
     }
-    const processResult = await verify(presence);
+    const processResult = processResults.has(entry.name) ? processResults.get(entry.name) : await verify(presence);
     if (processResult?.live !== true) {
       rejected.push({ presence, reason: processResult?.reason ?? "process-unverifiable" });
       if (cleanup && processResult?.live === false) rmSync(dir, { recursive: true, force: true });
