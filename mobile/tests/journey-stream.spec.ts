@@ -81,8 +81,8 @@ test.describe('Journey: live streaming turn', () => {
   });
 
   test('reading earlier messages is not yanked to the bottom when new content streams in', async ({ page }) => {
-    // Shrink the viewport so the transcript overflows and the thread truly scrolls.
-    await page.setViewportSize({ width: 412, height: 420 });
+    // Leave enough history above the fold to move outside the live-tail following region.
+    await page.setViewportSize({ width: 412, height: 320 });
     await expect(page.getByText('Build is green')).toBeVisible({ timeout: 15_000 });
 
     const scroller = page.locator('.thread-scroll');
@@ -91,7 +91,7 @@ test.describe('Journey: live streaming turn', () => {
       el.dispatchEvent(new Event('scroll'));
     });
     const max = await scroller.evaluate((el) => el.scrollHeight - el.clientHeight);
-    expect(max).toBeGreaterThan(50); // sanity: there is real history above the fold
+    expect(max).toBeGreaterThan(120);
 
     // The demo pushes a second tool card (~5.4s) after we scrolled up.
     await expect(page.locator('.tc-head')).toHaveCount(2, { timeout: 15_000 });
