@@ -10,11 +10,11 @@ import {
   loadTransportConfig, loadDeviceName, loadDefaultPermissionMode, isPersistentPairingEnabled,
   isTerminalEnabled, loadFileSharingConfig, saveManagementSettings, loadSupabaseCredentials,
 } from "./transportConfig.mjs";
-import { rotatePersistedIdentity, clearPersistedIdentity, getOrCreatePersistedIdentity } from "./pairingIdentity.mjs";
+import { rotatePersistedIdentity, clearPersistedIdentity, getOrCreatePersistedIdentity, readSavedPairing } from "./pairingIdentity.mjs";
 import { backgroundCommand, backgroundTaskOperation, startBackground, stopBackground } from "./backgroundLifecycle.mjs";
 import {
   healthyRegistryEntry, probePublicRelay, findDevTunnelBinary, isDevTunnelLoggedIn,
-  ensureDevTunnelLogin, DEVTUNNEL_REGISTRY_FILE,
+  ensureDevTunnelLogin, DEVTUNNEL_REGISTRY_FILE, describeStage, readDevTunnelAuthentication,
 } from "./devtunnel.mjs";
 import { readRegistry, isPidAlive } from "./registryFile.mjs";
 import { discoverRuntimeLifecycles, createRuntimeLifecycleClient } from "./runtimeLifecycle.mjs";
@@ -102,6 +102,7 @@ export function createManagement({
   background = { command: backgroundCommand, task: backgroundTaskOperation, start: startBackground, stop: stopBackground },
   discover = discoverRuntimeLifecycles, runtimeClient = createRuntimeLifecycleClient,
   relayHealth = healthyRegistryEntry, publicProbe = probePublicRelay,
+  authentication = readDevTunnelAuthentication,
 } = {}) {
   baseDir = resolve(baseDir);
   const options = { baseDir, cliPath };
@@ -124,25 +125,40 @@ export function createManagement({
       if (!status) throw new ManagementError("foreground-owned", "Station is owned by a foreground terminal. Stop it there before changing its lifecycle.");
     });
   };
-  async function prepareRelay({ interactive = false } = {}) {
+  async function prepareRelay({ interactive = false, report = () => {} } = {}) {
     if (await relayHealth(undefined, { baseDir, verifyPublic: true })) return;
     const registry = readRegistry(DEVTUNNEL_REGISTRY_FILE, options);
     if (registry && registry.alive !== false && isPidAlive(registry.pid) && !(await background.command("relay", "status", null, options))) {
       throw new ManagementError("foreground-owned", "The relay is owned by a foreground terminal. Manage it there.");
     }
+    report("checking-cli");
     const bin = await findDevTunnelBinary();
     if (!bin) throw new ManagementError("missing-devtunnel", "Install the Dev Tunnel CLI before starting the relay.");
-    if (interactive) await ensureDevTunnelLogin(bin);
+    report("checking-sign-in");
+    if (interactive) await ensureDevTunnelLogin(bin, { onProgress: report });
     else if (!(await isDevTunnelLoggedIn(bin))) throw new ManagementError("sign-in-required", "Run devtunnel user login -g in a terminal, then retry. Browser startup never waits on terminal input.");
   }
   async function workloads() {
     const result = {};
     await Promise.all(["station", "relay"].map(async (role) => {
       if (platform !== "win32") { result[role] = { state: "unsupported", supported: false }; return; }
+      const controlRecord = readRegistry(`background-${role}.json`, options);
       const raw = await background.command(role, "status", null, options);
       if (raw) {
-        const { state, error, paired, phoneName, deviceName, baseUrl, pid } = raw;
-        result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, supported: true };
+        const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
+          connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
+          nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint } = raw;
+        result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
+          connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
+          nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint,
+          stageLabel: stage ? describeStage(stage) : null, supported: true };
+        if (role === "station") result[role].checkedAt = Date.now();
+        const currentRecord = readRegistry(`background-${role}.json`, options);
+        if (controlRecord?.identity?.runtimeInstanceId &&
+            controlRecord.identity.runtimeInstanceId === currentRecord?.identity?.runtimeInstanceId) {
+          result[role].pid ??= controlRecord.pid;
+          result[role].startedAt ??= controlRecord.processStartedAt;
+        }
       } else {
         const task = await background.task("status", { ...options, role });
         result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true };
@@ -151,9 +167,14 @@ export function createManagement({
     const registry = readRegistry(DEVTUNNEL_REGISTRY_FILE, options);
     if (registry?.alive !== false && isPidAlive(registry?.pid)) {
       const health = await relayHealth(undefined, { baseDir });
-      result.relay = { ...result.relay, state: health ? "ready" : "unhealthy", pid: registry.pid, baseUrl: registry.baseUrl };
+      result.relay = { ...result.relay, state: health ? "ready" : "unhealthy",
+        managerPid: result.relay.pid, managerStartedAt: result.relay.startedAt,
+        pid: registry.pid, startedAt: registry.startedAt ?? null, baseUrl: registry.baseUrl, localHealth: health ? "ok" : "unhealthy" };
       if (health) {
         const forwarding = await publicProbe(registry.baseUrl);
+        result.relay.forwarding = forwarding;
+        result.relay.checkedAt = Date.now();
+        if (forwarding === "ok") result.relay.lastHealthyAt = result.relay.checkedAt;
         if (forwarding === "rejected") result.relay = { ...result.relay, state: "degraded", error: "Local relay is running, but public forwarding is unavailable. The manager will try recovery." };
         if (forwarding === "unreachable") result.relay = { ...result.relay, state: "waiting-network", error: "Public forwarding could not be reached. Check network connectivity." };
       }
@@ -176,8 +197,9 @@ export function createManagement({
         return {
           runtimeId: presence.runtimeInstanceId, sessionId: presence.sessionId, pid: presence.pid,
           state: s.state, paired: s.paired, phoneName: s.phoneName,
-          connected: typeof s.connected === "boolean" ? s.connected : null,
-          watchLevel: s.watchLevel ?? null, title: s.title, cwd: s.cwd,
+          connected: s.state === "dormant" ? false : typeof s.connected === "boolean" ? s.connected : null,
+          watchLevel: s.state === "dormant" ? "off" : s.watchLevel ?? null, title: s.title, cwd: s.cwd,
+          version: s.version ?? null, lastPeerContactAt: s.lastPeerContactAt ?? null, busy: s.busy ?? null,
         };
       } catch { return { runtimeId: presence.runtimeInstanceId, sessionId: presence.sessionId, pid: presence.pid, state: "unknown", connected: null, watchLevel: null, error: "Live session status unavailable." }; }
     })) };
@@ -189,8 +211,16 @@ export function createManagement({
     if (!presence) throw new ManagementError("stale-session", "This session is no longer available. Refresh the session list.");
     return runtimeClient(presence, options);
   }
-  async function execute(action, payload = {}, { interactive = false, trustedCli = false, operationId } = {}) {
+  async function execute(action, payload = {}, { interactive = false, trustedCli = false, operationId, onProgress } = {}) {
     validateManagementAction(action, payload);
+    const report = (stage, fields = {}) => onProgress?.({ stage, label: describeStage(stage), progressAt: Date.now(), ...fields });
+    const startRole = async (role) => {
+      report(`starting-${role}`);
+      return background.start(role, options, { onProgress: (status) => report(status.stage ?? `starting-${role}`, {
+        attempt: status.attempt, progressAt: status.progressAt ?? Date.now(), nextRetryAt: status.nextRetryAt,
+      }) });
+    };
+    if (action.startsWith("station.") || action.startsWith("relay.")) report("waiting-management");
     return withManagementLock(baseDir, async () => {
       if (action.startsWith("project.")) {
         if (action === "project.add") return addProject(payload.name, payload.path, { ...options, makeDefault: payload.makeDefault === true });
@@ -257,25 +287,60 @@ export function createManagement({
       if (role === "station") {
         if (!listProjects(options).length) throw new ManagementError("project-required", "Register at least one project folder before starting Station.");
         const config = loadTransportConfig(options);
-        if (!config) throw new ManagementError("transport-required", "Choose a transport in Settings before starting Station.");
+        if (!config) throw new ManagementError("transport-required", "Choose a transport in Setup before starting Station.");
         if (config.kind === "supabase" && !loadSupabaseCredentials(options)) throw new ManagementError("credentials-required", "Supabase credentials are missing. Configure them through weft set-transport or the installer.");
         if (config.kind === "devtunnel") {
-          await prepareRelay({ interactive });
-          await background.start("relay", options);
+          await prepareRelay({ interactive, report });
+          await startRole("relay");
         }
-      } else await prepareRelay({ interactive });
-      const status = await background.start(role, options);
+      } else await prepareRelay({ interactive, report });
+      const status = await startRole(role);
       return { state: status.state, deviceName: status.deviceName, paired: status.paired, baseUrl: status.baseUrl };
     });
   }
   let pendingState = null;
+  let authPending = null;
+  let authValue = null;
+  async function auth(force = false) {
+    if (!force && authValue && Date.now() - authValue.checkedAt < 60_000) return authValue;
+    authPending ??= authentication().then((value) => {
+      authValue = value;
+      return value;
+    }).finally(() => { authPending = null; });
+    return authPending;
+  }
+  function safeOrigin(value) {
+    try { const url = new URL(value); return ["https:", "http:", "wss:", "ws:"].includes(url.protocol) ? url.origin : null; }
+    catch { return null; }
+  }
   async function readState() {
       const warnings = [];
-      const [work, runtime] = await Promise.all([workloads(), runtimes()]);
-      if (["conflict", "uncertain"].includes(runtime.discovery.status)) warnings.push("Some session identities could not be verified; uncertain sessions cannot be controlled.");
       const currentSettings = settings();
+      const kind = currentSettings.transport?.kind ?? null;
+      const [work, runtime, signIn] = await Promise.all([workloads(), runtimes(), kind === "devtunnel" ? auth() : null]);
+      if (["conflict", "uncertain"].includes(runtime.discovery.status)) warnings.push("Some session identities could not be verified; uncertain sessions cannot be controlled.");
+      const savedPairing = readSavedPairing(options);
+      work.station.savedPairing = savedPairing;
+      if (work.station.state === "stopped") {
+        work.station.paired = savedPairing.paired;
+        work.station.connected = false;
+      }
+      const credentials = kind === "supabase" ? loadSupabaseCredentials(options) : null;
+      const projectOrigin = credentials ? safeOrigin(credentials.url) : null;
+      const endpoint = kind === "devtunnel" ? safeOrigin(work.relay.baseUrl)
+        : projectOrigin && /^https?:/.test(projectOrigin) ? projectOrigin : null;
+      const connection = {
+        kind, endpoint, configSource: "~/.weft/weft.config.json",
+        configured: kind === "supabase" ? !!endpoint && !!credentials?.anonKey?.trim() : kind === "devtunnel",
+        auth: signIn, liveState: work.station.state === "stopped" ? "not-running"
+          : work.station.transportKind && (work.station.transportKind !== kind ||
+              work.station.transportEndpoint && endpoint && work.station.transportEndpoint !== endpoint) ? "restart-needed"
+            : work.station.transportKind === kind ? work.station.transportState ?? "unreported" : "unreported",
+        checkedAt: work.station.transportCheckedAt ?? null,
+        unusedRelay: kind !== "devtunnel" && !["stopped", "unsupported", "unresponsive"].includes(work.relay.state),
+      };
       return { version: resolveVersion(), checkedAt: Date.now(), platform, deviceName: loadDeviceName(options) ?? hostname(), ...work, projects: listProjects(options),
-        settings: currentSettings, settingsRevision: settingsRevision(currentSettings), sessions: runtime.list, warnings };
+        settings: currentSettings, settingsRevision: settingsRevision(currentSettings), sessions: runtime.list, warnings, connection };
   }
   return {
     execute, settings, projects: () => listProjects(options),
@@ -283,9 +348,15 @@ export function createManagement({
       pendingState ??= readState().finally(() => { pendingState = null; });
       return pendingState;
     },
+    refreshAuthentication: () => loadTransportConfig(options)?.kind === "devtunnel" ? auth(true)
+      : Promise.resolve({ state: "not-applicable", provider: null, account: null, checkedAt: Date.now() }),
     async pairing(runtimeId) {
       const response = runtimeId ? await (await target(runtimeId)).command("status", null, { timeoutMs: 2000 }) : null;
       const status = runtimeId ? response?.result : await background.command("station", "status", null, options);
+      if (!status && !runtimeId) {
+        const saved = readSavedPairing(options);
+        return { state: "stopped", paired: saved.paired, savedPairing: saved, code: null, qr: null };
+      }
       if (!status) throw new ManagementError("not-running", "Start the selected endpoint before showing pairing.");
       const payload = status.pairingPayload;
       const code = !status.paired && payload && payload.expiresAt > Date.now() ? JSON.stringify(payload) : null;

@@ -1,5 +1,37 @@
 # Weft resilience and attention-aware streaming
 
+Control/Setup follow-up (2026-11-08, local changes): primary navigation is
+Control, Sessions, Setup and Diagnostics. Pairing remains an explicit flow from
+Control/session actions. Setup combines project and configuration UI while
+preserving their existing separate actions and storage. Control adapts its
+connection card to Dev Tunnel or Supabase, keeps saved trust visible while
+Station is stopped, hides inapplicable worker rows, and surfaces a running unused
+relay without stopping it automatically. Sign-in reporting is a bounded cached
+read-only CLI JSON query; configured Supabase credentials are never treated as
+proof of a live connection. Known running/configured transport mismatches require
+an explicit Station restart. No deployment or installed-code update is included.
+
+Main-page direction confirmed on 2026-11-08: Overview is the primary Weft management
+page, not a marketing landing page or a summary that hides operational information.
+Keep lifecycle status and Start/Stop/Restart controls, active configuration/transport,
+sign-in status/provider, safe tunnel address, and mobile trust/contact state visible
+on this page. Separate transport authentication from Copilot authentication; never
+display credentials or sign in automatically merely because the page was opened.
+Saved configuration/pairing and live runtime status are distinct, including while
+Station is stopped. Retain existing lifecycle ownership: stopping Station does not
+implicitly stop the shared relay or direct sessions. Advanced diagnostics can remain
+under Details, but the core management information should not be hidden there.
+
+Operational dashboard follow-up (2026-11-08, local changes): the overview now uses
+a compact readiness summary, a Weft-sharing session breakdown, and confirmed recent
+mobile links separate from pending/unreported links. WebSocket relay addresses are
+displayed as sanitized origins. Workload version/uptime, last authenticated peer
+contact, forwarding checks and actual startup/retry stages are additive status data;
+absent legacy fields remain unreported rather than inferred from installed files.
+Startup operations expose measured progress through the shared management API, and
+dormant session status remains local-only. These follow-up changes are not deployed
+or installed yet.
+
 Status: implemented and locally validated; not installed or released.
 Discussion captured: 2026-11-06.
 Inspected baseline: `62ada12` on `main`.

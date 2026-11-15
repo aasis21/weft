@@ -15,7 +15,7 @@ function initialState() {
     relay: { state: "stopped", baseUrl: null },
     projects: [{ name: "Workbench", path: "C:\\work\\bench", default: true }],
     settings: {
-      transport: { kind: "supabase" }, deviceName: null, permissionMode: "default", pairingMode: "persistent",
+      transport: { kind: "devtunnel" }, deviceName: null, permissionMode: "default", pairingMode: "persistent",
       terminalEnabled: false, files: { enabled: false, roots: [], exclude: ["**/.env"] },
     },
     sessions: [
@@ -29,7 +29,7 @@ function initialState() {
 test("Control Center is self-contained and its browser script parses", () => {
   const html = renderControlCenterPage();
   assert.match(html, /<title>Weft \| Control Center<\/title>/);
-  for (const name of ["overview", "sessions", "projects", "settings", "pairing", "diagnostics"]) assert.match(html, new RegExp('id="panel-' + name + '"'));
+  for (const name of ["control", "sessions", "setup", "pairing", "diagnostics"]) assert.match(html, new RegExp('id="panel-' + name + '"'));
   assert.doesNotMatch(html, /(?:src|href)\s*=\s*["']https?:/);
   assert.doesNotMatch(html, /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|document\.write|console\./);
   assert.match(html, /textContent/);
@@ -77,6 +77,7 @@ test("Control Center actual management browser journey persists projects and set
     baseDir: home,
     platform: "linux",
     discover: async () => ({ status: "empty", runtimes: [] }),
+    authentication: async () => ({ state: "unavailable", provider: null, account: null, checkedAt: Date.now() }),
   });
   app = await createControlCenterHost({ baseDir: home, management, publish: false });
   browser = await chromium.launch({ headless: true });
@@ -88,7 +89,12 @@ test("Control Center actual management browser journey persists projects and set
     const url = new URL(request.url());
     requests.push({ origin: url.origin, method: request.method(), path: url.pathname.startsWith("/open/") ? "/open/[bootstrap]" : url.pathname });
   });
-  const go = (name) => page.getByRole("navigation", { name: "Main" }).getByRole("button", { name, exact: true }).click();
+  const go = async (name) => {
+    await page.getByRole("navigation", { name: "Main" }).getByRole("button", {
+      name: { Overview: "Control", Projects: "Setup", Settings: "Setup" }[name] || name, exact: true,
+    }).click();
+    if (name === "Settings" || name === "Projects") await page.locator(name === "Settings" ? "#setup-settings" : "#setup-projects").scrollIntoViewIfNeeded();
+  };
   const complete = (label) => expect(page.locator("#operation-title")).toHaveText(label + " · complete", { timeout: 10000 });
   const storedProjects = async () => JSON.parse(await readFile(join(home, "projects.json"), "utf8")).projects;
   await page.goto(app.url);
@@ -270,13 +276,14 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
           });
           json(h.stateStatus, h.stateStatus === 200 ? h.state : { error: { code: "unavailable", message: "Local status unavailable" } });
         } else if (url.pathname === "/api/pairing") json(200, h.pairing);
+        else if (url.pathname === "/api/auth") json(200, h.state.connection?.auth ?? { state: "unavailable" });
         else if (url.pathname === "/api/update") json(200, { current: "0.2.39", available: true, latest: "0.2.40", message: "Published release available." });
         else if (url.pathname === "/api/operations" && request.method === "POST") {
           let body = "";
           for await (const chunk of request) body += chunk;
           const input = JSON.parse(body);
           h.calls.push(input);
-          h.operations.set(input.id, { ...input, polls: 0, error: h.failure });
+          h.operations.set(input.id, { ...input, polls: 0, error: h.failure, startedAt: Date.now() });
           json(h.postStatus, h.postStatus === 202 ? { id: input.id, state: "running" } : { error: { message: "Local response unavailable; request may be accepted" } });
         } else if (url.pathname.startsWith("/api/operations/")) {
           if (h.pollFailures > 0) { h.pollFailures--; json(503, { error: { message: "Temporary local status loss" } }); return; }
@@ -288,6 +295,7 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
           if (!running && !operation.error) applyOperation(operation);
           json(200, {
             id, state: running ? "running" : operation.error ? "failed" : "succeeded",
+            startedAt: operation.startedAt, ...(running && h.progress ? { progress: h.progress } : {}),
             ...(operation.error && !running ? { error: operation.error } : {}),
             ...(!running && operation.action === "session.start" ? { result: h.startResult } : {}),
           });
@@ -309,21 +317,190 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     h.page = page;
     h.context = context;
     h.origin = "http://127.0.0.1:" + server.address().port;
-    h.go = async (tab) => page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: tab, exact: true }).click();
+    h.go = async (tab) => {
+      if (tab === "Pairing") {
+        await h.go("Control");
+        await page.locator('[data-go="pairing"]').click();
+        return;
+      }
+      await page.getByRole("navigation", { name: "Main" }).getByRole("button", {
+        name: { Overview: "Control", Projects: "Setup", Settings: "Setup" }[tab] || tab, exact: true,
+      }).click();
+      if (tab === "Settings" || tab === "Projects") await page.locator(tab === "Settings" ? "#setup-settings" : "#setup-projects").scrollIntoViewIfNeeded();
+    };
     h.ready = async () => { await page.goto(h.origin); await expect(page.locator("#freshness")).toHaveText("Live · every 5s"); };
     h.finished = async () => expect(page.locator("#operation-title")).toContainText("· complete", { timeout: 10000 });
     await h.ready();
     return h;
   }
 
-  await t.test("status is passive, nullable links remain unknown, and pairing is fetched only on demand", async (st) => {
+  await t.test("adaptive service layout aligns desktop columns and follows logical order on smaller screens", async (st) => {
     const h = await harness(st);
-    await expect(h.page.locator("#metric-connected")).toHaveText("Unknown");
-    await expect(h.page.locator("#station-phone")).toHaveText("No phone paired");
+    const rects = async () => ({
+      station: await h.page.locator(".station-card").boundingBox(),
+      connection: await h.page.locator(".connection-card").boundingBox(),
+      mobile: await h.page.locator(".mobile-card").boundingBox(),
+    });
+    const bottom = (rect) => rect.y + rect.height;
+    let boxes = await rects();
+    assert.ok(Math.abs(boxes.station.y - boxes.connection.y) < 2);
+    assert.ok(Math.abs(bottom(boxes.mobile) - bottom(boxes.connection)) < 2);
+    h.state.connection = { kind: "devtunnel", auth: { state: "unavailable", message: "Connection details need review. ".repeat(20) } };
+    await h.page.locator("#refresh").click();
+    await expect(h.page.locator("#auth-help")).toContainText("need review");
+    boxes = await rects();
+    assert.ok(Math.abs(bottom(boxes.mobile) - bottom(boxes.connection)) < 2, "columns adapt to longer content");
+    const mobileAction = await h.page.locator('.mobile-card [data-go="pairing"]').boundingBox();
+    const connectionAction = await h.page.locator('.connection-card [data-go="settings"]').boundingBox();
+    assert.ok(Math.abs(bottom(mobileAction) - bottom(connectionAction)) < 2);
+    h.state.settings.transport = { kind: "supabase" };
+    h.state.connection = { kind: "supabase", configured: true, liveState: "connected", endpoint: "https://project.example.test" };
+    await h.page.locator("#refresh").click();
+    await expect(h.page.locator("#supabase-live")).toHaveText("Connected");
+    boxes = await rects();
+    assert.ok(Math.abs(bottom(boxes.station) - bottom(boxes.connection)) < 2);
+    assert.ok(boxes.mobile.y > bottom(boxes.station));
+    assert.ok(boxes.mobile.width > boxes.station.width * 1.8, "Supabase does not force an oversized right column");
+    for (const width of [980, 390, 320]) {
+      await h.page.setViewportSize({ width, height: 900 });
+      boxes = await rects();
+      assert.ok(boxes.connection.y > bottom(boxes.station));
+      assert.ok(boxes.mobile.y > bottom(boxes.connection));
+      assert.equal(await h.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("Control is actionable while stopped and Setup merges independent project and settings edits", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.station = { state: "stopped", savedPairing: { paired: true, state: "available" } };
+      h.pairing = { state: "stopped", paired: true, code: null, qr: null };
+    });
+    const nav = await h.page.getByRole("navigation", { name: "Main" }).getByRole("button").allTextContents();
+    assert.deepEqual(nav, ["Control", "Sessions", "Setup", "Diagnostics"]);
+    await expect(h.page.locator("#health-summary")).toHaveText("Device access is paused");
+    await expect(h.page.locator("#health-detail")).not.toContainText("No saved phone pairing");
+    await expect(h.page.locator("#station-runtime-details")).toBeHidden();
+    await expect(h.page.locator("#control-primary")).toHaveText("Start Station");
+    await expect(h.page.locator("#station-phone")).toHaveText("Phone trust saved");
+    await h.go("Setup");
+    await h.page.locator("#device-name").fill("Unsaved setup edit");
+    await h.page.locator("#project-name").fill("Unsaved project");
+    await h.go("Control"); await h.go("Setup");
+    await expect(h.page.locator("#device-name")).toHaveValue("Unsaved setup edit");
+    await expect(h.page.locator("#project-name")).toHaveValue("Unsaved project");
+    await h.go("Pairing");
+    await expect(h.page.locator("#pairing-visual-title")).toHaveText("Station is not running");
+    await expect(h.page.locator("#pairing-qr")).toBeHidden();
+    assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("Supabase hides tunnel sign-in and controls, while unused relay stop remains explicit", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.settings.transport = { kind: "supabase" };
+      h.state.connection = { kind: "supabase", configured: true, endpoint: "https://project.example.test",
+        liveState: "unreported", unusedRelay: true, auth: null };
+      h.state.relay = { state: "ready" };
+    });
+    await expect(h.page.locator("#supabase-connection")).toBeVisible();
+    await expect(h.page.locator("#devtunnel-connection")).toBeHidden();
+    await expect(h.page.locator("#supabase-live")).toHaveText("Not reported");
+    await expect(h.page.locator("#supabase-endpoint")).toHaveText("https://project.example.test");
+    await expect(h.page.locator("#auth-refresh")).toBeHidden();
+    await expect(h.page.locator("#unused-relay")).toBeVisible();
+    assert.equal(h.calls.length, 0);
+    await h.page.locator("#unused-relay-stop").click();
+    await expect(h.page.getByRole("dialog")).toContainText("Phone connections using this relay will be interrupted");
+    await h.page.locator("#confirmation-cancel").click();
+    assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("transport sign-in is displayed independently and only refreshed on request", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.connection = { kind: "devtunnel", configured: true, auth: {
+        state: "signed-in", provider: "Microsoft", account: "example-user", checkedAt: Date.now(),
+      } };
+    });
+    await expect(h.page.locator("#auth-status")).toHaveText("Signed in");
+    await expect(h.page.locator("#auth-account")).toHaveText("Microsoft · example-user");
+    assert.equal(h.requests.filter((r) => r.path === "/api/auth").length, 0);
+    await h.page.locator("#auth-refresh").click();
+    await expect.poll(() => h.requests.filter((r) => r.path === "/api/auth").length).toBe(1);
+    assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("operational overview separates dormant, pending and confirmed links and displays safe WSS details", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.settings.transport = { kind: "devtunnel" };
+      h.state.station = { state: "ready", paired: true, version: "0.2.40", startedAt: Date.now() - 120_000 };
+      h.state.relay = { state: "ready", version: "0.2.40", startedAt: Date.now() - 60_000,
+        forwarding: "ok", lastHealthyAt: Date.now() - 2000,
+        baseUrl: "wss://user:private-password@relay.example.test:7443/private?token=private-query" };
+      h.state.sessions = Array.from({ length: 21 }, (_, index) => ({
+        runtimeId: "runtime-" + index, sessionId: "session-" + index,
+        state: index < 16 ? "dormant" : index < 19 ? "pairing-ready" : "activating",
+        paired: index >= 16, connected: null,
+      }));
+    });
+    await expect(h.page.locator("#health-summary")).toHaveText("Weft ready on Studio Laptop");
+    await expect(h.page.locator("#metric-session-note")).toHaveText("16 not shared · 3 awaiting phone · 2 connecting");
+    await expect(h.page.locator("#metric-connected")).toHaveText("0");
+    await expect(h.page.locator("#metric-connected-note")).toContainText("5 awaiting or unreported");
+    await expect(h.page.locator("#health-detail")).toContainText("live contact not yet confirmed");
+    await expect(h.page.locator("#relay-address")).toHaveText("wss://relay.example.test:7443");
+    await expect(h.page.locator("#relay-forwarding")).toHaveText("Verified");
+    await expect(h.page.locator("#station-version")).toHaveText("0.2.40");
+    await expect(h.page.locator("#station-uptime")).toContainText("2m");
+    await expect(h.page.locator("#station-contact")).toHaveText("Trusted; contact not reported");
+    assert.ok(!(await h.page.locator("body").innerText()).includes("private-password"));
+    assert.ok(!(await h.page.locator("body").innerText()).includes("private-query"));
+    assert.ok((await h.page.locator(".health-summary").boundingBox()).height < 180);
+    h.state.sessions[16] = { ...h.state.sessions[16], state: "active", connected: true,
+      busy: true, version: "0.2.40", lastPeerContactAt: Date.now() - 2000 };
+    await h.page.locator("#refresh").click();
+    await expect(h.page.locator("#metric-connected")).toHaveText("1");
+    await expect(h.page.locator("#metric-connected-note")).toContainText("4 awaiting or unreported");
+    await h.go("Sessions");
+    await expect(h.page.locator("#sessions-list")).toContainText("Agent working");
+    await expect(h.page.locator("#sessions-list")).toContainText("Last phone contact:");
+    assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("real startup phase and retry time are shown without inventing legacy telemetry", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.settings.transport = { kind: "devtunnel" };
+      h.state.relay = { state: "starting", stage: "hosting", stageLabel: "hosting the tunnel",
+        attempt: 2, progressAt: Date.now() - 5000, nextRetryAt: Date.now() + 20_000 };
+    });
+    await expect(h.page.locator("#relay-progress")).toContainText("hosting the tunnel");
+    await expect(h.page.locator("#relay-progress")).toContainText("Attempt 2");
+    await expect(h.page.locator("#relay-progress")).toContainText("Retry in");
+    await expect(h.page.locator("#relay-version")).toHaveText("Not reported by this worker");
+    await expect(h.page.locator("#relay-uptime")).toHaveText("Not reported");
+    await expect(h.page.locator("#health-summary")).toHaveText("Connection needs attention");
+    assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("accepted startup shows the backend's measured progress rather than a synthetic percentage", async (st) => {
+    const h = await harness(st, (h) => {
+      h.runningPolls = 5;
+      h.progress = { stage: "hosting", label: "Hosting the saved tunnel", attempt: 2, progressAt: Date.now() };
+    });
+    await h.page.locator("#relay-start").click();
+    await expect(h.page.locator("#operation-detail")).toContainText("Hosting the saved tunnel");
+    await expect(h.page.locator("#operation-detail")).toContainText("Attempt 2");
+    await h.finished();
+    assert.equal(h.calls.length, 1);
+  });
+
+  await t.test("status is passive, dormant sessions do not imply an unknown link, and pairing is fetched only on demand", async (st) => {
+    const h = await harness(st);
+    await expect(h.page.locator("#metric-connected")).toHaveText("0");
+    await expect(h.page.locator("#station-phone")).toHaveText("No saved phone pairing");
     assert.equal(h.calls.length, 0);
     assert.equal(h.requests.filter((request) => request.path === "/api/pairing").length, 0);
     await h.go("Sessions");
-    await expect(h.page.locator("#sessions-list")).toContainText("Phone connection unknown");
+    await expect(h.page.locator("#sessions-list")).toContainText("Not shared with phone");
     await expect(h.page.locator("#sessions-list")).toContainText("Phone trusted · not connected");
     assert.equal(h.requests.filter((request) => request.path === "/api/pairing").length, 0);
     await h.page.getByRole("button", { name: "Show pairing" }).first().click();
@@ -575,10 +752,10 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     await expect(h.page.locator("#connection-error")).toBeVisible();
     await expect(h.page.locator("#connection-message")).toContainText("10 seconds");
     await expect(h.page.locator("#station-stop")).toBeDisabled();
-    await expect(h.page.locator("#metric-connected")).toHaveText("Unknown");
+    await expect(h.page.locator("#metric-connected")).toHaveText("—");
     await h.go("Sessions");
     await expect(h.page.locator("#sessions-list")).toContainText("Phone connection unknown");
-    await expect(h.page.locator("#sessions-list")).not.toContainText("Phone connected");
+    await expect(h.page.locator("#sessions-list")).not.toContainText("Recent phone contact");
     h.stateDelay = 0;
     await h.page.locator("#retry").click();
     await expect(h.page.locator("#freshness")).toHaveText("Live · every 5s");

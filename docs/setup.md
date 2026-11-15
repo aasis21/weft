@@ -198,6 +198,31 @@ pairing record. When no recent evidence is available, the panel reports unknown;
 watch level and runtime activation are displayed separately. The Control Center
 does not show transcripts or provide an arbitrary command/file browser.
 
+The main **Control** page counts dormant runtimes as **not shared**, not unknown
+phone connections. Confirmed mobile links count session links rather than physical
+phones; pending/unreported links are listed separately. Worker versions and uptime,
+last authenticated phone contact, forwarding checks, and measured startup stages
+help distinguish a stopped worker from a slow or recovering transport. Endpoint
+display accepts WebSocket URLs and strips private paths, credentials and query data.
+Fields absent from older running workers are not inferred from installed code:
+restart the worker/reload the session after updating for richer reporting.
+
+**Setup** merges Projects and Settings into one page without merging their storage:
+Add/Remove/Set default remain explicit project operations, while configuration
+edits require Save settings. Unsaved edits survive navigation and polling.
+
+Control displays Dev Tunnel sign-in provider/account from a bounded, cached
+read-only `devtunnel user show --json` query. Refreshing that information never
+signs in or switches accounts. With Supabase selected, the card shows project
+configuration and reported Station connection state instead, without keys or
+tunnel controls. A running unused relay is visible and requires an explicit,
+confirmed stop. Changing a selected transport/project does not silently change
+an existing worker's connection; the UI calls out a required Station restart.
+
+Saved phone trust is read independently of Station liveness. Stopped or unreadable
+runtime data never implies an absent pairing. A fresh QR still requires the
+selected endpoint to be running.
+
 Installer-source overrides, clean-install and actual code updates remain terminal
 operations. Update checks read the published release manifest, not session content.
 Do not use `weft update` to test an unreleased source change; install the source build

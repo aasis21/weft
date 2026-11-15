@@ -13,6 +13,7 @@ import { createRuntimeIdentity } from "./runtimeIdentity.mjs";
 import { getProcessStartTime } from "./processIdentity.mjs";
 import { clearRegistry, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { weftHome } from "./projects.mjs";
+import { resolveVersion } from "./version.mjs";
 
 const execFileAsync = promisify(execFile);
 const roles = new Set(["station", "relay"]);
@@ -178,11 +179,13 @@ export async function startBackground(role, options, {
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = Date.now,
   timeoutMs = 180_000,
+  onProgress = null,
 } = {}) {
   await taskOperation("start", { ...options, role });
   const deadline = now() + timeoutMs;
   while (now() < deadline) {
     const status = await inspect();
+    if (status) onProgress?.(status);
     if (["ready", "endpoint-refresh-needed"].includes(status?.state)) return status;
     if (status?.state === "failed") throw new Error(status.error ?? "Weft background startup failed.");
     await sleep(500);
@@ -233,7 +236,7 @@ export async function createBackgroundControl(role, {
     identity, capability, endpoint,
     presence: () => ({ ...identity, pid: process.pid, processStartedAt }),
     handlers: {
-      status: () => status(),
+      status: async () => ({ ...await status(), pid: process.pid, startedAt: processStartedAt, version: resolveVersion() }),
       ...(activate ? { activate } : {}),
       quiesce: () => {
         // Let the authenticated reply complete before stopping the control endpoint itself.

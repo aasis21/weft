@@ -826,7 +826,7 @@ export async function attachRelay({
 
   if (channel) await rebind(channel);
   return { stop, detach, rebind, onPermissionRequest: approvals.onPermissionRequest,
-    managementStatus: () => ({ watchLevel: attention.level, title: lastTitle, lastPeerContactAt,
+    managementStatus: () => ({ watchLevel: attention.level, title: lastTitle, lastPeerContactAt, busy: lastBusy,
       connected: !channel ? false : lastPeerContactAt && Date.now() - lastPeerContactAt < 120_000 ? true : null }) };
 }
 

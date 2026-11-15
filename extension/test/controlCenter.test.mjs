@@ -55,12 +55,20 @@ test("private local API rejects unauthenticated, cross-origin, forged-host and i
 test("accepted operation is deduplicated, tracks real completion, and keeps host alive", async (t) => {
   let release, calls = 0;
   const blocked = new Promise((done) => { release = done; });
-  const h = await host(t, { execute: async () => { calls++; await blocked; return { state: "ready" }; } });
+  const h = await host(t, { execute: async (_action, _payload, { onProgress }) => {
+    calls++;
+    onProgress({ stage: "hosting", label: "Hosting the saved tunnel", progressAt: Date.now() });
+    await blocked;
+    return { state: "ready" };
+  } });
   const input = { id: randomUUID(), action: "station.start", payload: {} };
   const result = await (await h.post(input)).json();
   assert.equal(result.state, "running");
   await h.post(input);
   assert.equal(calls, 1);
+  const pending = await (await h.get(`/api/operations/${input.id}`)).json();
+  assert.equal(pending.progress.stage, "hosting");
+  assert.ok(pending.startedAt > 0);
   assert.equal((await h.post({ ...input, action: "relay.start" })).status, 409);
   assert.equal((await h.post({}, "/api/close")).status, 409);
   release();

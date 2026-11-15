@@ -9,7 +9,7 @@ export function renderControlCenterPage() {
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
 <title>Weft | Control Center</title>
-<style>${styles}</style>
+<style>${styles}${operationalStyles}</style>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -23,18 +23,32 @@ export function renderControlCenterPage() {
   <div class="workspace">
     <header class="topbar"><div class="breadcrumb">WEFT <span>/</span> LOCAL WORKSPACE</div><div class="toolbar"><span id="freshness" class="badge">Loading status</span><button id="refresh" class="button compact" type="button">Refresh status</button></div></header>
     <main id="main" tabindex="-1">
-      <div class="page-heading"><div><p class="eyebrow">CONTROL CENTER</p><h1 id="page-title" tabindex="-1">Overview</h1><p id="page-description" class="muted">Your computer, phone, and sessions. One clear view.</p></div><span id="device-chip" class="device-chip">This computer</span></div>
+      <div class="page-heading"><div><p class="eyebrow">CONTROL CENTER</p><h1 id="page-title" tabindex="-1">Control</h1><p id="page-description" class="muted">Manage Weft on this laptop. Configuration, connection, and mobile status.</p></div><span id="device-chip" class="device-chip">This computer</span></div>
       <div id="connection-error" class="notice error" role="alert" hidden><strong>Status unavailable</strong><p id="connection-message"></p><button id="retry" type="button" class="button compact">Try again</button></div>
       <div id="operation" class="operation" role="status" aria-live="polite" hidden><span id="operation-dot" class="activity-dot"></span><div><strong id="operation-title"></strong><p id="operation-detail"></p></div><button id="operation-retry" class="button compact" type="button" hidden>Check operation</button><button id="operation-dismiss" class="button compact" type="button" hidden>Dismiss</button></div>
 
-      <section id="panel-overview" class="panel" aria-labelledby="page-title">
-        <div class="hero"><div><p class="eyebrow">CONNECTED, ON YOUR TERMS</p><h2>Your desk.<br>Your pocket. In sync.</h2><p>Keep work on your computer. Choose what connects to your phone, without leaving a session behind.</p><div class="actions"><button class="button primary" type="button" data-go="pairing">Manage phone pairing <span aria-hidden="true">↗</span></button><button class="button" type="button" data-go="sessions">View sessions</button></div></div><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><svg viewBox="0 0 200 180"><rect x="20" y="35" width="115" height="80" rx="9" fill="none" stroke="currentColor" stroke-width="3"/><path d="M32 100h90M62 116l-5 14h44l-5-14M48 130h60" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><rect x="130" y="65" width="48" height="82" rx="9" fill="var(--hero-bg)" stroke="currentColor" stroke-width="3"/><path d="M149 73h10M150 137h8M142 97l8 8 16-19" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="96" cy="73" r="5" fill="currentColor"/><path d="M53 73h24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="art-note">LOCAL FIRST. ALWAYS.</span></div></div>
-        <div class="metric-grid"><div class="metric"><span>Discovered sessions</span><strong id="metric-sessions">—</strong><small>Existing Copilot runtimes</small></div><div class="metric"><span>Connected phones</span><strong id="metric-connected">—</strong><small id="metric-connected-note">Waiting for a fresh status</small></div><div class="metric"><span>Registered projects</span><strong id="metric-projects">—</strong><small>Workspaces you choose</small></div></div>
+      <section id="panel-control" class="panel" aria-labelledby="page-title">
+        <div class="hero health-summary"><div><p class="eyebrow">THIS COMPUTER</p><h2 id="health-summary" class="health-title">Checking Weft…</h2><p id="health-detail">Waiting for verified local status. Nothing starts automatically.</p></div><div class="actions"><button id="control-primary" class="button primary" type="button">Check status</button><button class="button" type="button" data-go="sessions">View sessions</button></div></div>
         <div class="section-heading"><h2>Connection infrastructure</h2><span class="muted small">Nothing starts automatically</span></div>
         <div class="service-grid">
-          <article class="card service"><div class="card-heading"><span class="icon-tile" data-icon="station"></span><span id="station-status" class="badge">Unknown</span></div><h3>Device Station</h3><p>Phone access to this computer’s utilities. Independent of your Copilot sessions.</p><div class="service-meta"><span id="station-phone">Phone status unknown</span><span id="station-pid"></span></div><p id="station-error" class="inline-error" hidden></p><p id="station-remedy" class="hint"></p><div class="actions"><button id="station-start" class="button primary" type="button">Start Station</button><button id="station-restart" class="button" type="button">Restart</button><button id="station-stop" class="button danger-quiet" type="button">Stop</button></div></article>
-          <article class="card service"><div class="card-heading"><span class="icon-tile" data-icon="relay"></span><span id="relay-status" class="badge">Unknown</span></div><h3>Dev Tunnel relay</h3><p>A transport for encrypted traffic. Start it only when you use Dev Tunnel.</p><div class="service-meta"><span id="relay-address">No relay address available</span><span id="relay-pid"></span></div><p id="relay-error" class="inline-error" hidden></p><p id="relay-remedy" class="hint"></p><div class="actions"><button id="relay-start" class="button primary" type="button">Start relay</button><button id="relay-restart" class="button" type="button">Restart</button><button id="relay-stop" class="button danger-quiet" type="button">Stop</button></div></article>
+          <article class="card service station-card"><div class="card-heading"><span class="icon-tile" data-icon="station"></span><span id="station-status" class="badge">Unknown</span></div><h3>Device Station</h3><p>Device access is independent of your Copilot sessions.</p><div class="service-meta"><span>Stops do not terminate Copilot sessions or the shared relay.</span><span id="station-pid"></span></div>
+            <dl id="station-runtime-details" class="service-details"><div><dt>Running version</dt><dd id="station-version">Not reported</dd></div><div><dt>Worker uptime</dt><dd id="station-uptime">Not reported</dd></div><div><dt>Local status checked</dt><dd id="station-checked">Not yet checked</dd></div></dl>
+            <p id="station-progress" class="hint progress-detail" hidden></p><p id="station-error" class="inline-error" hidden></p><p id="station-remedy" class="hint"></p><div class="actions"><button id="station-start" class="button primary" type="button">Start Station</button><button id="station-restart" class="button" type="button">Restart</button><button id="station-stop" class="button danger-quiet" type="button">Stop</button></div></article>
+          <article class="card service connection-card"><div class="card-heading"><span class="icon-tile" data-icon="relay"></span><span id="connection-status" class="badge">Unknown</span></div><h3>Connection</h3><p id="connection-transport">Choose a transport in Setup.</p>
+            <div id="devtunnel-connection"><div class="service-meta"><span id="relay-address">No relay address available</span><span id="relay-pid"></span></div>
+              <dl class="service-details"><div><dt>Sign-in</dt><dd id="auth-status">Not checked</dd></div><div><dt>Provider / account</dt><dd id="auth-account">Not reported</dd></div><div><dt>Relay</dt><dd><span id="relay-status" class="badge">Unknown</span></dd></div><div><dt>Public forwarding</dt><dd id="relay-forwarding">Not checked</dd></div><div><dt>Last successful check</dt><dd id="relay-healthy">Not reported</dd></div></dl>
+              <dl id="relay-runtime-details" class="service-details"><div><dt>Running version</dt><dd id="relay-version">Not reported</dd></div><div><dt>Relay uptime</dt><dd id="relay-uptime">Not reported</dd></div></dl>
+              <p id="auth-help" class="field-help"></p><button id="auth-refresh" class="button compact" type="button">Refresh sign-in status</button>
+              <p id="relay-progress" class="hint progress-detail" hidden></p><p id="relay-error" class="inline-error" hidden></p><p id="relay-remedy" class="hint"></p><div class="actions"><button id="relay-start" class="button primary" type="button">Start relay</button><button id="relay-restart" class="button" type="button">Restart</button><button id="relay-stop" class="button danger-quiet" type="button">Stop</button></div>
+            </div>
+            <div id="supabase-connection" hidden><dl class="service-details"><div><dt>Project configuration</dt><dd id="supabase-config">Not checked</dd></div><div><dt>Project endpoint</dt><dd id="supabase-endpoint">Not reported</dd></div><div><dt>Station connection</dt><dd id="supabase-live">Not reported</dd></div><div><dt>Last verified</dt><dd id="supabase-checked">Not reported</dd></div></dl><p class="field-help">Configuration is not proof of a live subscription. No individual transport sign-in or local tunnel is required.</p></div>
+            <div id="connection-unconfigured" class="hint" hidden>Choose Supabase or Dev Tunnel in Setup before starting Station.</div>
+            <p id="connection-config-source" class="field-help">Local Weft configuration</p><div class="actions"><button class="button" type="button" data-go="settings">Connection settings</button></div>
+          </article>
+          <article class="card mobile-card"><div class="card-heading"><h2>Mobile</h2><span id="mobile-status" class="badge">Not checked</span></div><dl class="mobile-details"><div><dt>Saved pairing</dt><dd id="station-phone">Not checked</dd></div><div><dt>Recent Station contact</dt><dd id="station-contact">Not reported</dd></div></dl><p id="mobile-remedy" class="muted small"></p><button class="button" type="button" data-go="pairing">Manage pairing</button></article>
         </div>
+        <div id="unused-relay" class="notice warning" hidden><strong>Unused Dev Tunnel relay still running</strong><p>Your selected transport does not require it. Existing direct links may still depend on this relay; it is not stopped automatically.</p><button id="unused-relay-stop" class="button danger-quiet" type="button">Stop unused relay</button></div>
+        <div class="metric-grid"><div class="metric"><span>Detected sessions</span><strong id="metric-sessions">—</strong><small id="metric-session-note">Existing Copilot runtimes</small></div><div class="metric"><span>Confirmed mobile links</span><strong id="metric-connected">—</strong><small id="metric-connected-note">Waiting for a fresh status</small></div><div class="metric"><span>Registered projects</span><strong id="metric-projects">—</strong><small>Manage folders in Setup</small></div></div>
         <div id="warnings-card" class="notice warning" hidden><h3>Worth a look</h3><ul id="warnings"></ul><button class="button compact" type="button" data-go="diagnostics">Open diagnostics</button></div>
       </section>
 
@@ -45,13 +59,14 @@ export function renderControlCenterPage() {
         <div id="sessions-list" class="session-list" aria-live="polite"></div>
       </section>
 
-      <section id="panel-projects" class="panel" hidden aria-labelledby="page-title">
+      <section id="panel-setup" class="panel" hidden aria-labelledby="page-title">
+        <div class="setup-links actions"><button class="button compact" type="button" data-setup="setup-settings">Connection &amp; access</button><button class="button compact" type="button" data-setup="setup-projects">Projects</button></div>
+        <div id="setup-projects">
         <div class="two-column"><div><div class="section-heading"><h2>Your projects</h2><span id="project-count" class="badge">—</span></div><div id="projects-list" class="project-list"></div></div>
           <form id="project-form" class="card form-card"><span class="icon-tile" data-icon="folder"></span><h2>Add a workspace</h2><p class="muted">Register a folder on this computer. Adding a project does not start a session.</p><label for="project-name">Project name</label><input id="project-name" name="name" required maxlength="100" autocomplete="off" placeholder="My project"><label for="project-path">Folder path</label><input id="project-path" name="path" required maxlength="4096" autocomplete="off" spellcheck="false" placeholder="Absolute folder path"><p class="field-help">Use the existing local folder’s full path.</p><label class="check"><input id="project-default" type="checkbox">Make this the default project</label><button id="project-add" class="button primary" type="submit">Add project</button></form>
         </div>
-      </section>
-
-      <section id="panel-settings" class="panel" hidden aria-labelledby="page-title">
+        </div>
+        <div id="setup-settings">
         <form id="settings-form">
           <div class="settings-heading"><p class="muted">Changes are saved only when you choose Save. Polling never replaces unsaved edits.</p><span id="settings-dirty" class="badge" hidden>Unsaved changes</span></div>
           <fieldset id="settings-fields" disabled>
@@ -61,6 +76,7 @@ export function renderControlCenterPage() {
           </fieldset>
           <div class="save-bar"><span id="settings-note" class="muted small">Loading saved settings…</span><div class="actions"><button id="settings-reset" class="button" type="button" disabled>Discard edits</button><button id="settings-save" class="button primary" type="submit" disabled>Save settings</button></div></div>
         </form>
+        </div>
       </section>
 
       <section id="panel-pairing" class="panel" hidden aria-labelledby="page-title">
@@ -74,7 +90,7 @@ export function renderControlCenterPage() {
         <article class="card remediation"><h2>When something isn’t connected</h2><div class="remedy-grid"><div><h3>Unknown or stale status</h3><p>Refresh status. If the local service is unavailable, reopen Control Center from Weft. Unknown does not mean disconnected.</p></div><div><h3>Phone trusted, not connected</h3><p>Keep your existing trust. Check the selected transport and open the phone app before replacing a pairing.</p></div><div><h3>Worker unsupported</h3><p>Background workload controls require Windows. Copilot session discovery and supported session actions remain separate.</p></div></div><div id="diagnostic-warnings" class="notice warning" hidden><strong>Reported warnings</strong><ul id="diagnostic-warning-list"></ul></div><p class="small muted">Only status and sanitized remediation are shown here. No transcripts, logs, or pairing secrets.</p></article>
       </section>
     </main>
-    <footer><span>Weft Control Center <span aria-hidden="true">·</span> Loopback only</span><span>Work stays on your computer.</span></footer>
+    <footer><span>Weft Control Center <span aria-hidden="true">·</span> Build <span id="control-build">Not checked</span> <span aria-hidden="true">·</span> Loopback only</span><button class="button compact" type="button" data-go="diagnostics">Version &amp; diagnostics</button></footer>
   </div>
 </div>
 <dialog id="confirmation" aria-labelledby="confirmation-title" aria-describedby="confirmation-description"><form method="dialog"><span class="dialog-icon" data-icon="shield"></span><h2 id="confirmation-title">Confirm change</h2><p id="confirmation-description"></p><ul id="confirmation-effects"></ul><div class="actions"><button id="confirmation-cancel" class="button" value="cancel" autofocus>Cancel</button><button id="confirmation-accept" class="button danger" value="confirm">Confirm</button></div></form></dialog>
@@ -82,6 +98,36 @@ export function renderControlCenterPage() {
 <script>(${controlCenterClient.toString()})();</script>
 </body></html>`;
 }
+
+const operationalStyles = `
+#panel-control .service-grid{grid-template-areas:"station connection" "mobile connection";align-items:stretch}
+#panel-control .station-card{grid-area:station}
+#panel-control .connection-card{grid-area:connection}
+#panel-control .mobile-card{grid-area:mobile;margin:0}
+#panel-control .service-grid>.card{display:flex;flex-direction:column}
+#panel-control .station-card>.actions,#panel-control .connection-card>.actions{margin-top:auto}
+#panel-control .mobile-card>button{margin-top:auto;align-self:flex-start}
+#panel-control .service-grid[data-transport="supabase"],#panel-control .service-grid[data-transport="none"]{grid-template-areas:"station connection" "mobile mobile"}
+#panel-control .service-grid[data-transport="devtunnel"] .mobile-details{grid-template-columns:1fr}
+#panel-control .metric-grid{margin-top:20px}
+@media(max-width:1000px){#panel-control .service-grid,#panel-control .service-grid[data-transport]{grid-template-columns:1fr;grid-template-areas:"station" "connection" "mobile"}}
+.mobile-card{margin:20px 0}.mobile-details{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:0 0 14px}.mobile-details>div{display:grid;gap:5px}.mobile-details dd{overflow-wrap:anywhere}.setup-links{margin-bottom:24px}#setup-projects,#setup-settings{scroll-margin-top:90px}#setup-settings{margin-top:32px;padding-top:20px;border-top:1px solid var(--border)}#unused-relay{margin-top:20px}
+.hero.health-summary{grid-template-columns:minmax(0,1fr) auto;padding:22px 24px;gap:20px;min-height:0}
+.hero.health-summary .health-title{font-size:24px;margin:0 0 6px;line-height:1.3}
+.hero.health-summary p:not(.eyebrow){max-width:none;margin:0;font-size:13px}
+.hero.health-summary .eyebrow{margin-bottom:8px}
+.hero.health-summary .actions{margin:0;flex-wrap:wrap;justify-content:flex-end}
+.service-details{margin:14px 0;border-bottom:1px solid var(--border);padding-bottom:14px}
+.service-details>div{display:grid;grid-template-columns:minmax(115px,.8fr) minmax(0,1.2fr);gap:12px;margin:8px 0;font-size:12px}
+.service-details dt{color:var(--muted)}
+.service-details dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.progress-detail{border-left:3px solid var(--accent)}
+.health-summary.attention{border-color:var(--warn);background:var(--warn-bg);color:var(--text)}
+.health-title,.service-meta span{overflow-wrap:anywhere}
+.service-meta{flex-wrap:wrap;min-width:0}.service-meta span{min-width:0}
+@media(max-width:760px){.hero.health-summary{grid-template-columns:1fr;padding:18px}.hero.health-summary .actions{justify-content:flex-start}.hero.health-summary .health-title{font-size:21px}.service-details>div{font-size:11px}.metric small{overflow-wrap:anywhere}}
+@media(max-width:760px){.mobile-details{grid-template-columns:1fr;gap:14px}}
+`;
 
 const styles = `
 :root{color-scheme:light dark;--bg:#f7f6f3;--surface:#fff;--text:#252533;--muted:#696978;--border:#e4e2e9;--accent:#6950cf;--accent-hover:#5740b8;--accent-soft:#f0ecfc;--hero-bg:#eeebf8;--hero-text:#463b73;--good:#247259;--good-bg:#e9f5ee;--warn:#846022;--warn-bg:#fff5df;--bad:#a43b4e;--bad-bg:#fceef1;--shadow:0 5px 24px #20203205;--radius:18px}
@@ -145,15 +191,14 @@ function controlCenterClient() {
       .slice(0, 600);
   }
   const pages = {
-    overview: ["Overview", "Your computer, phone, and sessions. One clear view.", "overview"],
+    control: ["Control", "Manage Weft on this laptop. Configuration, connection, and mobile status.", "overview"],
     sessions: ["Sessions", "Existing Copilot runtimes. Connect only when you choose.", "sessions"],
-    projects: ["Projects", "The local workspaces you want within reach.", "folder"],
-    settings: ["Settings", "Intentional defaults. Explicit permissions. Your boundaries.", "settings"],
+    setup: ["Setup", "Connection, registered projects, and access settings. Explicit changes only.", "settings"],
     pairing: ["Pairing", "A private connection between this computer and your phone.", "pairing"],
     diagnostics: ["Diagnostics", "Clear status and practical next steps. No private logs.", "pulse"],
   };
   const nav = new Map();
-  let page = "overview";
+  let page = "control";
   let state = null;
   let stale = true;
   let stateRequest = null;
@@ -171,6 +216,7 @@ function controlCenterClient() {
   let rootSequence = 0;
 
   for (const [key, [label, , symbol]] of Object.entries(pages)) {
+    if (key === "pairing") continue;
     const button = element("button", null, "nav-button");
     button.type = "button";
     button.append(icon(symbol), element("span", label));
@@ -182,14 +228,19 @@ function controlCenterClient() {
   for (const button of document.querySelectorAll("[data-go]")) {
     button.addEventListener("click", () => navigate(button.dataset.go));
   }
+  for (const button of document.querySelectorAll("[data-setup]")) {
+    button.addEventListener("click", () => $(button.dataset.setup).scrollIntoView({ behavior: "auto", block: "start" }));
+  }
   function navigate(next, runtimeId, pairingDetails) {
+    const section = next === "projects" ? "setup-projects" : next === "settings" ? "setup-settings" : null;
+    next = { overview: "control", projects: "setup", settings: "setup" }[next] || next;
     const leavingPairing = page === "pairing";
     page = next;
     for (const [key, button] of nav) {
       if (key === page) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
-      $("panel-" + key).hidden = key !== page;
     }
+    for (const key of Object.keys(pages)) $("panel-" + key).hidden = key !== page;
     text("page-title", pages[page][0]);
     text("page-description", pages[page][1]);
     if (leavingPairing && page !== "pairing") clearPairing();
@@ -199,6 +250,7 @@ function controlCenterClient() {
       void loadPairing(pairingDetails);
     }
     $("page-title").focus({ preventScroll: true });
+    if (section) $(section).scrollIntoView({ behavior: "auto", block: "start" });
   }
   nav.get(page).setAttribute("aria-current", "page");
 
@@ -278,13 +330,142 @@ function controlCenterClient() {
   }
   function phoneStatus(item) {
     if (stale || isUnknown(item?.state)) return "Phone connection unknown";
-    if (item?.connected === true) return "Phone connected" + (item.phoneName ? " · " + item.phoneName : "");
+    if (item?.state === "dormant") return "Not shared with phone";
+    if (item?.connected === true) return "Recent phone contact" + (item.phoneName ? " · " + item.phoneName : "");
     if (item?.connected === false) return item.paired ? "Phone trusted · not connected" : "Phone not connected";
     return "Phone connection unknown" + (item?.paired ? " · trusted" : "");
   }
   function checkedAt() {
     const date = new Date(state?.checkedAt);
     return Number.isNaN(date.getTime()) ? "Check time unavailable" : date.toLocaleString();
+  }
+  function timestamp(value) {
+    if (typeof value !== "number" && typeof value !== "string") return null;
+    const number = typeof value === "number" ? value : Date.parse(value);
+    return Number.isFinite(number) && number > 0 && number <= Date.now() ? number : null;
+  }
+  function elapsed(value) {
+    const start = timestamp(value);
+    if (start === null) return "Not reported";
+    const seconds = Math.floor((Date.now() - start) / 1000);
+    if (seconds < 60) return seconds + "s";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + "m " + seconds % 60 + "s";
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + "h " + minutes % 60 + "m";
+    return Math.floor(hours / 24) + "d " + hours % 24 + "h";
+  }
+  function lastContact(item) {
+    if (timestamp(item?.lastPeerContactAt) !== null) return elapsed(item.lastPeerContactAt) + " ago";
+    if (item?.connected === true) return "Recent contact; time not reported";
+    return item?.paired ? "Trusted; contact not reported" : "No contact reported";
+  }
+  function sessionGroup(item) {
+    if (item?.state === "dormant") return "not shared";
+    if (item?.state === "pairing-ready") return "awaiting phone";
+    if (/^(activating|connecting|starting|recovering)$/.test(item?.state)) return "connecting";
+    if (/^(active|running)$/.test(item?.state)) return "shared";
+    if (/failed|error|unresponsive|endpoint-refresh/i.test(item?.state)) return "need attention";
+    return "status unreported";
+  }
+  function progress(item) {
+    if (!item || item.state === "ready" || item.stage === "ready") return "";
+    const parts = [];
+    if (item.stageLabel) parts.push(item.stageLabel);
+    else if (/starting|recovering|waiting-network/.test(item.state)) parts.push("Waiting for worker progress");
+    if (parts.length && Number.isSafeInteger(item.attempt) && item.attempt > 0) parts.push("Attempt " + item.attempt);
+    if (parts.length && timestamp(item.progressAt) !== null) parts.push("Stage elapsed " + elapsed(item.progressAt));
+    if (Number.isFinite(item.nextRetryAt) && item.nextRetryAt > Date.now()) parts.push("Retry in " + Math.ceil((item.nextRetryAt - Date.now()) / 1000) + "s");
+    return parts.join(" · ");
+  }
+  function renderSummary() {
+    const groups = {};
+    for (const session of state.sessions) {
+      const group = sessionGroup(session);
+      groups[group] = (groups[group] || 0) + 1;
+    }
+    const breakdown = ["not shared", "awaiting phone", "connecting", "shared", "need attention", "status unreported"]
+      .filter((name) => groups[name]).map((name) => groups[name] + " " + name).join(" · ");
+    text("metric-session-note", (stale ? "Last known · " : "") + (breakdown || "No sessions discovered"));
+    const eligible = state.sessions.filter((session) => session.state !== "dormant");
+    const confirmed = eligible.filter((session) => session.connected === true && !isUnknown(session.state)).length;
+    const pending = eligible.filter((session) => session.connected == null || isUnknown(session.state)).length;
+    text("metric-connected", stale ? "—" : confirmed);
+    text("metric-connected-note", stale ? "Status stale — refresh to verify links"
+      : pending ? pending + " awaiting or unreported; not counted as connected"
+        : "Session links, not a count of physical phones");
+    const relayRequired = state.settings.transport?.kind === "devtunnel";
+    const restartNeeded = state.connection?.liveState === "restart-needed";
+    const ready = !restartNeeded && state.station?.state === "ready" && (!relayRequired || state.relay?.state === "ready");
+    const recovering = [state.station?.state, relayRequired ? state.relay?.state : ""].some((value) =>
+      /starting|recovering|waiting-network|failed|unhealthy|degraded|unresponsive/.test(value || ""));
+    const stopped = state.station?.state === "stopped";
+    text("health-summary", stale ? "Status needs a refresh" : restartNeeded ? "Station needs a restart" : stopped ? "Device access is paused"
+      : ready ? "Weft ready on " + state.deviceName : recovering ? "Connection needs attention" : "Local Weft on " + state.deviceName);
+    const saved = savedPairing();
+    const contact = state.station?.connected === true ? "Recent phone contact confirmed"
+      : saved === true ? "Phone trust saved; live contact not yet confirmed"
+        : saved === false ? "No saved phone pairing" : "Saved pairing status unavailable";
+    text("health-detail", stale ? "Previously reported values are not live. Refresh before changing a worker."
+      : [(stopped ? "Station is stopped; direct sessions are separate" : "Station " + (state.station?.state || "unreported")),
+        relayRequired ? state.relay?.forwarding === "ok" ? "Public forwarding verified" : "Relay " + (state.relay?.state || "unreported")
+          : state.settings.transport?.kind === "supabase" ? "Supabase selected" : "No transport configured",
+        contact].join(" · "));
+    document.querySelector(".health-summary").classList.toggle("attention", stale || recovering);
+  }
+  function savedPairing() {
+    const stored = state?.station?.savedPairing?.paired;
+    if (state?.station?.savedPairing) return typeof stored === "boolean" ? stored : null;
+    if (typeof stored === "boolean") return stored;
+    return typeof state?.station?.paired === "boolean" ? state.station.paired : null;
+  }
+  function renderConnection() {
+    const info = state.connection || {};
+    const kind = info.kind ?? state.settings.transport?.kind;
+    const tunnel = kind === "devtunnel";
+    const supabase = kind === "supabase";
+    document.querySelector("#panel-control .service-grid").dataset.transport = tunnel ? "devtunnel" : supabase ? "supabase" : "none";
+    $("devtunnel-connection").hidden = !tunnel;
+    $("supabase-connection").hidden = !supabase;
+    $("connection-unconfigured").hidden = tunnel || supabase;
+    text("connection-transport", tunnel ? "Microsoft Dev Tunnel" : supabase ? "Supabase Realtime" : "No transport configured");
+    text("connection-config-source", info.configSource || "Local Weft configuration");
+    text("control-build", state.version);
+    const known = !stale;
+    statusBadge($("connection-status"), stale ? "Status stale" : tunnel ? status(state.relay?.state)[0]
+      : supabase ? info.liveState === "connected" ? "Connected" : info.configured === true ? "Configured"
+        : info.configured === false ? "Setup needed" : "Not verified" : "Setup needed",
+      known && (tunnel && state.relay?.state === "ready" || supabase && info.liveState === "connected") ? "good" : "");
+    const auth = info.auth;
+    text("auth-status", stale ? "Status stale" : auth?.state === "signed-in" ? "Signed in"
+      : auth?.state === "signed-out" ? "Sign-in required" : "Not verified");
+    text("auth-account", auth?.state === "signed-in"
+      ? [auth.provider || "Provider not reported", auth.account || "Account not reported"].join(" · ") : "Not reported");
+    text("auth-help", auth?.state === "signed-in" ? "Transport sign-in is separate from your Copilot account." +
+      (timestamp(auth.checkedAt) !== null ? " Checked " + elapsed(auth.checkedAt) + " ago." : "")
+      : auth?.message || "Check devtunnel user show in a terminal. To sign in, use devtunnel user login (Microsoft) or add -g (GitHub).");
+    text("supabase-config", info.configured === true ? "Project credentials configured"
+      : info.configured === false ? "Project credentials need setup" : "Configuration not reported");
+    text("supabase-endpoint", info.endpoint ? safeAddress(info.endpoint) : "Not reported");
+    text("supabase-live", stale ? "Status stale" : info.liveState === "connected" ? "Connected"
+      : info.liveState === "restart-needed" ? "Restart Station to apply the selected connection"
+      : info.liveState === "disconnected" ? "Disconnected" : info.liveState === "connecting" ? "Connecting"
+        : state.station?.state === "stopped" || info.liveState === "not-running" ? "Station not running" : "Not reported");
+    text("supabase-checked", timestamp(info.checkedAt) === null ? "Not reported" : elapsed(info.checkedAt) + " ago");
+    $("unused-relay").hidden = stale || !(info.unusedRelay ?? (!tunnel && isRunning(state.relay?.state)));
+    $("station-runtime-details").hidden = state.station?.state === "stopped";
+    $("relay-runtime-details").hidden = state.relay?.state === "stopped";
+    const paired = savedPairing();
+    text("station-phone", stale ? "Status stale" : state.settings.pairingMode === "ephemeral" ? "Temporary pairing mode"
+      : paired === true ? "Phone trust saved" + (state.station.phoneName ? " · " + state.station.phoneName : "")
+        : paired === false ? "No saved phone pairing" : "Saved pairing status unavailable");
+    const stopped = state.station?.state === "stopped";
+    statusBadge($("mobile-status"), stale ? "Status stale" : stopped ? "Station stopped"
+      : state.station?.connected === true ? "Recent contact" : "Contact unconfirmed",
+      !stale && !stopped && state.station?.connected === true ? "good" : "");
+    text("station-contact", stale ? "Status stale" : stopped ? "Unavailable while Station is stopped" : lastContact(state.station));
+    text("mobile-remedy", stopped ? "Saved trust is separate from a live connection. Start Station to pair or check current device contact."
+      : paired === true ? "Keep existing trust. Open Weft on your phone to confirm contact." : "Use Manage pairing to connect a phone deliberately.");
   }
   function renderState() {
     statusBadge($("freshness"), stale ? "Status unavailable" : "Live · every 5s", stale ? "warning" : "good live");
@@ -300,14 +481,16 @@ function controlCenterClient() {
     text("device-chip", state.deviceName || "This computer");
     text("metric-sessions", state.sessions.length);
     text("metric-projects", state.projects.length);
-    const uncertainLinks = stale || state.sessions.some((session) => session.connected == null || isUnknown(session.state)) || isUnknown(state.station?.state);
-    // Station's contract has pairing trust, not a live connected boolean.
-    text("metric-connected", uncertainLinks ? "Unknown" : state.sessions.filter((session) => session.connected === true).length);
-    text("metric-connected-note", "Session phone links; Station trust is shown below");
+    renderSummary();
     for (const kind of ["station", "relay"]) {
       const item = state[kind] || {};
       statusBadge($(kind + "-status"), ...status(item.state));
       text(kind + "-pid", item.pid ? "PID " + item.pid : "");
+      text(kind + "-version", (item.version || "Not reported by this worker") + (stale ? " · last known" : ""));
+      text(kind + "-uptime", stale ? "Status stale" : elapsed(item.startedAt));
+      const detail = stale ? "" : progress(item);
+      $(kind + "-progress").hidden = !detail;
+      if (detail) text(kind + "-progress", detail);
       if (!item.pid) $(kind + "-pid").textContent = "";
       $(kind + "-error").hidden = !item.error;
       if (item.error) text(kind + "-error", message(item.error));
@@ -319,10 +502,12 @@ function controlCenterClient() {
               : "Use Dev Tunnel transport in Settings, then explicitly start this relay.";
       text(kind + "-remedy", remedy);
     }
-    text("station-phone", stale || isUnknown(state.station?.state) ? "Phone trust unknown"
-      : state.station?.paired === true ? "Phone trusted" + (state.station.phoneName ? " · " + state.station.phoneName : "")
-        : state.station?.paired === false ? "No phone paired" : "Phone trust unknown");
     text("relay-address", safeAddress(state.relay?.baseUrl));
+    text("station-checked", stale ? "Status stale" : timestamp(state.station?.checkedAt) === null ? "Not reported" : elapsed(state.station.checkedAt) + " ago");
+    text("relay-forwarding", stale ? "Status stale" : state.relay?.forwarding === "ok" ? "Verified"
+      : state.relay?.forwarding === "rejected" ? "Not forwarding" : state.relay?.forwarding === "unreachable" ? "Unreachable" : "Not checked");
+    text("relay-healthy", stale ? "Status stale" : timestamp(state.relay?.lastHealthyAt) === null ? "Not reported" : elapsed(state.relay.lastHealthyAt) + " ago");
+    renderConnection();
     renderWarnings();
     renderSessions();
     renderProjects();
@@ -336,12 +521,13 @@ function controlCenterClient() {
     text("diagnostic-transport", state.settings.transport?.kind || "Not configured");
     renderPairingTargets();
     updateControls();
+    renderOperation();
   }
   function safeAddress(value) {
     if (!value) return "No relay address available";
     try {
       const url = new URL(value);
-      if (!["http:", "https:"].includes(url.protocol)) return "Relay address unavailable";
+      if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) return "Relay address unavailable";
       return url.origin;
     } catch { return "Relay address unavailable"; }
   }
@@ -392,11 +578,16 @@ function controlCenterClient() {
       const card = element("article", null, "card session-card");
       const tile = element("span", null, "icon-tile"); tile.append(icon("sessions"));
       const content = element("div");
-      const badge = element("span"); statusBadge(badge, ...status(session.state));
+      const badge = element("span"); statusBadge(badge, stale ? "Status stale" : sessionGroup(session),
+        session.connected === true ? "good" : /need attention|unreported/.test(sessionGroup(session)) ? "warning" : "");
       content.append(element("h3", session.title || "Untitled Copilot session"), element("p", session.cwd || "Workspace unavailable", "path"));
       const meta = element("div", null, "session-meta");
       meta.append(badge, element("span", phoneStatus(session)));
       if (session.watchLevel) meta.append(element("span", "Watch: " + session.watchLevel));
+      if (session.version) meta.append(element("span", "v" + session.version));
+      if (session.busy === true) meta.append(element("span", "Agent working"));
+      if (session.busy === false) meta.append(element("span", "Agent idle"));
+      if (session.state !== "dormant") meta.append(element("span", "Last phone contact: " + lastContact(session)));
       if (session.pid) meta.append(element("span", "PID " + session.pid));
       content.append(meta, element("div", "Session " + (session.sessionId || "unknown") + " · Runtime " + session.runtimeId, "session-id"));
       if (session.error) content.append(element("p", message(session.error), "inline-error small"));
@@ -578,7 +769,20 @@ function controlCenterClient() {
     if (!operation) return;
     $("operation-dot").className = "activity-dot " + operation.state;
     text("operation-title", operationLabels[operation.action] + (operation.state === "succeeded" ? " · complete" : operation.state === "failed" ? " · failed" : "…"));
-    text("operation-detail", operation.detail || "Working locally. You can switch views; this operation will keep being checked.");
+    let liveProgress = "";
+    if (operation.state === "running" && !operation.pollError && typeof operation.progress?.label === "string") {
+      liveProgress = operation.progress.label;
+      if (Number.isSafeInteger(operation.progress.attempt)) liveProgress += " · Attempt " + operation.progress.attempt;
+      if (timestamp(operation.startedAt) !== null) liveProgress += " · Elapsed " + elapsed(operation.startedAt);
+    }
+    if (!liveProgress && operation.state === "running" && !operation.pollError && state && !stale) {
+      const relayFirst = operation.action.startsWith("station.") &&
+        state.settings.transport?.kind === "devtunnel" && state.relay?.state !== "ready";
+      const worker = relayFirst || operation.action.startsWith("relay.") ? state.relay
+        : operation.action.startsWith("station.") ? state.station : null;
+      liveProgress = progress(worker);
+    }
+    text("operation-detail", liveProgress || operation.detail || "Working locally. You can switch views; this operation will keep being checked.");
     $("operation-dismiss").hidden = operation.state === "running";
     $("operation-retry").hidden = operation.state !== "running" || !operation.pollError;
     updateControls();
@@ -625,6 +829,8 @@ function controlCenterClient() {
     }
     operation.state = result.state;
     operation.pollError = false;
+    operation.progress = result.progress;
+    operation.startedAt = result.startedAt;
     if (result.state === "running") {
       operation.detail = "Working locally. Switching views or hiding this page does not cancel the operation.";
       renderOperation();
@@ -667,12 +873,28 @@ function controlCenterClient() {
         : button.dataset.sessionAction === "activate" && isRunning(session?.state) ? "Weft is already active for this runtime." : "";
     }
     $("project-add").disabled = unavailable;
+    const primary = $("control-primary");
+    let primaryAction = "pairing", primaryLabel = "Manage pairing";
+    if (stale || !state) { primaryAction = "refresh"; primaryLabel = "Refresh status"; }
+    else if (!["devtunnel", "supabase"].includes(state.settings.transport?.kind)) { primaryAction = "settings"; primaryLabel = "Set up connection"; }
+    else if (!state.projects.length && state.station?.state === "stopped") { primaryAction = "projects"; primaryLabel = "Register a project"; }
+    else if (state.station?.state === "stopped") { primaryAction = "start"; primaryLabel = "Start Station"; }
+    else if (state.connection?.liveState === "restart-needed") { primaryAction = "restart"; primaryLabel = "Review Station restart"; }
+    else if (/failed|recovering|starting|unresponsive|waiting-network/.test(state.station?.state || "") ||
+        state.settings.transport?.kind === "devtunnel" && /failed|recovering|starting|unresponsive|waiting-network|degraded/.test(state.relay?.state || "")) {
+      primaryAction = "diagnostics"; primaryLabel = "View connection details";
+    }
+    primary.textContent = primaryLabel;
+    primary.dataset.action = primaryAction;
+    primary.disabled = ["start", "restart"].includes(primaryAction) && (unavailable || !workloadSupported() || state.station?.supported === false);
+    $("unused-relay-stop").disabled = unavailable || !workloadSupported() || !isRunning(state?.relay?.state);
+    $("auth-refresh").disabled = stale || !state;
     const stationReady = workloadSupported() && state?.station?.supported !== false && /^(running|active|ready|pairing-ready|listening)$/i.test(state?.station?.state || "");
     const transportReady = ["supabase", "devtunnel"].includes(state?.settings?.transport?.kind);
     $("session-start").disabled = unavailable || !stationReady || !transportReady || !state?.projects?.length;
     text("session-start-remedy", stale ? "Refresh local status before starting a session."
-      : !stationReady ? "Start Device Station from Overview first. Background Station controls require Windows."
-        : !transportReady ? "Choose a transport in Settings before starting a session."
+      : !stationReady ? "Start Device Station from Control first. Background Station controls require Windows."
+        : !transportReady ? "Choose a transport in Setup before starting a session."
           : !state?.projects?.length ? "Register a project first."
             : "Starts a new local Copilot process only when you choose Start session.");
     $("settings-fields").disabled = !settingsInitialized;
@@ -682,7 +904,7 @@ function controlCenterClient() {
     text("settings-note", !settingsInitialized ? "Loading saved settings…" : settingsDirty ? "Your edits are local until saved." : "Saved settings · no unsaved changes");
     $("pairing-replace").disabled = unavailable || pairingTarget !== "" || !workloadSupported() || state?.station?.supported === false || isUnknown(state?.station?.state) || !isRunning(state?.station?.state);
     $("pairing-replace").title = pairingTarget ? "Trust replacement here applies to Device Station only."
-      : !isRunning(state?.station?.state) ? "Start Device Station from Overview first." : "";
+      : !isRunning(state?.station?.state) ? "Start Device Station from Control first." : "";
   }
   function clearPairing(invalidate = true) {
     if (invalidate) pairingRequest++;
@@ -739,7 +961,14 @@ function controlCenterClient() {
       text("pairing-message", paired ? "Keep your existing pairing to reconnect. Replace trust only when you intentionally want a different phone."
         : expired ? "This pairing code has expired. Refresh pairing to request the current code."
           : qr || result.code ? "Ready to scan or copy. Pairing trust is established only when the phone completes the handshake."
-          : "No usable pairing code is available. Check Overview and transport Settings; this view does not start anything.");
+          : "No usable pairing code is available. Check Control and Setup; this view does not start anything.");
+      if (result.state === "stopped") {
+        clearPairing(false);
+        statusBadge($("pairing-badge"), result.paired === true ? "Saved phone trust" : result.paired === false ? "No saved pairing" : "Saved pairing unavailable");
+        text("pairing-visual-title", "Station is not running");
+        text("pairing-visual-detail", "Saved pairing is independent of a live Station connection.");
+        text("pairing-message", "Start Station from Control to check current contact or obtain a fresh QR. No pairing has been reset.");
+      }
       if (isUnknown(result.state)) {
         statusBadge($("pairing-badge"), "Pairing status unknown", "warning");
         clearPairing(false);
@@ -758,6 +987,20 @@ function controlCenterClient() {
   }
 
   $("refresh").addEventListener("click", () => void refreshState());
+  $("control-primary").addEventListener("click", () => {
+    const action = $("control-primary").dataset.action;
+    if (action === "start") void runOperation("station.start", {});
+    else if (action === "restart") $("station-restart").click();
+    else if (action === "refresh") void refreshState();
+    else navigate(action);
+  });
+  $("unused-relay-stop").addEventListener("click", () => $("relay-stop").click());
+  $("auth-refresh").addEventListener("click", async () => {
+    $("auth-refresh").disabled = true;
+    try { await api("/api/auth"); await refreshState(); }
+    catch (error) { text("auth-help", error.message); }
+    finally { $("auth-refresh").disabled = false; }
+  });
   $("retry").addEventListener("click", () => void refreshState());
   $("session-search").addEventListener("input", () => { renderSessions(); updateControls(); });
   $("session-filter").addEventListener("change", () => { renderSessions(); updateControls(); });

@@ -312,7 +312,7 @@ async function backgroundWorker([role, home, ...rest]) {
     throw new Error("Invalid background worker invocation.");
   }
   process.env.WEFT_HOME = home;
-  let state = { state: "starting" };
+  let state = { state: "starting", stage: role === "station" ? "starting-station" : "checking-cli", progressAt: Date.now() };
   let closing = false;
   let shutdown = null;
   let listener = null;
@@ -322,7 +322,7 @@ async function backgroundWorker([role, home, ...rest]) {
       return listener.openLocalSession(intent);
     } : undefined,
     status: () => role === "station" && listener && ["ready", "endpoint-refresh-needed"].includes(state.state)
-      ? { ...state, state: listener.paired ? "ready" : state.state, pairingPayload: listener.pairingPayload, paired: listener.paired }
+      ? { ...state, state: listener.paired ? "ready" : state.state, pairingPayload: listener.pairingPayload, ...listener.managementStatus() }
       : state,
     stop: async () => {
       closing = true;
@@ -357,37 +357,51 @@ async function backgroundWorker([role, home, ...rest]) {
   let failures = 0;
   let needsProvision = true;
   let lastFailure = null;
+  let lastHealthyAt = null;
+  let provisionAttempts = 0;
   while (!closing) {
     try {
       if (needsProvision) {
-        const result = await ensureDevTunnelRelay({ interactive: false });
-        state = { state: "ready", baseUrl: result.baseUrl };
+        state = { ...state, state: "starting", stage: "checking-cli", attempt: ++provisionAttempts, nextRetryAt: null, nextCheckAt: null, error: null };
+        const result = await ensureDevTunnelRelay({
+          interactive: false,
+          onProgress: (stage) => { state = { ...state, stage, progressAt: Date.now() }; },
+        });
+        state = { state: "ready", baseUrl: result.baseUrl, stage: "ready", checkedAt: Date.now(), localHealth: "ok", forwarding: "not-checked" };
         needsProvision = false;
         failures = 0;
         lastFailure = null;
       } else {
         const local = await healthyRegistryEntry();
         const publicState = local ? await probePublicRelay(local.baseUrl) : "rejected";
+        const checkedAt = Date.now();
+        const health = { checkedAt, localHealth: local ? "ok" : "unhealthy", forwarding: publicState };
         if (publicState === "ok") {
-          state = { state: "ready", baseUrl: local.baseUrl };
+          lastHealthyAt = checkedAt;
+          state = { state: "ready", baseUrl: local.baseUrl, stage: "ready", ...health };
           failures = 0;
         } else if (publicState === "unreachable") {
-          state = { state: "waiting-network", baseUrl: local.baseUrl };
+          state = { state: "waiting-network", baseUrl: local.baseUrl, stage: "waiting-network", ...health };
           failures = 0;
         } else {
           failures++;
-          state = { state: "recovering", baseUrl: state.baseUrl };
+          state = { state: "recovering", baseUrl: state.baseUrl, stage: "checking-health", ...health };
           needsProvision = failures >= 3;
         }
       }
     } catch (error) {
-      state = { state: "failed", error: error.message.split("\n")[0] };
+      state = { state: "failed", error: error.message.split("\n")[0], stage: "retrying" };
       if (state.error !== lastFailure) {
         appendStationLog("background.relay_recovery_failed", { error: error.name }, { level: "error" });
         lastFailure = state.error;
       }
       needsProvision = true;
     }
+    state = {
+      ...state, lastHealthyAt,
+      attempt: provisionAttempts,
+      ...(state.state === "ready" ? { nextCheckAt: Date.now() + 30_000 } : { nextRetryAt: Date.now() + 30_000 }),
+    };
     await new Promise((resolveWait) => setTimeout(resolveWait, 30_000));
   }
 }

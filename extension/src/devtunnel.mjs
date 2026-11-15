@@ -94,6 +94,12 @@ export const STAGE_LABELS = {
   hosting: "hosting the tunnel (devtunnel host)…",
   "waiting-for-url": "waiting for the tunnel's public URL…",
   failed: "devtunnel startup failed",
+  "waiting-network": "waiting for network connectivity",
+  "checking-health": "checking relay and public forwarding",
+  retrying: "relay recovery will retry",
+  "starting-station": "starting Device Station",
+  "checking-sign-in": "checking Dev Tunnel sign-in",
+  "waiting-management": "waiting for the current management operation",
 };
 
 /** Human-readable label for a provisioning stage, or the raw stage string if unrecognized. */
@@ -146,7 +152,7 @@ export async function findDevTunnelBinary() {
     for (const variant of await candidateVariants(candidate)) {
       try {
         if (variant !== "devtunnel" && !existsSync(variant)) continue;
-        await execFileAsync(variant, ["--version"], { shell: shouldUseShellForCommand(variant) });
+        await execFileAsync(variant, ["--version"], { shell: shouldUseShellForCommand(variant), timeout: 3000 });
         cachedBin = variant;
         return cachedBin;
       } catch {
@@ -156,6 +162,31 @@ export async function findDevTunnelBinary() {
   }
   cachedBin = null;
   return null;
+}
+
+export async function readDevTunnelAuthentication({
+  bin, findBinary = findDevTunnelBinary, execute = execFileAsync, now = Date.now,
+} = {}) {
+  const checkedAt = now();
+  try {
+    bin ??= await findBinary();
+    if (!bin) return { state: "unavailable", provider: null, account: null, checkedAt,
+      message: "Dev Tunnel CLI is not installed." };
+    const { stdout } = await execute(bin, ["user", "show", "--json"], {
+      shell: shouldUseShellForCommand(bin), timeout: 3000, maxBuffer: 64 * 1024,
+    });
+    const raw = JSON.parse(stdout);
+    const state = /^logged in$/i.test(raw.status ?? "") ? "signed-in"
+      : /not logged|signed out|expired/i.test(raw.status ?? "") ? "signed-out" : "unavailable";
+    const provider = /^github$/i.test(raw.provider ?? "") ? "GitHub"
+      : /^microsoft$/i.test(raw.provider ?? "") ? "Microsoft" : null;
+    const account = state === "signed-in" && typeof raw.username === "string"
+      ? raw.username.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 256) : null;
+    return { state, provider, account, checkedAt };
+  } catch {
+    return { state: "unavailable", provider: null, account: null, checkedAt,
+      message: "Sign-in information could not be verified. Refresh or check devtunnel user show in a terminal." };
+  }
 }
 
 /** Run a `devtunnel` subcommand to completion and return its stdout. Exported for

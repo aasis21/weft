@@ -69,6 +69,14 @@ does not start Station or activate sessions; closing it does not stop workloads.
 Windows installation adds a branded Start menu shortcut; `weft ui shortcut`
 adds a desktop shortcut.
 
+The main **Control** page keeps lifecycle controls, selected transport, safe
+connection details and mobile status visible. **Setup** combines project
+registration/defaults with configuration and access policy; it does not combine
+project actions with the settings Save operation. Dev Tunnel sign-in metadata is
+read-only and separate from Copilot authentication. Supabase configuration is not
+proof of a live subscription, and no transport key is displayed. Saved pairing can
+be shown while Station is stopped; a fresh QR requires the endpoint to be running.
+
 On Windows, `weft start` and `weft devtunnel start` use manually started per-user
 background tasks. Their launch terminal can close. Crashes restart automatically;
 `weft stop` disables Station restart but leaves the shared relay available;

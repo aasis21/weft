@@ -48,13 +48,25 @@ function writeIdentityFile(record, { baseDir } = {}) {
   }
 }
 
-/** Read the persisted {channelId, keyPair, everConnected, peerPublicKeyB64} if present and valid,
- * else null. Never throws. `everConnected` is true once ANY phone has ever bound to this channel
- * (see markPersistedIdentityConnected) — lets a host (weft start's status line) distinguish "still
- * waiting for the very first scan" from "reconnecting a phone that's paired before". `peerPublicKeyB64`
- * is the last phone public key that actually bound to this channel — lets the listener derive the
- * session key and open the encrypted channel (+ start heartbeating) BEFORE that phone's hello
- * arrives this run, instead of sitting idle until it does (see listener.mjs's optimisticBind). */
+/** Inspect saved trust without importing or creating private key material. */
+export function readSavedPairing({ baseDir } = {}) {
+  try {
+    const record = JSON.parse(readFileSync(storePath(baseDir), "utf8"));
+    if (!record || typeof record.channelId !== "string" || !record.channelId.trim() || !record.privateKeyJwk ||
+        typeof record.privateKeyJwk !== "object" || Array.isArray(record.privateKeyJwk) ||
+        record.peerPublicKeyB64 != null && typeof record.peerPublicKeyB64 !== "string") {
+      return { paired: null, state: "unavailable" };
+    }
+    return { paired: typeof record.peerPublicKeyB64 === "string" && !!record.peerPublicKeyB64,
+      state: "available" };
+  } catch (error) {
+    return error.code === "ENOENT" ? { paired: false, state: "available" }
+      : { paired: null, state: "unavailable" };
+  }
+}
+
+/** Read the persisted identity and import its key for pairing.
+ * The stored peer key supports automatic reconnection before a fresh phone hello arrives. */
 export async function loadPersistedIdentity({ baseDir } = {}) {
   try {
     const raw = readFileSync(storePath(baseDir), "utf8");

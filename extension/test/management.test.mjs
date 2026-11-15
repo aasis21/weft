@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createManagement, withManagementLock } from "../src/management.mjs";
-import { saveTransportConfig } from "../src/transportConfig.mjs";
+import { saveTransportConfig, saveSupabaseCredentials } from "../src/transportConfig.mjs";
 import { shortcutScript, installControlCenterShortcut } from "../src/controlCenterShortcut.mjs";
 
 async function home(t) {
@@ -73,6 +73,8 @@ test("status probes do not activate dormant sessions or expose pairing payloads"
   });
   const state = await manager.state();
   assert.deepEqual(commands, ["status", "status"]);
+  assert.equal(state.sessions[0].connected, false, "dormant means Weft has no remote session link");
+  assert.equal(state.sessions[0].watchLevel, "off");
   assert.equal(state.sessions[1].connected, null);
   assert.equal(state.sessions[1].watchLevel, null);
   assert.ok(!JSON.stringify(state).includes("private-pairing-token"));
@@ -103,6 +105,84 @@ test("Station management shares relay startup, confirms stops, and never claims 
   assert.equal(calls.at(-1), "stop-station");
   assert.ok(!calls.includes("stop-relay"));
 });
+test("operational telemetry keeps worker identity, relay health and secrets separate", async (t) => {
+  const baseDir = await home(t);
+  const startedAt = Date.now() - 60_000;
+  await writeFile(join(baseDir, "devtunnel.json"), JSON.stringify({
+    alive: true, pid: process.pid, startedAt, baseUrl: "wss://relay.example.test",
+  }));
+  const manager = createManagement({
+    baseDir, platform: "win32",
+    background: {
+      command: async () => ({ state: "ready", pid: 123, startedAt: startedAt - 10_000, version: "0.2.40",
+        paired: true, connected: true, phoneName: "Phone", lastPeerContactAt: startedAt,
+        pairingPayload: { token: "private-pairing-token" } }),
+    },
+    discover: async () => ({ status: "none", runtimes: [] }),
+    relayHealth: async () => ({ baseUrl: "wss://relay.example.test" }),
+    publicProbe: async () => "ok",
+  });
+  const state = await manager.state();
+  assert.equal(state.station.version, "0.2.40");
+  assert.equal(state.station.lastPeerContactAt, startedAt);
+  assert.equal(state.station.connected, true);
+  assert.equal(state.relay.pid, process.pid);
+  assert.equal(state.relay.startedAt, startedAt);
+  assert.equal(state.relay.managerPid, 123);
+  assert.equal(state.relay.managerStartedAt, startedAt - 10_000);
+  assert.equal(state.relay.forwarding, "ok");
+  assert.ok(state.relay.lastHealthyAt > startedAt);
+  assert.ok(!JSON.stringify(state).includes("private-pairing-token"));
+});
+
+test("stopped Station preserves saved trust and does not infer a missing phone", async (t) => {
+  const baseDir = await home(t);
+  await writeFile(join(baseDir, "pairing-identity.json"), JSON.stringify({
+    channelId: "saved", privateKeyJwk: { secret: "private-key" }, peerPublicKeyB64: "public-peer",
+  }));
+  const manager = createManagement({ baseDir, platform: "win32",
+    discover: async () => ({ status: "none", runtimes: [] }),
+    background: { command: async () => null, task: async () => ({ state: "NotRegistered" }) },
+  });
+  const state = await manager.state();
+  assert.equal(state.station.state, "stopped");
+  assert.equal(state.station.paired, true);
+  assert.equal(state.station.connected, false);
+  const pairing = await manager.pairing();
+  assert.equal(pairing.paired, true);
+  assert.equal(pairing.code, null);
+  assert.equal(pairing.qr, null);
+  assert.ok(!JSON.stringify(state).includes("private-key"));
+  await writeFile(join(baseDir, "pairing-identity.json"), "{corrupt");
+  assert.equal((await manager.state()).station.paired, null);
+});
+
+test("selected transport scopes cached authentication and avoids claiming a different live connection", async (t) => {
+  const baseDir = await home(t);
+  saveTransportConfig({ kind: "devtunnel" }, { baseDir });
+  let reads = 0;
+  const manager = createManagement({ baseDir, platform: "win32",
+    discover: async () => ({ status: "none", runtimes: [] }),
+    background: { command: async () => ({ state: "ready", transportKind: "devtunnel", transportState: "connected" }) },
+    authentication: async () => { reads++; return { state: "signed-in", provider: "GitHub", account: "example", checkedAt: Date.now() }; },
+  });
+  await manager.state(); await manager.state();
+  assert.equal(reads, 1);
+  await manager.refreshAuthentication();
+  assert.equal(reads, 2);
+  saveTransportConfig({ kind: "supabase" }, { baseDir });
+  saveSupabaseCredentials({ url: "https://project.example.test/path?private=query", anonKey: "private-key" }, { baseDir });
+  const state = await manager.state();
+  assert.equal(state.connection.kind, "supabase");
+  assert.equal(state.connection.auth, null);
+  assert.equal(state.connection.endpoint, "https://project.example.test");
+  assert.equal(state.connection.liveState, "restart-needed");
+  assert.equal(state.connection.unusedRelay, true);
+  assert.ok(!JSON.stringify(state).includes("private-key"));
+  await manager.refreshAuthentication();
+  assert.equal(reads, 2);
+});
+
 test("interrupted management ownership is explicit and is not automatically deleted", async (t) => {
   const baseDir = await home(t);
   await writeFile(join(baseDir, "management.lock"), JSON.stringify({ pid: 2147483647, token: "old" }));

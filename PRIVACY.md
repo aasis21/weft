@@ -146,6 +146,14 @@ See [`docs/security.md`](docs/security.md) for the threat model and
 [`SUPPORT.md`](SUPPORT.md) for cleanup and issue-reporting guidance.
 ## Local Control Center
 
+Transport authentication reporting displays only sign-in status, provider and
+account label from the Dev Tunnel CLI to the authorized local browser. It never
+returns tokens, tenant/object identifiers or raw command output, never signs in
+automatically, and is cached briefly in process memory rather than written to
+diagnostic logs. Supabase displays configuration/project endpoint, not its key.
+Saved pairing metadata is read without importing or generating a private key;
+only the existence of saved phone trust is returned.
+
 `weft ui` serves an optional laptop management interface on loopback only. Its
 private bootstrap authorizes a same-origin browser session; configuration and
 session-status requests require that authorization. A private host registry lives

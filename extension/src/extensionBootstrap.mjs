@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { startRuntimeLifecycleHost } from "./runtimeLifecycle.mjs";
+import { resolveVersion } from "./version.mjs";
 
 const BOOTSTRAP_STATE = Symbol.for("weft.extension-bootstrap.v1");
 const ACTIVE_RUNTIME_PATH = "./activeRuntime.mjs";
@@ -225,6 +226,10 @@ export async function startExtensionBootstrap({
         state: "dormant",
         sessionId: session.sessionId,
         pid: process.pid,
+        version: resolveVersion(),
+        connected: false,
+        paired: false,
+        watchLevel: "off",
       },
       "replace-controller": async (payload) => {
         await activate({ reason: "station", context: payload });

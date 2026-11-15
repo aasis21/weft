@@ -23,6 +23,26 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { recoverRelayPort, resolveSavedTunnelId } from "../src/relayServerProcess.mjs";
+import { readDevTunnelAuthentication } from "../src/devtunnel.mjs";
+
+test("authentication reporting uses JSON identity metadata without returning tokens or signing in", async () => {
+  const calls = [];
+  const signedIn = await readDevTunnelAuthentication({
+    bin: "fake", execute: async (_bin, args) => {
+      calls.push(args);
+      return { stdout: JSON.stringify({ status: "Logged in", provider: "microsoft", username: "example-user", accessToken: "private-token", tenantId: "private-tenant" }) };
+    },
+  });
+  assert.equal(signedIn.state, "signed-in");
+  assert.equal(signedIn.provider, "Microsoft");
+  assert.equal(signedIn.account, "example-user");
+  assert.ok(!JSON.stringify(signedIn).includes("private-"));
+  assert.deepEqual(calls, [["user", "show", "--json"]]);
+  const unavailable = await readDevTunnelAuthentication({ bin: "fake", execute: async () => { throw new Error("private-error"); } });
+  assert.equal(unavailable.state, "unavailable");
+  assert.equal(unavailable.account, null);
+  assert.ok(!JSON.stringify(unavailable).includes("private-error"));
+});
 
 test("saved tunnel lookup replaces only confirmed absence, not network/auth failures", async () => {
   assert.equal(await resolveSavedTunnelId({ bin: "fake", tunnelId: "saved", runCommand: async () => {} }), "saved");

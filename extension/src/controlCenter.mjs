@@ -158,6 +158,7 @@ export async function createControlCenterHost({
       if (url.pathname === "/api/state") return json(res, 200, await management.state());
       if (url.pathname === "/api/pairing") return json(res, 200, await management.pairing(url.searchParams.get("runtimeId") ?? undefined));
       if (url.pathname === "/api/update") return json(res, 200, await management.update());
+      if (url.pathname === "/api/auth") return json(res, 200, await management.refreshAuthentication());
       if (url.pathname.startsWith("/api/operations/")) {
         const operation = operations.get(url.pathname.slice("/api/operations/".length));
         return json(res, operation ? 200 : 404, operation ? publicOperation(operation) : { error: { code: "unknown-operation", message: "Operation result is unavailable. Refresh actual state; do not automatically repeat the action." } });
@@ -183,9 +184,11 @@ export async function createControlCenterHost({
           return json(res, 202, publicOperation(existing));
         }
         if (operations.size >= 128) throw new ManagementError("operation-busy", "This UI host reached its operation limit. Finish active work, then reopen the UI host. Prior request identities are not replayed.");
-        const operation = { id: input.id, state: "running", signature };
+        const operation = { id: input.id, state: "running", signature, startedAt: now() };
         operations.set(input.id, operation);
-        void Promise.resolve().then(() => management.execute(input.action, input.payload, { operationId: input.id }))
+        void Promise.resolve().then(() => management.execute(input.action, input.payload, {
+          operationId: input.id, onProgress: (progress) => { operation.progress = progress; },
+        }))
           .then((result) => { operation.state = "succeeded"; operation.result = result; })
           .catch((error) => { operation.state = "failed"; operation.error = failure(error); })
           .finally(() => { lastActivity = now(); });

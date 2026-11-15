@@ -46,14 +46,17 @@ test("startup waits for authenticated ready state, not merely task registration"
   let clock = 0;
   let attempts = 0;
   const operations = [];
+  const progress = [];
   const result = await startBackground("station", options, {
     now: () => clock, sleep: async (ms) => { clock += ms; },
     taskOperation: async (op) => { operations.push(op); },
     inspect: async () => ++attempts === 3 ? { state: "ready" } : { state: "starting" },
+    onProgress: (status) => progress.push(status.state),
   });
   assert.equal(result.state, "ready");
   assert.deepEqual(operations, ["start"]);
   assert.equal(attempts, 3);
+  assert.deepEqual(progress, ["starting", "starting", "ready"]);
   await assert.rejects(startBackground("station", options, {
     taskOperation: async () => {}, inspect: async () => ({ state: "failed", error: "Sign in required" }),
   }), /Sign in required/);
@@ -82,7 +85,11 @@ test("background readiness uses the real authenticated local IPC and cleans its 
     getStartTime: async () => 12345,
   });
   t.after(() => control.close());
-  assert.deepEqual(await backgroundCommand("station", "status", null, { baseDir: dir }), { state: "ready" });
+  const status = await backgroundCommand("station", "status", null, { baseDir: dir });
+  assert.equal(status.state, "ready");
+  assert.equal(status.pid, process.pid);
+  assert.equal(status.startedAt, 12345);
+  assert.match(status.version, /^\d+\.\d+\.\d+/);
   await control.close();
   assert.equal(await backgroundCommand("station", "status", null, { baseDir: dir }), null);
 });

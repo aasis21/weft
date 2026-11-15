@@ -827,6 +827,9 @@ function status() {
     pid: process.pid,
     connected: currentPeerPub ? relayHandle?.managementStatus?.().connected ?? null : false,
     watchLevel: relayHandle?.managementStatus?.().watchLevel ?? null,
+    lastPeerContactAt: relayHandle?.managementStatus?.().lastPeerContactAt ?? null,
+    busy: relayHandle?.managementStatus?.().busy ?? null,
+    version: resolveVersion(),
     title: relayHandle?.managementStatus?.().title ?? null,
     cwd: session.cwd ?? session.workingDirectory ?? null,
   };

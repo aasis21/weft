@@ -1439,6 +1439,12 @@ test("the same paired phone can reconnect with its existing key while the QR gra
       () => rescanMessages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.PROJECT_LIST),
       "project list on the reconnected channel",
     );
+    const status = listener.managementStatus();
+    assert.equal(status.connected, true);
+    assert.equal(status.phoneName, "Phone");
+    assert.ok(status.lastPeerContactAt > 0);
+    assert.equal(status.paired, true);
+    assert.equal(status.pairingPayload, undefined);
     assert.deepEqual(warnings, []);
   } finally {
     // Always stop: a regression here leaves the listener holding its transport, and the test

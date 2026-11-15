@@ -184,6 +184,11 @@ export function createListener({
   let channel = null;
   let stopped = false;
   let started = false;
+  let lastPeerContactAt = null;
+  let lastPeerName = null;
+  let transportState = "unreported";
+  let transportCheckedAt = null;
+  let transportStatusStop = null;
   let heartbeatTimer = null;
   let activeMonitor = null;
   const attention = createAttentionLease();
@@ -295,6 +300,17 @@ export function createListener({
   };
 
   async function installPairingListener({ connect = false } = {}) {
+    transportStatusStop?.();
+    const observedTransport = listenerTransport;
+    if (connect) {
+      transportState = "connecting";
+      transportCheckedAt = Date.now();
+    }
+    transportStatusStop = observedTransport.onStatus?.((value) => {
+      if (observedTransport !== listenerTransport || stopped) return;
+      transportState = value;
+      transportCheckedAt = Date.now();
+    });
     const handle = await openPairedEndpoint({
       transport: listenerTransport,
       keyPair: listenerKeyPair,
@@ -315,6 +331,10 @@ export function createListener({
       },
     });
     pairingStop = handle.stop;
+    if (connect) {
+      transportState = "connected";
+      transportCheckedAt = Date.now();
+    }
   }
 
   function schedulePairingGrantRefresh() {
@@ -356,6 +376,10 @@ export function createListener({
   const stop = async () => {
     if (stopped) return;
     stopped = true;
+    transportStatusStop?.();
+    transportStatusStop = null;
+    transportState = "disconnected";
+    transportCheckedAt = Date.now();
     let terminalStopError = null;
     try { await terminalHost.stop(); } catch (error) { terminalStopError = error; }
     if (pairingGrantTimer) clearTimeout(pairingGrantTimer);
@@ -693,6 +717,8 @@ export function createListener({
       },
       connectionsHome,
     );
+    lastPeerContactAt = Date.now();
+    lastPeerName = typeof peer.senderName === "string" ? peer.senderName.slice(0, 100) : null;
     try {
       onDeviceConnected?.(peer);
     } catch {
@@ -940,6 +966,7 @@ export function createListener({
 
   async function handleControl(envelope, replyChannel) {
     if (stopped || replyChannel !== channel || envelope?.eventType !== EVENT_TYPE.CONTROL) return;
+    lastPeerContactAt = Date.now();
     if (envelope.eventSubtype === SUBTYPE.CONTROL.WATCH_REQUEST) {
       const ack = attention.update(envelope.msg);
       if (ack) {
@@ -1129,6 +1156,18 @@ export function createListener({
   const api = {
     start,
     stop,
+    managementStatus() {
+      let transportEndpoint = null;
+      try { transportEndpoint = new URL(listenerTransportDescriptor?.url).origin; } catch { /* Endpoint may not be configured. */ }
+      return {
+        transportState, transportCheckedAt, transportKind: listenerTransportDescriptor?.kind ?? null, transportEndpoint,
+        paired: Boolean(pairingGate?.claimedPeerPublicKeyB64),
+        phoneName: lastPeerName,
+        lastPeerContactAt,
+        connected: !channel || stopped ? false : lastPeerContactAt && Date.now() - lastPeerContactAt < 120_000 ? true : null,
+        watchLevel: attention.level,
+      };
+    },
     async openLocalSession(intent) {
       if (!started || stopped || !sessionCoordinator) throw new Error("Station is not ready.");
       return sessionCoordinator.open({ ...intent, requesterId: "local-control-center" });

@@ -92,6 +92,16 @@ CLI. Closing the browser does not stop workloads. Windows installs add a Start m
 shortcut; `weft ui shortcut` adds a desktop shortcut. `weft ui status` and
 `weft ui stop` manage only the local UI host.
 
+The **Control** page separates sessions not shared with a phone, sessions awaiting a phone,
+and confirmed recent mobile links. It shows worker versions/uptime, sanitized relay
+addresses, forwarding checks and real startup/retry progress. Saved phone trust is
+not treated as proof of live contact; older workers without these fields remain
+explicitly unreported until they are restarted on an updated build.
+It adapts connection information to Dev Tunnel or Supabase and keeps saved pairing
+visible when Station is stopped. **Setup** combines registered projects, connection
+settings and access policy, while retaining separate explicit project actions and
+configuration saves.
+
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.
 
