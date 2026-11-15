@@ -716,7 +716,9 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     h.state.settings.deviceName = "Saved by CLI";
     h.state.deviceName = "Saved by CLI";
     h.state.settingsRevision = newerRevision;
-    await h.page.clock.fastForward(5000);
+    const statusRequests = h.requests.filter((request) => request.path === "/api/state").length;
+    await h.page.clock.runFor(5500);
+    await expect.poll(() => h.requests.filter((request) => request.path === "/api/state").length).toBeGreaterThan(statusRequests);
     await expect(h.page.locator("#device-chip")).toHaveText("Saved by CLI");
     await expect(h.page.locator("#device-name")).toHaveValue("My unsaved revision");
     h.failure = { code: "settings-conflict", message: "Settings changed since this form was loaded. Reload or discard edits intentionally before saving." };
