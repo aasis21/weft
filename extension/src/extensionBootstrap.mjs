@@ -231,6 +231,8 @@ export async function startExtensionBootstrap({
         paired: false,
         watchLevel: "off",
       },
+      // Metadata-only phone traffic for local diagnostics; dormant sessions have none.
+      traffic: async () => activeRuntime?.traffic?.() ?? { title: null, entries: [] },
       "replace-controller": async (payload) => {
         await activate({ reason: "station", context: payload });
         return activeRuntime.replaceController(payload);

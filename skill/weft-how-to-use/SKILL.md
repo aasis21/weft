@@ -119,6 +119,13 @@ paths, device names or pairing secrets. Files stay local: `~/.weft/station.log`
 and active-session files under `~/.weft/sessions`, approximately 1 MB plus one
 backup each, with up to 100 recent session base files. Review before sharing.
 
+**Diagnostics -> Phone traffic** shows a live list of the latest 100 encrypted
+messages between this laptop and the paired phone (Station and active sessions):
+direction, readable event, size and result, including reply time, no reply, or
+failure. It is metadata only, held in memory, polled only while that page is
+open, and off when local logging is off. Use it when the phone looks online but
+lists or launches do not work.
+
 Phone-launched CLI sessions use a visible Windows console when background Station
 has no Windows Terminal context. Opening the terminal is separate from runtime
 readiness; wait for the handoff and do not duplicate an uncertain launch.

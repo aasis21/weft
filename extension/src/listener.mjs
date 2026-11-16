@@ -58,6 +58,7 @@ import {
 } from "./sessionCompatibility.mjs";
 import { createAttentionLease, openPairedEndpoint } from "./pairedEndpoint.mjs";
 import { appendStationLog } from "./stationLog.mjs";
+import { createTrafficLog } from "./trafficLog.mjs";
 
 // Proactive DEVICE_HEARTBEAT cadence: independent of PROJECT_LIST_REQUEST/PROJECT_LIST, so an idle
 // phone (not polling) can still tell the listener process is alive, not just that the transport
@@ -194,6 +195,7 @@ export function createListener({
   let heartbeatTimer = null;
   let activeMonitor = null;
   const attention = createAttentionLease();
+  const traffic = createTrafficLog();
   let pairingGrantTimer = null;
   // Pending `/weft` session offers relayed to the phone (see pendingSessions.mjs). `claimedOffers`
   // suppresses re-advertising a session the phone already adopted (until its file entry is gone);
@@ -334,6 +336,7 @@ export function createListener({
       pairingGate,
       onPeer: bindPeer,
       onDisconnected: () => {
+        if (channel) traffic.note("phone_disconnected");
         stopHeartbeat();
         stopMonitoring();
         terminalHost.disconnectPhone();
@@ -709,7 +712,9 @@ export function createListener({
         senderId: "weft-listener",
         senderName: listenerDeviceName,
       },
+      observer: traffic.observe,
     });
+    traffic.note("phone_connected");
     const boundChannel = channel;
     controlUnsub = boundChannel.onEvent(EVENT_TYPE.CONTROL, (envelope) => {
       void handleControl(envelope, boundChannel);
@@ -1178,6 +1183,7 @@ export function createListener({
   const api = {
     start,
     stop,
+    traffic: () => ({ entries: traffic.snapshot() }),
     managementStatus() {
       let transportEndpoint = null;
       try { transportEndpoint = new URL(listenerTransportDescriptor?.url).origin; } catch { /* Endpoint may not be configured. */ }

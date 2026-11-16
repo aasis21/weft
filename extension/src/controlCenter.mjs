@@ -219,6 +219,7 @@ export async function createControlCenterHost({
       if (url.pathname === "/api/update") return json(res, 200, await management.update());
       if (url.pathname === "/api/auth") return json(res, 200, await management.refreshAuthentication());
       if (url.pathname === "/api/diagnostics") return json(res, 200, management.diagnostics());
+      if (url.pathname === "/api/traffic") return json(res, 200, await management.traffic());
       if (url.pathname.startsWith("/api/operations/")) {
         const operation = operations.get(url.pathname.slice("/api/operations/".length));
         return json(res, operation ? 200 : 404, operation ? publicOperation(operation) : { error: { code: "unknown-operation", message: "Operation result is unavailable. Refresh actual state; do not automatically repeat the action." } });

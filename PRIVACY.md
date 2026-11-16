@@ -202,3 +202,11 @@ names, credentials and pairing keys. `weft logs` and the explicitly loaded
 Diagnostics view return at most 100 recent sanitized Station/management entries;
 they do not expose raw legacy log lines or upload logs. Identifiers and timing
 still describe your activity, so review output before sharing it.
+
+**Phone traffic** in Control Center Diagnostics is held only in the memory of the
+updated Station and active Weft sessions (latest 100 entries each) and is never
+written to disk. Each entry keeps direction, a readable event name, encrypted size,
+timing, and pass/fail or reply status. Message text, prompts, approvals, file and
+terminal content, clipboard contents and keys are not recorded. Only the
+authorized local dashboard can read it, and it stops recording while local
+diagnostics are off. **Copy for bug report** omits session names.

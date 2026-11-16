@@ -224,7 +224,7 @@ export async function stopBackground(role, options, {
 }
 
 export async function createBackgroundControl(role, {
-  baseDir = weftHome(), status, stop, activate,
+  baseDir = weftHome(), status, stop, activate, traffic,
   getStartTime = getProcessStartTime,
   onStopError = (error) => { console.error(`Weft background shutdown failed: ${error.message}`); process.exitCode = 1; },
 } = {}) {
@@ -242,6 +242,7 @@ export async function createBackgroundControl(role, {
     handlers: {
       status: async () => ({ ...await status(), pid: process.pid, startedAt: processStartedAt, version: resolveVersion() }),
       ...(activate ? { activate } : {}),
+      ...(traffic ? { traffic } : {}),
       quiesce: () => {
         // Let the authenticated reply complete before stopping the control endpoint itself.
         setTimeout(() => { void Promise.resolve().then(stop).catch(onStopError); }, 50);

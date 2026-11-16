@@ -22,6 +22,7 @@ import {
 import { updateLaunchOperation } from "./launchOperations.mjs";
 import { createWorkspaceView } from "./workspaceView.mjs";
 import { openPairedEndpoint } from "./pairedEndpoint.mjs";
+import { createTrafficLog } from "./trafficLog.mjs";
 
 export function activationControllerDecision({
   controllerDeviceId = null,
@@ -101,6 +102,7 @@ const spawnHandoffExpected = Boolean(identityFileEnv || channelIdEnv);
 // sessions would mean the relay ACKs/serves the phone's hello from more than one process at once.
 const laptopKeys = handedOffIdentity?.laptopKeys ?? (await generateKeyPair());
 const channelId = handedOffIdentity?.channelId ?? (channelIdEnv || randomChannelId());
+const traffic = createTrafficLog();
 process.stderr.write(
   `Weft: startup pid=${process.pid} identity=${handedOffIdentity ? "handoff" : "generated"} channel=${channelId.slice(0, 8)} handoffFile=${identityFileEnv ? "set" : "unset"}\n`,
 );
@@ -462,6 +464,7 @@ async function connectRelayWithRetry({ reconnect = false } = {}) {
 function requestReconnect(detail) {
   if (shuttingDown || reconnecting) return;
   reconnecting = true;
+  traffic.note("phone_disconnected");
   appendSessionLog("connection.lost", { reason: detail?.reason ?? detail ?? "unknown" }, { level: "warn" });
   void reconnectRelay(detail).catch((error) => {
     appendSessionLog("connection.recovery_failed", { error: error.name }, { level: "error" });
@@ -544,7 +547,9 @@ async function attachForPeer(transport, { key, peer }) {
       senderId: "copilot",
       senderName: "Copilot",
     },
+    observer: traffic.observe,
   });
+  traffic.note("phone_connected");
   // SupabaseTransport is subscribe-order independent (single catch-all broadcast listener +
   // internal dispatch), so attachRelay may register SecureChannel handlers after the channel is
   // already connected without losing events.
@@ -871,6 +876,7 @@ return Object.freeze({
   preparePairing,
   async grantWorkspaceAccess(args) { return (await workspaceView()).grant(args); },
   status,
+  traffic: () => ({ title: relayHandle?.managementStatus?.().title ?? null, entries: traffic.snapshot() }),
   replaceController,
   quiesce: (reason = "quiesce") => shutdown(reason),
   shutdown,

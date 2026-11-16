@@ -60,6 +60,41 @@ test("ECDH session keys match on both sides and round-trip an encrypted envelope
   await phoneChan.close();
 });
 
+test("an optional traffic observer sees accepted and failed messages without changing delivery", async () => {
+  _resetLocalBus();
+  const channelId = randomChannelId();
+  const laptop = await generateKeyPair();
+  const phone = await generateKeyPair();
+  const laptopEvents = [];
+  const laptopChan = new SecureChannel({
+    transport: createLocalTransport({ channelId }),
+    key: await deriveSessionKey(laptop.privateKey, phone.publicKeyB64),
+    observer: (event) => { laptopEvents.push(event); throw new Error("observer failures are ignored"); },
+  });
+  const phoneChan = new SecureChannel({
+    transport: createLocalTransport({ channelId }),
+    key: await deriveSessionKey(phone.privateKey, laptop.publicKeyB64),
+  });
+  const received = new Promise((resolve) => laptopChan.onEvent(EVENT_TYPE.PROMPT, resolve));
+  await phoneChan.send(prompt("observed"));
+  assert.equal((await received).msg.text, "observed");
+  await laptopChan.send(assistantMessage("reply", "m1"));
+  assert.deepEqual(laptopEvents.map((e) => [e.direction, e.message.eventSubtype, e.ok]), [
+    ["in", "prompt", true], ["out", "assistant_message", true],
+  ]);
+  assert.ok(Object.values(laptopEvents[1].payload).some((value) => typeof value === "string" && value.length > 0));
+
+  const failing = new SecureChannel({
+    transport: { publish: async () => { throw new Error("offline"); }, subscribe: () => () => {}, close: async () => {} },
+    key: await deriveSessionKey(laptop.privateKey, phone.publicKeyB64),
+    observer: (event) => laptopEvents.push(event),
+  });
+  await assert.rejects(failing.send(assistantMessage("lost", "m2")), /offline/);
+  assert.deepEqual([laptopEvents.at(-1).direction, laptopEvents.at(-1).ok], ["out", false]);
+  await laptopChan.close();
+  await phoneChan.close();
+});
+
 test("legacy protocol mode round-trips the version-1 direct message envelope", async () => {
   _resetLocalBus();
   const channelId = randomChannelId();

@@ -13,6 +13,7 @@ export const LIFECYCLE_COMMANDS = Object.freeze([
   "status",
   "replace-controller",
   "quiesce",
+  "traffic",
 ]);
 
 function privateMode(path, mode) {

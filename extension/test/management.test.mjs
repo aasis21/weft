@@ -224,6 +224,44 @@ test("status reports partial failures and unexpected worker exits without failin
   assert.ok(!log.includes("private"));
 });
 
+test("phone traffic merges Station and session sources, newest first, without unsupported workers failing it", async (t) => {
+  const baseDir = await home(t);
+  const at = Date.now();
+  const sessions = [
+    { runtimeInstanceId: "runtime-current", sessionId: "s1" },
+    { runtimeInstanceId: "runtime-older", sessionId: "s2" },
+  ];
+  const manager = createManagement({ baseDir, platform: "win32",
+    discover: async () => ({ status: "single", runtimes: sessions }),
+    background: {
+      command: async (role, command) => {
+        assert.equal(role, "station");
+        assert.equal(command, "traffic");
+        return { entries: [
+          { id: 1, at: at - 9000, lastAt: at - 9000, direction: "in", event: "Session list requested", count: 1, bytes: 120, result: "replied", replyMs: 6100 },
+          { id: 2, at: at - 8000, lastAt: at - 1000, direction: "out", event: "Station heartbeat", count: 4, bytes: 80, result: "sent", heartbeat: true },
+        ] };
+      },
+    },
+    runtimeClient: (presence) => ({ command: async (command) => {
+      assert.equal(command, "traffic");
+      if (presence.runtimeInstanceId === "runtime-older") return { ok: false, error: { code: "INVALID_REQUEST" } };
+      return { ok: true, result: { title: "Fix login\u0007 bug", entries: [
+        { id: 1, at: at - 5000, lastAt: at - 5000, direction: "out", event: "Launch result", count: 1, bytes: 300, result: "failed" },
+      ] } };
+    } }),
+  });
+  const result = await manager.traffic();
+  assert.deepEqual(result.entries.map((e) => [e.source, e.sourceKind, e.event]), [
+    ["Station", "station", "Station heartbeat"],
+    ["Fix login  bug", "session", "Launch result"],
+    ["Station", "station", "Session list requested"],
+  ]);
+  assert.equal(new Set(result.entries.map((e) => e.id)).size, 3);
+  assert.deepEqual(result.summary, { received: 1, sent: 5, lastFromPhone: at - 9000, problems: 1 });
+  assert.deepEqual(result.sources.map((s) => [s.kind, s.state]).sort(), [["session", "reporting"], ["session", "unsupported"], ["station", "reporting"]]);
+});
+
 test("interrupted management ownership is explicit and is not automatically deleted", async (t) => {
   const baseDir = await home(t);
   await writeFile(join(baseDir, "management.lock"), JSON.stringify({ pid: 2147483647, token: "old" }));

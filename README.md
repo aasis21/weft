@@ -117,6 +117,9 @@ diagnostics** show the latest 100 sanitized Station/management entries. Logs inc
 startup stages, session-list timings and correlated launch outcomes, not prompts,
 terminal output, project paths or pairing secrets. Updated Weft writers honor the
 switch without a restart; existing files and Copilot's own history are unchanged.
+**Diagnostics -> Phone traffic** shows a live, metadata-only list of the latest 100
+messages between this laptop and your phone, with readable event names, direction,
+size and reply timing, to diagnose "online but nothing works" problems.
 See [privacy and retention](PRIVACY.md#local-diagnostics).
 
 On Windows, phone-launched CLI sessions open an interactive terminal even when

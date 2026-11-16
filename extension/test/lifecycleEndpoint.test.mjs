@@ -28,6 +28,7 @@ async function fixture(t, handlerOverrides = {}) {
       return { command, payload };
     });
   }
+  if (handlerOverrides.traffic) handlers.traffic = handlerOverrides.traffic;
   const endpoint = runtimeEndpointAddress(identity.runtimeInstanceId, { baseDir });
   const host = await createLifecycleEndpoint({
     identity,
@@ -75,6 +76,18 @@ test("probe, activate, status, replace-controller, and quiesce are authenticated
     assert.equal(response.result.command, command);
   }
   assert.deepEqual(fx.calls.map((item) => item.command), ["activate", "status", "replace-controller", "quiesce"]);
+});
+
+test("traffic is an authenticated optional command that older runtimes report as unsupported", async (t) => {
+  const older = await fixture(t);
+  const unsupported = await sendLifecycleCommand({ endpoint: older.endpoint, auth: older.auth, command: "traffic" });
+  assert.equal(unsupported.ok, false);
+  assert.equal(unsupported.error.code, "UNSUPPORTED_COMMAND");
+  const current = await fixture(t, { traffic: async () => ({ entries: [{ id: 1, event: "Heartbeat" }] }) });
+  const forged = await sendLifecycleCommand({ endpoint: current.endpoint, auth: { ...current.auth, capability: "wrong" }, command: "traffic" });
+  assert.equal(forged.ok, false);
+  const response = await sendLifecycleCommand({ endpoint: current.endpoint, auth: current.auth, command: "traffic" });
+  assert.deepEqual(response.result.entries, [{ id: 1, event: "Heartbeat" }]);
 });
 
 test("malformed and oversized frames are rejected without stopping the listener", async (t) => {

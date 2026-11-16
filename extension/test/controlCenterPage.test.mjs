@@ -293,6 +293,7 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
         else if (url.pathname === "/api/diagnostics") json(200, { enabled: h.state.settings.loggingEnabled,
           entries: [{ timestamp: "2026-11-16T00:00:00Z", level: "ERROR", event: "launch.failed", fields: { code: "TERMINAL_LAUNCH_FAILED" } }] });
         else if (url.pathname === "/api/update") json(200, { current: "0.2.39", available: true, latest: "0.2.40", message: "Published release available." });
+        else if (url.pathname === "/api/traffic") json(200, h.traffic ?? { enabled: true, checkedAt: Date.now(), sources: [], summary: { received: 0, sent: 0, lastFromPhone: null, problems: 0 }, entries: [] });
         else if (url.pathname === "/api/operations" && request.method === "POST") {
           let body = "";
           for await (const chunk of request) body += chunk;
@@ -848,6 +849,56 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     await expect(h.page.locator("#pairing-message")).toContainText("did not include a runtime ID");
     await expect(h.page.locator("#pairing-code")).toHaveValue("");
     assert.equal(h.requests.filter((request) => request.path === "/api/pairing").length, 0);
+  });
+
+  await t.test("phone traffic shows live, readable, filterable events only while Diagnostics is open", async (st) => {
+    const now = Date.now();
+    const h = await harness(st, (h) => {
+      h.traffic = {
+        enabled: true, checkedAt: now,
+        sources: [{ id: "station", name: "Station", kind: "station", state: "reporting" }, { id: "old", name: "Copilot session 2", kind: "session", state: "unsupported" }],
+        summary: { received: 3, sent: 14, lastFromPhone: now - 4000, problems: 1 },
+        entries: [
+          { id: "station:1", at: now - 60000, lastAt: now - 1000, direction: "out", event: "Station heartbeat", count: 12, bytes: 240, result: "sent", heartbeat: true, source: "Station", sourceKind: "station" },
+          { id: "session:a:2", at: now - 2000, lastAt: now - 2000, direction: "out", event: "Launch result", count: 1, bytes: 300, result: "failed", source: "<img src=x onerror=alert(1)>", sourceKind: "session" },
+          { id: "station:3", at: now - 9000, lastAt: now - 9000, direction: "in", event: "Session list requested", count: 1, bytes: 120, result: "replied", replyMs: 6100, source: "Station", sourceKind: "station" },
+        ],
+      };
+    });
+    assert.equal(h.requests.filter((request) => request.path === "/api/traffic").length, 0);
+    await h.go("Diagnostics");
+    const rows = h.page.locator("#traffic-rows tr");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText("Laptop → Phone");
+    await expect(rows.nth(0)).toContainText("Station heartbeat ×12");
+    await expect(rows.nth(2)).toContainText("Phone → Laptop");
+    await expect(rows.nth(2)).toContainText("Replied in 6.1 s");
+    await expect(rows.nth(1)).toContainText("<img src=x onerror=alert(1)>");
+    assert.equal(await h.page.locator("#traffic-rows img").count(), 0);
+    await expect(h.page.locator("#traffic-received")).toHaveText("3");
+    await expect(h.page.locator("#traffic-problems")).toHaveText("1");
+    await expect(h.page.locator("#traffic-status")).toContainText("older version");
+    await expect(h.page.locator("#traffic-live")).toHaveText("Live · every 2s");
+    await h.page.locator("#traffic-hide-heartbeats").check();
+    await expect(rows).toHaveCount(2);
+    await h.page.locator("#traffic-filter").selectOption("problems");
+    await expect(rows).toHaveCount(1);
+    await expect(rows.nth(0)).toContainText("Failed");
+    await h.page.locator("#traffic-filter").selectOption("all");
+    await expect.poll(() => h.requests.filter((request) => request.path === "/api/traffic").length).toBeGreaterThan(1);
+    await h.page.locator("#traffic-pause").click();
+    await expect(h.page.locator("#traffic-live")).toHaveText("Paused");
+    const paused = h.requests.filter((request) => request.path === "/api/traffic").length;
+    await h.page.waitForTimeout(2600);
+    assert.equal(h.requests.filter((request) => request.path === "/api/traffic").length, paused);
+    await h.page.locator("#traffic-clear").click();
+    await expect(rows).toHaveCount(1);
+    await expect(rows.nth(0)).toContainText("No traffic matches this view.");
+    await h.page.locator("#traffic-pause").click();
+    await h.go("Control");
+    const left = h.requests.filter((request) => request.path === "/api/traffic").length;
+    await h.page.waitForTimeout(2600);
+    assert.equal(h.requests.filter((request) => request.path === "/api/traffic").length, left);
   });
 
   await t.test("per-device diagnostics setting is saved explicitly and local events load only on request", async (st) => {

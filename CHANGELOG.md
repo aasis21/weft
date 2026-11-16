@@ -5,6 +5,14 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.47
+
+- Add **Diagnostics → Phone traffic** to Control Center: a live view of the latest 100
+  encrypted messages between this laptop and the paired phone, from Station and active
+  sessions. It shows direction, readable event names, size, request/reply timing and
+  failures, with filters, grouping of heartbeats and streaming, pause, clear and copy.
+  Only metadata is kept, in memory, and nothing is recorded when local logging is off.
+
 ## 0.2.46
 
 - Keep waiting when Station or the relay is too busy to answer a 2-second status check

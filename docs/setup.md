@@ -203,6 +203,16 @@ terminal broker outcomes and operation identifiers help isolate slow discovery
 from failed launch or connection. Nothing is uploaded automatically; review even
 sanitized output before sharing. See [privacy](../PRIVACY.md#local-diagnostics).
 
+**Diagnostics -> Phone traffic** shows the latest 100 encrypted messages between this
+laptop and your phone, refreshed every 2 seconds only while that page is open. Rows
+show time, direction (Phone -> Laptop or Laptop -> Phone), Station or session, a
+readable event name, size and result: delivered, replied in N seconds, waiting, no
+reply after 60 seconds, or failed. Heartbeats and streaming chunks are grouped.
+Filter to Station, sessions or problems only, hide heartbeats, pause, clear the
+view, or copy a sanitized table for a bug report. Only metadata is kept, in memory.
+Restart older Station workers and reload older sessions after updating; they report
+that traffic is unavailable rather than showing nothing.
+
 On Windows, normal installation adds **Weft Control Center** to Start.
 `weft ui shortcut` adds a desktop shortcut. Shortcut targets use installed code,
 not a fixed localhost port or pairing URL. Foreground-owned workloads must be managed

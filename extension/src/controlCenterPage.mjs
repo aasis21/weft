@@ -88,6 +88,12 @@ export function renderControlCenterPage() {
       </section>
 
       <section id="panel-diagnostics" class="panel" hidden aria-labelledby="page-title">
+        <article id="traffic-card" class="card"><div class="section-heading traffic-heading"><div><h2>Phone traffic</h2><p class="muted small">Latest 100 encrypted messages between this laptop and your phone: event type, timing and size only — never message content.</p></div><div class="actions"><span id="traffic-live" class="badge">Not loaded</span><button id="traffic-pause" class="button compact" type="button" aria-pressed="false">Pause</button><button id="traffic-clear" class="button compact" type="button">Clear view</button><button id="traffic-copy" class="button compact" type="button">Copy for bug report</button></div></div>
+          <dl class="traffic-summary"><div><dt>Received · 5 min</dt><dd id="traffic-received">—</dd></div><div><dt>Sent · 5 min</dt><dd id="traffic-sent">—</dd></div><div><dt>Last from phone</dt><dd id="traffic-last">—</dd></div><div><dt>Problems</dt><dd id="traffic-problems">—</dd></div></dl>
+          <div class="traffic-toolbar"><label class="filter-field"><span class="sr-only">Show traffic</span><select id="traffic-filter"><option value="all">All traffic</option><option value="station">Station</option><option value="session">Sessions</option><option value="problems">Problems only</option></select></label><label class="check"><input id="traffic-hide-heartbeats" type="checkbox">Hide heartbeats</label></div>
+          <p id="traffic-status" class="muted small">Updates every 2 seconds while this page is open.</p>
+          <div class="traffic-wrap" role="region" aria-label="Recent phone traffic" tabindex="0"><table class="traffic-table"><thead><tr><th scope="col">Time</th><th scope="col">Direction</th><th scope="col">From</th><th scope="col">Event</th><th scope="col">Size</th><th scope="col">Result</th></tr></thead><tbody id="traffic-rows"></tbody></table></div>
+        </article>
         <article class="card remediation"><div class="section-heading"><h2>Recent local diagnostic events</h2><button id="diagnostics-refresh" class="button compact" type="button">Load diagnostics</button></div><p id="diagnostics-log-status" class="muted small">Load up to 100 sanitized local events. No transcripts, commands, credentials or raw logs are returned.</p><pre id="diagnostics-events" class="path" role="region" tabindex="0" aria-label="Sanitized local diagnostic events"></pre></article>
         <div class="service-grid"><article class="card"><span class="icon-tile" data-icon="pulse"></span><h2>Local installation</h2><dl class="diagnostic-list"><div><dt>Running version</dt><dd id="diagnostic-version">Unknown</dd></div><div><dt>Computer</dt><dd id="diagnostic-device">Unknown</dd></div><div><dt>Platform</dt><dd id="diagnostic-platform">Unknown</dd></div><div><dt>Last checked</dt><dd id="diagnostic-checked">Not yet checked</dd></div><div><dt>Transport</dt><dd id="diagnostic-transport">Unknown</dd></div></dl><p class="hint">This is the version served by the local Control Center. Repository source changes are not installed updates; running workers may need a restart after an installed update.</p></article><article class="card"><span class="icon-tile" data-icon="update"></span><h2>Release check</h2><p class="muted">Check availability without installing, deploying, or restarting anything.</p><p id="update-result" class="hint" role="status" aria-live="polite">No release check requested.</p><button id="update-check" type="button" class="button">Check for updates</button><p class="small muted">Installed clients change only after a published release is explicitly installed.</p></article></div>
         <article class="card remediation"><h2>When something isn’t connected</h2><div class="remedy-grid"><div><h3>Unknown or stale status</h3><p>Refresh status. If the local service is unavailable, reopen Control Center from Weft. Unknown does not mean disconnected.</p></div><div><h3>Phone trusted, not connected</h3><p>Keep your existing trust. Check the selected transport and open the phone app before replacing a pairing.</p></div><div><h3>Worker unsupported</h3><p>Background workload controls require Windows. Copilot session discovery and supported session actions remain separate.</p></div></div><div id="diagnostic-warnings" class="notice warning" hidden><strong>Reported warnings</strong><ul id="diagnostic-warning-list"></ul></div><p class="small muted">Only status and sanitized remediation are shown here. No transcripts, logs, or pairing secrets.</p></article>
@@ -104,6 +110,21 @@ export function renderControlCenterPage() {
 
 const operationalStyles = `
 #diagnostics-events{white-space:pre-wrap;max-height:360px;overflow:auto}
+#traffic-card{margin-bottom:22px}
+.traffic-heading{align-items:start;flex-wrap:wrap}.traffic-heading p{margin:4px 0 0;max-width:560px}
+.traffic-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}
+.traffic-summary>div{background:var(--bg);border-radius:10px;padding:11px 13px;min-width:0}
+.traffic-summary dd{font-size:18px;font-weight:600;margin-top:2px}
+.traffic-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.traffic-wrap{max-height:440px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+.traffic-table{width:100%;border-collapse:collapse;font-size:12px}
+.traffic-table th{position:sticky;top:0;background:var(--surface);text-align:left;font-weight:600;color:var(--muted);padding:9px 11px;border-bottom:1px solid var(--border)}
+.traffic-table td{padding:8px 11px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere}
+.traffic-table tr:last-child td{border-bottom:0}
+.traffic-table .empty{color:var(--muted);text-align:center;padding:26px 12px}
+.traffic-dir{white-space:nowrap;font-weight:600}.traffic-dir.in{color:var(--accent)}.traffic-dir.out{color:var(--muted)}
+.traffic-result.good{color:var(--good)}.traffic-result.wait{color:var(--warn)}.traffic-result.bad{color:var(--bad);font-weight:600}
+@media(max-width:720px){.traffic-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.traffic-table th:nth-child(5),.traffic-table td:nth-child(5){display:none}}
 #panel-control .service-grid{grid-template-areas:"station connection" "mobile connection";align-items:stretch}
 #panel-control .station-card{grid-area:station}
 #panel-control .connection-card{grid-area:connection}
@@ -255,6 +276,7 @@ function controlCenterClient() {
     }
     $("page-title").focus({ preventScroll: true });
     if (section) $(section).scrollIntoView({ behavior: "auto", block: "start" });
+    scheduleTraffic(true);
   }
   nav.get(page).setAttribute("aria-current", "page");
 
@@ -1133,6 +1155,114 @@ function controlCenterClient() {
       void refreshState();
       if (page === "pairing") void loadPairing();
     }
+    scheduleTraffic(true);
+  });
+
+  let trafficData = null;
+  let trafficPaused = false;
+  let trafficClearedAt = 0;
+  let trafficTimer = null;
+  let trafficLoading = false;
+  let trafficStatusText = "";
+  function trafficStatus(value) {
+    if (value === trafficStatusText) return;
+    trafficStatusText = value;
+    text("traffic-status", value);
+  }
+  function trafficSize(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+    return bytes < 1024 ? bytes + " B" : (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0) + " KB";
+  }
+  function trafficResult(entry) {
+    if (entry.result === "replied") {
+      const seconds = Number.isFinite(entry.replyMs) ? entry.replyMs / 1000 : null;
+      return [seconds === null ? "Replied" : "Replied in " + seconds.toFixed(1) + " s", seconds !== null && seconds > 5 ? "wait" : "good"];
+    }
+    if (entry.result === "waiting") return ["Waiting for reply…", "wait"];
+    if (entry.result === "no-reply") return ["No reply after 60 s", "bad"];
+    if (entry.result === "failed") return [entry.direction === "out" ? "Failed" : "Problem reported", "bad"];
+    if (entry.result === "sent") return ["Delivered", "good"];
+    return ["Received", ""];
+  }
+  function visibleTraffic() {
+    if (!trafficData) return [];
+    const filter = $("traffic-filter").value;
+    const hideHeartbeats = $("traffic-hide-heartbeats").checked;
+    return trafficData.entries.filter((entry) => entry.lastAt > trafficClearedAt &&
+      (filter === "all" || (filter === "problems" ? ["failed", "no-reply"].includes(entry.result) : entry.sourceKind === filter)) &&
+      !(hideHeartbeats && entry.heartbeat));
+  }
+  function renderTraffic() {
+    const live = !trafficPaused && page === "diagnostics" && !document.hidden;
+    statusBadge($("traffic-live"), !trafficData ? "Not loaded" : trafficPaused ? "Paused" : live ? "Live · every 2s" : "Waiting", live && trafficData ? "good live" : "");
+    $("traffic-pause").textContent = trafficPaused ? "Resume" : "Pause";
+    $("traffic-pause").setAttribute("aria-pressed", String(trafficPaused));
+    if (!trafficData) return;
+    const summary = trafficData.summary || {};
+    text("traffic-received", summary.received ?? 0);
+    text("traffic-sent", summary.sent ?? 0);
+    text("traffic-last", timestamp(summary.lastFromPhone) === null ? "Nothing yet" : elapsed(summary.lastFromPhone) + " ago");
+    text("traffic-problems", summary.problems ?? 0);
+    $("traffic-problems").className = summary.problems ? "traffic-result bad" : "";
+    const notes = [];
+    if (!trafficData.enabled) notes.push("Local diagnostic logging is off for this laptop, so traffic is not recorded. Turn it on in Setup.");
+    for (const source of trafficData.sources || []) {
+      if (source.state === "stopped") notes.push(source.name + " is not running.");
+      if (source.state === "unsupported") notes.push(source.name + " runs an older version that does not report traffic. Restart it after updating.");
+    }
+    trafficStatus(notes.length ? notes.join(" ") : "Updated " + new Date(trafficData.checkedAt).toLocaleTimeString() + ". Event types, timing and size only.");
+    const rows = visibleTraffic().map((entry) => {
+      const row = document.createElement("tr");
+      const time = element("td", new Date(entry.lastAt).toLocaleTimeString());
+      if (entry.count > 1) time.title = "First " + new Date(entry.at).toLocaleTimeString() + " · last " + new Date(entry.lastAt).toLocaleTimeString();
+      const direction = element("td", entry.direction === "in" ? "Phone → Laptop" : "Laptop → Phone", "traffic-dir " + (entry.direction === "in" ? "in" : "out"));
+      const [result, tone] = trafficResult(entry);
+      row.append(time, direction, element("td", entry.source || "Unknown"),
+        element("td", (entry.event || "Other message") + (entry.count > 1 ? " ×" + entry.count : "")),
+        element("td", trafficSize(entry.bytes)), element("td", result, "traffic-result " + tone));
+      return row;
+    });
+    if (!rows.length) {
+      const row = document.createElement("tr");
+      const cell = element("td", trafficData.entries.length ? "No traffic matches this view." : "No phone traffic yet. Open Weft on your phone to see messages here.", "empty");
+      cell.colSpan = 6;
+      row.append(cell);
+      rows.push(row);
+    }
+    $("traffic-rows").replaceChildren(...rows);
+  }
+  async function loadTraffic() {
+    if (trafficLoading) return;
+    trafficLoading = true;
+    try {
+      const result = await api("/api/traffic", undefined, 15000);
+      if (!result || !Array.isArray(result.entries)) throw new ApiError("Phone traffic is unavailable.", 200);
+      trafficData = result;
+    } catch (error) { trafficStatus(error.message); }
+    finally { trafficLoading = false; renderTraffic(); }
+  }
+  function scheduleTraffic(immediate = false) {
+    clearTimeout(trafficTimer);
+    trafficTimer = null;
+    renderTraffic();
+    if (page !== "diagnostics" || document.hidden || trafficPaused) return;
+    trafficTimer = setTimeout(async () => { await loadTraffic(); scheduleTraffic(); }, immediate ? 0 : 2000);
+  }
+  $("traffic-pause").addEventListener("click", () => { trafficPaused = !trafficPaused; scheduleTraffic(true); });
+  $("traffic-clear").addEventListener("click", () => {
+    trafficClearedAt = Math.max(Date.now(), ...((trafficData?.entries || []).map((entry) => entry.lastAt)));
+    renderTraffic();
+  });
+  $("traffic-filter").addEventListener("change", renderTraffic);
+  $("traffic-hide-heartbeats").addEventListener("change", renderTraffic);
+  $("traffic-copy").addEventListener("click", async () => {
+    const lines = [["Time", "Direction", "From", "Event", "Count", "Size", "Result"].join("\t"),
+      ...visibleTraffic().map((entry) => [new Date(entry.lastAt).toISOString(), entry.direction === "in" ? "phone-to-laptop" : "laptop-to-phone",
+        entry.sourceKind === "station" ? "Station" : "Session", entry.event, entry.count, entry.bytes, trafficResult(entry)[0]].join("\t"))];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      trafficStatus("Copied " + (lines.length - 1) + " rows. Session names and message content are not included.");
+    } catch { trafficStatus("Copy is unavailable in this window. Select the table instead."); }
   });
   setInterval(() => { if (!document.hidden) void refreshState(); }, 5000);
   renderState();

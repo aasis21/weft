@@ -344,6 +344,7 @@ async function backgroundWorker([role, home, ...rest]) {
       if (!listener) throw new Error("Station is not ready.");
       return listener.openLocalSession(intent);
     } : undefined,
+    traffic: role === "station" ? () => listener?.traffic?.() ?? { entries: [] } : undefined,
     status: () => role === "station" && listener && ["ready", "endpoint-refresh-needed"].includes(state.state)
       ? { ...state, state: listener.paired ? "ready" : state.state, pairingPayload: listener.pairingPayload, ...listener.managementStatus() }
       : state,

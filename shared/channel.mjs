@@ -13,14 +13,17 @@ export class SecureChannel {
    * @param {CryptoKey} opts.key - AES-GCM session key from crypto.deriveSessionKey()
    * @param {{ channelId?: string, sessionId?: string, senderId?: string, senderName?: string }} [opts.identity]
    * @param {1 | 2} [opts.protocolVersion]
+   * @param {(event: { direction: "in" | "out", message: object, payload: object, ok: boolean }) => void} [opts.observer]
+   *   Optional local diagnostics hook. Called after a send settles or an accepted message is decrypted.
    */
-  constructor({ transport, key, identity = {}, protocolVersion = 2 }) {
+  constructor({ transport, key, identity = {}, protocolVersion = 2, observer = null }) {
     if (!transport) throw new Error("weft/channel: transport is required");
     if (!key) throw new Error("weft/channel: key is required");
     this.transport = transport;
     this.key = key;
     this.identity = identity;
     this.protocolVersion = protocolVersion;
+    this.observer = typeof observer === "function" ? observer : null;
     this.sendStreamId = randomChannelId();
     this.sendSequence = 0;
     this.receiveSequence = 0;
@@ -44,28 +47,41 @@ export class SecureChannel {
     const operation = this.sendChain.then(async () => {
       const ts = message.ts ?? Date.now();
       const full = { ...message, ...this.identity, ts };
-      if (this.protocolVersion === 1) {
-        const enc = await encryptJSON(this.key, full);
+      let enc = null;
+      try {
+        if (this.protocolVersion === 1) {
+          enc = await encryptJSON(this.key, full);
+          await this.transport.publish(full.eventType, { ...enc, ts });
+          this._observe("out", full, enc, true);
+          return;
+        }
+        if (this.sendSequence >= Number.MAX_SAFE_INTEGER) {
+          throw new Error("weft/channel: send sequence exhausted");
+        }
+        const sequence = this.sendSequence + 1;
+        // Reserve before publishing. A timeout is ambiguous: the relay may have delivered the
+        // ciphertext even though the acknowledgement was lost, so this sequence must never be reused.
+        this.sendSequence = sequence;
+        enc = await encryptJSON(this.key, {
+          v: SECURE_MESSAGE_VERSION,
+          streamId: this.sendStreamId,
+          sequence,
+          message: full,
+        });
         await this.transport.publish(full.eventType, { ...enc, ts });
-        return;
+        this._observe("out", full, enc, true);
+      } catch (error) {
+        this._observe("out", full, enc, false);
+        throw error;
       }
-      if (this.sendSequence >= Number.MAX_SAFE_INTEGER) {
-        throw new Error("weft/channel: send sequence exhausted");
-      }
-      const sequence = this.sendSequence + 1;
-      // Reserve before publishing. A timeout is ambiguous: the relay may have delivered the
-      // ciphertext even though the acknowledgement was lost, so this sequence must never be reused.
-      this.sendSequence = sequence;
-      const enc = await encryptJSON(this.key, {
-        v: SECURE_MESSAGE_VERSION,
-        streamId: this.sendStreamId,
-        sequence,
-        message: full,
-      });
-      await this.transport.publish(full.eventType, { ...enc, ts });
     });
     this.sendChain = operation.catch(() => {});
     return operation;
+  }
+
+  _observe(direction, message, payload, ok) {
+    if (!this.observer) return;
+    try { this.observer({ direction, message, payload, ok }); } catch { /* diagnostics only */ }
   }
 
   /**
@@ -83,6 +99,7 @@ export class SecureChannel {
           const sealed = await decryptJSON(this.key, envelope);
           if (this.protocolVersion === 1) {
             if (sealed?.eventType !== event) return;
+            this._observe("in", sealed, envelope, true);
             for (const registeredHandler of [...handlers]) {
               try {
                 await registeredHandler(sealed);
@@ -120,6 +137,7 @@ export class SecureChannel {
           }
           if (sealed.sequence <= this.receiveSequence) return;
           this.receiveSequence = sealed.sequence;
+          this._observe("in", sealed.message, envelope, true);
           for (const registeredHandler of [...handlers]) {
             try {
               await registeredHandler(sealed.message);

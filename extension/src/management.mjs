@@ -161,6 +161,56 @@ export function createManagement({
     return result;
   }
   const reportedStops = new Set();
+  let lastPresences = null;
+  // Merge the in-memory phone traffic of Station and active sessions. Session discovery is reused
+  // from the dashboard's own status polling, so this stays cheap enough to refresh every 2 seconds.
+  async function traffic() {
+    const sources = [];
+    const entries = [];
+    const collect = (source, kind, result) => {
+      const list = Array.isArray(result?.entries) ? result.entries.slice(-100) : [];
+      for (const entry of list) entries.push({ ...entry, id: `${kind}:${source.id}:${entry.id}`, source: source.name, sourceKind: kind });
+      sources.push({ ...source, kind, state: "reporting", count: list.length });
+    };
+    if (platform === "win32") {
+      try {
+        const result = await background.command("station", "traffic", null, { ...options, timeoutMs: 3000 });
+        if (result) collect({ id: "station", name: "Station" }, "station", result);
+        else sources.push({ id: "station", name: "Station", kind: "station", state: "stopped" });
+      } catch {
+        sources.push({ id: "station", name: "Station", kind: "station", state: "unsupported" });
+      }
+    }
+    if (!lastPresences) {
+      try { lastPresences = (await discover({ baseDir, timeoutMs: 750, verifyBatch: verifyProcessIdentities, cleanup: false })).runtimes ?? []; }
+      catch { lastPresences = []; }
+    }
+    await Promise.all(lastPresences.slice(0, 20).map(async (presence, index) => {
+      const fallback = `Copilot session ${index + 1}`;
+      try {
+        const response = await runtimeClient(presence, options).command("traffic", null, { timeoutMs: 1500 });
+        if (response?.ok !== true) throw new Error("unsupported");
+        const title = typeof response.result?.title === "string" && response.result.title.trim()
+          ? response.result.title.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) : fallback;
+        collect({ id: presence.runtimeInstanceId, name: title }, "session", response.result);
+      } catch {
+        sources.push({ id: presence.runtimeInstanceId, name: fallback, kind: "session", state: "unsupported" });
+      }
+    }));
+    entries.sort((a, b) => b.lastAt - a.lastAt);
+    const recent = Date.now() - 5 * 60_000;
+    const lastFromPhone = entries.find((entry) => entry.direction === "in")?.lastAt ?? null;
+    return {
+      enabled: isDiagnosticLoggingEnabled(options), checkedAt: Date.now(), sources,
+      summary: {
+        received: entries.filter((e) => e.direction === "in" && e.lastAt >= recent).reduce((n, e) => n + e.count, 0),
+        sent: entries.filter((e) => e.direction === "out" && e.lastAt >= recent).reduce((n, e) => n + e.count, 0),
+        lastFromPhone,
+        problems: entries.filter((e) => ["failed", "no-reply"].includes(e.result)).length,
+      },
+      entries: entries.slice(0, 100),
+    };
+  }
   function statusPartFailed(phase, error) {
     appendStationLog("ui.status_part_failed", { phase, code: error?.code ?? error?.name ?? "Error" }, { baseDir, level: "warn" });
   }
@@ -222,6 +272,7 @@ export function createManagement({
   }
   async function runtimes() {
     const discovery = await discover({ baseDir, timeoutMs: 750, verifyBatch: verifyProcessIdentities, cleanup: false });
+    lastPresences = discovery.runtimes ?? [];
     return { discovery, list: await Promise.all((discovery.runtimes ?? []).map(async (presence) => {
       try {
         const response = await runtimeClient(presence, options).command("status", null, { timeoutMs: 1000 });
@@ -401,6 +452,7 @@ export function createManagement({
   return {
     execute, settings, projects: () => listProjects(options),
     diagnostics: () => ({ enabled: isDiagnosticLoggingEnabled(options), entries: readStationDiagnostics(options) }),
+    traffic,
     state() {
       pendingState ??= readState().finally(() => { pendingState = null; });
       return pendingState;

@@ -8,12 +8,20 @@ export interface SecureChannelIdentity {
   senderName?: string;
 }
 
+export interface SecureChannelTrafficEvent {
+  direction: "in" | "out";
+  message: EventEnvelope;
+  payload: Record<string, unknown> | null;
+  ok: boolean;
+}
+
 export declare class SecureChannel {
   constructor(opts: {
     transport: Transport;
     key: CryptoKey;
     identity?: SecureChannelIdentity;
     protocolVersion?: 1 | 2;
+    observer?: (event: SecureChannelTrafficEvent) => void;
   });
   transport: Transport;
   key: CryptoKey;
