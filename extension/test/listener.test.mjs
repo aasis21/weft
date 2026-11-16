@@ -1201,7 +1201,7 @@ test("activation timeout fails closed and never falls through to Resume", async 
       message.msg.requestId === "open-timeout" &&
       message.msg.state === "failed"),
     "activation timeout result",
-    3_000,
+    20_000,
   );
   assert.match(result.msg.error, /timed out|incomplete frame/);
   assert.equal(

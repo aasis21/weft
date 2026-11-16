@@ -122,6 +122,8 @@ backup each, with up to 100 recent session base files. Review before sharing.
 Phone-launched CLI sessions use a visible Windows console when background Station
 has no Windows Terminal context. Opening the terminal is separate from runtime
 readiness; wait for the handoff and do not duplicate an uncertain launch.
+Finish native Copilot startup prompts in that terminal. Other installed extensions
+can request elevated permissions; Weft does not automatically approve them.
 
 - **`weft start`** — runs a standalone "Device Station": pairs a phone the same way
   `/weft` does, but without needing an active Copilot CLI session (useful for headless

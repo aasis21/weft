@@ -69,17 +69,19 @@ export async function verifyProcessIdentity(
 /** Verify a discovery snapshot with one Windows process query, not one shell per runtime. */
 export async function verifyProcessIdentities(presences, {
   platform = process.platform, isAlive = isPidAlive, toleranceMs = 2_000,
+  exec = execFileAsync,
   getStartTimes = async (pids) => {
+    const filter = pids.map((pid) => `ProcessId=${pid}`).join(" OR ");
     const script = `@(
-Get-Process -Id @(${pids.join(",")}) -ErrorAction SilentlyContinue | ForEach-Object {
+Get-CimInstance Win32_Process -Filter '${filter}' -Property ProcessId,CreationDate -ErrorAction Stop | ForEach-Object {
   try {
-    [pscustomobject]@{pid=$_.Id;startedAt=[DateTimeOffset]::new($_.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds()}
+    [pscustomobject]@{pid=[int]$_.ProcessId;startedAt=[DateTimeOffset]::new($_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}
   } catch { }
 }
 ) | ConvertTo-Json -Compress`;
-    const { stdout } = await execFileAsync("powershell.exe",
+    const { stdout } = await exec("powershell.exe",
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
-      { windowsHide: true, timeout: 5_000, encoding: "utf8" });
+      { windowsHide: true, timeout: 10_000, encoding: "utf8" });
     const value = stdout.trim() ? JSON.parse(stdout) : [];
     return Array.isArray(value) ? value : [value];
   },

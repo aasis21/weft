@@ -122,6 +122,8 @@ See [privacy and retention](PRIVACY.md#local-diagnostics).
 On Windows, phone-launched CLI sessions open an interactive terminal even when
 Station runs in the background without Windows Terminal. A launched terminal is
 not yet proof of a connected session; Weft waits for the session runtime handoff.
+Finish any native Copilot startup prompts in that terminal, including unrelated
+extension permission requests. Weft does not automatically approve them.
 
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.

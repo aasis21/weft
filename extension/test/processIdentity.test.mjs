@@ -56,6 +56,7 @@ test("batch verification queries each PID once and preserves reuse and uncertain
     platform: "win32", toleranceMs: 10, isAlive: (pid) => pid !== 44,
     getStartTimes: async (pids) => { calls++; assert.deepEqual(pids, [42, 43]); return [{ pid: 42, startedAt: 1000 }]; },
   });
+
   assert.equal(calls, 1);
   assert.equal(result[0].live, true);
   assert.equal(result[1].reason, "pid-reused");
@@ -66,4 +67,37 @@ test("batch verification queries each PID once and preserves reuse and uncertain
   });
   assert.equal(unavailable[0].live, null);
   assert.equal(unavailable[0].reason, "process-unverifiable");
+});
+
+test("Windows batch creation-time inventory selects only live eligible PIDs and no private process fields", async () => {
+  const result = await verifyProcessIdentities([
+    { pid: 42, processStartedAt: 1000 },
+    { pid: 42, processStartedAt: 1000 },
+    { pid: 43, processStartedAt: 1000 },
+    { pid: -1, processStartedAt: 1000 },
+  ], {
+    platform: "win32", isAlive: (pid) => pid === 42,
+    exec: async (command, args, options) => {
+      assert.equal(command, "powershell.exe");
+      const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
+      assert.match(script, /-Filter 'ProcessId=42'/);
+      assert.match(script, /-Property ProcessId,CreationDate/);
+      assert.doesNotMatch(script, /CommandLine|ExecutablePath|ProcessId=43|ProcessId=-1/);
+      assert.equal(options.windowsHide, true);
+      assert.ok(options.timeout > 0 && options.timeout <= 10_000);
+      return { stdout: '{"pid":42,"startedAt":1000}' };
+    },
+  });
+  assert.equal(result[0].live, true);
+  assert.equal(result[1].live, true);
+  assert.equal(result[2].reason, "process-exited");
+  assert.equal(result[3].reason, "invalid-process-identity");
+});
+
+test("Windows batch creation time agrees with the current process's OS start time", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const processStartedAt = await getProcessStartTime(process.pid);
+  const [result] = await verifyProcessIdentities([{ pid: process.pid, processStartedAt }]);
+  assert.equal(result.live, true);
 });

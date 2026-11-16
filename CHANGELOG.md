@@ -5,6 +5,12 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.44
+
+- Use one filtered Windows creation-time inventory for runtime identity verification,
+  avoiding slow per-process handle inspection while preserving PID-reuse protection.
+- Explain native Copilot startup prompts separately from Weft terminal and transport readiness.
+
 ## 0.2.43
 
 - Open phone-launched Copilot sessions in a visible Windows console when background

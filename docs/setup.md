@@ -215,6 +215,10 @@ there is no Windows Terminal context. Identity and working directory are restore
 inside that shell. Broker success means a terminal was opened, not that Copilot
 connected: runtime readiness remains a separate handshake. Do not start duplicate
 sessions to recover an uncertain launch.
+Copilot can show startup prompts for installed extensions or authentication before
+the CLI is fully usable. Complete those native prompts in the opened terminal;
+Weft does not grant elevated extension permissions or fix unrelated MCP credentials.
+An already-online device is not proof that a new Copilot session finished startup.
 
 Dev Tunnel sign-in remains an explicit terminal step when required:
 `devtunnel user login -g`. Browser start does not wait on hidden terminal prompts.
