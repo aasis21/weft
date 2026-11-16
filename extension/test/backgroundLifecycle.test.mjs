@@ -97,6 +97,27 @@ test("background readiness uses the real authenticated local IPC and cleans its 
   assert.equal(await backgroundCommand("station", "status", null, { baseDir: dir }), null);
 });
 
+test("a busy worker during startup is retried instead of failing Station start", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-background-busy-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let busy = true;
+  const control = await createBackgroundControl("relay", {
+    baseDir: dir, status: () => busy ? new Promise(() => {}) : { state: "ready" }, stop: async () => {},
+    getStartTime: async () => 12345,
+  });
+  t.after(() => control.close());
+  let polls = 0;
+  const result = await startBackground("relay", { ...options, baseDir: dir }, {
+    taskOperation: async () => {}, sleep: async () => {},
+    inspect: async () => {
+      if (++polls === 3) busy = false;
+      return backgroundCommand("relay", "status", null, { baseDir: dir, timeoutMs: 100 });
+    },
+  });
+  assert.equal(result.state, "ready");
+  assert.ok(polls >= 3);
+});
+
 test("native Windows supervision survives a crash and intentional stop stays stopped", {
     skip: process.platform !== "win32" || process.env.WEFT_NATIVE_BACKGROUND_TEST !== "1",
     timeout: 180_000,

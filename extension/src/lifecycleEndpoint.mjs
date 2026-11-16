@@ -215,7 +215,9 @@ export async function sendLifecycleCommand(
       socket.destroy();
       reject(error);
     };
-    socket.setTimeout(timeoutMs, () => fail(new Error("Lifecycle endpoint timed out")));
+    // `timeout` (not `code`) lets callers that poll startup retry, without changing how session
+    // activation classifies a timed-out runtime.
+    socket.setTimeout(timeoutMs, () => fail(Object.assign(new Error("Lifecycle endpoint timed out"), { timeout: true })));
     socket.on("connect", () => socket.write(request));
     socket.on("data", (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);

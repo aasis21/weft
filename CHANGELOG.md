@@ -5,6 +5,11 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.46
+
+- Keep waiting when Station or the relay is too busy to answer a 2-second status check
+  during startup, instead of failing Start Station with an unexplained error.
+
 ## 0.2.45
 
 - Stop reporting an installed but slow Dev Tunnel CLI as missing: allow 30 seconds for its

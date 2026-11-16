@@ -170,7 +170,7 @@ export async function backgroundCommand(role, command = "status", payload = null
       command, payload,
     }, { timeoutMs });
   } catch (error) {
-    if (["ENOENT", "ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT"].includes(error?.code)) return null;
+    if (error?.timeout || ["ENOENT", "ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT"].includes(error?.code)) return null;
     throw error;
   }
   if (response?.ok !== true) throw new Error(response?.error?.message ?? "Background control failed.");

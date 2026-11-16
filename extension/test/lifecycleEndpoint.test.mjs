@@ -164,3 +164,11 @@ test("shutdown closes the listener and rejects later connections", async (t) => 
     }, { timeoutMs: 200 }),
   );
 });
+
+test("a busy endpoint times out as a retryable timeout, not an unexplained failure", async (t) => {
+  const fx = await fixture(t, { status: () => new Promise(() => {}) });
+  await assert.rejects(
+    sendLifecycleCommand({ endpoint: fx.endpoint, auth: fx.auth, command: "status" }, { timeoutMs: 150 }),
+    (error) => error.timeout === true && error.code === undefined && /timed out/.test(error.message),
+  );
+});
