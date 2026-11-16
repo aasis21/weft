@@ -317,6 +317,10 @@ Write-Host "  $(Bold '3.') Trigger a Copilot action and approve / deny from your
 Write-Host ''
 Write-Host "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
 Write-Host "  (requires an installed, signed-in CLI)? Open a new terminal and run: $(Cyan 'weft start')"
+Write-Host "  Open the laptop app window: $(Cyan 'weft') (same as weft ui)."
+Write-Host '  Use weft ui --browser for a normal browser tab.'
+Write-Host '  Start Station explicitly from Control; opening the dashboard starts no workloads.'
+Write-Host "  Terminal command reference: $(Cyan 'weft help')"
 Write-Host ''
 if ($Transport -eq 'devtunnel') {
     Write-Host "  Using devtunnel: provision/check/tear down the shared relay any time, independent"

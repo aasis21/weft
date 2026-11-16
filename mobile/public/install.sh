@@ -300,6 +300,10 @@ echo "  $(bold '3.') Trigger a Copilot action and approve / deny from your phone
 echo ""
 echo "  Want a station for your phone to spawn Copilot sessions on THIS machine directly"
 echo "  (requires an installed, signed-in CLI)? Open a new terminal and run: $(cyan 'weft start')"
+echo "  Open the laptop app window: $(cyan 'weft') (same as weft ui)."
+echo "  Use weft ui --browser for a normal browser tab."
+echo "  Start Station explicitly from Control; opening the dashboard starts no workloads."
+echo "  Terminal command reference: $(cyan 'weft help')"
 echo ""
 if [ "$TRANSPORT" = "devtunnel" ]; then
   echo "  Using devtunnel: provision/check/tear down the shared relay any time, independent"

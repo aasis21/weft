@@ -7,8 +7,13 @@
 The default onboarding path is intentionally short:
 
 1. Install Weft on the laptop.
-2. Run `weft start`.
-3. Scan the QR with the hosted web app.
+2. Run `weft` to open the laptop Control Center.
+3. Review Setup, start Station explicitly from Control, and scan its QR with the phone app.
+
+`weft ui` remains an equivalent app-window entry point. Use `weft ui --browser`
+to open an ordinary browser tab. For terminal-only operation, use
+`weft start` directly; `weft help` prints help without opening the dashboard.
+The Control Center does not automatically start Station or activate sessions.
 
 The options below are for narrower session mirroring, alternate transports, pairing
 lifetime, and multi-project setup.

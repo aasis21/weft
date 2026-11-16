@@ -39,10 +39,11 @@ Installed alongside the extension as a `weft`/`weft.cmd` shim on PATH (open a **
 terminal after install for PATH changes to take effect). Full command list:
 
 ```
+weft
 weft start [--new-device] [--foreground]
 weft status
 weft stop
-weft ui [status|stop|shortcut]
+weft ui [--browser|status|stop|shortcut]
 weft add-project <name> <path> [--default]
 weft remove-project <name>
 weft list-projects
@@ -61,7 +62,14 @@ weft help
 
 ## Laptop Control Center and background operation
 
-`weft ui` opens a private local browser dashboard for projects, settings, pairing,
+Bare `weft` opens Control Center in its own app-style window; `weft ui` is an alias.
+The window uses installed Edge/Chrome/Chromium app mode, not Electron. It has a
+separate private profile under `~/.weft/control-center-profile`. Use
+`weft ui --browser` to choose the normal browser tab. If supported Chromium is
+unavailable, Weft reports fallback to the default browser without installing one
+or changing security policy.
+`weft help`, `weft --help` and `weft -h` show terminal help without opening it.
+The dashboard provides projects, settings, pairing,
 session status/activation, Station-mediated session launch, and Station/relay
 start/stop/restart. CLI and UI share management functions. Opening the dashboard
 does not start Station or activate sessions; closing it does not stop workloads.

@@ -72,25 +72,33 @@ irm https://useweft.netlify.app/install.ps1 | iex
 curl -fsSL https://useweft.netlify.app/install.sh | bash
 ```
 
-Start the Device Station:
+Open the laptop Control Center:
 
 ```shell
-weft start
+weft
 ```
 
+Review **Setup**, then explicitly choose **Start Station** on **Control**.
+For terminal-only startup, run `weft start` instead.
 Then open **[useweft.netlify.app](https://useweft.netlify.app)** on your phone, choose
-**Scan QR to pair**, and scan the code shown in the terminal. On Windows, Station
+**Scan QR to pair**, and scan the dashboard or terminal QR. On Windows, Station
 runs in the background and you can close this terminal. Use `weft status` and
 `weft stop` to manage it. Startup is manual, not automatic at boot/sign-in.
 Use `weft start --foreground` for terminal-owned diagnostics; other platforms
 retain foreground operation.
 
-**Laptop Control Center:** run `weft ui` to open a private local dashboard for
+**Laptop Control Center:** run `weft` (or `weft ui`) to open a private local app-style window for
 Station/relay controls, projects, settings, pairing, and discoverable Copilot
 sessions. It works with Station stopped and uses the same management layer as the
-CLI. Closing the browser does not stop workloads. Windows installs add a Start menu
+CLI. Installed Edge/Chrome/Chromium supplies the window; no desktop framework is required.
+Use `weft ui --browser` for a normal browser tab. If no supported browser is found,
+Weft reports the default-browser fallback rather than installing one.
+Closing the window does not stop workloads. Windows installs add a Start menu
 shortcut; `weft ui shortcut` adds a desktop shortcut. `weft ui status` and
 `weft ui stop` manage only the local UI host.
+`weft help` or `weft --help` shows the complete command reference without opening
+the dashboard. Bare `weft` does not start Station; use the explicit controls or
+`weft start` when you want device-level phone access.
 
 The **Control** page separates sessions not shared with a phone, sessions awaiting a phone,
 and confirmed recent mobile links. It shows worker versions/uptime, sanitized relay

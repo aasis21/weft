@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "weft.mjs");
 
@@ -84,4 +86,40 @@ test("no top-level binding is declared after the main() call", () => {
     `these top-level bindings sit after the main() call and would be undefined for any command that ` +
       `does not return: ${stragglers.map((s) => `line ${s.line}: ${s.text.trim()}`).join(" | ")}`,
   );
+});
+
+test("bare weft opens the dashboard while explicit help and UI status do not", async () => {
+  const loader = `export async function load(url, context, nextLoad) {
+    if (url.endsWith('/src/controlCenter.mjs')) return {
+      format: 'module', shortCircuit: true,
+      source: \`
+        export async function openControlCenter(options) { console.log('TEST_CONTROL_CENTER_OPENED browser=' + options.browserMode); }
+        export async function inspectControlCenter() { return null; }
+        export async function stopControlCenter() {}
+        export async function createControlCenterHost() {}
+      \`
+    };
+    return nextLoad(url, context);
+  }`;
+  const registration = "import { register } from 'node:module'; register(" +
+    JSON.stringify("data:text/javascript," + encodeURIComponent(loader)) + ");";
+  const run = (args) => promisify(execFile)(process.execPath,
+    ["--import", "data:text/javascript," + encodeURIComponent(registration), cliPath, ...args],
+    { timeout: 20_000, windowsHide: true });
+  for (const args of [[], ["ui"]]) {
+    const { stdout } = await run(args);
+    assert.match(stdout, /TEST_CONTROL_CENTER_OPENED/);
+    assert.doesNotMatch(stdout, /Usage:/);
+  }
+  for (const args of [["help"], ["--help"], ["-h"]]) {
+    const { stdout } = await run(args);
+    assert.match(stdout, /Usage:/);
+    assert.match(stdout, /same as weft ui/);
+    assert.doesNotMatch(stdout, /TEST_CONTROL_CENTER_OPENED/);
+  }
+  const { stdout } = await run(["ui", "status"]);
+  assert.match(stdout, /Control Center is not running/);
+  assert.doesNotMatch(stdout, /TEST_CONTROL_CENTER_OPENED/);
+  const browser = await run(["ui", "--browser"]);
+  assert.match(browser.stdout, /TEST_CONTROL_CENTER_OPENED browser=true/);
 });

@@ -5,6 +5,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { createManagement, ManagementError, validateManagementAction, withManagementLock } from "./management.mjs";
 import { renderControlCenterPage } from "./controlCenterPage.mjs";
 import { weftHome } from "./projects.mjs";
@@ -53,7 +54,7 @@ export async function inspectControlCenter({ baseDir = weftHome() } = {}) {
 }
 
 export async function openControlCenter({
-  baseDir = weftHome(), cliPath, launchBrowser = true, timeoutMs = 20_000,
+  baseDir = weftHome(), cliPath, launchBrowser = true, browserMode = false, timeoutMs = 20_000,
   spawnHost = (args, options) => spawn(process.execPath, args, options),
   openBrowser = openControlCenterBrowser,
 } = {}) {
@@ -76,16 +77,64 @@ export async function openControlCenter({
     }
     throw new ManagementError("ui-startup-timeout", "Control Center did not become ready. Check the installed bundle and retry; no workloads were started.");
   });
-  if (launchBrowser) await openBrowser(`${record.origin}/open/${record.capability}`);
-  return { origin: record.origin, pid: record.pid };
+  const presentation = launchBrowser
+    ? await openBrowser(`${record.origin}/open/${record.capability}`, { baseDir, browserMode }) : null;
+  return { origin: record.origin, pid: record.pid, presentation };
 }
 
-export async function openControlCenterBrowser(url) {
-  if (process.platform === "win32") {
-    await exec("rundll32.exe", ["url.dll,FileProtocolHandler", url], { windowsHide: true });
-  } else {
-    await exec(process.platform === "darwin" ? "open" : "xdg-open", [url]);
+export function findControlCenterBrowser({ platform = process.platform, environment = process.env, exists = existsSync } = {}) {
+  const pf = environment.ProgramFiles || "C:\\Program Files";
+  const pfx = environment["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const local = environment.LOCALAPPDATA;
+  const candidates = platform === "win32" ? [
+    ["Microsoft Edge", join(pfx, "Microsoft", "Edge", "Application", "msedge.exe")],
+    ["Microsoft Edge", join(pf, "Microsoft", "Edge", "Application", "msedge.exe")],
+    ["Google Chrome", join(pf, "Google", "Chrome", "Application", "chrome.exe")],
+    ["Google Chrome", join(pfx, "Google", "Chrome", "Application", "chrome.exe")],
+    ...(local ? [["Google Chrome", join(local, "Google", "Chrome", "Application", "chrome.exe")]] : []),
+  ] : platform === "darwin" ? [
+    ["Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+    ["Microsoft Edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+    ["Chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
+  ] : [
+    ["Google Chrome", "/usr/bin/google-chrome"],
+    ["Google Chrome", "/usr/bin/google-chrome-stable"],
+    ["Microsoft Edge", "/usr/bin/microsoft-edge"],
+    ["Chromium", "/usr/bin/chromium"],
+    ["Chromium", "/usr/bin/chromium-browser"],
+  ];
+  const match = candidates.find(([, path]) => exists(path));
+  return match ? { name: match[0], path: match[1] } : null;
+}
+
+export async function openControlCenterBrowser(url, {
+  baseDir = weftHome(), browserMode = false, platform = process.platform,
+  findBrowser = () => findControlCenterBrowser({ platform }), spawnBrowser = spawn, execute = exec,
+} = {}) {
+  const browser = browserMode ? null : findBrowser();
+  if (browser) {
+    const profile = join(resolve(baseDir), "control-center-profile");
+    await mkdir(profile, { recursive: true, mode: 0o700 });
+    const child = spawnBrowser(browser.path, [
+      `--app=${url}`, `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
+    ], { detached: true, stdio: "ignore", shell: false });
+    await new Promise((ready, reject) => {
+      child.once("error", () => reject(new ManagementError("window-launch-failed", "The app window could not open. Try weft ui --browser or check the installed browser.")));
+      child.once("spawn", ready);
+    });
+    child.unref();
+    return { mode: "app-window", browser: browser.name };
   }
+  try {
+    if (platform === "win32") {
+      await execute("rundll32.exe", ["url.dll,FileProtocolHandler", url], { windowsHide: true });
+    } else {
+      await execute(platform === "darwin" ? "open" : "xdg-open", [url]);
+    }
+  } catch {
+    throw new ManagementError("browser-launch-failed", "The default browser could not open. Check its installation and local launch policy, then retry weft ui.");
+  }
+  return { mode: "browser", fallback: !browserMode };
 }
 
 export async function stopControlCenter({ baseDir = weftHome() } = {}) {

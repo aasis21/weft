@@ -89,6 +89,17 @@ test("the handbook follows reader tasks in the same order as its navigation", ()
   assert.ok(document.querySelector("#maintenance-commands"));
 });
 
+test("quickstart and command help distinguish opening the UI from starting workloads", () => {
+  const quickstart = document.querySelector("#quickstart").textContent;
+  assert.match(quickstart, /weft ui opens the same dashboard/);
+  assert.match(quickstart, /Opening the UI does not start a worker or activate sessions/);
+  assert.match(quickstart, /foreground/);
+  const commands = document.querySelector("#commands").textContent;
+  for (const command of ["weft ui status", "weft ui stop", "weft ui shortcut", "weft help", "weft --help", "weft status", "weft stop"]) {
+    assert.ok(commands.includes(command), `Missing command guidance: ${command}`);
+  }
+});
+
 test("handbook includes operating-system setup, recovery, limitations, and all technical guides", () => {
   const content = document.querySelector("main").textContent;
   for (const required of [

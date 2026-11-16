@@ -33,8 +33,8 @@ const STEPS = [
   },
   {
     n: 2,
-    title: 'Run weft start',
-    body: 'Start the Device Station and leave that terminal open. It prints the QR your phone needs.',
+    title: 'Open Weft on your laptop',
+    body: 'Run weft to open Control Center, review Setup, and choose Start Station. For terminal-only operation, use weft start.',
   },
   {
     n: 3,
@@ -411,7 +411,7 @@ export function LandingScreen({
                 <h3>{step.title}</h3>
                 <p>{step.body}</p>
                 {step.n === 1 ? <InstallCommand /> : null}
-                {step.n === 2 ? <pre className="product-command"><code>weft start</code></pre> : null}
+                {step.n === 2 ? <pre className="product-command"><code>weft</code></pre> : null}
                 {step.n === 3 ? <a className="product-inline-link" href="https://useweft.netlify.app">useweft.netlify.app →</a> : null}
               </div>
             </li>

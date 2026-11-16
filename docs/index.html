@@ -101,9 +101,12 @@
         <div class="code-example"><div class="code-label">Windows &middot; PowerShell</div><pre tabindex="0" role="region" aria-label="Windows install command"><code>irm https://useweft.netlify.app/install.ps1 | iex</code></pre></div>
         <div class="code-example"><div class="code-label">macOS or Linux &middot; terminal</div><pre tabindex="0" role="region" aria-label="macOS or Linux install command"><code>curl -fsSL https://useweft.netlify.app/install.sh | bash</code></pre></div>
         <p>The default installer configures the hosted Supabase relay. Your phone learns its connection details from the QR; there are no relay keys to type into the app.</p>
-        <h3 id="start-station"><a class="heading-link" href="#start-station">2. Start the Device Station</a></h3>
-        <div class="code-example"><div class="code-label">All platforms &middot; laptop terminal</div><pre tabindex="0" role="region" aria-label="Start the station"><code>weft start</code></pre></div>
-        <p><strong>You should see:</strong> a Device Station status and pairing QR. Leave this terminal open. If <code>weft</code> is not found, open a new terminal and follow <a href="#command-not-found">the command-not-found steps</a>.</p>
+        <h3 id="start-station"><a class="heading-link" href="#start-station">2. Open Control Center and start Station</a></h3>
+        <div class="code-example"><div class="code-label">All platforms &middot; laptop terminal</div><pre tabindex="0" role="region" aria-label="Open the laptop Control Center"><code>weft</code></pre></div>
+        <p><strong>You should see:</strong> the local Control Center in its own app-style window. Review <strong>Setup</strong> for connection, projects and access settings, then use <strong>Control &rarr; Start Station</strong> explicitly. <code>weft ui</code> opens the same dashboard; <code>weft help</code> shows terminal help. Opening the UI does not start a worker or activate sessions.</p>
+        <p>The window uses installed Edge/Chrome/Chromium with a separate local profile, not Electron. <code>weft ui --browser</code> explicitly opens the default browser. When no supported Chromium is found, Weft reports its browser fallback; it never installs one automatically.</p>
+        <p>For terminal-only operation, use <code>weft start</code>. On Windows, startup returns after background readiness and you can close its launch terminal. Use <code>weft status</code> and <code>weft stop</code>; stopping Station leaves the relay available. Other platforms use foreground Station; <code>weft start --foreground</code> also keeps terminal ownership on Windows. No boot/sign-in startup is added.</p>
+        <p>If <code>weft</code> is not found, open a new terminal and follow <a href="#command-not-found">the command-not-found steps</a>.</p>
         <h3 id="connect-phone"><a class="heading-link" href="#connect-phone">3. Pair from your phone</a></h3>
         <ol>
           <li>Open <a href="https://useweft.netlify.app">useweft.netlify.app</a> and choose <strong>Scan QR to pair</strong>.</li>
@@ -119,7 +122,7 @@
         <span class="legacy-anchor" id="advanced"></span>
         <span class="legacy-anchor" id="what"></span>
         <h2 id="sessions-title"><a class="heading-link" href="#sessions">Start &amp; resume work</a></h2>
-        <p>Keep <code>weft start</code> running on the laptop. The phone is a control surface for that laptop's Copilot work, not a separate place where your code executes.</p>
+        <p>Keep Station running on the laptop; its launch terminal is only required in foreground mode. The phone is a control surface for that laptop's Copilot work, not a separate place where your code executes.</p>
         <h3 id="start-session"><a class="heading-link" href="#start-session">Start a new session</a></h3>
         <ol>
           <li>Open the connected laptop and choose <strong>Start Copilot</strong> under <strong>Quick actions</strong>.</li>
@@ -279,7 +282,7 @@ weft update</code></pre></div>
         <p>Open the HTTPS app directly in a supported browser, not an embedded preview. Allow camera access in the browser/site settings and retry the scanner. On keyboard-and-mouse devices, you can use the paste-payload option instead. An unclaimed QR expires after 10 minutes. If the QR is expired or already claimed by a different phone identity, use <a href="#recovery">the new-device recovery flow</a>.</p>
         <h3 id="offline"><a class="heading-link" href="#offline">The phone stays offline or reconnecting</a></h3>
         <ol>
-          <li>Keep the laptop awake and confirm the <code>weft start</code> terminal is still running.</li>
+          <li>Keep the laptop awake and check <code>weft status</code>. Only foreground mode requires the launch terminal to remain open.</li>
           <li>Run <code>weft show-transport</code>. For Dev Tunnel, also run <code>weft devtunnel status</code>; Supabase does not require a local tunnel process.</li>
           <li>Read the station error and use the phone's <strong>Trouble connecting?</strong> connectivity test. Network policy can block HTTPS/WebSocket traffic even when ordinary browsing works.</li>
           <li>Compare versions using <code>weft update --check</code> and <a href="#versions">Settings &gt; About</a>. Restart after an update.</li>
@@ -347,7 +350,13 @@ weft update</code></pre></div>
         <h3 id="connection-commands"><a class="heading-link" href="#connection-commands">Connection &amp; pairing</a></h3>
         <div class="table-wrap" tabindex="0" role="region" aria-label="Connection and pairing commands">
           <table><thead><tr><th scope="col">Laptop shell command</th><th scope="col">Purpose</th></tr></thead><tbody>
+            <tr><td><code>weft</code> / <code>weft ui</code></td><td>Open Control Center in its own Chromium app-style window. Does not automatically start Station, relay or sessions.</td></tr>
+            <tr><td><code>weft ui --browser</code></td><td>Open the same private local dashboard in the default browser instead.</td></tr>
+            <tr><td><code>weft ui status</code> / <code>weft ui stop</code></td><td>Inspect or stop only the local UI host; workloads remain unchanged.</td></tr>
+            <tr><td><code>weft ui shortcut</code></td><td>Add the Windows desktop shortcut.</td></tr>
             <tr><td><code>weft start</code></td><td>Start Device Station; reuse persistent phone trust by default.</td></tr>
+            <tr><td><code>weft start --foreground</code></td><td>Keep Station owned by this terminal, instead of Windows background operation.</td></tr>
+            <tr><td><code>weft status</code> / <code>weft stop</code></td><td>Check or stop background Station; stop leaves the shared relay available.</td></tr>
             <tr><td><code>weft start --new-device</code></td><td>Replace phone trust and start with a fresh QR. Stop the old station first.</td></tr>
             <tr><td><code>weft start --help</code></td><td>Show station options without starting.</td></tr>
             <tr><td><code>weft set-pairing &lt;persistent|ephemeral&gt;</code></td><td>Choose whether subsequent station starts reuse the pairing identity.</td></tr>
@@ -364,6 +373,8 @@ weft update</code></pre></div>
             <tr><td><code>weft remove-project &lt;name&gt;</code></td><td>Remove a registration, not its files.</td></tr>
             <tr><td><code>weft set-name &lt;name&gt;</code></td><td>Name the laptop. Restart its station/session to publish the new label.</td></tr>
             <tr><td><code>weft show-name</code></td><td>Show the configured label or OS hostname.</td></tr>
+            <tr><td><code>weft set-permission &lt;default|allow-all&gt;</code></td><td>Set the phone's initial launch approval mode; the user can override it per launch.</td></tr>
+            <tr><td><code>weft show-permission</code></td><td>Inspect the default launch approval mode.</td></tr>
           </tbody></table>
         </div>
         <h3 id="maintenance-commands"><a class="heading-link" href="#maintenance-commands">Updates, relays &amp; installation</a></h3>
@@ -376,9 +387,11 @@ weft update</code></pre></div>
             <tr><td><code>weft set-transport &lt;supabase|devtunnel&gt;</code></td><td>Choose the relay for subsequent connections.</td></tr>
             <tr><td><code>weft set-transport clear</code></td><td>Clear the choice, not the saved Supabase details. Select a transport again before pairing.</td></tr>
             <tr><td><code>weft devtunnel &lt;start|status|stop&gt;</code></td><td>Operate the shared dev-tunnel relay. Stopping it disconnects its users.</td></tr>
+            <tr><td><code>weft devtunnel start --foreground</code></td><td>Run the relay under terminal ownership rather than Windows background operation.</td></tr>
+            <tr><td><code>weft terminal attach</code></td><td>Internal laptop frontend for the Station-owned shared terminal; not arbitrary terminal takeover.</td></tr>
             <tr><td><code>weft install [--from &lt;dir&gt;] [--skill &lt;file&gt;]</code></td><td>Install code bundles and the usage skill; developer/source installation option.</td></tr>
             <tr><td><code>weft clean-install [--yes]</code></td><td><strong>Destructive:</strong> delete installed code and <code>~/.weft/</code> data, then reinstall. <code>--yes</code> skips confirmation.</td></tr>
-            <tr><td><code>weft help</code></td><td>Show the installed CLI's complete usage.</td></tr>
+            <tr><td><code>weft help</code> / <code>weft --help</code> / <code>weft -h</code></td><td>Show the installed CLI's complete usage without opening the dashboard.</td></tr>
           </tbody></table>
         </div>
         <p class="note">Use <a href="#updates">update</a> for new code and <a href="#recovery">pairing recovery</a> for a new phone. A clean installation is not routine maintenance.</p>

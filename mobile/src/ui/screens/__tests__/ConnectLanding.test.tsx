@@ -31,6 +31,8 @@ describe('LandingScreen', () => {
     render(<LandingScreen onBeginPair={onBeginPair} onStartDemo={onStartDemo} error={null} onError={vi.fn()} />);
 
     expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })).toHaveLength(2);
+    expect(screen.getByRole('heading', { name: 'Open Weft on your laptop' })).toBeVisible();
+    expect(screen.getByText(/Run weft to open Control Center/)).toBeVisible();
     expect(screen.getAllByRole('link', { name: 'Set up your laptop' })[0]).toHaveAttribute('href', '#get-started');
     expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]).toHaveClass('secondary-action');
     await user.click(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]);

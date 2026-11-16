@@ -170,16 +170,25 @@ See [advanced usage](./advanced.md) for per-session transport overrides.
 
 ### Laptop Control Center
 
-After installing your source build, run `weft ui`. The default browser opens a
-private, loopback-only dashboard; all assets are bundled with the CLI, with no
+After installing your source build, run `weft` (or `weft ui`). An installed Chromium
+browser opens a private, loopback-only dashboard in its own app-style window,
+without browser tabs or an address bar. Edge is preferred on Windows, followed by
+Chrome; supported Chrome/Edge/Chromium locations are checked on other platforms.
+Use `weft ui --browser` for the ordinary browser. If Chromium is unavailable, Weft
+reports that fallback; it does not install a browser or bypass enterprise policy.
+All assets are bundled with the CLI, with no
 separate frontend server or repository checkout required. It exposes Station/relay
 start, stop and restart, project registration/defaults, settings, local session
 activation/disconnection, Station-mediated session launch, pairing and update checks.
 
+The app window uses a private persistent profile under
+`~/.weft/control-center-profile`, separate from your usual browsing profile.
+This is Chromium app mode, not Electron or a system service.
 Opening the dashboard starts only its local host. Viewing sessions does not activate
 them. Closing the page leaves Station, relay and Copilot running; the unused UI host
 expires after five minutes without requests once accepted operations finish.
 `weft ui status` checks the host and `weft ui stop` stops it without touching workloads.
+Use `weft help`, `weft --help` or `weft -h` for terminal help instead of opening the UI.
 
 On Windows, normal installation adds **Weft Control Center** to Start.
 `weft ui shortcut` adds a desktop shortcut. Shortcut targets use installed code,

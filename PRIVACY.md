@@ -146,6 +146,12 @@ See [`docs/security.md`](docs/security.md) for the threat model and
 [`SUPPORT.md`](SUPPORT.md) for cleanup and issue-reporting guidance.
 ## Local Control Center
 
+The optional app-style window uses an installed Chromium browser with a separate
+persistent profile under `~/.weft/control-center-profile`. Its cookies/cache/history
+are distinct from your regular browser profile. `weft ui --browser` uses your
+ordinary browser instead. Both use the same private loopback authorization; app
+mode does not grant remote or native-shell access or disable browser protections.
+
 Transport authentication reporting displays only sign-in status, provider and
 account label from the Dev Tunnel CLI to the authorized local browser. It never
 returns tokens, tenant/object identifiers or raw command output, never signs in

@@ -1,5 +1,23 @@
 # Weft resilience and attention-aware streaming
 
+Default-entry follow-up (2026-11-15, local change): bare `weft` now opens the
+Control Center, equivalent to `weft ui`. Explicit `weft help`, `--help` and `-h`
+print terminal usage without opening a browser. Starting Station remains deliberate
+through Control or `weft start`; opening the UI starts no workload. Source guides,
+product onboarding, installer completion messages and canonical usage skill are
+aligned. Release target: 0.2.42; installation uses the verified hosted release,
+not copied checkout files.
+
+App-window direction (2026-11-15): following the existing pattern in
+[Vox's browser launcher](https://github.com/aasis21/vox/blob/main/browser.mjs),
+Control Center uses installed Chromium app mode with a private persistent Weft
+profile. Windows prefers Edge; Chrome/Edge/Chromium candidates are supported on
+other platforms. No Electron/system service or browser installation is introduced.
+`weft ui --browser` retains explicit browser-tab operation. No supported Chromium
+produces a reported default-browser fallback; a launch failure is an actionable
+error, not a silent retry or security-policy bypass. Window presentation remains
+independent of the management API and Station lifecycle.
+
 Control/Setup follow-up (2026-11-08, local changes): primary navigation is
 Control, Sessions, Setup and Diagnostics. Pairing remains an explicit flow from
 Control/session actions. Setup combines project and configuration UI while

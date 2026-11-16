@@ -53,7 +53,7 @@ import { createManagement } from "../src/management.mjs";
 import { openControlCenter, inspectControlCenter, stopControlCenter, createControlCenterHost } from "../src/controlCenter.mjs";
 import { installControlCenterShortcut } from "../src/controlCenterShortcut.mjs";
 
-const [, , command, ...args] = process.argv;
+const [, , command = "ui", ...args] = process.argv;
 const management = createManagement({ cliPath: fileURLToPath(import.meta.url) });
 
 // Where the end-user installer drops Weft's code bundles (CODE only — all user data lives in
@@ -126,7 +126,7 @@ process.on("uncaughtException", (err) => {
 // starts. test/cliDispatch.test.mjs enforces it.
 async function main() {
   try {
-    if (!command || command === "help" || command === "--help" || command === "-h") {
+    if (command === "help" || command === "--help" || command === "-h") {
       usage();
     } else if (command === "version" || command === "--version" || command === "-v") {
       printVersion();
@@ -139,7 +139,7 @@ async function main() {
     } else if (command === "status") {
       await stationStatus();
     } else if (command === "ui") {
-      if (args.length > 1 || args[0] && !["status", "stop", "shortcut"].includes(args[0])) throw new Error("Usage: weft ui [status|stop|shortcut]");
+      if (args.length > 1 || args[0] && !["--browser", "status", "stop", "shortcut"].includes(args[0])) throw new Error("Usage: weft ui [--browser|status|stop|shortcut]");
       if (args[0] === "shortcut") {
         if (process.platform !== "win32") throw new Error("Windows desktop shortcuts require Windows.");
         await installControlCenterShortcut({ installDir: extensionInstallDir(), desktop: true });
@@ -152,8 +152,11 @@ async function main() {
         const status = await inspectControlCenter();
         console.log(status ? `Control Center is running (pid ${status.pid}).` : "Control Center is not running.");
       } else {
-        await openControlCenter({ cliPath: fileURLToPath(import.meta.url) });
-        console.log("Weft Control Center opened in your browser. Closing it does not stop workloads.");
+        const opened = await openControlCenter({ cliPath: fileURLToPath(import.meta.url), browserMode: args[0] === "--browser" });
+        console.log(opened?.presentation?.mode === "app-window"
+          ? "Weft Control Center opened in its own app window. Closing it does not stop workloads."
+          : "Weft Control Center opened in your browser. Closing it does not stop workloads.");
+        if (opened?.presentation?.fallback) console.log("No supported Chromium browser was found for app-window mode. No browser was installed; the default browser was used.");
       }
     } else if (command === "__ui-host") {
       if (args.length !== 1 || !isAbsolute(args[0])) throw new Error("Invalid UI host invocation.");
@@ -1694,10 +1697,11 @@ function runBootstrapInstaller() {
 
 function usage() {
   console.log(`Usage:
+  weft                              Open Control Center in its own window (same as weft ui)
   weft start [--new-device] [--foreground]
   weft status
   weft stop
-  weft ui [status|stop|shortcut]
+  weft ui [--browser|status|stop|shortcut]
   weft terminal attach
   weft add-project <name> <path> [--default]
   weft remove-project <name>
@@ -1718,6 +1722,14 @@ function usage() {
   weft install [--from <dir>] [--skill <file>]
   weft clean-install [--yes]
   weft help
+
+Run \`weft\` to manage this laptop in an app-style window using installed Chromium.
+Use \`weft ui --browser\` for an ordinary browser tab. If Chromium is unavailable,
+Weft reports the default-browser fallback; it never installs a browser automatically.
+Control shows Station/connection/mobile status and explicit Start/Stop/Restart.
+Setup combines project registration, transport and access settings.
+Opening or closing the dashboard does not start or stop Station, relay or Copilot.
+Use \`weft help\` (or --help / -h) for this command reference.
 
 Your transport CHOICE lives in ~/.weft/weft.config.json (written by \`weft set-transport\`).
 Supabase's connection details live separately in ~/.weft/supabase.json — the installer seeds it

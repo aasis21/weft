@@ -3,13 +3,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { request } from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { createControlCenterHost, openControlCenter, stopControlCenter } from "../src/controlCenter.mjs";
+import { EventEmitter } from "node:events";
+import { createControlCenterHost, openControlCenter, stopControlCenter, openControlCenterBrowser, findControlCenterBrowser } from "../src/controlCenter.mjs";
 import { createManagement } from "../src/management.mjs";
 import { saveTransportConfig } from "../src/transportConfig.mjs";
 import { backgroundTaskName, stopBackground } from "../src/backgroundLifecycle.mjs";
@@ -35,6 +36,56 @@ async function completed(get, id) {
   }
   assert.fail("Operation did not complete.");
 }
+
+test("app-window mode uses an installed browser and private Weft profile without a shell", async (t) => {
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-window-"));
+  t.after(() => rm(baseDir, { recursive: true, force: true }));
+  let launched;
+  const result = await openControlCenterBrowser("http://127.0.0.1:4321/open/test", {
+    baseDir, findBrowser: () => ({ name: "Test Chromium", path: "test-browser" }),
+    spawnBrowser: (path, args, options) => {
+      launched = { path, args, options };
+      const child = new EventEmitter();
+      child.unref = () => {};
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    },
+    execute: async () => assert.fail("Default-browser command must not run in app mode."),
+  });
+  assert.equal(result.mode, "app-window");
+  assert.ok(launched.args.includes("--app=http://127.0.0.1:4321/open/test"));
+  assert.ok(launched.args.includes("--user-data-dir=" + join(baseDir, "control-center-profile")));
+  assert.equal(launched.options.shell, false);
+  assert.ok(!launched.args.includes("--no-sandbox"));
+  assert.equal(findControlCenterBrowser({ exists: () => false }), null);
+});
+
+test("browser fallback is explicit and an app launch error is not silently retried", async (t) => {
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-window-error-"));
+  t.after(() => rm(baseDir, { recursive: true, force: true }));
+  let launches = 0;
+  const options = {
+    platform: "win32", findBrowser: () => null,
+    execute: async (command) => { launches++; assert.equal(command, "rundll32.exe"); },
+  };
+  assert.deepEqual(await openControlCenterBrowser("http://127.0.0.1:4321/", options), { mode: "browser", fallback: true });
+  assert.deepEqual(await openControlCenterBrowser("http://127.0.0.1:4321/", {
+    ...options, browserMode: true, findBrowser: () => assert.fail("Explicit browser mode must not select another browser."),
+  }), { mode: "browser", fallback: false });
+  assert.equal(launches, 2);
+  await assert.rejects(openControlCenterBrowser("http://127.0.0.1:4321/", {
+    ...options, baseDir, findBrowser: () => ({ name: "Test Chromium", path: "test-browser" }),
+    spawnBrowser: () => {
+      const child = new EventEmitter();
+      queueMicrotask(() => child.emit("error", new Error("Browser blocked")));
+      return child;
+    },
+  }), (error) => error.code === "window-launch-failed");
+  assert.equal(launches, 2, "Failed launch never falls back silently.");
+  await assert.rejects(openControlCenterBrowser("http://127.0.0.1:4321/open/private-capability", {
+    ...options, execute: async () => { throw new Error("Failed command includes private-capability"); },
+  }), (error) => error.code === "browser-launch-failed" && !error.message.includes("private-capability"));
+});
 test("private local API rejects unauthenticated, cross-origin, forged-host and invalid actions", async (t) => {
   const h = await host(t, { state: async () => ({ station: { state: "stopped" } }) });
   assert.equal((await fetch(h.app.origin + "/api/state")).status, 401);
@@ -144,4 +195,47 @@ test("native local Control Center starts and stops a real isolated background St
   const stopped = await nativeOperation("station.stop", { confirmed: true });
   assert.equal(stopped.state, "succeeded", JSON.stringify(stopped.error));
   assert.equal((await (await h.get("/api/state")).json()).station.state, "stopped");
+});
+
+test("native Windows opens a visible standalone Control Center window", {
+  skip: process.platform !== "win32" || process.env.WEFT_NATIVE_CONTROL_TEST !== "1",
+}, async (t) => {
+  if (!findControlCenterBrowser()) { t.skip("No supported installed Chromium browser."); return; }
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-native-window-"));
+  let child;
+  const app = await createControlCenterHost({
+    baseDir, publish: false, management: { state: async () => ({
+      version: "test", checkedAt: Date.now(), platform: "win32", deviceName: "Window test",
+      station: { state: "stopped" }, relay: { state: "stopped" }, projects: [], sessions: [],
+      settings: { transport: null, pairingMode: "persistent", files: { enabled: false, roots: [] } },
+    }) },
+  });
+  t.after(async () => {
+    await app.close();
+    const profile = join(basename(baseDir), "control-center-profile").replaceAll("'", "''");
+    const cleanup = `$profile=[regex]::Escape('${profile}')
+Get-CimInstance -Query "SELECT ProcessId,Name,CommandLine FROM Win32_Process WHERE Name='msedge.exe' OR Name='chrome.exe' OR Name='chromium.exe' OR Name='crashpad_handler.exe' OR Name='msedge_crashpad_handler.exe' OR Name='chrome_crashpad_handler.exe'" | Where-Object {
+  $_.Name -match '^(msedge|chrome|chromium|crashpad_handler)(?:_crashpad_handler)?\\.exe$' -and
+  $_.CommandLine -and $_.CommandLine -match $profile
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+    await promisify(execFile)("powershell.exe", [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+      Buffer.from(cleanup, "utf16le").toString("base64"),
+    ], { timeout: 30_000, windowsHide: true });
+    await rm(baseDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  });
+  const result = await openControlCenterBrowser(app.url, {
+    baseDir, spawnBrowser: (...args) => { child = spawn(...args); return child; },
+  });
+  assert.equal(result.mode, "app-window");
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const { stdout } = await promisify(execFile)("powershell.exe", [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+      `$p=Get-Process -Id ${child.pid} -ErrorAction Stop; if ($p.MainWindowHandle -ne 0 -and $p.MainWindowTitle -like '*Control Center*') { 'visible' }`,
+    ], { windowsHide: true, timeout: 5000 });
+    if (stdout.trim() === "visible") return;
+    await new Promise((done) => setTimeout(done, 500));
+  }
+  assert.fail("The app browser did not expose a visible Control Center window.");
 });
