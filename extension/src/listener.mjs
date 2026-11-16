@@ -57,6 +57,7 @@ import {
   lifecycleSnapshotFromLaunchRecord,
 } from "./sessionCompatibility.mjs";
 import { createAttentionLease, openPairedEndpoint } from "./pairedEndpoint.mjs";
+import { appendStationLog } from "./stationLog.mjs";
 
 // Proactive DEVICE_HEARTBEAT cadence: independent of PROJECT_LIST_REQUEST/PROJECT_LIST, so an idle
 // phone (not polling) can still tell the listener process is alive, not just that the transport
@@ -139,6 +140,7 @@ export function createListener({
   // without this module knowing anything about terminals or rendering.
   onDeviceConnected = null,
   onDeviceDisconnected = null,
+  onProgress = null,
   onHeartbeat = null,
   // Retained as a host compatibility hook. Secure pairing now waits for a fresh authenticated
   // hello on every process start, so this hook is intentionally no longer invoked.
@@ -225,6 +227,12 @@ export function createListener({
     if (started) return api;
     started = true;
     stopped = false;
+    const startedAt = Date.now();
+    const stage = (phase) => {
+      appendStationLog("station.startup.stage", { phase, elapsedMs: Date.now() - startedAt, pid: process.pid });
+      onProgress?.(phase);
+    };
+    stage("initializing-terminal");
     await terminalHost.initialize();
     if (allowTerminal && terminalHost.supportError) log.warn?.(terminalHost.supportError);
     try {
@@ -237,6 +245,7 @@ export function createListener({
     // A remembered peer key authorizes only that already-paired phone to reconnect. A different
     // phone requires an explicit identity rotation and fresh QR.
     let trustedPeerPublicKeyB64 = null;
+    stage("restoring-pairing");
     if (!listenerKeyPair || !listenerChannelId) {
       // Persistent pairing reuses the same channelId + keypair across every `weft start` run
       // (see pairingIdentity.mjs). The channel and ECDH identity stay stable so an already-paired
@@ -257,6 +266,7 @@ export function createListener({
     // persisted "devtunnel" default is expanded into a real, connectable URL exactly once here —
     // createTransportFromDescriptor then builds off that same resolved value instead of each
     // re-resolving independently (which used to risk two separate devtunnel provisions).
+    stage("resolving-transport");
     listenerTransportDescriptor ??= await resolveTransport();
     listenerTransport ??= createTransportFromDescriptor(listenerTransportDescriptor, { channelId: listenerChannelId });
     sessionCoordinator ??= coordinatorFactory({
@@ -282,6 +292,7 @@ export function createListener({
       expiresAt: pairingPayload.expiresAt,
       trustedPeerPublicKeyB64,
     });
+    stage("connecting-station");
     await installPairingListener({ connect: true });
     schedulePairingGrantRefresh();
     startPendingWatch();
@@ -290,12 +301,14 @@ export function createListener({
     } catch {
       // Best-effort retention cleanup.
     }
+    stage("recovering-session-operations");
     try {
       await sessionCoordinator.reconcile();
     } catch (error) {
       log?.warn?.(`Weft Device Station: lifecycle recovery failed: ${error?.message ?? error}`);
     }
     startLaunchWatch();
+    stage("ready");
     return api;
   };
 
@@ -789,11 +802,15 @@ export function createListener({
   // list; the phone can pull again.
   async function sendSessionList(limit, cwd) {
     if (!channel || stopped) return;
+    const replyChannel = channel;
+    const startedAt = Date.now();
+    appendStationLog("session.list.requested", { pid: process.pid });
     let sessions = [];
     let folders = null;
     try {
-      sessions = (await Promise.resolve(sessionsApi.listSessions({ limit, cwd }))) ?? [];
-    } catch {
+      sessions = (await Promise.resolve(sessionsApi.listSessions({ limit, cwd, strict: true }))) ?? [];
+    } catch (error) {
+      appendStationLog("session.list.store_failed", { code: error.cause?.code ?? error.code ?? error.name }, { level: "error" });
       sessions = [];
     }
     try {
@@ -802,17 +819,22 @@ export function createListener({
         sessionsApi,
         storeAuthority: sessionCoordinator.storeAuthority,
       });
-    } catch {
+    } catch (error) {
+      appendStationLog("session.list.discovery_failed", { code: error.code ?? error.name }, { level: "warn" });
       // Saved sessions remain available if runtime discovery is temporarily unavailable.
     }
     try {
-      folders = (await Promise.resolve(sessionsApi.listSessionFolders?.())) ?? null;
-    } catch {
+      folders = (await Promise.resolve(sessionsApi.listSessionFolders?.(undefined, { strict: true }))) ?? null;
+    } catch (error) {
+      appendStationLog("session.list.folders_failed", { code: error.cause?.code ?? error.code ?? error.name }, { level: "warn" });
       folders = null;
     }
     try {
-      await channel.send(sessionList(sessions, folders));
-    } catch {
+      if (stopped || replyChannel !== channel) return;
+      await replyChannel.send(sessionList(sessions, folders));
+      appendStationLog("session.list.sent", { count: sessions.length, elapsedMs: Date.now() - startedAt });
+    } catch (error) {
+      appendStationLog("session.list.send_failed", { code: error.code ?? error.name, elapsedMs: Date.now() - startedAt }, { level: "error" });
       // send didn't land — the phone will re-request on its next refresh.
     }
   }

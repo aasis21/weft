@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
+import { spawn as childSpawn } from "node:child_process";
 import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
-import { spawnCopilotSession, writeIdentityFile } from "../src/spawn.mjs";
+import { spawnCopilotSession, writeIdentityFile, detectTerminal } from "../src/spawn.mjs";
 import {
   cleanupIdentityAfterPairing,
   persistHandoffController,
@@ -134,6 +135,7 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
     project: { name: "app", path: projectDir },
     name: "brave-otter",
     mode: "allow-all",
+    platform: "linux",
     identity: await identity("chan-spawn"),
     spawnFn(command, args, options) {
       calls.push({ command, args, options });
@@ -156,6 +158,41 @@ test("spawnCopilotSession builds argv/env for headless spawn without shell", asy
   assert.equal(calls[0].options.env.WEFT_CHANNEL_ID, "chan-spawn");
   assert.ok(calls[0].options.env.WEFT_IDENTITY_FILE);
   assert.equal(JSON.parse(readFileSync(calls[0].options.env.WEFT_IDENTITY_FILE, "utf8")).channelId, "chan-spawn");
+});
+
+test("background Windows Station launches an interactive console without WT_SESSION", async () => {
+  const old = process.env.WT_SESSION;
+  delete process.env.WT_SESSION;
+  try {
+    assert.equal(detectTerminal({}, "win32"), "windows-console");
+    const projectDir = mkdtempSync(join(tmpdir(), "weft-background-spawn-"));
+    cleanupDirs.push(projectDir);
+    let call;
+    const result = await spawnCopilotSession({
+      platform: "win32", project: { path: projectDir }, identity: await identity("console-test"),
+      name: "test % value", spawnFn(command, args, options) {
+        call = { command, args, options };
+        return { pid: 4321, unref() {} };
+      },
+    });
+    cleanupFiles.push(result.identityFile);
+    assert.equal(result.ok, true);
+    assert.equal(result.pid, null, "terminal broker PID is not a proven Copilot writer");
+    assert.match(call.command, /cmd\.exe$/i);
+    const broker = call.args.at(-1);
+    cleanupFiles.push(broker);
+    const script = readFileSync(broker, "utf8");
+    assert.match(script, /start "" "%ComSpec%"/);
+    const launcher = script.match(/\/k "([^"]+\.cmd)"/)[1].replaceAll("%%", "%");
+    cleanupFiles.push(launcher);
+    const body = readFileSync(launcher, "utf8");
+    assert.match(body, /setlocal DisableDelayedExpansion/);
+    assert.match(body, /copilot -n "test %% value"/);
+    assert.equal(call.options.shell, false);
+  } finally {
+    if (old === undefined) delete process.env.WT_SESSION;
+    else process.env.WT_SESSION = old;
+  }
 });
 
 test("spawnCopilotSession bakes identity into a launcher script for windows-terminal", async () => {
@@ -207,6 +244,7 @@ test("spawnCopilotSession resumes an existing session by id in its cwd (no -n na
   const result = await spawnCopilotSession({
     project: { name: "resume", path: sessionCwd },
     mode: "allow-all",
+    platform: "linux",
     identity: await identity("chan-resume"),
     resumeSessionId: "sid-123",
     spawnFn(command, args, options) {
@@ -226,7 +264,8 @@ test("spawnCopilotSession resumes an existing session by id in its cwd (no -n na
   assert.equal(calls[0].options.env.WEFT_CHANNEL_ID, "chan-resume");
 });
 
-test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
+test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);
   let identityPath;
   const result = await spawnCopilotSession({
@@ -276,6 +315,7 @@ test("spawnCopilotSession returns a reliable direct child pid and persists opera
     operationId: "req-operation",
     operationOwnerToken: "owner-secret",
     baseDir: weftHome,
+    platform: "linux",
     spawnFn() {
       return { pid: 4321, unref() {} };
     },
@@ -289,4 +329,76 @@ test("spawnCopilotSession returns a reliable direct child pid and persists opera
   const restored = await readIdentityFile(result.identityFile);
   assert.equal(restored.operationId, "req-operation");
   assert.equal(restored.operationOwnerToken, "owner-secret");
+});
+
+test("a failed visible terminal broker cannot report a successful session launch", async () => {
+  const home = mkdtempSync(join(tmpdir(), "weft-failed-broker-"));
+  cleanupDirs.push(home);
+  const files = [];
+  const result = await spawnCopilotSession({
+    project: { path: home }, identity: await identity(), baseDir: home, platform: "win32",
+    spawnFn(_command, args, options) {
+      const broker = args.at(-1);
+      const launcher = broker.endsWith(".broker.cmd")
+        ? readFileSync(broker, "utf8").match(/\/k "([^"]+\.cmd)"/)[1].replaceAll("%%", "%")
+        : broker;
+      files.push(options.env.WEFT_IDENTITY_FILE, broker, launcher);
+      const child = new EventEmitter();
+      child.unref = () => {};
+      setImmediate(() => { child.emit("spawn"); child.emit("close", 1); });
+      return child;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Terminal launcher exited with code 1/);
+  assert.ok(files.every((file) => !existsSync(file)));
+  assert.match(readFileSync(join(home, "station.log"), "utf8"), /launch.failed.*TERMINAL_LAUNCH_FAILED/);
+});
+
+test("native background-style Windows launch runs the interactive shell command with its handoff", {
+  skip: process.platform !== "win32" || process.env.WEFT_NATIVE_SPAWN_TEST !== "1",
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-console-launch-"));
+  cleanupDirs.push(dir);
+  const output = join(dir, "result.json");
+  const script = join(dir, "fake-copilot.mjs");
+  const command = join(dir, "fake-copilot.cmd");
+  writeFileSync(script, `import {writeFileSync} from 'node:fs';
+writeFileSync(${JSON.stringify(output)}, JSON.stringify({
+  args: process.argv.slice(2), channel: process.env.WEFT_CHANNEL_ID,
+  handoff: process.env.WEFT_IDENTITY_FILE, cwd: process.cwd()
+}));`);
+  writeFileSync(command, `@echo off\r\n"${process.execPath}" "${script}" %*\r\nexit\r\n`);
+  const old = process.env.WT_SESSION;
+  delete process.env.WT_SESSION;
+  try {
+    let brokerError = "";
+    const result = await spawnCopilotSession({
+      project: { path: dir }, platform: "win32", name: "native % test",
+      identity: await identity("native-console"), copilotExecutable: command,
+      spawnFn: (exe, args, options) => {
+        const broker = args.at(-1);
+        cleanupFiles.push(broker);
+        const launcher = readFileSync(broker, "utf8").match(/\/k "([^"]+\.cmd)"/)[1].replaceAll("%%", "%");
+        cleanupFiles.push(launcher);
+        const child = childSpawn(exe, args, { ...options, stdio: ["ignore", "ignore", "pipe"] });
+        child.stderr.on("data", (chunk) => { brokerError = (brokerError + chunk.toString()).slice(-4000); });
+        return child;
+      },
+    });
+    assert.equal(result.ok, true, result.error ?? brokerError);
+    cleanupFiles.push(result.identityFile);
+    const deadline = Date.now() + 20_000;
+    while (!existsSync(output) && Date.now() < deadline) await new Promise((done) => setTimeout(done, 100));
+    assert.ok(existsSync(output), "the visible console executed the requested command");
+    const data = JSON.parse(readFileSync(output, "utf8"));
+    assert.deepEqual(data.args, ["-n", "native % test"]);
+    assert.equal(data.channel, "native-console");
+    assert.equal(data.handoff, result.identityFile);
+    assert.equal(data.cwd.toLowerCase(), dir.toLowerCase());
+    assert.equal(result.pid, null);
+  } finally {
+    if (old === undefined) delete process.env.WT_SESSION;
+    else process.env.WT_SESSION = old;
+  }
 });

@@ -12,7 +12,7 @@ import { SessionCoordinator } from "./sessionCoordinator.mjs";
 import { createLaunchOperationJournal } from "./sessionOperationJournal.mjs";
 import { createRuntimeLifecycleClient, discoverRuntimeLifecycles } from "./runtimeLifecycle.mjs";
 import { deriveStoreAuthority } from "./runtimeIdentity.mjs";
-import { verifyProcessIdentity } from "./processIdentity.mjs";
+import { verifyProcessIdentity, verifyProcessIdentities } from "./processIdentity.mjs";
 import { isPidAlive } from "./registryFile.mjs";
 import { resolveVersion } from "./version.mjs";
 import { spawnCopilotSession } from "./spawn.mjs";
@@ -65,6 +65,7 @@ async function discoverTarget(target, { baseDir, attachedApi, pendingApi, timeou
     storeAuthority: target.storeAuthority,
     sessionId: target.sessionId,
     timeoutMs,
+    verifyBatch: verifyProcessIdentities,
   });
   if (discovery.status === "conflict" || discovery.status === "multiple") {
     return { status: "multiple", runtimes: discovery.runtimes.map(runtime) };
@@ -96,7 +97,7 @@ async function discoverTarget(target, { baseDir, attachedApi, pendingApi, timeou
 }
 
 async function locateOperationRuntime(operation, { baseDir, timeoutMs } = {}) {
-  const discovery = await discoverRuntimeLifecycles({ baseDir, timeoutMs });
+  const discovery = await discoverRuntimeLifecycles({ baseDir, timeoutMs, verifyBatch: verifyProcessIdentities });
   if (discovery.status === "conflict") return { status: "multiple" };
   const matches = [];
   for (const presence of discovery.runtimes) {
@@ -336,11 +337,12 @@ export async function mergeSavedSessionsWithRuntimePresence(
     baseDir,
     sessionsApi,
     storeAuthority = deriveStoreAuthority(defaultSessionStorePath()),
-    timeoutMs = 5_000,
+    timeoutMs = 750,
   } = {},
 ) {
   const merged = new Map((sessions ?? []).map((session) => [session.sessionId, session]));
-  const discovery = await discoverRuntimeLifecycles({ baseDir, storeAuthority, timeoutMs });
+  const discovery = await discoverRuntimeLifecycles({ baseDir, storeAuthority, timeoutMs,
+    verifyBatch: verifyProcessIdentities, cleanup: false });
   for (const presence of discovery.runtimes) {
     if (merged.has(presence.sessionId)) continue;
     const saved = await Promise.resolve(

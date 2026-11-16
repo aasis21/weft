@@ -110,6 +110,19 @@ visible when Station is stopped. **Setup** combines registered projects, connect
 settings and access policy, while retaining separate explicit project actions and
 configuration saves.
 
+**Local diagnostics:** logging is on by default for this laptop. Use **Setup ->
+Local diagnostic logging**, or `weft set-logging off` / `weft set-logging on`.
+`weft show-logging` checks the setting; `weft logs` and **Diagnostics -> Load
+diagnostics** show the latest 100 sanitized Station/management entries. Logs include
+startup stages, session-list timings and correlated launch outcomes, not prompts,
+terminal output, project paths or pairing secrets. Updated Weft writers honor the
+switch without a restart; existing files and Copilot's own history are unchanged.
+See [privacy and retention](PRIVACY.md#local-diagnostics).
+
+On Windows, phone-launched CLI sessions open an interactive terminal even when
+Station runs in the background without Windows Terminal. A launched terminal is
+not yet proof of a connected session; Weft waits for the session runtime handoff.
+
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.
 

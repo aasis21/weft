@@ -190,12 +190,31 @@ expires after five minutes without requests once accepted operations finish.
 `weft ui status` checks the host and `weft ui stop` stops it without touching workloads.
 Use `weft help`, `weft --help` or `weft -h` for terminal help instead of opening the UI.
 
+The window also loads the bundled Weft logo, without an external image request.
+**Setup -> Local diagnostic logging** saves a laptop-wide preference; the CLI
+equivalents are `weft set-logging on`, `weft set-logging off`, and `weft show-logging`.
+Logging defaults on and updated Weft writers check it on each write. It does not
+change Copilot history or delete earlier logs. After installing an update, restart
+older Station/relay workers and reload older Weft sessions before expecting the
+new setting to affect them.
+Use **Diagnostics -> Load diagnostics** or `weft logs` to read the latest 100
+sanitized Station/management entries. Startup stages, session-list elapsed times,
+terminal broker outcomes and operation identifiers help isolate slow discovery
+from failed launch or connection. Nothing is uploaded automatically; review even
+sanitized output before sharing. See [privacy](../PRIVACY.md#local-diagnostics).
+
 On Windows, normal installation adds **Weft Control Center** to Start.
 `weft ui shortcut` adds a desktop shortcut. Shortcut targets use installed code,
 not a fixed localhost port or pairing URL. Foreground-owned workloads must be managed
 in their owning terminal; the UI does not silently take ownership or kill them.
 Other platforms can use local configuration/session views but retain foreground
 workload commands.
+
+Background Station opens a visible Windows console for a phone-launched CLI when
+there is no Windows Terminal context. Identity and working directory are restored
+inside that shell. Broker success means a terminal was opened, not that Copilot
+connected: runtime readiness remains a separate handshake. Do not start duplicate
+sessions to recover an uncertain launch.
 
 Dev Tunnel sign-in remains an explicit terminal step when required:
 `devtunnel user login -g`. Browser start does not wait on hidden terminal prompts.

@@ -290,6 +290,7 @@ weft update</code></pre></div>
         <p>If the browser lost its saved keys, refreshing an old QR cannot restore them. Follow <a href="#recovery">phone replacement</a>; otherwise preserve the existing pairing while diagnosing the connection.</p>
         <h3 id="stalled-session"><a class="heading-link" href="#stalled-session">A session or launch appears stuck</a></h3>
         <p>Check for a pending permission request in the phone thread or laptop terminal. Weft does not automatically approve it or add a decision timeout. For a slow New / Resume operation, use its <strong>Try again</strong> action rather than starting duplicates. If mode switching is unsupported by the Copilot host, switch in the terminal or update the host.</p>
+        <p>On Windows, background Station opens a visible console even without Windows Terminal. A terminal opening is not yet a connected Copilot session: runtime readiness is confirmed separately. For an online device with a slow or empty session list, load laptop diagnostics and compare <code>session.list.requested</code>, <code>session.list.sent</code> and any failure code. Restart older Station code after updating; do not reset saved phone trust just to troubleshoot discovery.</p>
         <h3 id="notifications"><a class="heading-link" href="#notifications">No notification while the app is closed</a></h3>
         <p>Notification permission and delivery depend on the browser and operating system. Do not rely on a backgrounded or killed app to wake for an approval. Reopen the app to inspect pending requests; keep the laptop terminal available when reliable attention is required.</p>
         <h3 id="diagnostics"><a class="heading-link" href="#diagnostics">Understand the event log</a></h3>
@@ -305,6 +306,9 @@ weft update</code></pre></div>
         <p>Use event names and timestamps to follow a recent request/response. Expand an entry for its payload; use <strong>Identifiers</strong> in the device log for connection identifiers. This is troubleshooting context, not an exhaustive audit trail.</p>
         <p class="note">Payloads can contain private content. Review and redact before sharing; compaction is not a promise that a raw log is safe to publish.</p>
         <p>Diagnostic logs exclude terminal requests, output, and reconnect screen state. A shared terminal is not a persisted Weft transcript; the shell or invoked programs can still keep their own history.</p>
+        <h4>Laptop-local diagnostics</h4>
+        <p>These are separate from the phone event views above. Use <strong>Setup &rarr; Local diagnostic logging</strong> or <code>weft set-logging on|off</code> for this laptop; <code>weft show-logging</code> checks it. The default is on. Updated Weft writers honor the switch on their next write; restart/reload older processes after updating. Existing logs, Copilot history and the phone cache remain unchanged.</p>
+        <p><strong>Diagnostics &rarr; Load diagnostics</strong> and <code>weft logs</code> explicitly show at most 100 sanitized Station/management entries, including startup stages, list timings, broker outcomes and operation correlations. Prompts, terminal output, paths, names, credentials and pairing keys are excluded; logs are not uploaded. <code>~/.weft/station.log</code> and active-session files in <code>~/.weft/sessions/</code> rotate around 1 MB with one backup each; up to 100 recent session base files are retained with best-effort cleanup. See <a href="https://github.com/aasis21/weft/blob/main/PRIVACY.md#local-diagnostics">privacy and retention details</a>.</p>
         <h3 id="report-problem"><a class="heading-link" href="#report-problem">Report a problem safely</a></h3>
         <p>Open a <a href="https://github.com/aasis21/weft/issues/new/choose">GitHub issue</a> with the smallest reproducible example. Include:</p>
         <ul>
@@ -373,6 +377,8 @@ weft update</code></pre></div>
             <tr><td><code>weft remove-project &lt;name&gt;</code></td><td>Remove a registration, not its files.</td></tr>
             <tr><td><code>weft set-name &lt;name&gt;</code></td><td>Name the laptop. Restart its station/session to publish the new label.</td></tr>
             <tr><td><code>weft show-name</code></td><td>Show the configured label or OS hostname.</td></tr>
+            <tr><td><code>weft set-logging on|off</code></td><td>Enable or disable new local Weft diagnostic writes for this laptop.</td></tr>
+            <tr><td><code>weft show-logging</code> / <code>weft logs</code></td><td>Check the setting or explicitly read up to 100 sanitized Station/management entries.</td></tr>
             <tr><td><code>weft set-permission &lt;default|allow-all&gt;</code></td><td>Set the phone's initial launch approval mode; the user can override it per launch.</td></tr>
             <tr><td><code>weft show-permission</code></td><td>Inspect the default launch approval mode.</td></tr>
           </tbody></table>

@@ -175,3 +175,30 @@ bootstrap address; treat it as sensitive while that host is running.
 The shared management layer uses a local operation lock and existing authenticated
 worker/session control. It adds no remote authority, transcript viewer, arbitrary
 shell endpoint, boot trigger, or always-running tray process.
+
+## Local diagnostics
+
+`diagnostics.enabled` in `~/.weft/weft.config.json` is a per-laptop setting, on by
+default for compatibility. Change it in Control Center Setup or with
+`weft set-logging on|off`; `weft show-logging` reports it. Updated Station, relay,
+Control Center management, and active Weft session writers check it on each write.
+Older processes must be restarted/reloaded after updating. Dormant sessions still
+do no diagnostic work. Turning it off stops new Weft diagnostic writes; it does
+not delete existing files, affect Copilot's own history, or clear the phone's
+separate event/transcript cache.
+
+Station, relay and management diagnostics use `~/.weft/station.log`, with one
+rotated backup at approximately 1 MB per file. Active Weft sessions use
+`~/.weft/sessions/<sessionId>.log`, with the same rotation and retention of up to
+100 recent base logs plus their backups. Old-file cleanup is best-effort. A failed
+rotation skips the new write and reports a local access/settings warning instead
+of silently growing the file.
+
+Structured diagnostics retain only bounded operational metadata: timestamps,
+event names, process/session/channel identifiers, versions, stages, durations,
+counts, stable error codes and hashed operation correlation identifiers. They
+exclude prompts, tool arguments/results, terminal output, project paths, device
+names, credentials and pairing keys. `weft logs` and the explicitly loaded
+Diagnostics view return at most 100 recent sanitized Station/management entries;
+they do not expose raw legacy log lines or upload logs. Identifiers and timing
+still describe your activity, so review output before sharing it.

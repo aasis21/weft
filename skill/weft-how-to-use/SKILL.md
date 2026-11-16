@@ -44,6 +44,7 @@ weft start [--new-device] [--foreground]
 weft status
 weft stop
 weft ui [--browser|status|stop|shortcut]
+weft terminal attach
 weft add-project <name> <path> [--default]
 weft remove-project <name>
 weft list-projects
@@ -54,9 +55,17 @@ weft set-name <name>
 weft show-name
 weft set-permission <default|allow-all>
 weft show-permission
+weft set-logging <on|off>
+weft show-logging
+weft logs
 weft set-pairing <persistent|ephemeral>
 weft rotate-pairing
-weft devtunnel <start|status|stop>
+weft devtunnel start [--foreground]
+weft devtunnel <status|stop>
+weft version
+weft update [--check]
+weft install [--from <dir>] [--skill <file>]
+weft clean-install [--yes]
 weft help
 ```
 
@@ -97,6 +106,22 @@ traffic proves contact. Foreground-owned workloads stay under their terminal's
 control. Browser startup never waits on hidden sign-in prompts; if required, run
 `devtunnel user login -g` in a terminal and retry. Destructive/access-changing UI
 actions require confirmation. Code updates and clean-install remain CLI-only.
+
+Local diagnostic logging defaults on per laptop. Use **Setup -> Local diagnostic
+logging** or `weft set-logging off|on`; `weft show-logging` checks it. Updated Weft
+writers honor changes on their next write, while older workers/sessions need a
+restart/reload after updating. Existing logs, native Copilot history and the phone's
+separate event/transcript cache are not deleted or disabled.
+`weft logs` or **Diagnostics -> Load diagnostics** explicitly reads at most 100
+sanitized Station/management entries. They show startup stages, session-list timing,
+launch broker outcomes and operation correlations, never prompts, terminal content,
+paths, device names or pairing secrets. Files stay local: `~/.weft/station.log`
+and active-session files under `~/.weft/sessions`, approximately 1 MB plus one
+backup each, with up to 100 recent session base files. Review before sharing.
+
+Phone-launched CLI sessions use a visible Windows console when background Station
+has no Windows Terminal context. Opening the terminal is separate from runtime
+readiness; wait for the handoff and do not duplicate an uncertain launch.
 
 - **`weft start`** — runs a standalone "Device Station": pairs a phone the same way
   `/weft` does, but without needing an active Copilot CLI session (useful for headless

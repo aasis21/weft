@@ -27,6 +27,21 @@ test("appendSessionLog is a no-op until enableSessionLog is called", async () =>
   assert.equal(existsSync(join(home, "sessions")), false);
 });
 
+test("machine logging opt-out also stops Weft session diagnostics without deleting history", async () => {
+  const { enableSessionLog, appendSessionLog } = await freshSessionLog();
+  const config = join(home, "weft.config.json");
+  writeFileSync(config, JSON.stringify({ diagnostics: { enabled: false } }));
+  const file = enableSessionLog({ sessionId: "logging-test", baseDir: home });
+  appendSessionLog("disabled");
+  assert.equal(existsSync(file), false);
+  writeFileSync(config, JSON.stringify({ diagnostics: { enabled: true } }));
+  appendSessionLog("enabled", { code: "OK" });
+  const before = readFileSync(file, "utf8");
+  writeFileSync(config, JSON.stringify({ diagnostics: { enabled: false } }));
+  appendSessionLog("disabled.again");
+  assert.equal(readFileSync(file, "utf8"), before);
+});
+
 test("enableSessionLog creates ~/.weft/sessions/<id>.log with an opening marker", async () => {
   const { enableSessionLog } = await freshSessionLog();
   const path = enableSessionLog({ sessionId: "abc-123", baseDir: home });
@@ -39,7 +54,7 @@ test("enableSessionLog creates ~/.weft/sessions/<id>.log with an opening marker"
 test("appendSessionLog writes timestamped, leveled key=value lines", async () => {
   const { enableSessionLog, appendSessionLog } = await freshSessionLog();
   enableSessionLog({ sessionId: "s1", baseDir: home });
-  appendSessionLog("device.paired", { phone: "brave otter" });
+  appendSessionLog("device.paired", { phone: "private phone name", phase: "waiting for phone" });
   appendSessionLog("connection.lost", { reason: "idle" }, { level: "warn" });
 
   const lines = readFileSync(join(home, "sessions", "s1.log"), "utf8").trim().split("\n");
@@ -47,7 +62,8 @@ test("appendSessionLog writes timestamped, leveled key=value lines", async () =>
   const lost = lines.find((l) => l.includes("connection.lost"));
 
   assert.match(paired, /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+INFO\s+device\.paired/);
-  assert.match(paired, /phone="brave otter"/);
+  assert.match(paired, /phase="waiting for phone"/);
+  assert.ok(!paired.includes("private phone name"));
   assert.match(lost, /\s+WARN\s+connection\.lost reason=idle/);
 });
 

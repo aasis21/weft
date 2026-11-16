@@ -650,8 +650,17 @@ test("SPAWN_SESSION for a known project spawns safely and emits pairing then ok 
   process.env.GNOME_TERMINAL_SCREEN = oldGnome;
 
   assert.equal(spawnCalls.length, 1);
-  assert.equal(spawnCalls[0].command, "copilot");
-  assert.deepEqual(spawnCalls[0].args, ["-n", "phone-started", "--allow-all"]);
+  if (process.platform === "win32") {
+    assert.match(spawnCalls[0].command, /cmd\.exe$/i);
+    const broker = spawnCalls[0].args.at(-1);
+    identityFiles.push(broker);
+    const launcher = readFileSync(broker, "utf8").match(/\/k "([^"]+\.cmd)"/)[1].replaceAll("%%", "%");
+    identityFiles.push(launcher);
+    assert.ok(readFileSync(launcher, "utf8").includes("copilot -n phone-started --allow-all"));
+  } else {
+    assert.equal(spawnCalls[0].command, "copilot");
+    assert.deepEqual(spawnCalls[0].args, ["-n", "phone-started", "--allow-all"]);
+  }
   assert.equal(spawnCalls[0].options.cwd, projectDir);
   assert.equal(spawnCalls[0].options.shell, false);
   const identity = JSON.parse(readFileSync(spawnCalls[0].options.env.WEFT_IDENTITY_FILE, "utf8"));
@@ -1051,8 +1060,17 @@ test("RESUME_SESSION spawns `copilot --resume=<id>` in the session's cwd and pai
   process.env.GNOME_TERMINAL_SCREEN = oldGnome;
 
   assert.equal(spawnCalls.length, 1);
-  assert.equal(spawnCalls[0].command, "copilot");
-  assert.deepEqual(spawnCalls[0].args, ["--resume=sid-42", "--allow-all"]);
+  if (process.platform === "win32") {
+    assert.match(spawnCalls[0].command, /cmd\.exe$/i);
+    const broker = spawnCalls[0].args.at(-1);
+    identityFiles.push(broker);
+    const launcher = readFileSync(broker, "utf8").match(/\/k "([^"]+\.cmd)"/)[1].replaceAll("%%", "%");
+    identityFiles.push(launcher);
+    assert.ok(readFileSync(launcher, "utf8").includes("copilot --resume=sid-42 --allow-all"));
+  } else {
+    assert.equal(spawnCalls[0].command, "copilot");
+    assert.deepEqual(spawnCalls[0].args, ["--resume=sid-42", "--allow-all"]);
+  }
   assert.equal(spawnCalls[0].options.cwd, sessionCwd);
   const pairing = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING && m.msg.requestId === "req-r1");
   assert.ok(pairing, "a SPAWN_PAIRING is sent for the resumed session");

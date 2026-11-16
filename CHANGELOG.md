@@ -5,6 +5,18 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.43
+
+- Open phone-launched Copilot sessions in a visible Windows console when background
+  Station has no Windows Terminal context, preserving identity and working directory.
+- Batch runtime process verification for session lists, launch coordination and
+  recovery; bound phone-list discovery without activating sessions or losing saved history.
+- Add per-laptop diagnostic logging controls in Setup and `weft set-logging on|off`,
+  `weft show-logging`, and `weft logs`. Keep logs local, bounded, sanitized and
+  correlated across startup, discovery, launch and management operations.
+- Show the bundled Weft logo in the Control Center window and add an explicitly
+  loaded, sanitized Diagnostics viewer.
+
 ## 0.2.23
 
 - Resumed historical Copilot sessions created before Weft when no runtime ownership evidence

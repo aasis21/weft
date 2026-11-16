@@ -5,17 +5,23 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createManagement, ManagementError, validateManagementAction, withManagementLock } from "./management.mjs";
 import { renderControlCenterPage } from "./controlCenterPage.mjs";
 import { weftHome } from "./projects.mjs";
 import { getProcessStartTime, verifyProcessIdentity } from "./processIdentity.mjs";
+import { appendStationLog } from "./stationLog.mjs";
 
 const exec = promisify(execFile);
 const RECORD = "control-center.json";
 const equal = (a, b) => typeof a === "string" && typeof b === "string" &&
   Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+function controlCenterIcon() {
+  return typeof __WEFT_CONTROL_ICON__ === "string"
+    ? Buffer.from(__WEFT_CONTROL_ICON__, "base64")
+    : readFileSync(new URL("../../mobile/public/icon-192.png", import.meta.url));
+}
 const failure = (error) => ({
   code: error instanceof ManagementError ? error.code : "operation-failed",
   message: error instanceof ManagementError ? error.message : "Weft could not complete this operation. Check local configuration and workload status before retrying.",
@@ -203,11 +209,16 @@ export async function createControlCenterHost({
     lastActivity = now();
     if (req.method === "GET") {
       if (url.pathname === "/") { res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }); return res.end(renderPage()); }
+      if (url.pathname === "/favicon.png") {
+        res.writeHead(200, { "Content-Type": "image/png" });
+        return res.end(controlCenterIcon());
+      }
       if (url.pathname === "/api/probe") return json(res, 200, { pid: process.pid, instanceId });
       if (url.pathname === "/api/state") return json(res, 200, await management.state());
       if (url.pathname === "/api/pairing") return json(res, 200, await management.pairing(url.searchParams.get("runtimeId") ?? undefined));
       if (url.pathname === "/api/update") return json(res, 200, await management.update());
       if (url.pathname === "/api/auth") return json(res, 200, await management.refreshAuthentication());
+      if (url.pathname === "/api/diagnostics") return json(res, 200, management.diagnostics());
       if (url.pathname.startsWith("/api/operations/")) {
         const operation = operations.get(url.pathname.slice("/api/operations/".length));
         return json(res, operation ? 200 : 404, operation ? publicOperation(operation) : { error: { code: "unknown-operation", message: "Operation result is unavailable. Refresh actual state; do not automatically repeat the action." } });
@@ -254,6 +265,7 @@ export async function createControlCenterHost({
   server.requestTimeout = 10_000;
   server.headersTimeout = 10_000;
   origin = `http://127.0.0.1:${server.address().port}`;
+  if (publish) appendStationLog("ui.started", { pid: process.pid, role: "control-center" }, { baseDir });
   if (publish) {
     try {
       await mkdir(baseDir, { recursive: true, mode: 0o700 });

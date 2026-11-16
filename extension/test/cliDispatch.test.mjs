@@ -13,7 +13,8 @@
 // in the file and the mistake was still made twice.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -122,4 +123,31 @@ test("bare weft opens the dashboard while explicit help and UI status do not", a
   assert.doesNotMatch(stdout, /TEST_CONTROL_CENTER_OPENED/);
   const browser = await run(["ui", "--browser"]);
   assert.match(browser.stdout, /TEST_CONTROL_CENTER_OPENED browser=true/);
+});
+
+test("logging CLI commands persist the device switch without changing other configuration or history", async () => {
+  const home = mkdtempSync(path.join(tmpdir(), "weft-cli-logging-"));
+  const configPath = path.join(home, "weft.config.json");
+  const historyPath = path.join(home, "session.log");
+  writeFileSync(configPath, JSON.stringify({ deviceName: "kept-device", custom: { retained: true } }));
+  writeFileSync(historyPath, "untouched history");
+  const run = (...args) => promisify(execFile)(process.execPath, [cliPath, ...args],
+    { env: { ...process.env, WEFT_HOME: home }, timeout: 20_000, windowsHide: true });
+  try {
+    assert.match((await run("show-logging")).stdout, /logging: on/);
+    await run("set-logging", "off");
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    assert.equal(config.diagnostics.enabled, false);
+    assert.equal(config.deviceName, "kept-device");
+    assert.deepEqual(config.custom, { retained: true });
+    assert.match((await run("show-logging")).stdout, /logging: off/);
+    assert.match((await run("logs")).stdout, /Local diagnostics: off/);
+    await assert.rejects(run("set-logging", "invalid"), /Usage: weft set-logging/);
+    assert.equal(JSON.parse(readFileSync(configPath, "utf8")).diagnostics.enabled, false);
+    await run("set-logging", "on");
+    assert.equal(JSON.parse(readFileSync(configPath, "utf8")).diagnostics.enabled, true);
+    assert.equal(readFileSync(historyPath, "utf8"), "untouched history");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

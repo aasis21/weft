@@ -100,6 +100,11 @@ export const STAGE_LABELS = {
   "starting-station": "starting Device Station",
   "checking-sign-in": "checking Dev Tunnel sign-in",
   "waiting-management": "waiting for the current management operation",
+  "initializing-terminal": "checking shared terminal support",
+  "restoring-pairing": "restoring saved phone trust",
+  "resolving-transport": "resolving the configured connection",
+  "connecting-station": "connecting Device Station",
+  "recovering-session-operations": "reconciling earlier session operations",
 };
 
 /** Human-readable label for a provisioning stage, or the raw stage string if unrecognized. */

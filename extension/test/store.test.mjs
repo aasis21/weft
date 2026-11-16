@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import {
   listSessions,
+  listSessionFolders,
   readHistory,
   readLatestTurnIndex,
   readSession,
@@ -197,8 +198,19 @@ test("readHistory returns an empty page for unknown session or missing db", asyn
     nextCursor: null,
     hasMore: false,
   });
+
   const missing = await readHistory(SESSION, {}, join(dir, "nope.db"));
   assert.deepEqual(missing, { items: [], nextCursor: null, hasMore: false });
+});
+
+test("strict session and folder reads report store failure without exposing the database path", async () => {
+  const missing = join(dir, "private-missing.db");
+  await assert.rejects(listSessions({ strict: true }, missing), (error) =>
+    error.message === "Copilot session store could not be read." && Boolean(error.cause));
+  await assert.rejects(listSessionFolders(missing, { strict: true }), (error) =>
+    error.message === "Copilot folder list could not be read." && Boolean(error.cause));
+  assert.deepEqual(await listSessions({}, missing), []);
+  assert.deepEqual(await listSessionFolders(missing), []);
 });
 
 // ---- listSessions / readSessionCwd (the "Resume a session" list) -----------

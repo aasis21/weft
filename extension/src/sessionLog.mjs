@@ -2,6 +2,8 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { weftHome } from "./projects.mjs";
+import { isDiagnosticLoggingEnabled } from "./transportConfig.mjs";
+import { formatDiagnosticDetail } from "./stationLog.mjs";
 
 // Persistent, append-only diagnostic log for a single in-session Weft run (the `/weft` extension
 // path that loads inside a spawned Copilot session). It's the per-session twin of stationLog.mjs:
@@ -29,6 +31,9 @@ let enabled = false;
 let logDir = null;
 let logFile = null;
 let rotatedFile = null;
+let logHome = null;
+let directoryReady = false;
+let failureReported = false;
 
 function ensureDir(dir) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -61,12 +66,11 @@ export function sessionLogPath() {
 export function enableSessionLog({ sessionId, baseDir } = {}) {
   if (enabled) return logFile;
   const stem = safeSessionFileStem(sessionId);
-  logDir = join(weftHome(baseDir), SESSIONS_DIR);
+  logHome = weftHome(baseDir);
+  logDir = join(logHome, SESSIONS_DIR);
   logFile = join(logDir, `${stem}.log`);
   rotatedFile = join(logDir, `${stem}.log.1`);
   try {
-    ensureDir(logDir);
-    pruneOldSessionLogs();
     enabled = true;
     appendSessionLog("session.log_opened", { pid: process.pid, sessionId: stem, file: logFile });
   } catch {
@@ -76,31 +80,13 @@ export function enableSessionLog({ sessionId, baseDir } = {}) {
   return logFile;
 }
 
-// Renders a detail object as space-separated key=value pairs, quoting any value that contains
-// whitespace so a line stays greppable and single-line. Nested/undefined values are skipped.
-function formatDetail(detail) {
-  if (!detail || typeof detail !== "object") return "";
-  const parts = [];
-  for (const [key, raw] of Object.entries(detail)) {
-    if (raw === undefined || raw === null) continue;
-    let value = typeof raw === "string" ? raw : JSON.stringify(raw);
-    if (/\s|"/.test(value)) value = `"${value.replace(/"/g, "'")}"`;
-    parts.push(`${key}=${value}`);
-  }
-  return parts.join(" ");
-}
-
 // Rotate before an append if the current file is at/over the cap: move <sessionId>.log ->
-// <sessionId>.log.1 (overwriting any previous backup) and start fresh. Best-effort — a rotation
-// failure must never block or crash a log write.
+// <sessionId>.log.1 (overwriting any previous backup) and start fresh. The writer reports a failed
+// rotation and skips that append, keeping diagnostic failures from growing the file indefinitely.
 function rotateIfNeeded() {
-  try {
-    if (!existsSync(logFile)) return;
-    if (statSync(logFile).size < MAX_BYTES) return;
-    renameSync(logFile, rotatedFile);
-  } catch {
-    // Best-effort rotation.
-  }
+  if (!existsSync(logFile)) return;
+  if (statSync(logFile).size < MAX_BYTES) return;
+  renameSync(logFile, rotatedFile);
 }
 
 // Best-effort retention: keep the newest MAX_SESSION_FILES base logs (plus their .1 backups) and
@@ -143,13 +129,24 @@ function pruneOldSessionLogs() {
 export function appendSessionLog(event, detail = {}, { level = "info" } = {}) {
   if (!enabled || !logFile) return;
   try {
+    if (!isDiagnosticLoggingEnabled({ baseDir: logHome })) return;
+    if (!/^[a-zA-Z0-9_.-]{1,96}$/.test(event)) return;
+    if (!directoryReady) {
+      ensureDir(logDir);
+      pruneOldSessionLogs();
+      directoryReady = true;
+    }
     rotateIfNeeded();
     const ts = new Date().toISOString();
     const lvl = String(level).toUpperCase().padEnd(5, " ");
-    const tail = formatDetail(detail);
+    const tail = formatDiagnosticDetail(detail);
     const line = `${ts} ${lvl} ${event}${tail ? " " + tail : ""}\n`;
     appendFileSync(logFile, line, { encoding: "utf8", mode: 0o600 });
+    failureReported = false;
   } catch {
-    // Best-effort: a failed log write is silently dropped rather than disrupting the session.
+    if (!failureReported) {
+      failureReported = true;
+      console.error("Weft session diagnostics could not be written. Check local diagnostics settings and Weft data-folder access.");
+    }
   }
 }

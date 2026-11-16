@@ -546,10 +546,25 @@ export function saveDeviceName(name, { baseDir } = {}) {
   return trimmed;
 }
 
+/** Read the laptop-local logging preference without changing Copilot history. */
+export function isDiagnosticLoggingEnabled({ baseDir } = {}) {
+  const config = loadConfig({ baseDir, strict: true });
+  if (config.diagnostics === undefined) return true;
+  if (!config.diagnostics || typeof config.diagnostics !== "object" || Array.isArray(config.diagnostics) ||
+      config.diagnostics.enabled !== undefined && typeof config.diagnostics.enabled !== "boolean") {
+    throw new Error("Invalid local diagnostics configuration.");
+  }
+  return config.diagnostics.enabled !== false;
+}
+
 /** Validate an entire management edit before a single atomic configuration write. */
 export function saveManagementSettings(patch, { baseDir } = {}) {
   const config = loadConfig({ baseDir, strict: true });
   const next = { ...config };
+  if (patch.loggingEnabled !== undefined) {
+    if (typeof patch.loggingEnabled !== "boolean") throw new Error("Invalid diagnostic logging setting.");
+    next.diagnostics = { ...config.diagnostics, enabled: patch.loggingEnabled };
+  }
   if (patch.deviceName !== undefined) {
     if (typeof patch.deviceName !== "string" || !patch.deviceName.trim() || patch.deviceName.trim().length > MAX_DEVICE_NAME_LENGTH) {
       throw new Error("Device name must contain 1 to 60 characters.");

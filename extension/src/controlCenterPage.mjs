@@ -9,6 +9,7 @@ export function renderControlCenterPage() {
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
 <title>Weft | Control Center</title>
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon.png">
 <style>${styles}${operationalStyles}</style>
 </head>
 <body>
@@ -70,6 +71,7 @@ export function renderControlCenterPage() {
         <form id="settings-form">
           <div class="settings-heading"><p class="muted">Changes are saved only when you choose Save. Polling never replaces unsaved edits.</p><span id="settings-dirty" class="badge" hidden>Unsaved changes</span></div>
           <fieldset id="settings-fields" disabled>
+            <div class="card settings-card"><div class="settings-intro"><span class="icon-tile" data-icon="pulse"></span><h2>Local diagnostics</h2><p>Debug Weft on this laptop without collecting chat or tool contents.</p></div><div class="settings-inputs"><label class="check"><input id="logging-enabled" type="checkbox">Enable local Weft diagnostic logs</label><p class="field-help">Applies to updated Station, relay, Control Center and Weft session runtimes. Existing logs are retained; Copilot's own history is unaffected. Logs stay on this device.</p></div></div>
             <div class="card settings-card"><div class="settings-intro"><span class="icon-tile" data-icon="device"></span><h2>Identity &amp; transport</h2><p>How this computer appears, and how its encrypted connection travels.</p></div><div class="settings-inputs"><label for="device-name">Device name</label><input id="device-name" required maxlength="200" autocomplete="off" placeholder="This computer’s name"><p class="field-help">The system name is prefilled when no custom name is configured.</p><label for="transport">Transport</label><select id="transport"><option value="clear">Not configured (clear selection)</option><option value="supabase">Supabase Realtime</option><option value="devtunnel">Microsoft Dev Tunnel</option></select><p class="field-help">Changing transport can interrupt phone connections. Clearing it does not start or stop a worker.</p></div></div>
             <div class="card settings-card"><div class="settings-intro"><span class="icon-tile" data-icon="shield"></span><h2>Trust &amp; permissions</h2><p>Keep approval boundaries intentional. Broader access requires your confirmation.</p></div><div class="settings-inputs"><label for="permission-mode">Approval mode</label><select id="permission-mode"><option value="default">Default — native approvals</option><option value="allow-all">Allow all — broader permissions</option></select><label for="pairing-mode">Pairing trust</label><select id="pairing-mode"><option value="persistent">Persistent — remember the phone</option><option value="ephemeral">Ephemeral — temporary pairing</option></select><label class="check"><input id="terminal-enabled" type="checkbox">Enable phone terminal access</label><p class="field-help">Terminal access is separate from session chat and workspace previews.</p></div></div>
             <div class="card settings-card"><div class="settings-intro"><span class="icon-tile" data-icon="folder"></span><h2>Read-only file sharing</h2><p>Only explicitly requested files within your allowed roots. Host permissions and native approvals still apply.</p></div><div class="settings-inputs"><label class="check"><input id="files-enabled" type="checkbox">Enable file sharing with the phone</label><div class="section-heading"><h3>Allowed roots</h3><button id="root-add" class="button compact" type="button">Add root</button></div><p class="field-help">Each root needs a unique name and an absolute local folder path.</p><div id="roots"></div><p id="roots-empty" class="hint">No roots configured. File access needs an explicitly allowed root.</p><label for="file-excludes">Excluded paths / patterns</label><textarea id="file-excludes" rows="4" spellcheck="false" placeholder="One exclusion per line"></textarea><p class="field-help">Preserves your explicit exclusions; do not enter credentials here.</p></div></div>
@@ -86,6 +88,7 @@ export function renderControlCenterPage() {
       </section>
 
       <section id="panel-diagnostics" class="panel" hidden aria-labelledby="page-title">
+        <article class="card remediation"><div class="section-heading"><h2>Recent local diagnostic events</h2><button id="diagnostics-refresh" class="button compact" type="button">Load diagnostics</button></div><p id="diagnostics-log-status" class="muted small">Load up to 100 sanitized local events. No transcripts, commands, credentials or raw logs are returned.</p><pre id="diagnostics-events" class="path" role="region" tabindex="0" aria-label="Sanitized local diagnostic events"></pre></article>
         <div class="service-grid"><article class="card"><span class="icon-tile" data-icon="pulse"></span><h2>Local installation</h2><dl class="diagnostic-list"><div><dt>Running version</dt><dd id="diagnostic-version">Unknown</dd></div><div><dt>Computer</dt><dd id="diagnostic-device">Unknown</dd></div><div><dt>Platform</dt><dd id="diagnostic-platform">Unknown</dd></div><div><dt>Last checked</dt><dd id="diagnostic-checked">Not yet checked</dd></div><div><dt>Transport</dt><dd id="diagnostic-transport">Unknown</dd></div></dl><p class="hint">This is the version served by the local Control Center. Repository source changes are not installed updates; running workers may need a restart after an installed update.</p></article><article class="card"><span class="icon-tile" data-icon="update"></span><h2>Release check</h2><p class="muted">Check availability without installing, deploying, or restarting anything.</p><p id="update-result" class="hint" role="status" aria-live="polite">No release check requested.</p><button id="update-check" type="button" class="button">Check for updates</button><p class="small muted">Installed clients change only after a published release is explicitly installed.</p></article></div>
         <article class="card remediation"><h2>When something isn’t connected</h2><div class="remedy-grid"><div><h3>Unknown or stale status</h3><p>Refresh status. If the local service is unavailable, reopen Control Center from Weft. Unknown does not mean disconnected.</p></div><div><h3>Phone trusted, not connected</h3><p>Keep your existing trust. Check the selected transport and open the phone app before replacing a pairing.</p></div><div><h3>Worker unsupported</h3><p>Background workload controls require Windows. Copilot session discovery and supported session actions remain separate.</p></div></div><div id="diagnostic-warnings" class="notice warning" hidden><strong>Reported warnings</strong><ul id="diagnostic-warning-list"></ul></div><p class="small muted">Only status and sanitized remediation are shown here. No transcripts, logs, or pairing secrets.</p></article>
       </section>
@@ -100,6 +103,7 @@ export function renderControlCenterPage() {
 }
 
 const operationalStyles = `
+#diagnostics-events{white-space:pre-wrap;max-height:360px;overflow:auto}
 #panel-control .service-grid{grid-template-areas:"station connection" "mobile connection";align-items:stretch}
 #panel-control .station-card{grid-area:station}
 #panel-control .connection-card{grid-area:connection}
@@ -665,6 +669,7 @@ function controlCenterClient() {
     $("permission-mode").value = saved.permissionMode === "allow-all" ? "allow-all" : "default";
     $("pairing-mode").value = saved.pairingMode === "ephemeral" ? "ephemeral" : "persistent";
     $("terminal-enabled").checked = saved.terminalEnabled === true;
+    $("logging-enabled").checked = saved.loggingEnabled !== false;
     $("files-enabled").checked = saved.files?.enabled === true;
     $("file-excludes").value = (saved.files?.exclude || []).join("\n");
     $("roots").replaceChildren();
@@ -711,6 +716,7 @@ function controlCenterClient() {
       permissionMode: $("permission-mode").value,
       pairingMode: $("pairing-mode").value,
       terminalEnabled: $("terminal-enabled").checked,
+      loggingEnabled: $("logging-enabled").checked,
       files: {
         enabled: $("files-enabled").checked,
         roots: [...$("roots").children].map((row) => ({
@@ -987,6 +993,18 @@ function controlCenterClient() {
   }
 
   $("refresh").addEventListener("click", () => void refreshState());
+  $("diagnostics-refresh").addEventListener("click", async () => {
+    $("diagnostics-refresh").disabled = true;
+    try {
+      const result = await api("/api/diagnostics");
+      if (!Array.isArray(result?.entries)) throw new ApiError("Diagnostic events are unavailable.", 200);
+      text("diagnostics-log-status", "Local logging " + (result.enabled ? "on" : "off") + " · " + result.entries.length + " recent sanitized events. Existing logs are retained.");
+      $("diagnostics-events").textContent = result.entries.map((entry) =>
+        [entry.timestamp, entry.level, entry.event,
+          ...Object.entries(entry.fields || {}).map(([key, value]) => key + "=" + value)].join(" ")).join("\n");
+    } catch (error) { text("diagnostics-log-status", error.message); }
+    finally { $("diagnostics-refresh").disabled = false; }
+  });
   $("control-primary").addEventListener("click", () => {
     const action = $("control-primary").dataset.action;
     if (action === "start") void runOperation("station.start", {});

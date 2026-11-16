@@ -9,6 +9,7 @@ import { weftHome, listProjects, addProject, removeProject, setDefault } from ".
 import {
   loadTransportConfig, loadDeviceName, loadDefaultPermissionMode, isPersistentPairingEnabled,
   isTerminalEnabled, loadFileSharingConfig, saveManagementSettings, loadSupabaseCredentials,
+  isDiagnosticLoggingEnabled,
 } from "./transportConfig.mjs";
 import { rotatePersistedIdentity, clearPersistedIdentity, getOrCreatePersistedIdentity, readSavedPairing } from "./pairingIdentity.mjs";
 import { backgroundCommand, backgroundTaskOperation, startBackground, stopBackground } from "./backgroundLifecycle.mjs";
@@ -20,6 +21,7 @@ import { readRegistry, isPidAlive } from "./registryFile.mjs";
 import { discoverRuntimeLifecycles, createRuntimeLifecycleClient } from "./runtimeLifecycle.mjs";
 import { resolveVersion } from "./version.mjs";
 import { verifyProcessIdentities } from "./processIdentity.mjs";
+import { readStationDiagnostics, appendStationLog } from "./stationLog.mjs";
 
 export class ManagementError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -30,7 +32,7 @@ const actions = {
   "relay.start": [], "relay.stop": ["confirmed"], "relay.restart": ["confirmed"],
   "project.add": ["name", "path", "makeDefault"],
   "project.remove": ["name", "confirmed"], "project.default": ["name"],
-  "settings.save": ["deviceName", "permissionMode", "pairingMode", "terminalEnabled", "files", "transport", "confirmed", "expectedRevision"],
+  "settings.save": ["deviceName", "permissionMode", "pairingMode", "terminalEnabled", "loggingEnabled", "files", "transport", "confirmed", "expectedRevision"],
   "pairing.replace": ["confirmed"],
   "pairing.rotate": ["confirmed"],
   "session.activate": ["runtimeId"], "session.disconnect": ["runtimeId", "confirmed"],
@@ -111,6 +113,7 @@ export function createManagement({
     deviceName: loadDeviceName(options), permissionMode: loadDefaultPermissionMode(options),
     pairingMode: isPersistentPairingEnabled(options) ? "persistent" : "ephemeral",
     terminalEnabled: isTerminalEnabled(options), files: loadFileSharingConfig(options),
+    loggingEnabled: isDiagnosticLoggingEnabled(options),
   });
   const settingsRevision = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
   const requireWindows = () => {
@@ -213,6 +216,12 @@ export function createManagement({
   }
   async function execute(action, payload = {}, { interactive = false, trustedCli = false, operationId, onProgress } = {}) {
     validateManagementAction(action, payload);
+    const started = Date.now();
+    const operation = createHash("sha256").update(operationId ?? randomUUID()).digest("hex").slice(0, 12);
+    const log = (event, fields, level = "info") => appendStationLog(event, {
+      operation, phase: action, ...fields,
+    }, { baseDir, level });
+    log("management.requested", { pid: process.pid });
     const report = (stage, fields = {}) => onProgress?.({ stage, label: describeStage(stage), progressAt: Date.now(), ...fields });
     const startRole = async (role) => {
       report(`starting-${role}`);
@@ -296,6 +305,12 @@ export function createManagement({
       } else await prepareRelay({ interactive, report });
       const status = await startRole(role);
       return { state: status.state, deviceName: status.deviceName, paired: status.paired, baseUrl: status.baseUrl };
+    }).then((result) => {
+      log("management.completed", { elapsedMs: Date.now() - started });
+      return result;
+    }).catch((error) => {
+      log("management.failed", { code: error.code ?? error.name, elapsedMs: Date.now() - started }, "error");
+      throw error;
     });
   }
   let pendingState = null;
@@ -344,6 +359,7 @@ export function createManagement({
   }
   return {
     execute, settings, projects: () => listProjects(options),
+    diagnostics: () => ({ enabled: isDiagnosticLoggingEnabled(options), entries: readStationDiagnostics(options) }),
     state() {
       pendingState ??= readState().finally(() => { pendingState = null; });
       return pendingState;

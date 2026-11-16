@@ -90,6 +90,11 @@ test("private local API rejects unauthenticated, cross-origin, forged-host and i
   const h = await host(t, { state: async () => ({ station: { state: "stopped" } }) });
   assert.equal((await fetch(h.app.origin + "/api/state")).status, 401);
   assert.equal((await h.get("/")).status, 200);
+  assert.equal((await fetch(h.app.origin + "/favicon.png")).status, 401);
+  const icon = await h.get("/favicon.png");
+  assert.equal(icon.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await icon.arrayBuffer()),
+    await readFile(new URL("../../mobile/public/icon-192.png", import.meta.url)));
   assert.equal((await h.post({ id: randomUUID(), action: "station.start", payload: {} }, "/api/operations", { Origin: "https://attacker.test" })).status, 403);
   const forged = await new Promise((resolve, reject) => {
     const req = request(h.app.origin + "/api/state", { headers: { Cookie: h.cookie, Host: "attacker.test" } }, (res) => {

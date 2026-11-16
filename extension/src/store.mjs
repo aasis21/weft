@@ -171,7 +171,7 @@ function dirExists(dir) {
  * happened to survive a global newest-50 cut. Returns [] on any read failure (older Node without
  * node:sqlite, missing/locked DB, …) so the caller degrades to an empty list.
  */
-export async function listSessions({ limit, cwd } = {}, dbPath = DB_PATH) {
+export async function listSessions({ limit, cwd, strict = false } = {}, dbPath = DB_PATH) {
   const pageSize = clampSessionLimit(limit);
   const folder = typeof cwd === "string" && cwd.trim() ? cwd.trim() : null;
   try {
@@ -207,7 +207,8 @@ export async function listSessions({ limit, cwd } = {}, dbPath = DB_PATH) {
     } finally {
       db.close();
     }
-  } catch {
+  } catch (error) {
+    if (strict) throw new Error("Copilot session store could not be read.", { cause: error });
     return [];
   }
 }
@@ -218,7 +219,7 @@ export async function listSessions({ limit, cwd } = {}, dbPath = DB_PATH) {
  * could advertise "(2)" simply because the newest fifty rows belonged to somewhere else. Folders
  * whose directory no longer exists are omitted, matching listSessions.
  */
-export async function listSessionFolders(dbPath = DB_PATH) {
+export async function listSessionFolders(dbPath = DB_PATH, { strict = false } = {}) {
   try {
     const db = await openDb(dbPath);
     try {
@@ -237,7 +238,8 @@ export async function listSessionFolders(dbPath = DB_PATH) {
     } finally {
       db.close();
     }
-  } catch {
+  } catch (error) {
+    if (strict) throw new Error("Copilot folder list could not be read.", { cause: error });
     return [];
   }
 }

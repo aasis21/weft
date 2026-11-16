@@ -16,7 +16,7 @@ function initialState() {
     projects: [{ name: "Workbench", path: "C:\\work\\bench", default: true }],
     settings: {
       transport: { kind: "devtunnel" }, deviceName: null, permissionMode: "default", pairingMode: "persistent",
-      terminalEnabled: false, files: { enabled: false, roots: [], exclude: ["**/.env"] },
+      terminalEnabled: false, loggingEnabled: true, files: { enabled: false, roots: [], exclude: ["**/.env"] },
     },
     sessions: [
       { runtimeId: "runtime-1", sessionId: "session-1", state: "dormant", pid: 301, title: "Design system", cwd: "C:\\work\\bench", paired: false, connected: null, watchLevel: "quiet" },
@@ -29,6 +29,7 @@ function initialState() {
 test("Control Center is self-contained and its browser script parses", () => {
   const html = renderControlCenterPage();
   assert.match(html, /<title>Weft \| Control Center<\/title>/);
+  assert.match(html, /<link rel="icon" type="image\/png" sizes="192x192" href="\/favicon.png">/);
   for (const name of ["control", "sessions", "setup", "pairing", "diagnostics"]) assert.match(html, new RegExp('id="panel-' + name + '"'));
   assert.doesNotMatch(html, /(?:src|href)\s*=\s*["']https?:/);
   assert.doesNotMatch(html, /\.innerHTML\b|\.outerHTML\b|insertAdjacentHTML|document\.write|console\./);
@@ -71,6 +72,7 @@ test("Control Center actual management browser journey persists projects and set
     terminal: { enabled: false, retainedSyntheticOption: "keep-terminal" },
     files: { enabled: false, roots: [], exclude: ["**/.env"] },
     retainedSyntheticSection: { purpose: "verify-save-preservation" },
+    diagnostics: { enabled: true, retainedSyntheticOption: "keep-diagnostics" },
   };
   await writeFile(join(home, "weft.config.json"), JSON.stringify(originalConfig), "utf8");
   const management = createManagement({
@@ -100,6 +102,17 @@ test("Control Center actual management browser journey persists projects and set
   await page.goto(app.url);
   await expect(page.locator("#freshness")).toHaveText("Live · every 5s");
   assert.equal(page.url(), app.origin + "/", "Bootstrap redirects to the authenticated default page");
+  const iconSize = await page.evaluate(async () => {
+    const icon = document.querySelector('link[rel="icon"]');
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+      image.src = icon.href;
+    });
+    return [image.naturalWidth, image.naturalHeight];
+  });
+  assert.deepEqual(iconSize, [192, 192], "The authenticated app window can load the packaged Weft logo.");
   assert.ok((await context.cookies()).some((cookie) => cookie.name === "weft_control" && cookie.httpOnly && cookie.sameSite === "Strict"));
   await expect(page.locator("#device-chip")).toHaveText(originalConfig.deviceName);
   await expect(page.locator("#station-start")).toBeDisabled();
@@ -159,7 +172,7 @@ test("Control Center actual management browser journey persists projects and set
   });
   assert.deepEqual(management.settings(), {
     transport: { kind: "devtunnel" }, deviceName, permissionMode: "allow-all",
-    pairingMode: "ephemeral", terminalEnabled: false, files,
+    pairingMode: "ephemeral", terminalEnabled: false, loggingEnabled: true, files,
   });
   await expect(page.locator("#settings-dirty")).toBeHidden();
   await expect(page.locator("#settings-save")).toBeDisabled();
@@ -277,6 +290,8 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
           json(h.stateStatus, h.stateStatus === 200 ? h.state : { error: { code: "unavailable", message: "Local status unavailable" } });
         } else if (url.pathname === "/api/pairing") json(200, h.pairing);
         else if (url.pathname === "/api/auth") json(200, h.state.connection?.auth ?? { state: "unavailable" });
+        else if (url.pathname === "/api/diagnostics") json(200, { enabled: h.state.settings.loggingEnabled,
+          entries: [{ timestamp: "2026-11-16T00:00:00Z", level: "ERROR", event: "launch.failed", fields: { code: "TERMINAL_LAUNCH_FAILED" } }] });
         else if (url.pathname === "/api/update") json(200, { current: "0.2.39", available: true, latest: "0.2.40", message: "Published release available." });
         else if (url.pathname === "/api/operations" && request.method === "POST") {
           let body = "";
@@ -831,6 +846,22 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     await expect(h.page.locator("#pairing-message")).toContainText("did not include a runtime ID");
     await expect(h.page.locator("#pairing-code")).toHaveValue("");
     assert.equal(h.requests.filter((request) => request.path === "/api/pairing").length, 0);
+  });
+
+  await t.test("per-device diagnostics setting is saved explicitly and local events load only on request", async (st) => {
+    const h = await harness(st);
+    await h.go("Setup");
+    await h.page.locator("#logging-enabled").uncheck();
+    assert.equal(h.state.settings.loggingEnabled, true);
+    await h.page.locator("#settings-save").click();
+    await h.finished();
+    assert.equal(h.calls[0].payload.loggingEnabled, false);
+    await h.go("Diagnostics");
+    assert.equal(h.requests.filter((request) => request.path === "/api/diagnostics").length, 0);
+    await h.page.locator("#diagnostics-refresh").click();
+    await expect(h.page.locator("#diagnostics-log-status")).toContainText("Local logging off");
+    await expect(h.page.locator("#diagnostics-events")).toContainText("TERMINAL_LAUNCH_FAILED");
+    assert.equal(h.requests.filter((request) => request.path === "/api/diagnostics").length, 1);
   });
 
   await t.test("diagnostics checks published availability but never installs or deploys", async (st) => {

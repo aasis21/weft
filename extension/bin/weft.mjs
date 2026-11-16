@@ -35,7 +35,7 @@ import {
   ensureDevTunnelLogin,
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
-import { loadTransportConfig, isTerminalEnabled } from "../src/transportConfig.mjs";
+import { loadTransportConfig, isTerminalEnabled, isDiagnosticLoggingEnabled } from "../src/transportConfig.mjs";
 import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
 import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
@@ -193,6 +193,20 @@ async function main() {
       showName();
     } else if (command === "set-permission") {
       await setPermission(args);
+    } else if (command === "set-logging") {
+      if (args.length !== 1 || !["on", "off"].includes(args[0])) throw new Error("Usage: weft set-logging <on|off>");
+      await management.execute("settings.save", { loggingEnabled: args[0] === "on" }, { trustedCli: true });
+      console.log(`Local Weft diagnostic logging is ${args[0]} for this laptop. Existing logs and Copilot history are unchanged.`);
+    } else if (command === "show-logging") {
+      if (args.length) throw new Error("Usage: weft show-logging");
+      console.log(`Local Weft diagnostic logging: ${isDiagnosticLoggingEnabled() ? "on" : "off"}`);
+    } else if (command === "logs") {
+      if (args.length) throw new Error("Usage: weft logs");
+      const diagnostics = management.diagnostics();
+      console.log(`Local diagnostics: ${diagnostics.enabled ? "on" : "off"} (latest ${diagnostics.entries.length} sanitized entries)`);
+      for (const entry of diagnostics.entries) console.log(
+        `${entry.timestamp} ${entry.level} ${entry.event} ${Object.entries(entry.fields).map(([key, value]) => `${key}=${value}`).join(" ")}`,
+      );
     } else if (command === "show-permission") {
       showPermission();
     } else if (command === "set-pairing") {
@@ -211,6 +225,7 @@ async function main() {
       throw new Error(`Unknown command: ${command}`);
     }
   } catch (err) {
+    appendStationLog("cli.failed", { code: err?.code ?? err?.name ?? "Error", phase: "cli" }, { level: "error" });
     console.error(err?.message ?? String(err));
     if (command === "start") {
       console.error(
@@ -315,6 +330,8 @@ async function backgroundWorker([role, home, ...rest]) {
     throw new Error("Invalid background worker invocation.");
   }
   process.env.WEFT_HOME = home;
+  enableStationLog();
+  appendStationLog("worker.start", { role, pid: process.pid, version: resolveVersion() });
   let state = { state: "starting", stage: role === "station" ? "starting-station" : "checking-cli", progressAt: Date.now() };
   let closing = false;
   let shutdown = null;
@@ -340,6 +357,7 @@ async function backgroundWorker([role, home, ...rest]) {
     try {
       await start({
         background: true,
+        onProgress: (stage) => { state = { state: "starting", stage, progressAt: Date.now() }; },
         onReady: (value, stop) => {
           listener = value;
           shutdown = stop;
@@ -362,6 +380,7 @@ async function backgroundWorker([role, home, ...rest]) {
   let lastFailure = null;
   let lastHealthyAt = null;
   let provisionAttempts = 0;
+  let previousState = null;
   while (!closing) {
     try {
       if (needsProvision) {
@@ -405,6 +424,10 @@ async function backgroundWorker([role, home, ...rest]) {
       attempt: provisionAttempts,
       ...(state.state === "ready" ? { nextCheckAt: Date.now() + 30_000 } : { nextRetryAt: Date.now() + 30_000 }),
     };
+    if (state.state !== previousState) {
+      appendStationLog("worker.state", { role, state: state.state, stage: state.stage, attempt: provisionAttempts });
+      previousState = state.state;
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 30_000));
   }
 }
@@ -625,7 +648,7 @@ function createProvisionStatusLine() {
   };
 }
 
-async function start({ newDevice = false, background = false, onReady = null, onEndpointChanged = null } = {}) {
+async function start({ newDevice = false, background = false, onReady = null, onEndpointChanged = null, onProgress = null } = {}) {
   const allowTerminal = isTerminalEnabled();
   const lock = acquireLock();
   let released = false;
@@ -654,6 +677,7 @@ async function start({ newDevice = false, background = false, onReady = null, on
   const status = createStatusLine();
   const listener = createListener({
     allowTerminal,
+    onProgress,
     onDeviceConnected: (peer) => {
       status.setConnected(true);
       appendStationLog("device.connected", { phone: peer?.senderName ?? peer?.deviceId ?? "unknown" });
@@ -1713,6 +1737,9 @@ function usage() {
   weft show-name
   weft set-permission <default|allow-all>
   weft show-permission
+  weft set-logging <on|off>
+  weft show-logging
+  weft logs
   weft set-pairing <persistent|ephemeral>
   weft rotate-pairing
   weft devtunnel start [--foreground]
@@ -1728,6 +1755,9 @@ Use \`weft ui --browser\` for an ordinary browser tab. If Chromium is unavailabl
 Weft reports the default-browser fallback; it never installs a browser automatically.
 Control shows Station/connection/mobile status and explicit Start/Stop/Restart.
 Setup combines project registration, transport and access settings.
+Local diagnostics default on. Use \`weft set-logging off|on\`, or Setup's logging checkbox.
+\`weft show-logging\` checks it; \`weft logs\` reads up to 100 sanitized local entries.
+Updated Weft writers apply the switch live; existing logs and Copilot history remain unchanged.
 Opening or closing the dashboard does not start or stop Station, relay or Copilot.
 Use \`weft help\` (or --help / -h) for this command reference.
 
