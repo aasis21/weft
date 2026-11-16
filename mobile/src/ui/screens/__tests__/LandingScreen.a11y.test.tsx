@@ -61,7 +61,7 @@ describe('LandingScreen install command tabs accessibility', () => {
     expect(panel).toHaveAttribute('aria-labelledby', other.id);
   });
 
-  it('presents install, weft start, then scan as the primary path', async () => {
+  it('presents install, Control Center, then scan as the primary path', async () => {
     render(
       <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
     );
@@ -71,7 +71,9 @@ describe('LandingScreen install command tabs accessibility', () => {
     const items = within(steps).getAllByRole('listitem');
     expect(items).toHaveLength(3);
     expect(items[0]).toHaveTextContent('Install on your laptop');
-    expect(items[1]).toHaveTextContent('Run weft start');
+    expect(items[1]).toHaveTextContent('Open Weft on your laptop');
+    expect(items[1]).toHaveTextContent('Run weft to open Control Center');
+    expect(items[1]).toHaveTextContent('For terminal-only operation, use weft start');
     expect(items[2]).toHaveTextContent('Scan with your phone');
     expect(within(steps).queryByText(/\/weft/)).not.toBeInTheDocument();
     const setup = screen.getByRole('region', { name: 'How it works' });
