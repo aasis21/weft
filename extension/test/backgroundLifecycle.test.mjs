@@ -29,6 +29,9 @@ test("background tasks are user-scoped, manual, limited, and safely quoted", () 
   assert.match(script, /running from another installation/);
   assert.notEqual(backgroundTaskName("station", options), backgroundTaskName("relay", options));
   assert.match(backgroundTaskScript("stop", { ...options, role: "station" }), /Weft did not stop/);
+  const status = backgroundTaskScript("status", { ...options, role: "station" });
+  assert.match(status, /Get-ScheduledTaskInfo/);
+  assert.match(status, /lastResult=\$lastResult/);
 });
 
 test("task execution sends an encoded script without a shell argument interpolation", async () => {

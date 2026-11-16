@@ -136,7 +136,7 @@ export function createManagement({
     }
     report("checking-cli");
     const bin = await findDevTunnelBinary();
-    if (!bin) throw new ManagementError("missing-devtunnel", "Install the Dev Tunnel CLI before starting the relay.");
+    if (!bin) throw new ManagementError("missing-devtunnel", "The Dev Tunnel CLI was not found or did not respond to devtunnel --version within 30 seconds. Check it in a terminal, then retry.");
     report("checking-sign-in");
     if (interactive) await ensureDevTunnelLogin(bin, { onProgress: report });
     else if (!(await isDevTunnelLoggedIn(bin))) throw new ManagementError("sign-in-required", "Run devtunnel user login -g in a terminal, then retry. Browser startup never waits on terminal input.");
@@ -145,32 +145,66 @@ export function createManagement({
     const result = {};
     await Promise.all(["station", "relay"].map(async (role) => {
       if (platform !== "win32") { result[role] = { state: "unsupported", supported: false }; return; }
-      const controlRecord = readRegistry(`background-${role}.json`, options);
-      const raw = await background.command(role, "status", null, options);
-      if (raw) {
-        const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
-          connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
-          nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint } = raw;
-        result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
-          connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
-          nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint,
-          stageLabel: stage ? describeStage(stage) : null, supported: true };
-        if (role === "station") result[role].checkedAt = Date.now();
-        const currentRecord = readRegistry(`background-${role}.json`, options);
-        if (controlRecord?.identity?.runtimeInstanceId &&
-            controlRecord.identity.runtimeInstanceId === currentRecord?.identity?.runtimeInstanceId) {
-          result[role].pid ??= controlRecord.pid;
-          result[role].startedAt ??= controlRecord.processStartedAt;
-        }
-      } else {
-        const task = await background.task("status", { ...options, role });
-        result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true };
+      try { await roleStatus(role, result); }
+      catch (error) {
+        statusPartFailed(role, error);
+        result[role] = { state: "unknown", supported: true, error: "Status for this workload could not be verified. Refresh before starting or stopping it." };
       }
     }));
-    const registry = readRegistry(DEVTUNNEL_REGISTRY_FILE, options);
-    if (registry?.alive !== false && isPidAlive(registry?.pid)) {
+    await relayStatus(result);
+    if (platform === "win32" && result.station.state === "stopped") {
+      let pid;
+      try { pid = Number.parseInt(readFileSync(join(baseDir, "listener.lock"), "utf8"), 10); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (isPidAlive(pid)) result.station = { state: "foreground", supported: false, pid, error: "Station is owned by a terminal. Manage it there." };
+    }
+    return result;
+  }
+  const reportedStops = new Set();
+  function statusPartFailed(phase, error) {
+    appendStationLog("ui.status_part_failed", { phase, code: error?.code ?? error?.name ?? "Error" }, { baseDir, level: "warn" });
+  }
+  async function roleStatus(role, result) {
+    const controlRecord = readRegistry(`background-${role}.json`, options);
+    const raw = await background.command(role, "status", null, options);
+    if (raw) {
+      const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
+        connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
+        nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint } = raw;
+      result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
+        connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
+        nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint,
+        stageLabel: stage ? describeStage(stage) : null, supported: true };
+      if (role === "station") result[role].checkedAt = Date.now();
+      const currentRecord = readRegistry(`background-${role}.json`, options);
+      if (controlRecord?.identity?.runtimeInstanceId &&
+          controlRecord.identity.runtimeInstanceId === currentRecord?.identity?.runtimeInstanceId) {
+        result[role].pid ??= controlRecord.pid;
+        result[role].startedAt ??= controlRecord.processStartedAt;
+      }
+      return;
+    }
+    const task = await background.task("status", { ...options, role });
+    result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true };
+    // Weft stop disables the task, so an enabled, idle task with a failure result ended on its own.
+    if (task.state === "Ready" && Number.isInteger(task.lastResult) && ![0, 0x41303].includes(task.lastResult)) {
+      const exitCode = "0x" + (task.lastResult >>> 0).toString(16).toUpperCase();
+      result[role].unexpectedStop = { exitCode };
+      if (!reportedStops.has(role + exitCode)) {
+        reportedStops.add(role + exitCode);
+        appendStationLog("worker.unexpected_stop", { role, code: exitCode }, { baseDir, level: "warn" });
+      }
+      result[role].error = `${role === "station" ? "Station" : "The relay"} stopped unexpectedly (exit code ${exitCode}). Start it again; saved phone trust is unchanged.`;
+    }
+  }
+  async function relayStatus(result) {
+    if (!result.relay) return;
+    try {
+      const registry = readRegistry(DEVTUNNEL_REGISTRY_FILE, options);
+      if (!(registry?.alive !== false && isPidAlive(registry?.pid))) return;
       const health = await relayHealth(undefined, { baseDir });
-      result.relay = { ...result.relay, state: health ? "ready" : "unhealthy",
+      const { unexpectedStop, ...current } = result.relay;
+      result.relay = { ...current, state: health ? "ready" : "unhealthy", error: unexpectedStop ? undefined : current.error,
         managerPid: result.relay.pid, managerStartedAt: result.relay.startedAt,
         pid: registry.pid, startedAt: registry.startedAt ?? null, baseUrl: registry.baseUrl, localHealth: health ? "ok" : "unhealthy" };
       if (health) {
@@ -181,14 +215,10 @@ export function createManagement({
         if (forwarding === "rejected") result.relay = { ...result.relay, state: "degraded", error: "Local relay is running, but public forwarding is unavailable. The manager will try recovery." };
         if (forwarding === "unreachable") result.relay = { ...result.relay, state: "waiting-network", error: "Public forwarding could not be reached. Check network connectivity." };
       }
+    } catch (error) {
+      statusPartFailed("relay-health", error);
+      result.relay = { ...result.relay, forwarding: "unknown", error: result.relay.error ?? "Relay health could not be verified. Refresh status." };
     }
-    if (platform === "win32" && result.station.state === "stopped") {
-      let pid;
-      try { pid = Number.parseInt(readFileSync(join(baseDir, "listener.lock"), "utf8"), 10); }
-      catch (error) { if (error.code !== "ENOENT") throw error; }
-      if (isPidAlive(pid)) result.station = { state: "foreground", supported: false, pid, error: "Station is owned by a terminal. Manage it there." };
-    }
-    return result;
   }
   async function runtimes() {
     const discovery = await discover({ baseDir, timeoutMs: 750, verifyBatch: verifyProcessIdentities, cleanup: false });
@@ -324,6 +354,12 @@ export function createManagement({
     }).finally(() => { authPending = null; });
     return authPending;
   }
+  // Status never waits on the Dev Tunnel CLI: return the last result and refresh in the background.
+  function cachedAuth() {
+    if (!authValue || Date.now() - authValue.checkedAt >= 60_000) void auth().catch(() => {});
+    return authValue ?? { state: "checking", provider: null, account: null, checkedAt: null,
+      message: "Checking Dev Tunnel sign-in in the background." };
+  }
   function safeOrigin(value) {
     try { const url = new URL(value); return ["https:", "http:", "wss:", "ws:"].includes(url.protocol) ? url.origin : null; }
     catch { return null; }
@@ -332,7 +368,12 @@ export function createManagement({
       const warnings = [];
       const currentSettings = settings();
       const kind = currentSettings.transport?.kind ?? null;
-      const [work, runtime, signIn] = await Promise.all([workloads(), runtimes(), kind === "devtunnel" ? auth() : null]);
+      const [work, runtime] = await Promise.all([workloads(), runtimes().catch((error) => {
+        statusPartFailed("sessions", error);
+        warnings.push("Copilot session discovery is temporarily unavailable. Refresh status; no session was changed.");
+        return { discovery: { status: "unavailable", runtimes: [] }, list: [] };
+      })]);
+      const signIn = kind === "devtunnel" ? cachedAuth() : null;
       if (["conflict", "uncertain"].includes(runtime.discovery.status)) warnings.push("Some session identities could not be verified; uncertain sessions cannot be controlled.");
       const savedPairing = readSavedPairing(options);
       work.station.savedPairing = savedPairing;

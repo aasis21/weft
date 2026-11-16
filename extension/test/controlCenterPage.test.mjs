@@ -761,13 +761,15 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
   await t.test("stale state cannot imply a live phone or allow mutation, and API timeouts recover", async (st) => {
     const h = await harness(st, (h) => { h.state.sessions[0].connected = true; h.state.sessions[0].state = "active"; });
     await h.page.clock.install();
-    h.stateDelay = 20000;
+    h.stateDelay = 40000;
     const before = h.requests.length;
     await h.page.locator("#refresh").click();
     await expect.poll(() => h.requests.length).toBeGreaterThan(before);
+    await h.page.clock.fastForward(20000);
+    await expect(h.page.locator("#connection-error")).toBeHidden();
     await h.page.clock.fastForward(10001);
     await expect(h.page.locator("#connection-error")).toBeVisible();
-    await expect(h.page.locator("#connection-message")).toContainText("10 seconds");
+    await expect(h.page.locator("#connection-message")).toContainText("30 seconds");
     await expect(h.page.locator("#station-stop")).toBeDisabled();
     await expect(h.page.locator("#metric-connected")).toHaveText("—");
     await h.go("Sessions");

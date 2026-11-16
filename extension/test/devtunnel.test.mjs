@@ -19,7 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { recoverRelayPort, resolveSavedTunnelId } from "../src/relayServerProcess.mjs";
@@ -109,7 +109,10 @@ const readPorts = () => {
 const writePorts = (value) => {
   if (portsState) writeFileSync(portsState, JSON.stringify(value));
 };
-if (cmd === "--version") { console.log("fake 1.0"); process.exit(0); }
+if (cmd === "--version") {
+  if (process.env.FAKE_DEVTUNNEL_VERSION_READY && !existsSync(process.env.FAKE_DEVTUNNEL_VERSION_READY)) process.exit(1);
+  console.log("fake 1.0"); process.exit(0);
+}
 if (args.join(" ") === "user show") {
   if (loggedIn()) { console.log("Logged in as fake@example.com using GitHub."); process.exit(0); }
   // The REAL devtunnel CLI exits 0 here while printing that the session is unusable — detecting
@@ -381,6 +384,32 @@ test("findDevTunnelBinary resolves WEFT_DEVTUNNEL_BIN when it runs successfully"
     assert.equal(await findDevTunnelBinary(), bin);
   } finally {
     delete process.env.WEFT_DEVTUNNEL_BIN;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("findDevTunnelBinary retries after a failed probe instead of remembering not-installed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "weft-devtunnel-"));
+  const ready = join(dir, "version-ready");
+  const saved = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA };
+  try {
+    const bin = makeFakeCli(dir);
+    process.env.WEFT_DEVTUNNEL_BIN = bin;
+    process.env.FAKE_DEVTUNNEL_VERSION_READY = ready;
+    // Keep node for the fake shim, but hide any real devtunnel install on this machine.
+    process.env.PATH = [dirname(process.execPath),
+      process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32") : "/usr/bin:/bin"].join(delimiter);
+    process.env.LOCALAPPDATA = dir;
+    const { findDevTunnelBinary } = await freshModule();
+    assert.equal(await findDevTunnelBinary(), null);
+    writeFileSync(ready, "");
+    assert.equal(await findDevTunnelBinary(), bin);
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.LOCALAPPDATA === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = saved.LOCALAPPDATA;
+    delete process.env.WEFT_DEVTUNNEL_BIN;
+    delete process.env.FAKE_DEVTUNNEL_VERSION_READY;
     rmSync(dir, { recursive: true, force: true });
   }
 });

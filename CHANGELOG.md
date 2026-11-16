@@ -5,6 +5,15 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.45
+
+- Stop reporting an installed but slow Dev Tunnel CLI as missing: allow 30 seconds for its
+  version check and retry after a failure instead of remembering "not installed".
+- Keep the Control Center usable when one Windows status check is slow or fails: show
+  partial status, check Dev Tunnel sign-in in the background, and wait up to 30 seconds.
+- Report Station or relay stopping unexpectedly with its Windows exit code in Control
+  Center, `weft status`, and local diagnostics.
+
 ## 0.2.44
 
 - Use one filtered Windows creation-time inventory for runtime identity verification,

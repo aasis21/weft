@@ -183,6 +183,47 @@ test("selected transport scopes cached authentication and avoids claiming a diff
   assert.equal(reads, 2);
 });
 
+test("status reports partial failures and unexpected worker exits without failing the dashboard", async (t) => {
+  const baseDir = await home(t);
+  saveTransportConfig({ kind: "devtunnel" }, { baseDir });
+  let taskState = "Ready";
+  let authReads = 0;
+  let releaseAuth;
+  const manager = createManagement({ baseDir, platform: "win32",
+    discover: async () => { throw Object.assign(new Error("private discovery detail"), { code: "EPERM" }); },
+    background: {
+      command: async (role) => {
+        if (role === "relay") throw Object.assign(new Error("private relay detail"), { code: "EIO" });
+        return null;
+      },
+      task: async () => ({ state: taskState, taskName: "Weft-station", lastResult: 3221225786 }),
+    },
+    authentication: () => { authReads++; return new Promise((resolve) => { releaseAuth = resolve; }); },
+  });
+  const state = await manager.state();
+  assert.equal(state.station.state, "stopped");
+  assert.equal(state.station.unexpectedStop.exitCode, "0xC000013A");
+  assert.match(state.station.error, /stopped unexpectedly/);
+  assert.equal(state.relay.state, "unknown");
+  assert.deepEqual(state.sessions, []);
+  assert.ok(state.warnings.some((warning) => /discovery is temporarily unavailable/.test(warning)));
+  assert.equal(state.connection.auth.state, "checking");
+  assert.ok(!JSON.stringify(state).includes("private"));
+  releaseAuth({ state: "signed-in", provider: "GitHub", account: "example", checkedAt: Date.now() });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await manager.state()).connection.auth.state, "signed-in");
+  assert.equal(authReads, 1);
+  taskState = "Disabled";
+  const stopped = await manager.state();
+  assert.equal(stopped.station.unexpectedStop, undefined);
+  assert.equal(stopped.station.error, undefined);
+  const log = await readFile(join(baseDir, "station.log"), "utf8");
+  assert.equal(log.match(/worker\.unexpected_stop role=station code=0xC000013A/g).length, 1);
+  assert.match(log, /ui\.status_part_failed phase=sessions code=EPERM/);
+  assert.match(log, /ui\.status_part_failed phase=relay code=EIO/);
+  assert.ok(!log.includes("private"));
+});
+
 test("interrupted management ownership is explicit and is not automatically deleted", async (t) => {
   const baseDir = await home(t);
   await writeFile(join(baseDir, "management.lock"), JSON.stringify({ pid: 2147483647, token: "old" }));

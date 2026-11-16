@@ -88,7 +88,11 @@ if ($task) {
 `;
   if (operation === "status") {
     return `${prefix}
-if ($task) { @{state=[string]$task.State; taskName=$name} | ConvertTo-Json -Compress }
+if ($task) {
+  $lastResult=$null
+  try { $lastResult=[int64](Get-ScheduledTaskInfo -TaskName $name -TaskPath '\\').LastTaskResult } catch { }
+  @{state=[string]$task.State; taskName=$name; lastResult=$lastResult} | ConvertTo-Json -Compress
+}
 else { @{state='NotRegistered'; taskName=$name} | ConvertTo-Json -Compress }`;
   }
   if (operation === "disable" || operation === "stop") {

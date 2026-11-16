@@ -261,9 +261,9 @@ function controlCenterClient() {
   class ApiError extends Error {
     constructor(message, status) { super(message); this.status = status; }
   }
-  async function api(path, body) {
+  async function api(path, body, timeoutMs = 10000) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(path, {
         method: body === undefined ? "GET" : "POST",
@@ -285,7 +285,7 @@ function controlCenterClient() {
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(error.name === "AbortError"
-        ? "The local service did not respond within 10 seconds. Check status before repeating an action."
+        ? "The local service did not respond within " + Math.round(timeoutMs / 1000) + " seconds. Check status before repeating an action."
         : "Cannot reach the local service. Reopen Control Center from Weft, then retry.", 0);
     } finally { clearTimeout(timer); }
   }
@@ -294,7 +294,8 @@ function controlCenterClient() {
     $("refresh").disabled = true;
     stateRequest = (async () => {
       try {
-        const next = await api("/api/state");
+        // Windows status checks can be slow on a busy laptop; a slow first answer is not a failure.
+        const next = await api("/api/state", undefined, 30000);
         if (!next || typeof next !== "object" || !Array.isArray(next.sessions) || !Array.isArray(next.projects) || !next.settings) {
           throw new ApiError("Status is incomplete. Reopen Control Center or check the installed version.", 200);
         }
@@ -442,7 +443,7 @@ function controlCenterClient() {
       known && (tunnel && state.relay?.state === "ready" || supabase && info.liveState === "connected") ? "good" : "");
     const auth = info.auth;
     text("auth-status", stale ? "Status stale" : auth?.state === "signed-in" ? "Signed in"
-      : auth?.state === "signed-out" ? "Sign-in required" : "Not verified");
+      : auth?.state === "signed-out" ? "Sign-in required" : auth?.state === "checking" ? "Checking…" : "Not verified");
     text("auth-account", auth?.state === "signed-in"
       ? [auth.provider || "Provider not reported", auth.account || "Account not reported"].join(" · ") : "Not reported");
     text("auth-help", auth?.state === "signed-in" ? "Transport sign-in is separate from your Copilot account." +

@@ -131,7 +131,11 @@ function candidateBinaries() {
   return candidates;
 }
 
-let cachedBin; // resolved once per process — the binary's location doesn't change mid-run.
+// Only a working binary is cached. A cold `devtunnel --version` can take well over 10 seconds on a
+// busy Windows laptop, so a slow or failed probe must not be remembered as "not installed".
+let cachedBin = null;
+let pendingBin = null;
+const PROBE_TIMEOUT_MS = positiveIntFromEnv("WEFT_DEVTUNNEL_PROBE_TIMEOUT_MS", 30_000);
 
 function shouldUseShellForCommand(command) {
   if (process.platform !== "win32") return false;
@@ -152,21 +156,23 @@ async function candidateVariants(candidate) {
 
 /** Locate a working `devtunnel` binary, or null if none of the candidates run. */
 export async function findDevTunnelBinary() {
-  if (cachedBin !== undefined) return cachedBin;
-  for (const candidate of candidateBinaries()) {
-    for (const variant of await candidateVariants(candidate)) {
-      try {
-        if (variant !== "devtunnel" && !existsSync(variant)) continue;
-        await execFileAsync(variant, ["--version"], { shell: shouldUseShellForCommand(variant), timeout: 3000 });
-        cachedBin = variant;
-        return cachedBin;
-      } catch {
-        // Try the next candidate.
+  if (cachedBin) return cachedBin;
+  pendingBin ??= (async () => {
+    for (const candidate of candidateBinaries()) {
+      for (const variant of await candidateVariants(candidate)) {
+        try {
+          if (variant !== "devtunnel" && !existsSync(variant)) continue;
+          await execFileAsync(variant, ["--version"], { shell: shouldUseShellForCommand(variant), timeout: PROBE_TIMEOUT_MS });
+          cachedBin = variant;
+          return cachedBin;
+        } catch {
+          // Try the next candidate.
+        }
       }
     }
-  }
-  cachedBin = null;
-  return null;
+    return null;
+  })().finally(() => { pendingBin = null; });
+  return pendingBin;
 }
 
 export async function readDevTunnelAuthentication({
@@ -176,9 +182,9 @@ export async function readDevTunnelAuthentication({
   try {
     bin ??= await findBinary();
     if (!bin) return { state: "unavailable", provider: null, account: null, checkedAt,
-      message: "Dev Tunnel CLI is not installed." };
+      message: "The Dev Tunnel CLI was not found or did not respond. Check devtunnel --version in a terminal." };
     const { stdout } = await execute(bin, ["user", "show", "--json"], {
-      shell: shouldUseShellForCommand(bin), timeout: 3000, maxBuffer: 64 * 1024,
+      shell: shouldUseShellForCommand(bin), timeout: 20_000, maxBuffer: 64 * 1024,
     });
     const raw = JSON.parse(stdout);
     const state = /^logged in$/i.test(raw.status ?? "") ? "signed-in"

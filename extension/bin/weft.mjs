@@ -283,7 +283,7 @@ function backgroundOptions() {
 async function prepareBackgroundRelay() {
   if (await healthyRegistryEntry(undefined, { verifyPublic: true })) return;
   const bin = await findDevTunnelBinary();
-  if (!bin) throw new Error("Dev Tunnel CLI is not installed. Install it before starting the relay.");
+  if (!bin) throw new Error("The Dev Tunnel CLI was not found or did not respond to `devtunnel --version` within 30 seconds. Check it in a terminal, then retry.");
   await ensureDevTunnelLogin(bin);
 }
 
@@ -315,7 +315,10 @@ async function stationStatus() {
   if (status) console.log(`Station: ${status.state}${status.deviceName ? ` (${status.deviceName})` : ""}${status.error ? ` - ${status.error}` : ""}`);
   else {
     const task = await backgroundTaskOperation("status", { ...backgroundOptions(), role: "station" });
-    console.log(`Station is not responding. Task: ${task.state}.`);
+    const failed = task.state === "Ready" && Number.isInteger(task.lastResult) && ![0, 0x41303].includes(task.lastResult);
+    console.log(failed
+      ? `Station stopped unexpectedly (exit code 0x${(task.lastResult >>> 0).toString(16).toUpperCase()}). Run \`weft start\`; saved phone trust is unchanged.`
+      : `Station is not responding. Task: ${task.state}.`);
   }
 }
 

@@ -222,8 +222,17 @@ An already-online device is not proof that a new Copilot session finished startu
 
 Dev Tunnel sign-in remains an explicit terminal step when required:
 `devtunnel user login -g`. Browser start does not wait on hidden terminal prompts.
+On Dev Tunnel, **Start Station** reuses a healthy relay or starts it first, then
+starts Station. A cold `devtunnel --version` can be slow, so Weft allows 30 seconds
+and retries later rather than reporting the CLI as missing after a slow check.
 Configuration changes explain restart requirements. Stop Relay and trust replacement
 require confirmation; unregistering a folder removes only its shortcut registration.
+
+Windows status checks can take several seconds on a busy laptop. Control Center
+waits up to 30 seconds and shows the parts it could verify; sign-in is checked in the
+background. If Station or the relay exits without `weft stop`, its card and
+`weft status` report "stopped unexpectedly" with the Windows exit code. Start it
+again; saved phone trust is unchanged.
 
 Phone connectivity is based on recent authenticated peer traffic, not a saved
 pairing record. When no recent evidence is available, the panel reports unknown;
