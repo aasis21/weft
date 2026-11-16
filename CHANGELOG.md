@@ -5,6 +5,11 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.48
+
+- Summarize older sessions that cannot report phone traffic in one Diagnostics line
+  instead of one note per session.
+
 ## 0.2.47
 
 - Add **Diagnostics → Phone traffic** to Control Center: a live view of the latest 100

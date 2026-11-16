@@ -1206,10 +1206,12 @@ function controlCenterClient() {
     $("traffic-problems").className = summary.problems ? "traffic-result bad" : "";
     const notes = [];
     if (!trafficData.enabled) notes.push("Local diagnostic logging is off for this laptop, so traffic is not recorded. Turn it on in Setup.");
-    for (const source of trafficData.sources || []) {
-      if (source.state === "stopped") notes.push(source.name + " is not running.");
-      if (source.state === "unsupported") notes.push(source.name + " runs an older version that does not report traffic. Restart it after updating.");
-    }
+    const sources = trafficData.sources || [];
+    const station = sources.find((source) => source.kind === "station");
+    if (station?.state === "stopped") notes.push("Station is not running.");
+    if (station?.state === "unsupported") notes.push("Station runs an older version that does not report traffic. Restart it after updating.");
+    const olderSessions = sources.filter((source) => source.kind === "session" && source.state === "unsupported").length;
+    if (olderSessions) notes.push(olderSessions + (olderSessions === 1 ? " Copilot session runs" : " Copilot sessions run") + " an older Weft version, so their traffic is not shown until each is reloaded.");
     trafficStatus(notes.length ? notes.join(" ") : "Updated " + new Date(trafficData.checkedAt).toLocaleTimeString() + ". Event types, timing and size only.");
     const rows = visibleTraffic().map((entry) => {
       const row = document.createElement("tr");

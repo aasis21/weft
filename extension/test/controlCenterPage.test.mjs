@@ -877,7 +877,7 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     assert.equal(await h.page.locator("#traffic-rows img").count(), 0);
     await expect(h.page.locator("#traffic-received")).toHaveText("3");
     await expect(h.page.locator("#traffic-problems")).toHaveText("1");
-    await expect(h.page.locator("#traffic-status")).toContainText("older version");
+    await expect(h.page.locator("#traffic-status")).toContainText("1 Copilot session runs an older Weft version");
     await expect(h.page.locator("#traffic-live")).toHaveText("Live · every 2s");
     await h.page.locator("#traffic-hide-heartbeats").check();
     await expect(rows).toHaveCount(2);
