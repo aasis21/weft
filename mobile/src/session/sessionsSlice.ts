@@ -17,7 +17,7 @@ import type {
 import type { DeviceHealthCache } from '@/lib/devices';
 import {
   applyEnvelope,
-  orderRecoveredEnvelope,
+  orderCaughtUpEnvelope,
   appendNotice,
   appendUser,
   dismissApproval,
@@ -517,7 +517,7 @@ const sessionsSlice = createSlice({
       const compact = session.connection.compact;
       applyEnvelope(session, action.payload.envelope);
       if (action.payload.countUnread === false && compact) session.connection.compact = true;
-      orderRecoveredEnvelope(session, action.payload.envelope);
+      orderCaughtUpEnvelope(session, action.payload.envelope);
       if (!duplicate && action.payload.countUnread !== false && isUnreadActivity(action.payload.envelope)) {
         session.lastEventAt = action.payload.envelope.ts;
         if (!(action.payload.visible ?? (action.payload.id === state.activeId))) {

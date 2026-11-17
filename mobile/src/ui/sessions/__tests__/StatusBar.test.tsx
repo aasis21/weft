@@ -157,6 +157,22 @@ describe('StatusBar', () => {
     // The ambiguous rollup badge was removed (#161); the drawer conveys unread per-session instead.
     expect(container.querySelector('.session-count')).not.toBeInTheDocument();
     expect(container.querySelector('.unread-badge')).not.toBeInTheDocument();
+    expect(container.querySelector('.decision-waiting-dot')).not.toBeInTheDocument();
+  });
+
+  it('marks the menu button when another session is waiting for a decision', () => {
+    mockSnapshot = {
+      ready: true,
+      activeId: 'current',
+      sessions: [
+        { meta: { channelId: 'current' }, needsAttention: 1 },
+        { meta: { channelId: 'other' }, needsAttention: 2, unread: true },
+      ],
+      devices: [],
+    };
+    const { container } = renderStatusBar();
+    expect(screen.getByRole('button', { name: 'Open sessions, 1 waiting for your decision' })).toBeInTheDocument();
+    expect(container.querySelector('.decision-waiting-dot')).toBeInTheDocument();
   });
 
   it('swaps the hamburger for a static Weft mark when the sidebar is already docked (#183)', async () => {

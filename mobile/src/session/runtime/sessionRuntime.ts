@@ -5,7 +5,7 @@ import {
   WATCH_RENEW_MS,
   WATCH_COOLDOWN_MS,
   watchRequest,
-  recoveryRequest,
+  catchUpRequest,
   SUBTYPE,
   approvalDecision,
   elicitationResponse,
@@ -46,7 +46,7 @@ import {
 import type {
   EventEnvelope,
   WatchLevel,
-  RecoveryMsg,
+  CatchUpPageMsg,
   LaunchStatusMsg,
   LifecycleStatusMsg,
   PairingPayload,
@@ -479,12 +479,12 @@ export class SessionRuntime {
   private readonly watches = new Map<string, { id: string; level: WatchLevel; client: WeftClient }>();
   private watchTimer: ReturnType<typeof setInterval> | null = null;
   private readonly watchCooldowns = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly recoveryPositions = new Map<string, NonNullable<import('@/lib/timeline').PersistedTimeline['recovery']>>();
-  private readonly recoveryWrites = new Map<string, Promise<void>>();
-  private readonly recovering = new Set<string>();
+  private readonly catchUpPositions = new Map<string, NonNullable<import('@/lib/timeline').PersistedTimeline['catch-up']>>();
+  private readonly catchUpWrites = new Map<string, Promise<void>>();
+  private readonly catchUpInFlight = new Set<string>();
   private readonly historyDeferred = new Set<string>();
-  private readonly recoverySeen = new Map<string, Set<string>>();
-  private readonly recoverySummaries = new Map<string, {
+  private readonly catchUpSeen = new Map<string, Set<string>>();
+  private readonly catchUpSummaries = new Map<string, {
     key: string; seen: Set<number>; messages: number; tools: number; failures: number;
   }>();
 
@@ -496,7 +496,7 @@ export class SessionRuntime {
       this.scheduleMetaPersist(channelId);
     }
     this.updateWatches();
-    if (channelId && this.attentionPeers.has(channelId)) this.requestRecovery(channelId);
+    if (channelId && this.attentionPeers.has(channelId)) this.requestCatchUp(channelId);
   }
 
   private activateSession(channelId: string): void {
@@ -552,7 +552,7 @@ export class SessionRuntime {
       this.watchTimer = setInterval(() => {
         for (const [id, watch] of this.watches) {
           if (watch.level !== 'off' && !this.disconnectedPeers.has(id) && this.attentionClient(id) === watch.client) {
-            void watch.client.send(watchRequest(watch.id, watch.level)).catch(() => {});
+            void watch.client.send(watchRequest(watch.id, watch.level, WATCH_LEASE_MS, this.seenPosition(id))).catch(() => {});
           }
         }
       }, WATCH_RENEW_MS);
@@ -567,12 +567,18 @@ export class SessionRuntime {
     const id = previous?.client === client && !(previous.level === 'off' && level !== 'off')
       ? previous.id : crypto.randomUUID();
     this.watches.set(channelId, { id, level, client });
-    void client.send(watchRequest(id, level, WATCH_LEASE_MS)).catch(() => {});
+    void client.send(watchRequest(id, level, WATCH_LEASE_MS, this.seenPosition(channelId))).catch(() => {});
     if (level === 'detail' && this.controllers.has(channelId) &&
         (previous?.level !== 'detail' || previous.client !== client)) {
       this.requestState(channelId);
-      this.requestRecovery(channelId);
+      this.requestCatchUp(channelId);
     }
+  }
+
+  /** Last catch-up position the user actually viewed, so the laptop can count unseen replies. */
+  private seenPosition(channelId: string): { epoch: string | null; cursor: number } {
+    const position = this.catchUpPositions.get(channelId);
+    return { epoch: position?.viewedEpoch ?? null, cursor: position?.viewedCursor ?? 0 };
   }
 
   private negotiateAttention(channelId: string, capabilities?: string[]): void {
@@ -589,32 +595,32 @@ export class SessionRuntime {
     }
   }
 
-  private requestRecovery(channelId: string): void {
-    if (!this.chatIsVisible(channelId) || this.recovering.has(channelId)) return;
-    const position = this.recoveryPositions.get(channelId);
-    this.recovering.add(channelId);
-    void this.send(channelId, recoveryRequest(position?.epoch ?? null, position?.cursor ?? 0)).catch(() => {
-      this.recovering.delete(channelId);
+  private requestCatchUp(channelId: string): void {
+    if (!this.chatIsVisible(channelId) || this.catchUpInFlight.has(channelId)) return;
+    const position = this.catchUpPositions.get(channelId);
+    this.catchUpInFlight.add(channelId);
+    void this.send(channelId, catchUpRequest(position?.epoch ?? null, position?.cursor ?? 0)).catch(() => {
+      this.catchUpInFlight.delete(channelId);
     });
-    this.controllers.get(channelId)?.arm('recovery', () => {
-      this.recovering.delete(channelId);
-      if (this.foreground && !this.disconnectedPeers.has(channelId)) this.requestRecovery(channelId);
+    this.controllers.get(channelId)?.arm('catch-up', () => {
+      this.catchUpInFlight.delete(channelId);
+      if (this.foreground && !this.disconnectedPeers.has(channelId)) this.requestCatchUp(channelId);
     }, WATCH_RENEW_MS);
   }
 
-  private retainRecovery(channelId: string, data: RecoveryMsg, live = false): void {
-    const pending = this.recoveryWrites.get(channelId) ?? Promise.resolve();
+  private applyCatchUpPage(channelId: string, data: CatchUpPageMsg, live = false): void {
+    const pending = this.catchUpWrites.get(channelId) ?? Promise.resolve();
     let retained = false;
     const next = pending.then(async () => {
       const ctrl = this.controllers.get(channelId);
       if (!ctrl?.client || !this.session(channelId)) return;
-      const previous = this.recoveryPositions.get(channelId) ??
+      const previous = this.catchUpPositions.get(channelId) ??
         { epoch: null, cursor: 0, viewedEpoch: null, viewedCursor: 0 };
       const cursor = previous.epoch === data.epoch ? previous.cursor : 0;
       const viewed = previous.viewedEpoch === data.epoch ? previous.viewedCursor : 0;
       const newItems = data.items.filter((item) => Number.isSafeInteger(item.sequence) && item.sequence > cursor);
       const unseen = newItems.filter((item) => item.sequence > viewed);
-      const gapId = data.gap ? `recovery-gap:${data.epoch}` : previous.gapId;
+      const gapId = data.gap ? `catch-up-gap:${data.epoch}` : previous.gapId;
       const anchor = unseen.length ? Math.min(...unseen.map((item) => item.message.ts)) : this.clock();
       const notice = (id: string, text: string, level: 'info' | 'warning' = 'info', ts = this.clock()): void => {
         this.store.dispatch(noticeAppended({ id: channelId, noticeId: id, text, level, ts }));
@@ -623,14 +629,14 @@ export class SessionRuntime {
       const summaryKey = `${data.epoch}:${viewed}`;
       if (unseen.length) {
         notice(`catchup:${summaryKey}`, 'Since last viewed', 'info', anchor - 0.2);
-        let summary = this.recoverySummaries.get(channelId);
+        let summary = this.catchUpSummaries.get(channelId);
         if (summary?.key !== summaryKey) {
           const saved = previous.summary?.key === summaryKey ? previous.summary : undefined;
           summary = {
             key: summaryKey, seen: new Set(saved?.sequences ?? []),
             messages: saved?.messages ?? 0, tools: saved?.tools ?? 0, failures: saved?.failures ?? 0,
           };
-          this.recoverySummaries.set(channelId, summary);
+          this.catchUpSummaries.set(channelId, summary);
         }
         for (const item of unseen) {
           if (summary.seen.has(item.sequence)) continue;
@@ -647,35 +653,35 @@ export class SessionRuntime {
           'info', anchor - 0.1);
       }
       for (const item of newItems) {
-        const message = { ...item.message, recoveryEpoch: data.epoch, recoverySequence: item.sequence };
+        const message = { ...item.message, streamEpoch: data.epoch, streamSequence: item.sequence };
         // Pending prompts and live state are reconciled only by the current authoritative snapshot.
         if (message.eventType !== EVENT_TYPE.STREAM || ![
           SUBTYPE.STREAM.ASSISTANT_MESSAGE, SUBTYPE.STREAM.USER_MESSAGE,
           SUBTYPE.STREAM.TOOL_START, SUBTYPE.STREAM.TOOL_COMPLETE, SUBTYPE.STREAM.LOG,
         ].includes(message.eventSubtype as never)) continue;
-        const seen = this.recoverySeen.get(channelId) ?? new Set<string>();
+        const seen = this.catchUpSeen.get(channelId) ?? new Set<string>();
         seen.add(`${data.epoch}:${item.sequence}`);
         if (seen.size > 1000) seen.delete(seen.values().next().value!);
-        this.recoverySeen.set(channelId, seen);
+        this.catchUpSeen.set(channelId, seen);
         this.store.dispatch(envelopeReceived({
           id: channelId, envelope: { ...message, receivedAt: this.clock() },
           visible: this.chatIsVisible(channelId), countUnread: false,
         }));
       }
-      const summary = this.recoverySummaries.get(channelId);
+      const summary = this.catchUpSummaries.get(channelId);
       const position = {
         ...previous, epoch: data.epoch, cursor: Math.max(cursor, data.cursor), gapId,
         summary: summary ? {
           key: summary.key, sequences: [...summary.seen],
           messages: summary.messages, tools: summary.tools, failures: summary.failures,
         } : previous.summary,
-        ...(this.chatIsVisible(channelId) && !data.hasMore && (!live || !this.recovering.has(channelId))
+        ...(this.chatIsVisible(channelId) && !data.hasMore && (!live || !this.catchUpInFlight.has(channelId))
           ? { viewedEpoch: data.epoch, viewedCursor: Math.max(cursor, data.cursor) } : {}),
       };
       const session = this.session(channelId);
       if (!session) return;
-      await saveTranscript(channelId, { ...toPersisted(toTimelineState(session)), recovery: position }, true);
-      this.recoveryPositions.set(channelId, position);
+      await saveTranscript(channelId, { ...toPersisted(toTimelineState(session)), catchUp: position }, true);
+      this.catchUpPositions.set(channelId, position);
       retained = true;
       if (!data.hasMore) {
         if (this.chatIsVisible(channelId) && position.viewedEpoch === position.epoch &&
@@ -692,16 +698,16 @@ export class SessionRuntime {
       }
     }).catch(() => {
       this.store.dispatch(noticeAppended({
-        id: channelId, noticeId: 'recovery-storage-error', level: 'warning',
+        id: channelId, noticeId: 'catch-up-storage-error', level: 'warning',
         text: 'Could not save catch-up on this device. Reopen the chat to retry.', ts: this.clock(),
       }));
     }).finally(() => {
       if (live) return;
-      this.recovering.delete(channelId);
-      this.controllers.get(channelId)?.clear('recovery');
-      if (retained && data.hasMore && this.chatIsVisible(channelId)) this.requestRecovery(channelId);
+      this.catchUpInFlight.delete(channelId);
+      this.controllers.get(channelId)?.clear('catch-up');
+      if (retained && data.hasMore && this.chatIsVisible(channelId)) this.requestCatchUp(channelId);
     });
-    this.recoveryWrites.set(channelId, next);
+    this.catchUpWrites.set(channelId, next);
   }
 
   constructor(store?: AppStore) {
@@ -848,7 +854,7 @@ export class SessionRuntime {
       if (s.attention) this.attentionPeers.add(s.pairing.channelId);
     }
     for (const { channelId, persisted } of restored) {
-      if (persisted?.recovery) this.recoveryPositions.set(channelId, persisted.recovery);
+      if (persisted?.catchUp) this.catchUpPositions.set(channelId, persisted.catchUp);
     }
     const eventsById = new Map(restored.map((r) => [r.channelId, r.events]));
 
@@ -1061,7 +1067,7 @@ export class SessionRuntime {
       // boot-probe ordering have a start edge even before the first heartbeat lands.
       this.persistLiveness(channelId, /* flush */ true);
     }
-    this.recovering.delete(channelId);
+    this.catchUpInFlight.delete(channelId);
     this.updateWatches(true);
     this.requestState(channelId);
     if (this.visibleChat !== undefined && !this.chatIsVisible(channelId) && !this.attentionPeers.has(channelId)) {
@@ -1151,7 +1157,7 @@ export class SessionRuntime {
     }
     if (status === 'disconnected') {
       this.disconnectedPeers.add(channelId);
-      this.recovering.delete(channelId);
+      this.catchUpInFlight.delete(channelId);
       this.updateWatches();
       if (session.connection.status === 'live' || session.connection.status === 'idle') {
         this.store.dispatch(
@@ -1184,7 +1190,7 @@ export class SessionRuntime {
     const session = this.session(channelId);
     if (!ctrl || !session || ctrl.ephemeral) return;
     if (this.attentionPeers.has(channelId)) {
-      if (this.chatIsVisible(channelId)) this.requestRecovery(channelId);
+      if (this.chatIsVisible(channelId)) this.requestCatchUp(channelId);
       return;
     }
     const hasContent = session.history.items.length > 0 || session.transcript.items.length > 0;
@@ -1251,16 +1257,16 @@ export class SessionRuntime {
     // Ignore a message that decrypted after its channel was superseded (reconnect) or cooled to cold:
     // acting on it could set a stale card back to 'live' with no live connection.
     if (ctrl.client !== client) return;
-    const journalKey = message.recoveryEpoch && Number.isSafeInteger(message.recoverySequence)
-      ? `${message.recoveryEpoch}:${message.recoverySequence}` : null;
-    const seen = this.recoverySeen.get(channelId) ?? new Set<string>();
+    const journalKey = message.streamEpoch && Number.isSafeInteger(message.streamSequence)
+      ? `${message.streamEpoch}:${message.streamSequence}` : null;
+    const seen = this.catchUpSeen.get(channelId) ?? new Set<string>();
     if (journalKey) {
-      const position = this.recoveryPositions.get(channelId);
+      const position = this.catchUpPositions.get(channelId);
       if (seen.has(journalKey) ||
-          (position && position.epoch === message.recoveryEpoch && message.recoverySequence! <= position.cursor)) return;
+          (position && position.epoch === message.streamEpoch && message.streamSequence! <= position.cursor)) return;
       seen.add(journalKey);
       if (seen.size > 1000) seen.delete(seen.values().next().value!);
-      this.recoverySeen.set(channelId, seen);
+      this.catchUpSeen.set(channelId, seen);
     }
     let historyJustRequested = false;
     if (message.eventType === EVENT_TYPE.CONTROL) {
@@ -1272,8 +1278,8 @@ export class SessionRuntime {
           historyJustRequested = true;
         }
       }
-      if (message.eventSubtype === SUBTYPE.CONTROL.RECOVERY) {
-        this.retainRecovery(channelId, message.msg);
+      if (message.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_PAGE) {
+        this.applyCatchUpPage(channelId, message.msg);
         return;
       }
       if (message.eventSubtype === SUBTYPE.CONTROL.WATCH_STATE) {
@@ -1282,17 +1288,16 @@ export class SessionRuntime {
       }
       if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS) {
         const status = message.msg;
-        const position = this.recoveryPositions.get(channelId);
-        const viewed = position && position.viewedEpoch === status.epoch ? position.viewedCursor : 0;
+        const position = this.catchUpPositions.get(channelId);
         this.store.dispatch(compactStatusReceived({
           id: channelId, busy: status.busy,
-          unreadCount: this.chatIsVisible(channelId) ? before.unreadCount : Math.max(0, status.cursor - viewed),
+          unreadCount: this.chatIsVisible(channelId) ? before.unreadCount : status.unseenReplies ?? 0,
           pendingApprovals: status.pendingApprovals, pendingForms: status.pendingForms, ts: this.clock(),
         }));
         this.confirmHost(channelId, before.connection.status === 'live');
         this.scheduleMetaPersist(channelId);
         if (this.chatIsVisible(channelId) &&
-            (!position || position.epoch !== status.epoch || status.cursor > position.cursor)) this.requestRecovery(channelId);
+            (!position || position.epoch !== status.epoch || status.cursor > position.cursor)) this.requestCatchUp(channelId);
         return;
       }
     }
@@ -1386,14 +1391,14 @@ export class SessionRuntime {
     }
 
     this.schedulePersist(channelId);
-    if (message.recoveryEpoch && Number.isSafeInteger(message.recoverySequence)) {
+    if (message.streamEpoch && Number.isSafeInteger(message.streamSequence)) {
       // A live tail can race replay. Never advance over a missing journal entry.
-      const position = this.recoveryPositions.get(channelId);
-      if (position?.epoch === message.recoveryEpoch && message.recoverySequence === position.cursor + 1) {
-        this.retainRecovery(channelId, {
-          epoch: message.recoveryEpoch, cursor: message.recoverySequence!, items: [], hasMore: false, gap: false,
+      const position = this.catchUpPositions.get(channelId);
+      if (position?.epoch === message.streamEpoch && message.streamSequence === position.cursor + 1) {
+        this.applyCatchUpPage(channelId, {
+          epoch: message.streamEpoch, cursor: message.streamSequence!, items: [], hasMore: false, gap: false,
         }, true);
-      } else if (this.chatIsVisible(channelId)) this.requestRecovery(channelId);
+      } else if (this.chatIsVisible(channelId)) this.requestCatchUp(channelId);
     }
   }
 
@@ -3240,20 +3245,20 @@ export class SessionRuntime {
       'save',
       () => {
         ctrl.clear('save');
-        const pending = this.recoveryWrites.get(channelId) ?? Promise.resolve();
+        const pending = this.catchUpWrites.get(channelId) ?? Promise.resolve();
         const write = pending.then(async () => {
           const s = this.session(channelId);
           if (s) await saveTranscript(channelId, {
-            ...toPersisted(toTimelineState(s)), recovery: this.recoveryPositions.get(channelId),
+            ...toPersisted(toTimelineState(s)), catchUp: this.catchUpPositions.get(channelId),
           }, true);
         }).catch(() => {
           if (!this.session(channelId)) return;
           this.store.dispatch(noticeAppended({
-            id: channelId, noticeId: 'recovery-storage-error', level: 'warning',
+            id: channelId, noticeId: 'catch-up-storage-error', level: 'warning',
             text: 'Could not save this conversation on your device.', ts: this.clock(),
           }));
         });
-        this.recoveryWrites.set(channelId, write);
+        this.catchUpWrites.set(channelId, write);
       },
       PERSIST_THROTTLE_MS,
     );
@@ -3496,7 +3501,7 @@ export class SessionRuntime {
         if (!ctrl.client || session.connection.status === 'error') void this.reconnect(channelId);
         else if (this.chatIsVisible(channelId)) {
           this.requestState(channelId);
-          this.requestRecovery(channelId);
+          this.requestCatchUp(channelId);
         }
         continue;
       }

@@ -92,6 +92,13 @@ export function StatusBar({
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const snapshot = useSyncExternalStore(sessionRuntime.subscribe, sessionRuntime.getSnapshot);
   const unreadCount = snapshot.sessions.filter((session) => session.unread && session.meta.channelId !== snapshot.activeId).length;
+  // Another session is waiting for an approval or a form answer. Only this specific, actionable
+  // state gets a mark on the menu button (an unread rollup badge was removed as ambiguous, #161).
+  const othersAwaitingDecision = snapshot.sessions.filter((session) =>
+    session.meta.channelId !== snapshot.activeId && (session.needsAttention ?? 0) > 0).length;
+  const drawerLabel = othersAwaitingDecision > 0
+    ? `Open sessions, ${othersAwaitingDecision} waiting for your decision`
+    : unreadCount > 0 ? `Open sessions, ${unreadCount} unread` : 'Open sessions';
   const activeSession = snapshot.sessions.find((session) => session.meta.channelId === snapshot.activeId);
   // Single source of truth for the pill (#163): the same derivation the sidebar rows use, so the
   // header can never read "Live" while a row (or the banner below) says otherwise. Splits the calm
@@ -171,13 +178,14 @@ export function StatusBar({
           className="icon-btn drawer-btn"
           type="button"
           onClick={onOpenDrawer}
-          aria-label={unreadCount > 0 ? `Open sessions, ${unreadCount} unread` : 'Open sessions'}
+          aria-label={drawerLabel}
         >
           <span className="hamburger" aria-hidden="true">
             <span />
             <span />
             <span />
           </span>
+          {othersAwaitingDecision > 0 ? <span className="decision-waiting-dot" aria-hidden="true" /> : null}
         </button>
       )}
 

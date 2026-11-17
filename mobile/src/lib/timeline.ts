@@ -72,7 +72,7 @@ export interface NoticeItem {
 }
 
 export type TimelineItem = (UserItem | AssistantItem | ToolItem | NoticeItem) & {
-  recoveryEpoch?: string; recoverySequence?: number;
+  streamEpoch?: string; streamSequence?: number;
 };
 
 export interface TimelineState {
@@ -712,7 +712,7 @@ function mergePendingById<T extends { requestId: string }>(existing: T[], incomi
 
 /** A serializable snapshot of the durable parts of a timeline (no transient/live fields). */
 export interface PersistedTimeline {
-  recovery?: {
+  catchUp?: {
     epoch: string | null; cursor: number; viewedEpoch: string | null; viewedCursor: number; gapId?: string;
     summary?: { key: string; sequences: number[]; messages: number; tools: number; failures: number };
   };

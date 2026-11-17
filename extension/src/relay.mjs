@@ -35,7 +35,7 @@ import {
   ATTENTION_CAPABILITY,
   watchState,
   sessionStatus,
-  recovery,
+  catchUpPage,
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
@@ -44,7 +44,7 @@ import { WorkspaceError } from "./workspaceView.mjs";
 import { SessionFilesError } from "./sessionFiles.mjs";
 import { FileSharingError } from "./transportConfig.mjs";
 import { createAttentionLease } from "./pairedEndpoint.mjs";
-import { createSessionRecovery } from "./sessionRecovery.mjs";
+import { createSessionStreamStore } from "./sessionStreamStore.mjs";
 import { appendSessionLog } from "./sessionLog.mjs";
 
 const knownWorkspaceError = (error) =>
@@ -386,7 +386,7 @@ export async function attachRelay({
   permissionRelay,
   onConnectionLost,
   workspaceView,
-  recoveryStore,
+  streamStore: providedStreamStore,
 } = {}) {
   if (!session) throw new Error("weft relay: session is required");
   await channel?.connect?.();
@@ -397,19 +397,23 @@ export async function attachRelay({
   // refreshed on every heartbeat and re-sent (as session_meta) when it changes.
   let lastTitle = await fetchTitle(session);
   const logger = (message, options = {}) => logToSession(session, message, options);
-  let journal = recoveryStore;
-  if (!journal) {
+  // Saved stream events of this session, so a returning phone can catch up (sessionStreamStore.mjs).
+  let streamStore = providedStreamStore;
+  if (!streamStore) {
     try {
-      journal = await createSessionRecovery({
+      streamStore = await createSessionStreamStore({
         sessionId, onIssue: () => logger("Weft catch-up cache was reset; older missed events may be unavailable.", { level: "warning", ephemeral: false }),
       });
     } catch (error) {
       logger("Weft durable catch-up is unavailable; live pairing continues with memory-only catch-up. Check access to ~/.weft.", { level: "warning", ephemeral: false });
-      appendSessionLog("recovery.storage_unavailable", { error: error.name }, { level: "error" });
-      journal = await createSessionRecovery({ sessionId, persist: false });
+      appendSessionLog("stream_store.unavailable", { error: error.name }, { level: "error" });
+      streamStore = await createSessionStreamStore({ sessionId, persist: false });
     }
   }
   const attention = createAttentionLease();
+  // The phone's last viewed catch-up position, sent with its watch requests, so session status can
+  // count the replies it has not seen yet ("N new" in the session list).
+  let phoneSeenPosition = null;
   const wireSubscriptions = [];
   const approvals =
     permissionRelay ??
@@ -448,7 +452,7 @@ export async function attachRelay({
   // every change so the phone never has to merge partial updates.
   const agentStatus = { text: null, thinkingId: null };
   let lastBusy = null;
-  let recoveryWarning = false;
+  let streamStoreWarning = false;
   let captureChain = Promise.resolve();
   const outbound = [];
   let deliveryGeneration = 0;
@@ -459,28 +463,30 @@ export async function attachRelay({
   const captureMessage = async (msg) => {
     if (msg.eventType === EVENT_TYPE.STREAM && msg.eventSubtype === SUBTYPE.STREAM.ACTIVITY) lastBusy = msg.msg.busy;
     try {
-      const captured = await journal.capture(msg);
+      const captured = await streamStore.capture(msg);
       if (captured) msg = captured;
     } catch (error) {
-      if (!recoveryWarning) {
-        recoveryWarning = true;
-        logger("Weft catch-up could not be saved; recovery may have gaps.", { level: "warning", ephemeral: false });
+      if (!streamStoreWarning) {
+        streamStoreWarning = true;
+        logger("Weft catch-up could not be saved; the phone may miss some events.", { level: "warning", ephemeral: false });
       }
-      appendSessionLog("recovery.save_failed", { error: error.message }, { level: "error" });
+      appendSessionLog("stream_store.save_failed", { error: error.message }, { level: "error" });
     }
     return msg;
   };
+  const currentSessionStatus = () => sessionStatus({
+    busy: lastBusy, epoch: streamStore.epoch, cursor: streamStore.cursor,
+    pendingApprovals: approvals.snapshotPending().length + exitPlans.snapshotPending().length,
+    pendingForms: elicitations.snapshotPending().length,
+    unseenReplies: streamStore.countUnseenReplies(phoneSeenPosition?.epoch ?? null, phoneSeenPosition?.cursor ?? 0),
+  });
   const sendSafe = async (msg, target = channel, capture = true) => {
     if (capture) msg = await captureMessage(msg);
     if (!channel || target !== channel) return;
     const level = attention.level;
     if ([EVENT_TYPE.STREAM, EVENT_TYPE.APPROVAL, EVENT_TYPE.ELICITATION].includes(msg.eventType) && level !== "detail") {
       if (level === "compact" && msg.eventSubtype !== SUBTYPE.STREAM.ASSISTANT_DELTA && msg.eventSubtype !== SUBTYPE.STREAM.INTENT) {
-        msg = sessionStatus({
-          busy: lastBusy, epoch: journal.epoch, cursor: journal.cursor,
-          pendingApprovals: approvals.snapshotPending().length + exitPlans.snapshotPending().length,
-          pendingForms: elicitations.snapshotPending().length,
-        });
+        msg = currentSessionStatus();
       } else return;
     }
     if (msg.eventSubtype === SUBTYPE.CONTROL.HEARTBEAT && level === "off") return;
@@ -533,11 +539,7 @@ export async function attachRelay({
       }
       if (needsCatchUp && !stopped && generation === deliveryGeneration && channel && attention.level !== "off") {
         needsCatchUp = false;
-        await sendSafe(sessionStatus({
-          busy: lastBusy, epoch: journal.epoch, cursor: journal.cursor,
-          pendingApprovals: approvals.snapshotPending().length + exitPlans.snapshotPending().length,
-          pendingForms: elicitations.snapshotPending().length,
-        }));
+        await sendSafe(currentSessionStatus());
       }
     })().catch((error) => appendSessionLog("delivery.failed", { error: error.name }, { level: "error" }))
       .finally(() => {
@@ -689,15 +691,19 @@ export async function attachRelay({
       if (msg?.eventSubtype === SUBTYPE.CONTROL.WATCH_REQUEST) {
         void (async () => {
           const ack = attention.update(msg.msg);
+          if (ack && (typeof msg.msg.seenEpoch === "string" || msg.msg.seenEpoch === null) &&
+              Number.isSafeInteger(msg.msg.seenCursor) && msg.msg.seenCursor >= 0) {
+            phoneSeenPosition = { epoch: msg.msg.seenEpoch, cursor: msg.msg.seenCursor };
+          }
           if (ack) await reply(watchState(ack.watchId, ack.level, ack.leaseMs));
         })().catch((error) => logger(`Weft watch request failed: ${error.message}`, { level: "warning" }));
         return;
       }
-      if (msg?.eventSubtype === SUBTYPE.CONTROL.RECOVERY_REQUEST) {
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_REQUEST) {
         void (async () => {
           await captureChain;
-          const page = await journal.page(msg.msg?.epoch, msg.msg?.cursor, msg.msg?.limit);
-          await reply(recovery(page.items, page.epoch, page.cursor, page.hasMore, page.gap));
+          const page = await streamStore.page(msg.msg?.epoch, msg.msg?.cursor, msg.msg?.limit);
+          await reply(catchUpPage(page.items, page.epoch, page.cursor, page.hasMore, page.gap));
         })().catch((error) => logger(`Weft catch-up request failed: ${error.message}`, { level: "warning" }));
         return;
       }
@@ -767,6 +773,7 @@ export async function attachRelay({
 
   function detach() {
     lastPeerContactAt = null;
+    phoneSeenPosition = null;
     deliveryGeneration++;
     outbound.length = 0;
     delivering = false;
@@ -821,7 +828,7 @@ export async function attachRelay({
       await sendSafe(channelDown(reason));
       await channel?.close?.();
     }
-    await journal.close();
+    await streamStore.close();
   }
 
   if (channel) await rebind(channel);

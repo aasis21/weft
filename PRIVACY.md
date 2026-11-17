@@ -32,16 +32,19 @@ after three days unless a live runtime or unresolved operation still references 
 A `/weft` pairing inside one Copilot session uses an ephemeral identity that ends with
 that session.
 
-An activated session also keeps a local missed-event cache under `~/.weft/recovery/`.
-It contains user messages, completed assistant messages, and generic tool
-started/completed/failed summaries. It excludes token deltas, reasoning, raw tool
-arguments/results, workspace previews, and terminal output. This cache is plaintext
-in the user-private laptop directory, not a diagnostic log; recovery travels only
-over the paired encrypted channel. Retention is three days, up to 2,000 events or
-10 MiB per session, with oldest-cache eviction against a 100 MiB machine budget.
-Removing the recovery directory deletes laptop catch-up without resetting pairing.
-Current approvals and forms are obtained from live session state, not replayed as
-historical actions.
+An activated session also keeps a local **session stream store** under
+`~/.weft/session-streams/` (one file per shared session), so the phone can catch up
+with the same detail it would have seen live. It contains user messages, completed
+assistant messages, tool cards with their arguments and output (output is limited to
+2,000 characters, as sent live), and warnings and errors. It excludes token deltas,
+reasoning, workspace previews and terminal output. Each event is limited to 64 KiB.
+This store is plaintext in the user-private laptop directory, not a diagnostic log;
+catch-up travels only over the paired encrypted channel. Retention is three days, up
+to 2,000 events or 10 MiB per session; older tool cards are removed before messages.
+A store unused for three days is deleted, and the least recently active sessions are
+removed first above a 100 MiB machine budget. Removing the folder deletes laptop
+catch-up without resetting pairing. Current approvals and forms are obtained from live
+session state, not replayed as historical actions.
 
 Windows background Station and relay tasks run with the signed-in user's existing
 permissions. They start only when requested, have no boot/sign-in triggers, and

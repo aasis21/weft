@@ -72,8 +72,8 @@ export const SUBTYPE: {
     readonly WATCH_REQUEST: "watch_request";
     readonly WATCH_STATE: "watch_state";
     readonly SESSION_STATUS: "session_status";
-    readonly RECOVERY_REQUEST: "recovery_request";
-    readonly RECOVERY: "recovery";
+    readonly CATCH_UP_REQUEST: "catch_up_request";
+    readonly CATCH_UP_PAGE: "catch_up_page";
     readonly CHANNEL_UP: "channel_up";
     readonly WORKSPACE_REQUEST: "workspace_request";
     readonly WORKSPACE_RESULT: "workspace_result";
@@ -150,8 +150,8 @@ export interface EnvelopeBase {
    *  in `ts` can't be compared against the phone's clock. Falls back to `ts` when absent. */
   receivedAt?: number;
   /** Durable application-journal position, independent of SecureChannel sequencing. */
-  recoveryEpoch?: string;
-  recoverySequence?: number;
+  streamEpoch?: string;
+  streamSequence?: number;
   /** Stamped by SecureChannel on publish. */
   channelId?: string;
   sessionId?: string;
@@ -785,32 +785,40 @@ export const WATCH_LEASE_MS: 60000;
 export const WATCH_RENEW_MS: 20000;
 export const WATCH_COOLDOWN_MS: 5000;
 export type WatchLevel = "detail" | "compact" | "off";
-export interface WatchMsg { watchId: string; level: WatchLevel; leaseMs: number }
+export interface WatchMsg {
+  watchId: string; level: WatchLevel; leaseMs: number;
+  /** Phone's last viewed catch-up position, used to count unseen replies. */
+  seenEpoch?: string | null; seenCursor?: number;
+}
 export interface SessionStatusMsg {
   busy: boolean; epoch: string; cursor: number; pendingApprovals: number; pendingForms: number;
+  /** Assistant replies after the phone's last viewed position. */
+  unseenReplies?: number;
 }
-export interface RecoveryRequestMsg { epoch: string | null; cursor: number; limit: number }
-export interface RecoveryItem { sequence: number; message: EventEnvelope }
-export interface RecoveryMsg {
-  items: RecoveryItem[]; epoch: string; cursor: number; hasMore: boolean; gap: boolean;
+export interface CatchUpRequestMsg { epoch: string | null; cursor: number; limit: number }
+export interface CatchUpItem { sequence: number; message: EventEnvelope }
+export interface CatchUpPageMsg {
+  items: CatchUpItem[]; epoch: string; cursor: number; hasMore: boolean; gap: boolean;
 }
 export type WatchRequest = Envelope<"control", "watch_request", WatchMsg>;
 export type WatchState = Envelope<"control", "watch_state", WatchMsg>;
 export type SessionStatusMessage = Envelope<"control", "session_status", SessionStatusMsg>;
-export type RecoveryRequest = Envelope<"control", "recovery_request", RecoveryRequestMsg>;
-export type Recovery = Envelope<"control", "recovery", RecoveryMsg>;
-export function watchRequest(watchId: string, level: WatchLevel, leaseMs?: number): WatchRequest;
+export type CatchUpRequest = Envelope<"control", "catch_up_request", CatchUpRequestMsg>;
+export type CatchUpPage = Envelope<"control", "catch_up_page", CatchUpPageMsg>;
+export function watchRequest(
+  watchId: string, level: WatchLevel, leaseMs?: number, seenPosition?: { epoch: string | null; cursor: number } | null,
+): WatchRequest;
 export function watchState(watchId: string, level: WatchLevel, leaseMs: number): WatchState;
 export function sessionStatus(status: SessionStatusMsg): SessionStatusMessage;
-export function recoveryRequest(epoch?: string | null, cursor?: number, limit?: number): RecoveryRequest;
-export function recovery(items: RecoveryItem[], epoch: string, cursor: number, hasMore?: boolean, gap?: boolean): Recovery;
+export function catchUpRequest(epoch?: string | null, cursor?: number, limit?: number): CatchUpRequest;
+export function catchUpPage(items: CatchUpItem[], epoch: string, cursor: number, hasMore?: boolean, gap?: boolean): CatchUpPage;
 
 export type EventEnvelope =
   | WatchRequest
   | WatchState
   | SessionStatusMessage
-  | RecoveryRequest
-  | Recovery
+  | CatchUpRequest
+  | CatchUpPage
   | import("./workspace").WorkspaceRequest
   | import("./workspace").WorkspaceResult
   | AssistantMessage

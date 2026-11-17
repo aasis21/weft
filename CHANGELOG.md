@@ -5,6 +5,22 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.50
+
+- Catch-up now shows what you would have seen live. Tool cards you missed keep their real
+  arguments and output instead of a bare "Completed"/"Failed", and warnings are kept too.
+- The "N new" badge on a session counts assistant replies you have not seen, not every tool event.
+- When another session is waiting for an approval or an answer, the session menu button shows a
+  small amber dot.
+- The laptop keeps each shared session's catch-up in a **session stream store**
+  (`~/.weft/session-streams/`). Each event is appended once instead of rewriting the whole file,
+  and cleanup of idle sessions runs when a store opens rather than on every event. Over its limit,
+  a session drops old tool cards before messages, without reporting them as lost activity.
+- Protocol: catch-up messages are renamed `catch_up_request` / `catch_up_page`, with event
+  positions `streamEpoch` / `streamSequence`. The phone sends its last viewed position with watch
+  requests. Laptop and phone must both run this version; old `~/.weft/recovery` caches are removed,
+  so the first catch-up after updating starts fresh.
+
 ## 0.2.49
 
 - Report Station or relay workers that keep crashing. After 5 crashes in a row, each

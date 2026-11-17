@@ -9,7 +9,7 @@ import {
 } from "@aasis21/weft-shared";
 import { createWorkspaceView } from "../src/workspaceView.mjs";
 import { attachRelay } from "../src/relay.mjs";
-import { createSessionRecovery } from "../src/sessionRecovery.mjs";
+import { createSessionStreamStore } from "../src/sessionStreamStore.mjs";
 import { saveFileSharingConfig } from "../src/transportConfig.mjs";
 
 test("encrypted workspace round trip reads policy-approved snapshots while Stop remains usable", async (t) => {
@@ -61,7 +61,7 @@ test("encrypted workspace round trip reads policy-approved snapshots while Stop 
   view = await createWorkspaceView({ session, configBaseDir, requestPermission: (args) =>
     session.rpc.tools.execute({ name: "weft_workspace_access", arguments: args }) });
   const relay = await attachRelay({ session, channel: hostChannel, channelId, heartbeatMs: 100000,
-    recoveryStore: await createSessionRecovery({ persist: false }),
+    streamStore: await createSessionStreamStore({ persist: false }),
     workspaceView: async () => view });
   t.after(async () => { view.close(); await relay.stop(); await phoneChannel.close(); });
   async function response(id) {
@@ -128,7 +128,7 @@ test("workspace capabilities follow sharing grants and directory permissions wit
   view = await createWorkspaceView({ session, configBaseDir, requestPermission: (args) =>
     session.rpc.tools.execute({ name: "weft_workspace_access", arguments: args }) });
   const relay = await attachRelay({ session, channel, channelId: "synthetic-policy", heartbeatMs: 100000,
-    recoveryStore: await createSessionRecovery({ persist: false }),
+    streamStore: await createSessionStreamStore({ persist: false }),
     workspaceView: async () => view });
   t.after(async () => { view.close(); await relay.stop(); });
   assert.deepEqual(sent.find((message) => message.eventSubtype === "channel_up").msg.capabilities, [ATTENTION_CAPABILITY]);

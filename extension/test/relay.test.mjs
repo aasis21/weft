@@ -9,7 +9,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -25,12 +26,13 @@ import {
   elicitationResponse,
   approvalDecision,
   watchRequest,
-  recoveryRequest,
+  catchUpRequest,
   assistantMessage,
   assistantDelta,
   toolStart,
   toolComplete,
   logLine,
+  userMessage,
 } from "@aasis21/weft-shared";
 import {
   attachRelay as createRelay,
@@ -39,13 +41,13 @@ import {
   createPermissionRelay,
   createPromptOriginTracker,
 } from "../src/relay.mjs";
-import { createSessionRecovery } from "../src/sessionRecovery.mjs";
+import { createSessionStreamStore } from "../src/sessionStreamStore.mjs";
 import { createAttentionLease } from "../src/pairedEndpoint.mjs";
 
 async function attachRelay(options) {
   return createRelay({
     ...options,
-    recoveryStore: options.recoveryStore ?? await createSessionRecovery({ persist: false }),
+    streamStore: options.streamStore ?? await createSessionStreamStore({ persist: false }),
   });
 }
 
@@ -179,28 +181,32 @@ test("attention expires after sleep, respects cooldown, and fences an older watc
   assert.equal(lease.level, "off", "elapsed wall-clock lease expires before wake-up sends");
 });
 
-test("compact watch suppresses tokens and returns committed, scrubbed catch-up", async () => {
+test("compact watch suppresses tokens, counts unseen replies, and catch-up returns events as sent live", async () => {
   await withRelay(async ({ session, channel }) => {
-    channel.emit(EVENT_TYPE.CONTROL, watchRequest("compact", "compact"));
+    channel.emit(EVENT_TYPE.CONTROL, watchRequest("compact", "compact", 60_000, { epoch: null, cursor: 0 }));
     await flush();
     channel.sent.length = 0;
     session.emitEvent({ type: "assistant.message_delta", data: { deltaContent: "token" } });
-    session.emitEvent({ type: "tool.execution_start", data: { toolCallId: "tool", toolName: "shell", arguments: { command: "private command" } } });
-    session.emitEvent({ type: "tool.execution_complete", data: { toolCallId: "tool", toolName: "shell", success: false, error: { message: "private result" } } });
+    session.emitEvent({ type: "tool.execution_start", data: { toolCallId: "tool", toolName: "shell", arguments: { command: "npm test" } } });
+    session.emitEvent({ type: "tool.execution_complete", data: { toolCallId: "tool", toolName: "shell", success: false, error: { message: "2 tests failed" } } });
     session.emitEvent({ type: "assistant.message", id: "answer", data: { content: "Finished" } });
     await flush();
     assert.equal(channel.sent.filter((message) => message.eventType === EVENT_TYPE.STREAM).length, 0);
-    assert.ok(channel.sent.some((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS && message.msg.cursor === 3));
-    channel.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    const statuses = channel.sent.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS);
+    assert.equal(statuses.at(-1).msg.cursor, 3);
+    assert.equal(statuses.at(-1).msg.unseenReplies, 1, "tool cards are not counted as new replies");
+    channel.emit(EVENT_TYPE.CONTROL, catchUpRequest());
     await flush();
-    const page = channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY).msg;
+    const page = channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_PAGE).msg;
     assert.equal(page.items.length, 3);
-    assert.ok(!JSON.stringify(page).includes("private command"));
-    assert.ok(!JSON.stringify(page).includes("private result"));
-    assert.deepEqual(page.items[0].message.msg.args, {});
-    assert.equal(page.items[1].message.msg.resultPreview, "Failed");
+    assert.deepEqual(page.items[0].message.msg.args, { command: "npm test" });
+    assert.equal(page.items[1].message.msg.resultPreview, "2 tests failed");
     assert.equal(page.items.at(-1).message.msg.content, "Finished");
-    assert.equal(page.items.at(-1).message.recoverySequence, 3);
+    assert.equal(page.items.at(-1).sequence, 3);
+    channel.emit(EVENT_TYPE.CONTROL, watchRequest("compact", "compact", 60_000, { epoch: page.epoch, cursor: 3 }));
+    session.emitEvent({ type: "tool.execution_start", data: { toolCallId: "next", toolName: "view", arguments: {} } });
+    await flush();
+    assert.equal(channel.sent.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_STATUS).at(-1).msg.unseenReplies, 0);
   });
 });
 
@@ -223,126 +229,179 @@ test("disconnect keeps capture and pending native approval until a fresh channel
     assert.equal(snapshot.msg.approvals.length, 1);
     replacement.emit(EVENT_TYPE.DECISION, approvalDecision(request.msg.requestId, "approve"));
     assert.equal((await approval).kind, "approve-once");
-    replacement.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    replacement.emit(EVENT_TYPE.CONTROL, catchUpRequest());
     await flush();
-    assert.ok(replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY)
+    assert.ok(replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_PAGE)
       .msg.items.some((item) => item.message.msg.content === "While disconnected"));
   });
 });
 
-test("an old connection cannot deliver its delayed recovery response to a replacement", async () => {
+test("an old connection cannot deliver its delayed catch-up page to a replacement", async () => {
   const channel = makeFakeChannel();
   const replacement = makeFakeChannel();
-  const journal = await createSessionRecovery({ persist: false });
-  await journal.capture(assistantMessage("Saved"));
+  const streamStore = await createSessionStreamStore({ persist: false });
+  await streamStore.capture(assistantMessage("Saved"));
   let release;
   let entered;
   const blocked = new Promise((resolve) => { release = resolve; });
   const requested = new Promise((resolve) => { entered = resolve; });
-  const page = journal.page.bind(journal);
-  journal.page = async (...args) => {
+  const page = streamStore.page.bind(streamStore);
+  streamStore.page = async (...args) => {
     entered();
     await blocked;
     return page(...args);
   };
   const relay = await attachRelay({
-    session: makeFakeSession(), channel, recoveryStore: journal, heartbeatMs: 10_000_000,
+    session: makeFakeSession(), channel, streamStore, heartbeatMs: 10_000_000,
   });
   try {
-    channel.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    channel.emit(EVENT_TYPE.CONTROL, catchUpRequest());
     await requested;
     await relay.rebind(replacement);
     release();
     await flush();
-    assert.ok(!replacement.sent.some((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY));
-    replacement.emit(EVENT_TYPE.CONTROL, recoveryRequest());
+    assert.ok(!replacement.sent.some((message) => message.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_PAGE));
+    replacement.emit(EVENT_TYPE.CONTROL, catchUpRequest());
     await flush();
-    assert.equal(replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY).msg.items.length, 1);
+    assert.equal(replacement.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_PAGE).msg.items.length, 1);
   } finally {
     release();
     await relay.stop("test", { closeTransport: false });
   }
 });
 
-test("recovery is durable, paged, bounded, and reports retained-history gaps", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "weft-recovery-"));
+test("session stream store is append-only, paged, durable, and survives an interrupted append", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-stream-store-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  let journal = await createSessionRecovery({ sessionId: "durable", baseDir: dir, maxEvents: 2 });
-  await journal.capture(assistantDelta("not retained"));
-  await journal.capture(toolStart("tool", "shell", { command: "not retained" }));
-  await journal.capture(toolComplete("tool", "shell", false, "not retained"));
-  const live = await journal.capture(assistantMessage("Saved", "answer"));
-  const epoch = live.recoveryEpoch;
-  await journal.close();
-  journal = await createSessionRecovery({ sessionId: "durable", baseDir: dir, maxEvents: 2 });
-  const page = await journal.page(epoch, 0, 1);
-  assert.equal(page.epoch, epoch);
-  assert.equal(page.items.length, 1);
+  const storeFolder = join(dir, "session-streams");
+  let store = await createSessionStreamStore({ sessionId: "durable", baseDir: dir });
+  assert.equal(await store.capture(assistantDelta("streaming fragment")), null);
+  await store.capture(toolStart("tool", "shell", { command: "npm test" }));
+  await store.capture(toolComplete("tool", "shell", true, "42 passed"));
+  const live = await store.capture(assistantMessage("Saved", "answer"));
+  const epoch = live.streamEpoch;
+  assert.equal(live.streamSequence, 3);
+  await store.close();
+  const [fileName] = await readdir(storeFolder);
+  assert.match(fileName, /^[a-f0-9]{64}\.jsonl$/);
+  const lines = (await readFile(join(storeFolder, fileName), "utf8")).trimEnd().split("\n");
+  assert.equal(lines.length, 4, "a header line, then exactly one appended line per kept event");
+  assert.ok(!lines.join("\n").includes("streaming fragment"));
+  // An append interrupted by a crash leaves a partial last line; that event was never sent.
+  await writeFile(join(storeFolder, fileName), lines.join("\n") + "\n" + '{"kind":"event","seq');
+  store = await createSessionStreamStore({ sessionId: "durable", baseDir: dir });
+  assert.equal(store.epoch, epoch);
+  assert.equal(store.cursor, 3);
+  const page = await store.page(epoch, 0, 2);
+  assert.deepEqual(page.items.map((item) => item.sequence), [1, 2]);
+  assert.deepEqual(page.items[0].message.msg.args, { command: "npm test" });
+  assert.equal(page.items[1].message.msg.resultPreview, "42 passed");
   assert.equal(page.hasMore, true);
-  assert.equal(page.gap, true);
-  const next = await journal.page(epoch, page.cursor, 1);
-  assert.equal(next.items[0].message.msg.content, "Saved");
-  assert.equal(next.hasMore, false);
-  const contents = await readFile(join(dir, "recovery", (await readdir(join(dir, "recovery")))[0]), "utf8");
-  assert.ok(!contents.includes("not retained"));
-  assert.equal((await journal.page("different-epoch", 100)).gap, true);
+  assert.equal(page.gap, false);
+  assert.equal((await store.page(epoch, page.cursor)).items[0].message.msg.content, "Saved");
+  assert.equal((await store.page("different-epoch", 100)).gap, true);
+  assert.equal(store.countUnseenReplies(epoch, 0), 1);
+  assert.equal(store.countUnseenReplies(epoch, 3), 0);
+  assert.equal((await store.capture(assistantMessage("Next", "next"))).streamSequence, 4, "sequence numbers are never reused");
+  await store.close();
+
+  const oldCacheFolder = join(dir, "recovery");
+  await mkdir(oldCacheFolder);
+  await writeFile(join(oldCacheFolder, `${"a".repeat(64)}.json`), "{}");
+  await (await createSessionStreamStore({ sessionId: "other", baseDir: dir })).close();
+  await assert.rejects(readdir(oldCacheFolder), { code: "ENOENT" }, "0.2.49 caches are removed, not migrated");
 });
 
-test("catch-up bounds large messages, resets corrupt caches explicitly, and ages out events", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "weft-recovery-limits-"));
+test("session stream store bounds large events, resets unreadable stores explicitly, and ages out events", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-stream-store-limits-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   let clock = Date.now();
-  let journal = await createSessionRecovery({
+  let store = await createSessionStreamStore({
     sessionId: "limits", baseDir: dir, now: () => clock, retentionMs: 1000, maxEventBytes: 1024,
   });
-  await journal.capture(assistantMessage("x".repeat(10_000), "large"));
-  await journal.capture(logLine("error", "private failure details"));
-  let page = await journal.page(null, 0, 50);
+  await store.capture(assistantMessage("x".repeat(10_000), "large"));
+  await store.capture(toolStart("big", "create", { path: "notes.md", file_text: "y".repeat(10_000) }));
+  await store.capture(logLine("error", "Build failed: missing module"));
+  await store.capture(logLine("info", "routine detail"));
+  let page = await store.page(null, 0, 50);
+  assert.equal(page.items.length, 3, "info logs are not kept");
   assert.ok(page.items[0].message.msg.content.includes("truncated in catch-up"));
-  assert.ok(Buffer.byteLength(JSON.stringify(page.items[0])) < 1024);
-  assert.ok(!JSON.stringify(page).includes("private failure details"));
-  assert.equal(page.gap, true);
+  assert.equal(page.items[1].message.msg.args.path, "notes.md", "large arguments keep their short fields");
+  assert.ok(page.items.every((item) => Buffer.byteLength(JSON.stringify(item.message)) <= 1024));
+  assert.equal(page.items[2].message.msg.message, "Build failed: missing module", "errors are kept as sent live");
+  assert.equal(page.gap, false, "a shortened event is not reported as missing activity");
   clock = Date.now() + 2000;
-  page = await journal.page(journal.epoch, 0);
+  page = await store.page(store.epoch, 0);
   assert.equal(page.items.length, 0);
   assert.equal(page.gap, true);
-  await journal.close();
-  const filename = (await readdir(join(dir, "recovery"))).find((name) => name.endsWith(".json"));
-  await writeFile(join(dir, "recovery", filename), "{broken");
+  await store.close();
+  const [fileName] = await readdir(join(dir, "session-streams"));
+  await writeFile(join(dir, "session-streams", fileName), "{broken\n");
   const issues = [];
-  journal = await createSessionRecovery({ sessionId: "limits", baseDir: dir, onIssue: (error) => issues.push(error) });
+  store = await createSessionStreamStore({ sessionId: "limits", baseDir: dir, onIssue: (error) => issues.push(error) });
   assert.equal(issues.length, 1);
-  await journal.capture(assistantMessage("Recovered"));
-  assert.equal((await journal.page(null, 0)).items[0].message.msg.content, "Recovered");
+  assert.equal((await store.page(null, 0)).gap, true);
+  await store.capture(assistantMessage("Recovered"));
+  assert.equal((await store.page(null, 0)).items[0].message.msg.content, "Recovered");
 });
 
-test("machine catch-up budget evicts old caches without resetting the current epoch", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "weft-recovery-budget-"));
+test("session stream store thins old tool cards before messages and rewrites only when mostly removed", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-stream-store-thin-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const options = { baseDir: dir, maxBytes: 2048, machineBytes: 3000 };
-  const old = await createSessionRecovery({ ...options, sessionId: "old" });
-  await old.capture(assistantMessage("x".repeat(1200)));
-  await old.close();
-  const current = await createSessionRecovery({ ...options, sessionId: "current" });
-  const epoch = current.epoch;
-  await current.capture(assistantMessage("y".repeat(1200)));
-  await current.close();
-  const files = (await readdir(join(dir, "recovery"))).filter((name) => name.endsWith(".json"));
-  assert.equal(files.length, 1);
-  assert.equal(JSON.parse(await readFile(join(dir, "recovery", files[0]), "utf8")).epoch, epoch);
-  const stale = `${"a".repeat(64)}.json.0.00000000-0000-0000-0000-000000000001.tmp`;
-  const fresh = `${"b".repeat(64)}.json.0.00000000-0000-0000-0000-000000000002.tmp`;
-  await writeFile(join(dir, "recovery", stale), "interrupted save");
-  await writeFile(join(dir, "recovery", fresh), "save in progress");
-  const expired = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
-  await utimes(join(dir, "recovery", stale), expired, expired);
-  const resumed = await createSessionRecovery({ ...options, sessionId: "current" });
-  assert.equal(resumed.epoch, epoch);
-  const retained = await readdir(join(dir, "recovery"));
-  assert.ok(!retained.includes(stale), "expired crash leftovers are removed");
-  assert.ok(retained.includes(fresh), "an in-flight atomic save is not removed");
-  await resumed.close();
+  const store = await createSessionStreamStore({ sessionId: "thin", baseDir: dir, maxSessionEvents: 6, recentEventsNeverThinned: 2 });
+  await store.capture(userMessage("Run the tests", "phone", "u1"));
+  await store.capture(toolStart("t1", "shell", { command: "npm test" }));
+  await store.capture(toolComplete("t1", "shell", true, "ok"));
+  await store.capture(assistantMessage("Tests pass", "a1"));
+  await store.capture(toolStart("t2", "view", { path: "a.js" }));
+  await store.capture(toolComplete("t2", "view", true, "contents"));
+  await store.capture(assistantMessage("Done", "a2"));
+  let page = await store.page(null, 0);
+  assert.deepEqual(page.items.map((item) => item.message.msg.toolCallId ?? item.message.msg.messageId ?? item.message.msg.id),
+    ["u1", "a1", "t2", "t2", "a2"], "the oldest tool card goes first, together with its partner");
+  assert.equal(page.gap, false, "thinned tool cards are not reported as lost activity");
+  for (let index = 0; index < 6; index++) await store.capture(assistantMessage(`Reply ${index}`, `r${index}`));
+  page = await store.page(null, 0);
+  assert.equal(page.items.length, 6);
+  assert.ok(page.items.every((item) => item.message.eventSubtype === SUBTYPE.STREAM.ASSISTANT_MESSAGE));
+  assert.equal(page.gap, true, "losing a conversation message is reported");
+  await store.close();
+  const [fileName] = await readdir(join(dir, "session-streams"));
+  const lineCount = (await readFile(join(dir, "session-streams", fileName), "utf8")).trimEnd().split("\n").length;
+  assert.equal(lineCount, 14, "small removals stay appended until they outweigh the kept events");
 });
+
+test("session stream stores of idle sessions expire and the least recently active go first over budget", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "weft-stream-store-budget-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const options = { baseDir: dir, machineBytes: 3000 };
+  const folder = join(dir, "session-streams");
+  const oldest = await createSessionStreamStore({ ...options, sessionId: "oldest" });
+  await oldest.capture(assistantMessage("x".repeat(1200)));
+  await oldest.close();
+  const older = await createSessionStreamStore({ ...options, sessionId: "older" });
+  await older.capture(assistantMessage("x".repeat(1200)));
+  await older.close();
+  const hours = (count) => new Date(Date.now() - count * 60 * 60 * 1000);
+  const files = await readdir(folder);
+  await utimes(join(folder, files.find((name) => name === createHashName("oldest"))), hours(2), hours(2));
+  await utimes(join(folder, files.find((name) => name === createHashName("older"))), hours(1), hours(1));
+  const idle = `${"c".repeat(64)}.jsonl`;
+  await writeFile(join(folder, idle), "{}\n");
+  await utimes(join(folder, idle), hours(80), hours(80));
+  const current = await createSessionStreamStore({ ...options, sessionId: "current" });
+  await current.capture(assistantMessage("y".repeat(1200)));
+  const kept = await readdir(folder);
+  assert.ok(!kept.includes(idle), "a store idle for three days is removed");
+  assert.ok(!kept.includes(createHashName("oldest")), "the least recently active session goes first");
+  assert.ok(kept.includes(createHashName("older")));
+  assert.ok(kept.includes(createHashName("current")));
+  await current.close();
+});
+
+function createHashName(sessionId) {
+  return `${createHash("sha256").update(sessionId).digest("hex")}.jsonl`;
+}
 
 test("stalled live delivery does not block durable capture or catch-up requests", async () => {
   await withRelay(async ({ channel, session }) => {
@@ -361,10 +420,10 @@ test("stalled live delivery does not block durable capture or catch-up requests"
         session.emitEvent({ type: "assistant.message", id: `queued-${index}`, data: { content: `Queued ${index}` } });
       }
       await flush();
-      channel.emit(EVENT_TYPE.CONTROL, recoveryRequest(null, 0, 100));
+      channel.emit(EVENT_TYPE.CONTROL, catchUpRequest(null, 0, 100));
       channel.emit(EVENT_TYPE.CONTROL, stateRequest());
       await flush();
-      const recovered = channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.RECOVERY).msg.items;
+      const recovered = channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.CATCH_UP_PAGE).msg.items;
       assert.equal(recovered.length, 81, "trimmed wire frames remain available for replay");
       assert.ok(recovered.some((item) => item.message.msg.content === "Saved before delivery"));
       assert.equal(channel.sent.find((message) => message.eventSubtype === SUBTYPE.CONTROL.STATE_SNAPSHOT).msg.busy, true);

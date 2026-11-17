@@ -217,6 +217,17 @@
   border-radius: 2px;
   background: currentColor;
 }
+.drawer-btn { position: relative; }
+.drawer-btn .decision-waiting-dot {
+  position: absolute;
+  top: 5px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--bg, #0d1117);
+}
 .weft-mark-btn .weft-mark {
   font-size: 19px;
   line-height: 1;

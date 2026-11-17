@@ -7,8 +7,8 @@ import { makeManager } from '@/test/helpers/makeManager';
 import * as B from '@/test/helpers/builders';
 import {
   ATTENTION_CAPABILITY, WATCH_RENEW_MS, WATCH_COOLDOWN_MS,
-  channelUp, stateSnapshot, sessionStatus, recovery, assistantMessage, toolStart, toolComplete,
-  approvalRequest, watchRequest, watchState, recoveryRequest, isValidEnvelope,
+  channelUp, stateSnapshot, sessionStatus, catchUpPage, assistantMessage, toolStart, toolComplete,
+  approvalRequest, watchRequest, watchState, catchUpRequest, isValidEnvelope,
 } from '@aasis21/weft-shared';
 import { loadTranscript } from '@/lib/transcripts';
 import { preferencesStorage } from '@/services/persistence/preferencesStorage';
@@ -26,14 +26,14 @@ describe('scenario: drop catchup', () => {
     h = makeManager();
   });
 
-  it('keeps the additive watch and recovery factories valid envelopes', () => {
+  it('keeps the watch and catch-up factories valid envelopes', () => {
     for (const message of [
       watchRequest('visit', 'detail'), watchState('visit', 'off', 0),
-      recoveryRequest(), sessionStatus({ busy: true, epoch: 'e', cursor: 2, pendingApprovals: 1, pendingForms: 0 }),
-      recovery([{ sequence: 1, message: assistantMessage('done', 'a') }], 'e', 1),
+      catchUpRequest(), sessionStatus({ busy: true, epoch: 'e', cursor: 2, pendingApprovals: 1, pendingForms: 0 }),
+      catchUpPage([{ sequence: 1, message: assistantMessage('done', 'a') }], 'e', 1),
     ]) expect(isValidEnvelope(message)).toBe(true);
     expect(watchRequest('visit', 'compact').msg).toEqual({ watchId: 'visit', level: 'compact', leaseMs: 60_000 });
-    expect(recoveryRequest().msg).toEqual({ epoch: null, cursor: 0, limit: 50 });
+    expect(catchUpRequest().msg).toEqual({ epoch: null, cursor: 0, limit: 50 });
   });
 
   it('renews only the displayed chat and cools navigation to compact without downloading hidden history', async () => {
@@ -46,10 +46,11 @@ describe('scenario: drop catchup', () => {
     second.client.clearSent();
     await vi.advanceTimersByTimeAsync(WATCH_COOLDOWN_MS);
     expect(second.client.sentOfKind('control.watch_request').at(-1)?.level).toBe('compact');
+    expect(second.client.sentOfKind('control.watch_request').at(-1)).toMatchObject({ seenEpoch: null, seenCursor: 0 });
     await vi.advanceTimersByTimeAsync(WATCH_RENEW_MS);
     expect(first.client.sentOfKind('control.watch_request').at(-1)?.level).toBe('detail');
     expect(second.client.sentOfKind('control.watch_request').at(-1)?.level).toBe('compact');
-    expect(second.client.sentOfKind('control.recovery_request')).toHaveLength(0);
+    expect(second.client.sentOfKind('control.catch_up_request')).toHaveLength(0);
     expect(second.client.sentOfKind('control.recent_turns_request')).toHaveLength(0);
 
     h!.manager.setChatVisible(null); // Explore, a device page, or a modal replaces chat.
@@ -62,7 +63,7 @@ describe('scenario: drop catchup', () => {
     const modern = await h!.pair('modern');
     modern.client.emit(channelUp('/repo', 'Modern', [ATTENTION_CAPABILITY]));
     expect(modern.client.sentOfKind('control.watch_request').at(-1)?.level).toBe('compact');
-    expect(modern.client.sentOfKind('control.recovery_request')).toHaveLength(0);
+    expect(modern.client.sentOfKind('control.catch_up_request')).toHaveLength(0);
     expect(modern.client.sentOfKind('control.recent_turns_request')).toHaveLength(0);
     const legacy = await h!.pair('legacy');
     legacy.client.emit(channelUp('/repo', 'Legacy'));
@@ -107,7 +108,7 @@ describe('scenario: drop catchup', () => {
     await h!.flush();
     expect(client.sentOfKind('control.watch_request').at(-1)?.level).toBe('detail');
     expect(client.sentOfKind('control.watch_request').at(-1)?.watchId).not.toBe(watchedId);
-    expect(client.sentOfKind('control.recovery_request')).toHaveLength(1);
+    expect(client.sentOfKind('control.catch_up_request')).toHaveLength(1);
   });
 
   it('shows compact unread and needs-attention without requesting or marking invisible content read', async () => {
@@ -115,14 +116,18 @@ describe('scenario: drop catchup', () => {
     client.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
     h!.manager.setChatVisible(null);
     client.clearSent();
-    client.emit(sessionStatus({ busy: true, epoch: 'e', cursor: 7, pendingApprovals: 2, pendingForms: 1 }));
+    client.emit(sessionStatus({ busy: true, epoch: 'e', cursor: 7, pendingApprovals: 2, pendingForms: 1, unseenReplies: 3 }));
     await h!.flush();
     expect(h!.active()?.timeline.busy).toBe(true);
-    expect(h!.active()?.unreadCount).toBe(7);
+    expect(h!.active()?.unreadCount).toBe(3);
     expect(h!.active()?.needsAttention).toBe(3);
     expect(h!.active()?.timeline.items).toHaveLength(0);
-    expect(client.sentOfKind('control.recovery_request')).toHaveLength(0);
+    expect(client.sentOfKind('control.catch_up_request')).toHaveLength(0);
     expect(await loadTranscript('c1')).toBeNull();
+    // The badge follows the laptop's count of unseen assistant replies, not the event cursor.
+    client.emit(sessionStatus({ busy: false, epoch: 'e', cursor: 9, pendingApprovals: 0, pendingForms: 0, unseenReplies: 2 }));
+    await h!.flush();
+    expect(h!.active()?.unreadCount).toBe(2);
   });
 
   it('pages catch-up with stable dedup, a single gap, and authoritative current prompts', async () => {
@@ -130,78 +135,78 @@ describe('scenario: drop catchup', () => {
     client.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
     client.emit(stateSnapshot({ approvals: [], capabilities: [ATTENTION_CAPABILITY] }));
     const stale = approvalRequest('old', 'write_file', {}, [{ id: 'yes', label: 'Yes' }]);
-    const page = recovery([
+    const page = catchUpPage([
       { sequence: 1, message: assistantMessage('Done', 'a1') },
       { sequence: 2, message: toolStart('t1', 'read_file') },
       { sequence: 3, message: stale },
     ], 'e', 3, true, true);
     client.emit(page);
     await vi.advanceTimersByTimeAsync(1);
-    expect(client.sentOfKind('control.recovery_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 3 });
-    client.emit(recovery([{ sequence: 4, message: toolComplete('t1', 'read_file', false, 'Failed') }], 'e', 4));
+    expect(client.sentOfKind('control.catch_up_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 3 });
+    client.emit(catchUpPage([{ sequence: 4, message: toolComplete('t1', 'read_file', false, 'Failed') }], 'e', 4));
     await vi.advanceTimersByTimeAsync(1);
     client.emit(page);
     await vi.advanceTimersByTimeAsync(1);
-    client.emit(recovery([], 'e', 4));
+    client.emit(catchUpPage([], 'e', 4));
     await vi.advanceTimersByTimeAsync(1);
     expect(h!.active()?.timeline.items.filter((item) => item.id === 'a1')).toHaveLength(1);
     expect(h!.active()?.timeline.items.filter((item) => item.id === 't1')).toHaveLength(1);
-    expect(h!.active()?.timeline.items.filter((item) => item.id === 'recovery-gap:e')).toHaveLength(1);
+    expect(h!.active()?.timeline.items.filter((item) => item.id === 'catch-up-gap:e')).toHaveLength(1);
     expect(h!.active()?.timeline.items.find((item) => item.id === 'catchup-summary:e:0')).toMatchObject({
       text: '1 messages · 2 tool updates · 1 failures since last viewed',
     });
     expect(h!.active()?.timeline.approvals).toHaveLength(0);
     expect(h!.active()?.unreadCount).toBeUndefined();
-    expect((await loadTranscript('c1'))?.recovery).toMatchObject({ epoch: 'e', cursor: 4, viewedCursor: 4 });
+    expect((await loadTranscript('c1'))?.catchUp).toMatchObject({ epoch: 'e', cursor: 4, viewedCursor: 4 });
   });
 
   it('deduplicates live/replay races and does not advance the received cursor over missing activity', async () => {
     const { client } = await h!.pair('c1');
     client.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
-    const live = { ...assistantMessage('Live tail', 'a2'), recoveryEpoch: 'e', recoverySequence: 2 };
+    const live = { ...assistantMessage('Live tail', 'a2'), streamEpoch: 'e', streamSequence: 2 };
     client.emit(live);
     client.emit(live);
     await vi.advanceTimersByTimeAsync(801);
-    expect((await loadTranscript('c1'))?.recovery?.cursor ?? 0).toBe(0);
-    client.emit(recovery([
+    expect((await loadTranscript('c1'))?.catchUp?.cursor ?? 0).toBe(0);
+    client.emit(catchUpPage([
       { sequence: 1, message: assistantMessage('Missed', 'a1') },
       { sequence: 2, message: live },
     ], 'e', 2));
     await vi.advanceTimersByTimeAsync(1);
     expect(h!.active()?.timeline.items.filter((item) => item.kind === 'assistant')).toHaveLength(2);
     expect(h!.active()?.timeline.items.filter((item) => item.kind === 'assistant').map((item) => item.id)).toEqual(['a1', 'a2']);
-    expect((await loadTranscript('c1'))?.recovery?.cursor).toBe(2);
+    expect((await loadTranscript('c1'))?.catchUp?.cursor).toBe(2);
     client.clearSent();
-    const droppedTail = { ...assistantMessage('After queue drop', 'a4'), recoveryEpoch: 'e', recoverySequence: 4 };
+    const droppedTail = { ...assistantMessage('After queue drop', 'a4'), streamEpoch: 'e', streamSequence: 4 };
     client.emit(droppedTail);
     await vi.advanceTimersByTimeAsync(801);
-    expect(client.sentOfKind('control.recovery_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 2 });
-    expect((await loadTranscript('c1'))?.recovery?.cursor).toBe(2);
-    client.emit(recovery([
+    expect(client.sentOfKind('control.catch_up_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 2 });
+    expect((await loadTranscript('c1'))?.catchUp?.cursor).toBe(2);
+    client.emit(catchUpPage([
       { sequence: 3, message: assistantMessage('Dropped frame', 'a3') },
       { sequence: 4, message: droppedTail },
     ], 'e', 4));
     await vi.advanceTimersByTimeAsync(1);
-    expect((await loadTranscript('c1'))?.recovery?.cursor).toBe(4);
+    expect((await loadTranscript('c1'))?.catchUp?.cursor).toBe(4);
     expect(h!.active()?.timeline.items.filter((item) => item.kind === 'assistant').map((item) => item.id))
       .toEqual(['a1', 'a2', 'a3', 'a4']);
   });
 
-  it('does not let a live tail close an in-flight recovery page or mark the backlog viewed', async () => {
+  it('does not let a live tail close an in-flight catch-up page or mark the backlog viewed', async () => {
     const { client } = await h!.pair('c1');
     client.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
-    client.emit(recovery([{ sequence: 1, message: assistantMessage('First', 'a1') }], 'e', 1, true));
+    client.emit(catchUpPage([{ sequence: 1, message: assistantMessage('First', 'a1') }], 'e', 1, true));
     await vi.advanceTimersByTimeAsync(1);
-    const live = { ...assistantMessage('Live', 'a2'), recoveryEpoch: 'e', recoverySequence: 2 };
+    const live = { ...assistantMessage('Live', 'a2'), streamEpoch: 'e', streamSequence: 2 };
     client.emit(live);
     await vi.advanceTimersByTimeAsync(1);
-    expect((await loadTranscript('c1'))?.recovery).toMatchObject({ cursor: 2, viewedCursor: 0 });
-    client.emit(recovery([
+    expect((await loadTranscript('c1'))?.catchUp).toMatchObject({ cursor: 2, viewedCursor: 0 });
+    client.emit(catchUpPage([
       { sequence: 2, message: live },
       { sequence: 3, message: assistantMessage('Last', 'a3') },
     ], 'e', 3));
     await vi.advanceTimersByTimeAsync(1);
-    expect((await loadTranscript('c1'))?.recovery).toMatchObject({ cursor: 3, viewedCursor: 3 });
+    expect((await loadTranscript('c1'))?.catchUp).toMatchObject({ cursor: 3, viewedCursor: 3 });
     expect(h!.active()?.timeline.items.filter((item) => item.kind === 'assistant')).toHaveLength(3);
   });
 
@@ -214,18 +219,18 @@ describe('scenario: drop catchup', () => {
       return original(key, value);
     });
 
-    client.emit(recovery([{ sequence: 1, message: assistantMessage('Keep me', 'a1') }], 'e', 1, true));
+    client.emit(catchUpPage([{ sequence: 1, message: assistantMessage('Keep me', 'a1') }], 'e', 1, true));
     await vi.advanceTimersByTimeAsync(1);
-    expect(h!.active()?.timeline.items.some((item) => item.id === 'recovery-storage-error')).toBe(true);
+    expect(h!.active()?.timeline.items.some((item) => item.id === 'catch-up-storage-error')).toBe(true);
     expect(await loadTranscript('c1')).toBeNull();
     fail.mockRestore();
     h!.manager.setChatVisible(null);
     await vi.advanceTimersByTimeAsync(WATCH_COOLDOWN_MS);
     h!.manager.setChatVisible('c1');
-    expect(client.sentOfKind('control.recovery_request').at(-1)).toMatchObject({ epoch: null, cursor: 0 });
-    client.emit(recovery([{ sequence: 1, message: assistantMessage('Keep me', 'a1') }], 'e', 1));
+    expect(client.sentOfKind('control.catch_up_request').at(-1)).toMatchObject({ epoch: null, cursor: 0 });
+    client.emit(catchUpPage([{ sequence: 1, message: assistantMessage('Keep me', 'a1') }], 'e', 1));
     await vi.advanceTimersByTimeAsync(1);
-    expect((await loadTranscript('c1'))?.recovery?.cursor).toBe(1);
+    expect((await loadTranscript('c1'))?.catchUp?.cursor).toBe(1);
     expect(h!.active()?.timeline.items.filter((item) => item.id === 'a1')).toHaveLength(1);
   });
 
@@ -233,27 +238,27 @@ describe('scenario: drop catchup', () => {
     const { client } = await h!.pair('c1');
     client.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
     h!.manager.setChatVisible(null);
-    client.emit(recovery([{ sequence: 1, message: assistantMessage('Missed', 'a1') }], 'e', 1));
+    client.emit(catchUpPage([{ sequence: 1, message: assistantMessage('Missed', 'a1') }], 'e', 1));
     await vi.advanceTimersByTimeAsync(1);
-    expect((await loadTranscript('c1'))?.recovery).toMatchObject({ cursor: 1, viewedCursor: 0, viewedEpoch: null });
-    client.emit(sessionStatus({ busy: false, epoch: 'e', cursor: 2, pendingApprovals: 0, pendingForms: 0 }));
+    expect((await loadTranscript('c1'))?.catchUp).toMatchObject({ cursor: 1, viewedCursor: 0, viewedEpoch: null });
+    client.emit(sessionStatus({ busy: false, epoch: 'e', cursor: 2, pendingApprovals: 0, pendingForms: 0, unseenReplies: 2 }));
     expect(h!.active()?.unreadCount).toBe(2);
     h!.manager.setActive('c1');
     expect(h!.active()?.unreadCount).toBe(2);
   });
 
-  it('restores the saved recovery position and reconnects the visible foreground chat first', async () => {
+  it('restores the saved catch-up position and reconnects the visible foreground chat first', async () => {
     await h!.init();
     const { client } = await h!.pair('c1');
     client.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
-    client.emit(recovery([{ sequence: 1, message: assistantMessage('Saved', 'a1') }], 'e', 1));
+    client.emit(catchUpPage([{ sequence: 1, message: assistantMessage('Saved', 'a1') }], 'e', 1));
     await vi.advanceTimersByTimeAsync(801);
     h!.dispose();
     h = makeManager();
     await h.init();
     const restored = h.client('c1');
     restored.emit(channelUp('/repo', 'Chat', [ATTENTION_CAPABILITY]));
-    expect(restored.sentOfKind('control.recovery_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 1 });
+    expect(restored.sentOfKind('control.catch_up_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 1 });
     window.dispatchEvent(new Event('pagehide'));
     restored.setStatus('disconnected');
     window.dispatchEvent(new Event('pageshow'));
@@ -262,7 +267,7 @@ describe('scenario: drop catchup', () => {
     const fresh = h.client('c1');
     expect(fresh).not.toBe(restored);
     expect(fresh.sentOfKind('control.watch_request').at(-1)?.level).toBe('detail');
-    expect(fresh.sentOfKind('control.recovery_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 1 });
+    expect(fresh.sentOfKind('control.catch_up_request').at(-1)).toMatchObject({ epoch: 'e', cursor: 1 });
     expect(h.active()?.timeline.items.filter((item) => item.id === 'a1')).toHaveLength(1);
   });
 

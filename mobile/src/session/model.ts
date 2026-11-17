@@ -64,7 +64,7 @@ export interface NoticeItem {
 }
 
 export type TimelineItem = (UserItem | AssistantItem | ToolItem | NoticeItem) & {
-  recoveryEpoch?: string; recoverySequence?: number;
+  streamEpoch?: string; streamSequence?: number;
 };
 
 export type { ApprovalRequestMsg, ElicitationRequestMsg, HistoryItem, PromptAttachment, SessionMode };

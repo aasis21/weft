@@ -326,8 +326,8 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
 }
 
 function upsertAssistant(session: Session, message: AssistantMessage): void {
-  const id = message.msg.messageId ?? (message.recoveryEpoch && message.recoverySequence
-    ? `recovery:${message.recoveryEpoch}:${message.recoverySequence}` : `assistant-${message.ts}`);
+  const id = message.msg.messageId ?? (message.streamEpoch && message.streamSequence
+    ? `stream:${message.streamEpoch}:${message.streamSequence}` : `assistant-${message.ts}`);
   const index = session.transcript.items.findIndex((item) => item.id === id && item.kind === 'assistant');
   if (index === -1) {
     session.transcript.items = cap([...session.transcript.items, { kind: 'assistant', id, text: message.msg.content, ts: message.ts }]);
@@ -388,8 +388,8 @@ function completeTool(session: Session, message: ToolComplete): void {
 
 function pushNotice(session: Session, message: LogLine): void {
   appendNotice(session, message.msg.level, message.msg.message, message.ts,
-    message.recoveryEpoch && message.recoverySequence
-      ? `recovery:${message.recoveryEpoch}:${message.recoverySequence}` : undefined);
+    message.streamEpoch && message.streamSequence
+      ? `stream:${message.streamEpoch}:${message.streamSequence}` : undefined);
 }
 
 /** Compare prompt text across the wire loosely — whitespace and line endings don't survive the
@@ -429,8 +429,8 @@ function promptAbsorbs(existing: string, incoming: string): boolean {
  * genuinely repeated message still shows twice (#193).
  */
 function appendUserEcho(session: Session, message: UserMessageEcho): void {
-  const id = `umsg-${message.msg.id ?? (message.recoveryEpoch && message.recoverySequence
-    ? `recovery:${message.recoveryEpoch}:${message.recoverySequence}` : message.ts)}`;
+  const id = `umsg-${message.msg.id ?? (message.streamEpoch && message.streamSequence
+    ? `stream:${message.streamEpoch}:${message.streamSequence}` : message.ts)}`;
   if (session.transcript.items.some((item) => item.id === id)) return;
   const twin = session.transcript.items.find(
     (item): item is UserItem =>
@@ -449,10 +449,10 @@ function appendUserEcho(session: Session, message: UserMessageEcho): void {
   ]);
 }
 
-/** Recovery can arrive after a live tail; retain native identities and journal ordering. */
-export function orderRecoveredEnvelope(session: Session, message: EventEnvelope): void {
-  if (!message.recoveryEpoch || !message.recoverySequence || message.eventType !== EVENT_TYPE.STREAM) return;
-  const stable = `recovery:${message.recoveryEpoch}:${message.recoverySequence}`;
+/** A catch-up page can arrive after a live tail; retain native identities and stream order. */
+export function orderCaughtUpEnvelope(session: Session, message: EventEnvelope): void {
+  if (!message.streamEpoch || !message.streamSequence || message.eventType !== EVENT_TYPE.STREAM) return;
+  const stable = `stream:${message.streamEpoch}:${message.streamSequence}`;
   let id: string | undefined;
   switch (message.eventSubtype) {
     case SUBTYPE.STREAM.ASSISTANT_MESSAGE: id = message.msg.messageId ?? stable; break;
@@ -464,14 +464,14 @@ export function orderRecoveredEnvelope(session: Session, message: EventEnvelope)
   }
   const item = session.transcript.items.find((entry) => entry.id === id);
   if (item) {
-    item.recoverySequence = item.recoveryEpoch === message.recoveryEpoch
-      ? Math.min(item.recoverySequence ?? message.recoverySequence, message.recoverySequence)
-      : message.recoverySequence;
-    item.recoveryEpoch = message.recoveryEpoch;
+    item.streamSequence = item.streamEpoch === message.streamEpoch
+      ? Math.min(item.streamSequence ?? message.streamSequence, message.streamSequence)
+      : message.streamSequence;
+    item.streamEpoch = message.streamEpoch;
   }
   session.transcript.items.sort((a, b) =>
-    (a.recoveryEpoch === b.recoveryEpoch && a.recoverySequence && b.recoverySequence
-      ? a.recoverySequence - b.recoverySequence : 0) || a.ts - b.ts);
+    (a.streamEpoch === b.streamEpoch && a.streamSequence && b.streamSequence
+      ? a.streamSequence - b.streamSequence : 0) || a.ts - b.ts);
 }
 
 function applyRecentTurns(session: Session, message: RecentTurnsMsg): void {

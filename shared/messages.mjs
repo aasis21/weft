@@ -90,8 +90,8 @@ export const SUBTYPE = Object.freeze({
     WATCH_REQUEST: "watch_request",
     WATCH_STATE: "watch_state",
     SESSION_STATUS: "session_status",
-    RECOVERY_REQUEST: "recovery_request",
-    RECOVERY: "recovery",
+    CATCH_UP_REQUEST: "catch_up_request",
+    CATCH_UP_PAGE: "catch_up_page",
     CHANNEL_UP: "channel_up",
     WORKSPACE_REQUEST: "workspace_request",
     WORKSPACE_RESULT: "workspace_result",
@@ -477,18 +477,26 @@ export const ATTENTION_CAPABILITY = "attention-v1";
 export const WATCH_LEASE_MS = 60_000;
 export const WATCH_RENEW_MS = 20_000;
 export const WATCH_COOLDOWN_MS = 5_000;
-export const watchRequest = (watchId, level, leaseMs = WATCH_LEASE_MS) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.WATCH_REQUEST, { watchId, level, leaseMs });
+/**
+ * Phone -> ext: how closely the phone is watching this session. `seenPosition` is the phone's last
+ * viewed catch-up position ({ epoch, cursor }), so the laptop can count replies the phone has not seen.
+ */
+export const watchRequest = (watchId, level, leaseMs = WATCH_LEASE_MS, seenPosition = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.WATCH_REQUEST, {
+    watchId, level, leaseMs,
+    ...(seenPosition ? { seenEpoch: seenPosition.epoch ?? null, seenCursor: seenPosition.cursor ?? 0 } : {}),
+  });
 export const watchState = (watchId, level, leaseMs) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.WATCH_STATE, { watchId, level, leaseMs });
-export const sessionStatus = ({ busy, epoch, cursor, pendingApprovals, pendingForms }) =>
+/** `unseenReplies` counts assistant replies after the phone's last viewed position. */
+export const sessionStatus = ({ busy, epoch, cursor, pendingApprovals, pendingForms, unseenReplies = 0 }) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_STATUS, {
-    busy, epoch, cursor, pendingApprovals, pendingForms,
+    busy, epoch, cursor, pendingApprovals, pendingForms, unseenReplies,
   });
-export const recoveryRequest = (epoch = null, cursor = 0, limit = 50) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RECOVERY_REQUEST, { epoch, cursor, limit });
-export const recovery = (items, epoch, cursor, hasMore = false, gap = false) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RECOVERY, { items, epoch, cursor, hasMore, gap });
+export const catchUpRequest = (epoch = null, cursor = 0, limit = 50) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CATCH_UP_REQUEST, { epoch, cursor, limit });
+export const catchUpPage = (items, epoch, cursor, hasMore = false, gap = false) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CATCH_UP_PAGE, { items, epoch, cursor, hasMore, gap });
 
 /**
  * Ext -> phone: the channel is live. channelId/sessionId now travel on the ENVELOPE (stamped by the
