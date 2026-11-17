@@ -479,7 +479,7 @@ export class SessionRuntime {
   private readonly watches = new Map<string, { id: string; level: WatchLevel; client: WeftClient }>();
   private watchTimer: ReturnType<typeof setInterval> | null = null;
   private readonly watchCooldowns = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly catchUpPositions = new Map<string, NonNullable<import('@/lib/timeline').PersistedTimeline['catch-up']>>();
+  private readonly catchUpPositions = new Map<string, NonNullable<import('@/lib/timeline').PersistedTimeline['catchUp']>>();
   private readonly catchUpWrites = new Map<string, Promise<void>>();
   private readonly catchUpInFlight = new Set<string>();
   private readonly historyDeferred = new Set<string>();
