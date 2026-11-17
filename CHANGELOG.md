@@ -5,6 +5,19 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.49
+
+- Report Station or relay workers that keep crashing. After 5 crashes in a row, each
+  within a minute of starting, Control Center and `weft status` show **Crashing
+  repeatedly** instead of retrying silently. The details show the exact last error
+  (name, code, first message line, file and line), the exit code and its meaning, and
+  the next retry time, with **Copy error details**. Restart becomes the main action.
+- "Stopped unexpectedly" now explains the exit code and shows the last recorded error.
+- Clearer background-task code: named restart and crash constants, descriptive
+  variable names in the supervisor and task scripts, and a written overview.
+- A worker started from an earlier version now asks you to run `weft stop` and
+  start again.
+
 ## 0.2.48
 
 - Summarize older sessions that cannot report phone traffic in one Diagnostics line

@@ -95,7 +95,9 @@ proof of a live subscription, and no transport key is displayed. Saved pairing c
 be shown while Station is stopped; a fresh QR requires the endpoint to be running.
 
 On Windows, `weft start` and `weft devtunnel start` use manually started per-user
-background tasks. Their launch terminal can close. Crashes restart automatically;
+background tasks. Their launch terminal can close. Crashes restart automatically
+(1 s backoff doubling to 30 s); after 5 quick crashes in a row, the dashboard and
+`weft status` show "crashing repeatedly" with the exit code and exact last error.
 `weft stop` disables Station restart but leaves the shared relay available;
 `weft devtunnel stop` disables relay restart and stops the shared relay.
 No boot/sign-in startup is registered. Use `--foreground` for terminal-owned

@@ -34,13 +34,13 @@ export function renderControlCenterPage() {
         <div class="service-grid">
           <article class="card service station-card"><div class="card-heading"><span class="icon-tile" data-icon="station"></span><span id="station-status" class="badge">Unknown</span></div><h3>Device Station</h3><p>Device access is independent of your Copilot sessions.</p><div class="service-meta"><span>Stops do not terminate Copilot sessions or the shared relay.</span><span id="station-pid"></span></div>
             <dl id="station-runtime-details" class="service-details"><div><dt>Running version</dt><dd id="station-version">Not reported</dd></div><div><dt>Worker uptime</dt><dd id="station-uptime">Not reported</dd></div><div><dt>Local status checked</dt><dd id="station-checked">Not yet checked</dd></div></dl>
-            <p id="station-progress" class="hint progress-detail" hidden></p><p id="station-error" class="inline-error" hidden></p><p id="station-remedy" class="hint"></p><div class="actions"><button id="station-start" class="button primary" type="button">Start Station</button><button id="station-restart" class="button" type="button">Restart</button><button id="station-stop" class="button danger-quiet" type="button">Stop</button></div></article>
+            <p id="station-progress" class="hint progress-detail" hidden></p><p id="station-error" class="inline-error" hidden></p><section id="station-crash" class="crash-details" aria-label="Station crash details" hidden></section><p id="station-remedy" class="hint"></p><div class="actions"><button id="station-start" class="button primary" type="button">Start Station</button><button id="station-restart" class="button" type="button">Restart</button><button id="station-stop" class="button danger-quiet" type="button">Stop</button></div></article>
           <article class="card service connection-card"><div class="card-heading"><span class="icon-tile" data-icon="relay"></span><span id="connection-status" class="badge">Unknown</span></div><h3>Connection</h3><p id="connection-transport">Choose a transport in Setup.</p>
             <div id="devtunnel-connection"><div class="service-meta"><span id="relay-address">No relay address available</span><span id="relay-pid"></span></div>
               <dl class="service-details"><div><dt>Sign-in</dt><dd id="auth-status">Not checked</dd></div><div><dt>Provider / account</dt><dd id="auth-account">Not reported</dd></div><div><dt>Relay</dt><dd><span id="relay-status" class="badge">Unknown</span></dd></div><div><dt>Public forwarding</dt><dd id="relay-forwarding">Not checked</dd></div><div><dt>Last successful check</dt><dd id="relay-healthy">Not reported</dd></div></dl>
               <dl id="relay-runtime-details" class="service-details"><div><dt>Running version</dt><dd id="relay-version">Not reported</dd></div><div><dt>Relay uptime</dt><dd id="relay-uptime">Not reported</dd></div></dl>
               <p id="auth-help" class="field-help"></p><button id="auth-refresh" class="button compact" type="button">Refresh sign-in status</button>
-              <p id="relay-progress" class="hint progress-detail" hidden></p><p id="relay-error" class="inline-error" hidden></p><p id="relay-remedy" class="hint"></p><div class="actions"><button id="relay-start" class="button primary" type="button">Start relay</button><button id="relay-restart" class="button" type="button">Restart</button><button id="relay-stop" class="button danger-quiet" type="button">Stop</button></div>
+              <p id="relay-progress" class="hint progress-detail" hidden></p><p id="relay-error" class="inline-error" hidden></p><section id="relay-crash" class="crash-details" aria-label="Relay crash details" hidden></section><p id="relay-remedy" class="hint"></p><div class="actions"><button id="relay-start" class="button primary" type="button">Start relay</button><button id="relay-restart" class="button" type="button">Restart</button><button id="relay-stop" class="button danger-quiet" type="button">Stop</button></div>
             </div>
             <div id="supabase-connection" hidden><dl class="service-details"><div><dt>Project configuration</dt><dd id="supabase-config">Not checked</dd></div><div><dt>Project endpoint</dt><dd id="supabase-endpoint">Not reported</dd></div><div><dt>Station connection</dt><dd id="supabase-live">Not reported</dd></div><div><dt>Last verified</dt><dd id="supabase-checked">Not reported</dd></div></dl><p class="field-help">Configuration is not proof of a live subscription. No individual transport sign-in or local tunnel is required.</p></div>
             <div id="connection-unconfigured" class="hint" hidden>Choose Supabase or Dev Tunnel in Setup before starting Station.</div>
@@ -111,6 +111,12 @@ export function renderControlCenterPage() {
 const operationalStyles = `
 #diagnostics-events{white-space:pre-wrap;max-height:360px;overflow:auto}
 #traffic-card{margin-bottom:22px}
+.crash-details{border:1px solid var(--border);background:var(--bg);border-radius:10px;padding:12px 14px;margin:10px 0;overflow-wrap:anywhere}
+.crash-details.bad{background:var(--bad-bg);border-color:#b74c6429}
+.crash-details>strong{display:block;font-size:13px;margin-bottom:6px}
+.crash-details.bad>strong{color:var(--bad)}
+.crash-details dl{margin:0 0 10px}.crash-details dl>div{display:grid;grid-template-columns:110px minmax(0,1fr);gap:10px;padding:4px 0}
+.crash-details dd{font-size:12px}.crash-details .crash-error{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
 .traffic-heading{align-items:start;flex-wrap:wrap}.traffic-heading p{margin:4px 0 0;max-width:560px}
 .traffic-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}
 .traffic-summary>div{background:var(--bg);border-radius:10px;padding:11px 13px;min-width:0}
@@ -346,12 +352,54 @@ function controlCenterClient() {
     const raw = typeof value === "string" ? value.toLowerCase() : "unknown";
     if (["active", "running", "connected", "ready", "listening"].includes(raw)) return [raw[0].toUpperCase() + raw.slice(1), "good"];
     if (["failed", "error"].includes(raw)) return ["Needs attention", "bad"];
+    if (raw === "crash-looping") return ["Crashing repeatedly", "bad"];
     if (["unknown", "stale", "unavailable"].includes(raw)) return ["Unknown · check status", "warning"];
     if (["stopped", "inactive", "dormant", "idle", "disconnected"].includes(raw)) return [raw[0].toUpperCase() + raw.slice(1), ""];
     return [raw.replace(/[-_]/g, " ").slice(0, 80), "warning"];
   }
   function isUnknown(value) { return !value || /unknown|stale|unavailable/i.test(value); }
   function isRunning(value) { return /^(active|running|connected|ready|listening|starting|stopping|restarting|pairing-ready)$/i.test(value || ""); }
+  // A crash-looping worker is still owned by its running task: Stop and Restart apply, Start does not.
+  function workloadActive(value) { return isRunning(value) || value === "crash-looping"; }
+  function renderCrashDetails(kind, item) {
+    const panel = $(kind + "-crash");
+    const report = item?.crash || item?.unexpectedStop;
+    panel.hidden = stale || !report;
+    if (panel.hidden) { panel.replaceChildren(); return; }
+    const repeated = item.crash?.repeated === true;
+    const label = kind === "station" ? "Station" : "The relay";
+    const title = repeated ? "Crashing repeatedly" : item.unexpectedStop ? "Stopped unexpectedly" : "Restarted after a crash";
+    const whatHappened = repeated
+      ? report.quickCrashesInARow + " crashes in a row, each within a minute of starting."
+      : item.unexpectedStop ? label + "'s background task ended without Stop."
+        : "Crashed " + elapsed(report.lastCrashAt) + " ago after running " + (report.lastRunSeconds ?? "?") + " s, and was restarted.";
+    const rows = [["What happened", whatHappened], ["Exit code", report.exit.code + " — " + report.exit.meaning]];
+    const lastError = report.lastError;
+    rows.push(["Error", lastError ? lastError.name + (lastError.code ? " [" + lastError.code + "]" : "") + ": " + lastError.message
+      : "No error message was recorded. This usually means a native or Windows-level stop, or local diagnostics are off."]);
+    if (lastError?.location) rows.push(["Where", lastError.location]);
+    if (repeated) {
+      const waitSeconds = Number.isFinite(report.nextRestartAt) ? Math.max(0, Math.ceil((report.nextRestartAt - Date.now()) / 1000)) : null;
+      rows.push(["Next", (waitSeconds ? "Retrying in " + waitSeconds + " s" : "Retrying now") + ", then every 30 s or less. Fix the cause, then Restart. Stop ends the retries."]);
+    } else if (item.unexpectedStop) rows.push(["Next", "Start it again. Saved phone trust is unchanged."]);
+    const heading = element("strong", title);
+    const list = document.createElement("dl");
+    for (const [term, value] of rows) {
+      const row = document.createElement("div");
+      row.append(element("dt", term), element("dd", message(value), (term === "Error" && lastError) || term === "Where" ? "crash-error" : ""));
+      list.append(row);
+    }
+    const copy = element("button", "Copy error details", "button compact");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText([label + ": " + title, ...rows.map(([term, value]) => term + ": " + message(value))].join("\n"));
+        copy.textContent = "Copied";
+      } catch { copy.textContent = "Copy unavailable"; }
+    });
+    panel.className = "crash-details" + (repeated || item.unexpectedStop ? " bad" : "");
+    panel.replaceChildren(heading, list, copy);
+  }
   function workloadSupported() {
     return state && /^(win32|windows)$/i.test(state.platform || "");
   }
@@ -427,18 +475,21 @@ function controlCenterClient() {
     const recovering = [state.station?.state, relayRequired ? state.relay?.state : ""].some((value) =>
       /starting|recovering|waiting-network|failed|unhealthy|degraded|unresponsive/.test(value || ""));
     const stopped = state.station?.state === "stopped";
-    text("health-summary", stale ? "Status needs a refresh" : restartNeeded ? "Station needs a restart" : stopped ? "Device access is paused"
-      : ready ? "Weft ready on " + state.deviceName : recovering ? "Connection needs attention" : "Local Weft on " + state.deviceName);
+    const crashLooping = state.station?.state === "crash-looping" ? "Station is crashing repeatedly"
+      : relayRequired && state.relay?.state === "crash-looping" ? "The relay is crashing repeatedly" : null;
+    const workerLabel = (value) => value === "crash-looping" ? "crashing repeatedly" : value || "unreported";
+    text("health-summary", stale ? "Status needs a refresh" : crashLooping || (restartNeeded ? "Station needs a restart" : stopped ? "Device access is paused"
+      : ready ? "Weft ready on " + state.deviceName : recovering ? "Connection needs attention" : "Local Weft on " + state.deviceName));
     const saved = savedPairing();
     const contact = state.station?.connected === true ? "Recent phone contact confirmed"
       : saved === true ? "Phone trust saved; live contact not yet confirmed"
         : saved === false ? "No saved phone pairing" : "Saved pairing status unavailable";
     text("health-detail", stale ? "Previously reported values are not live. Refresh before changing a worker."
-      : [(stopped ? "Station is stopped; direct sessions are separate" : "Station " + (state.station?.state || "unreported")),
-        relayRequired ? state.relay?.forwarding === "ok" ? "Public forwarding verified" : "Relay " + (state.relay?.state || "unreported")
+      : [(stopped ? "Station is stopped; direct sessions are separate" : "Station " + workerLabel(state.station?.state)),
+        relayRequired ? state.relay?.forwarding === "ok" ? "Public forwarding verified" : "Relay " + workerLabel(state.relay?.state)
           : state.settings.transport?.kind === "supabase" ? "Supabase selected" : "No transport configured",
         contact].join(" · "));
-    document.querySelector(".health-summary").classList.toggle("attention", stale || recovering);
+    document.querySelector(".health-summary").classList.toggle("attention", stale || recovering || Boolean(crashLooping));
   }
   function savedPairing() {
     const stored = state?.station?.savedPairing?.paired;
@@ -519,11 +570,13 @@ function controlCenterClient() {
       $(kind + "-progress").hidden = !detail;
       if (detail) text(kind + "-progress", detail);
       if (!item.pid) $(kind + "-pid").textContent = "";
-      $(kind + "-error").hidden = !item.error;
+      $(kind + "-error").hidden = !item.error || Boolean(item.crash || item.unexpectedStop);
       if (item.error) text(kind + "-error", message(item.error));
+      renderCrashDetails(kind, item);
       const supported = workloadSupported() && (kind !== "station" || item.supported !== false);
       const remedy = !supported ? "Background workload controls require Windows and a supported local installation."
         : stale || isUnknown(item.state) ? "Refresh status before changing this worker."
+          : item.state === "crash-looping" ? "Weft keeps restarting this worker. Fix the error shown here, then Restart, or Stop to end the retries."
           : isRunning(item.state) ? "Running locally. Restart and stop always ask for confirmation."
             : kind === "station" ? "Start explicitly when you want phone access to Station utilities."
               : "Use Dev Tunnel transport in Settings, then explicitly start this relay.";
@@ -890,7 +943,7 @@ function controlCenterClient() {
       const unknown = isUnknown(item?.state);
       for (const action of ["start", "restart", "stop"]) {
         const button = $(kind + "-" + action);
-        button.disabled = unavailable || unsupported || unknown || (action === "start" ? isRunning(item?.state) : !isRunning(item?.state)) || /^(starting|stopping|restarting)$/i.test(item?.state || "");
+        button.disabled = unavailable || unsupported || unknown || (action === "start" ? workloadActive(item?.state) : !workloadActive(item?.state)) || /^(starting|stopping|restarting)$/i.test(item?.state || "");
         button.title = unsupported ? "Background workload controls require Windows and a supported installation." : stale || unknown ? "Refresh to get a known status first." : busy ? "Wait for the current operation." : "";
       }
     }
@@ -908,6 +961,7 @@ function controlCenterClient() {
     else if (!["devtunnel", "supabase"].includes(state.settings.transport?.kind)) { primaryAction = "settings"; primaryLabel = "Set up connection"; }
     else if (!state.projects.length && state.station?.state === "stopped") { primaryAction = "projects"; primaryLabel = "Register a project"; }
     else if (state.station?.state === "stopped") { primaryAction = "start"; primaryLabel = "Start Station"; }
+    else if (state.station?.state === "crash-looping") { primaryAction = "restart"; primaryLabel = "Restart Station"; }
     else if (state.connection?.liveState === "restart-needed") { primaryAction = "restart"; primaryLabel = "Review Station restart"; }
     else if (/failed|recovering|starting|unresponsive|waiting-network/.test(state.station?.state || "") ||
         state.settings.transport?.kind === "devtunnel" && /failed|recovering|starting|unresponsive|waiting-network|degraded/.test(state.relay?.state || "")) {
@@ -916,7 +970,7 @@ function controlCenterClient() {
     primary.textContent = primaryLabel;
     primary.dataset.action = primaryAction;
     primary.disabled = ["start", "restart"].includes(primaryAction) && (unavailable || !workloadSupported() || state.station?.supported === false);
-    $("unused-relay-stop").disabled = unavailable || !workloadSupported() || !isRunning(state?.relay?.state);
+    $("unused-relay-stop").disabled = unavailable || !workloadSupported() || !workloadActive(state?.relay?.state);
     $("auth-refresh").disabled = stale || !state;
     const stationReady = workloadSupported() && state?.station?.supported !== false && /^(running|active|ready|pairing-ready|listening)$/i.test(state?.station?.state || "");
     const transportReady = ["supabase", "devtunnel"].includes(state?.settings?.transport?.kind);

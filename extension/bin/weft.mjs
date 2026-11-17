@@ -36,14 +36,15 @@ import {
   DEVTUNNEL_REGISTRY_FILE,
 } from "../src/devtunnel.mjs";
 import { loadTransportConfig, isTerminalEnabled, isDiagnosticLoggingEnabled } from "../src/transportConfig.mjs";
-import { readRegistry, isPidAlive } from "../src/registryFile.mjs";
+import { readRegistry, isPidAlive, writeRegistryAtomic } from "../src/registryFile.mjs";
 import { transportIdentity } from "@aasis21/weft-shared";
 import { enableStationLog, appendStationLog, stationLogPath } from "../src/stationLog.mjs";
 import { resolveVersion } from "../src/version.mjs";
 import { parseStartOptions } from "../src/startOptions.mjs";
 import {
   backgroundCommand, backgroundTaskOperation, createBackgroundControl,
-  startBackground, stopBackground,
+  startBackground, stopBackground, summarizeWorkerError, workerFailureFileName,
+  readWorkerCrashReport, readUnexpectedTaskExit, describeWorkerProblem,
 } from "../src/backgroundLifecycle.mjs";
 import { attachTerminal } from "../src/terminalClient.mjs";
 import { NATIVE_TARGETS, requiredNativeFiles, stageNativeRuntime } from "../../scripts/native-runtime.mjs";
@@ -99,6 +100,22 @@ function printFailure(err) {
   for (const line of rest) console.error(c.dim(line));
 }
 
+// A background worker that is about to exit on a fatal error records the error itself, so the
+// dashboard and `weft status` can show what actually failed instead of only an exit code. Only the
+// latest failure per worker is kept, locally, and only while local diagnostics are enabled.
+function recordBackgroundWorkerFailure(error) {
+  const [role, home] = args;
+  if (command !== "__background-worker" || !["station", "relay"].includes(role) || !home || !isAbsolute(home)) return;
+  try {
+    if (!isDiagnosticLoggingEnabled({ baseDir: home })) return;
+    writeRegistryAtomic(workerFailureFileName(role), {
+      at: Date.now(), pid: process.pid, version: resolveVersion(), ...summarizeWorkerError(error),
+    }, { baseDir: home });
+  } catch {
+    // Recording a failure must never hide the original one.
+  }
+}
+
 // Last-resort safety net: `weft start` is a long-running station process — any stray unhandled
 // rejection or synchronous throw from deep in the transport/heartbeat stack must never silently
 // kill it (that's the "crashed 100s after the heartbeat fired, no stack trace" bug). We keep the
@@ -107,12 +124,18 @@ function printFailure(err) {
 process.on("unhandledRejection", (reason) => {
   console.error(`\n${c.red("✗ unhandled rejection (station kept running):")}`, reason?.stack ?? reason);
   appendStationLog("process.unhandled_rejection", { error: reason?.stack ?? String(reason) }, { level: "error" });
-  if (["__background-worker", "__ui-host"].includes(command)) process.exit(1);
+  if (["__background-worker", "__ui-host"].includes(command)) {
+    recordBackgroundWorkerFailure(reason);
+    process.exit(1);
+  }
 });
 process.on("uncaughtException", (err) => {
   console.error(`\n${c.red("✗ uncaught exception (station kept running):")}`, err?.stack ?? err);
   appendStationLog("process.uncaught_exception", { error: err?.stack ?? String(err) }, { level: "error" });
-  if (["__background-worker", "__ui-host"].includes(command)) process.exit(1);
+  if (["__background-worker", "__ui-host"].includes(command)) {
+    recordBackgroundWorkerFailure(err);
+    process.exit(1);
+  }
 });
 
 // Every command runs inside main(), which is CALLED AT THE VERY BOTTOM of this file — never
@@ -226,6 +249,7 @@ async function main() {
     }
   } catch (err) {
     appendStationLog("cli.failed", { code: err?.code ?? err?.name ?? "Error", phase: "cli" }, { level: "error" });
+    recordBackgroundWorkerFailure(err);
     console.error(err?.message ?? String(err));
     if (command === "start") {
       console.error(
@@ -311,14 +335,26 @@ function readFileSyncSafe(path) {
 
 async function stationStatus() {
   if (process.platform !== "win32") throw new Error("Background Station management is currently supported on Windows. Use foreground Station on this platform.");
-  const status = await backgroundCommand("station");
-  if (status) console.log(`Station: ${status.state}${status.deviceName ? ` (${status.deviceName})` : ""}${status.error ? ` - ${status.error}` : ""}`);
-  else {
-    const task = await backgroundTaskOperation("status", { ...backgroundOptions(), role: "station" });
-    const failed = task.state === "Ready" && Number.isInteger(task.lastResult) && ![0, 0x41303].includes(task.lastResult);
-    console.log(failed
-      ? `Station stopped unexpectedly (exit code 0x${(task.lastResult >>> 0).toString(16).toUpperCase()}). Run \`weft start\`; saved phone trust is unchanged.`
-      : `Station is not responding. Task: ${task.state}.`);
+  const options = backgroundOptions();
+  for (const role of ["station", "relay"]) {
+    const label = role === "station" ? "Station" : "Relay";
+    const workerStatus = await backgroundCommand(role);
+    const crash = readWorkerCrashReport(role, { baseDir: options.baseDir, workerStartedAt: workerStatus?.startedAt });
+    const task = workerStatus ? null : await backgroundTaskOperation("status", { ...options, role });
+    const unexpectedStop = task ? readUnexpectedTaskExit(role, task, { baseDir: options.baseDir }) : null;
+    const problem = describeWorkerProblem(role, { crash, unexpectedStop });
+    if (workerStatus) {
+      const state = crash?.repeated && workerStatus.state !== "ready" ? "crashing repeatedly" : workerStatus.state;
+      console.log(`${label}: ${state}${workerStatus.deviceName ? ` (${workerStatus.deviceName})` : ""}${workerStatus.error ? ` - ${workerStatus.error}` : ""}`);
+    } else if (crash?.repeated) {
+      console.log(`${label}: crashing repeatedly.`);
+    } else if (task.state === "NotRegistered" || task.state === "Disabled") {
+      if (role === "station") console.log("Station: stopped.");
+      continue;
+    } else {
+      console.log(`${label}: ${unexpectedStop ? "stopped unexpectedly" : `not responding (task ${task.state})`}.`);
+    }
+    if (problem) console.log(`  ${problem}`);
   }
 }
 

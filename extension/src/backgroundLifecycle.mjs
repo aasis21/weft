@@ -16,118 +16,288 @@ import { weftHome } from "./projects.mjs";
 import { resolveVersion } from "./version.mjs";
 
 const execFileAsync = promisify(execFile);
-const roles = new Set(["station", "relay"]);
+const BACKGROUND_ROLES = new Set(["station", "relay"]);
+
+// How the Windows background workloads run
+// -----------------------------------------
+// Station and the relay each run as ONE Windows Task Scheduler task per user and Weft home. The
+// task has no triggers: Start runs it once, and that single run lasts until Stop. Task Scheduler
+// only provides a hidden process under the user's account that outlives the terminal or dashboard.
+//
+// The task runs a small PowerShell "supervisor" loop, which runs the Node worker
+// (`weft __background-worker <role> <home>`) and restarts it after a crash:
+//   - restart delay starts at 1 second and doubles up to 30 seconds;
+//   - a run that lasted at least 60 seconds counts as healthy and resets the delay;
+//   - each crash is recorded in background-<role>-restarts.json so status can report a worker that
+//     keeps crashing ("crash loop") instead of silently retrying forever;
+//   - the worker records its own fatal error in background-<role>-failure.json before exiting.
+// Stop disables the task and writes a stop marker first, so the loop can never restart a worker
+// that is being stopped deliberately.
+export const RESTART_DELAY_INITIAL_MS = 1_000;
+export const RESTART_DELAY_MAX_MS = 30_000;
+export const HEALTHY_RUN_SECONDS = 60;
+// Five crashes in a row, each within a minute of starting, is reported as "crashing repeatedly".
+export const REPEATED_CRASH_THRESHOLD = 5;
+// Crash information older than this (the longest retry wait plus a quick run) is no longer current.
+const CRASH_REPORT_WINDOW_MS = 2 * 60_000;
+// Task Scheduler last-result codes that do not mean the workload failed.
+const TASK_RESULT_SUCCESS = 0;
+const TASK_RESULT_NOT_RUN_YET = 0x41303;
 
 function requireRole(role) {
-  if (!roles.has(role)) throw new Error("Background role must be station or relay.");
+  if (!BACKGROUND_ROLES.has(role)) throw new Error("Background role must be station or relay.");
   return role;
 }
 
-function registryName(role) {
+/** Registry published by a running worker: its authenticated local control endpoint. */
+function controlRegistryFileName(role) {
   return `background-${requireRole(role)}.json`;
 }
 
-export function backgroundTaskName(role, { baseDir = weftHome() } = {}) {
-  const suffix = createHash("sha256").update(resolve(baseDir).toLowerCase()).digest("hex").slice(0, 16);
-  return `Weft-${requireRole(role)}-${suffix}`;
+/** Written by the supervisor loop after every crash. */
+export function restartStateFileName(role) {
+  return `background-${requireRole(role)}-restarts.json`;
 }
 
-function psString(value) {
+/** Written by the worker itself just before it exits on a fatal error. */
+export function workerFailureFileName(role) {
+  return `background-${requireRole(role)}-failure.json`;
+}
+
+function stopMarkerPath(role, baseDir) {
+  return win32.join(resolve(baseDir), `background-${requireRole(role)}.stop`);
+}
+
+export function backgroundTaskName(role, { baseDir = weftHome() } = {}) {
+  const homeHash = createHash("sha256").update(resolve(baseDir).toLowerCase()).digest("hex").slice(0, 16);
+  return `Weft-${requireRole(role)}-${homeHash}`;
+}
+
+/** Quote a value as a single-quoted PowerShell literal (no interpolation). */
+function powerShellLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+/** The PowerShell loop that the scheduled task runs. See the overview at the top of this file. */
 export function backgroundSupervisorScript({
   role, baseDir = weftHome(), cliPath, nodePath = process.execPath,
+  restartDelayInitialMs = RESTART_DELAY_INITIAL_MS, restartDelayMaxMs = RESTART_DELAY_MAX_MS,
+  healthyRunSeconds = HEALTHY_RUN_SECONDS,
 } = {}) {
   requireRole(role);
   return `$ErrorActionPreference='Stop'
-$node=${psString(nodePath)}
-$cli=${psString(resolve(cliPath))}
-$weftHome=${psString(resolve(baseDir))}
-$role=${psString(role)}
-$stop=${psString(win32.join(resolve(baseDir), `background-${role}.stop`))}
-$delay=1
+$nodeExecutable=${powerShellLiteral(nodePath)}
+$weftCli=${powerShellLiteral(resolve(cliPath))}
+$weftHome=${powerShellLiteral(resolve(baseDir))}
+$workerRole=${powerShellLiteral(role)}
+$stopMarkerPath=${powerShellLiteral(stopMarkerPath(role, baseDir))}
+$restartStatePath=${powerShellLiteral(win32.join(resolve(baseDir), restartStateFileName(role)))}
+$restartDelayInitialMs=${Number(restartDelayInitialMs)}
+$restartDelayMaxMs=${Number(restartDelayMaxMs)}
+$healthyRunSeconds=${Number(healthyRunSeconds)}
+$restartDelayMs=$restartDelayInitialMs
+$totalCrashes=0
+$quickCrashesInARow=0
+$quickCrashStreakStartedAt=$null
 while ($true) {
-  if (Test-Path -LiteralPath $stop) { exit 0 }
-  $started=[DateTime]::UtcNow
+  if (Test-Path -LiteralPath $stopMarkerPath) { exit 0 }
+  $workerStartedAt=[DateTime]::UtcNow
   $ErrorActionPreference='Continue'
   $global:LASTEXITCODE=1
-  & $node $cli '__background-worker' $role $weftHome > $null 2> $null
-  $code=$LASTEXITCODE
+  & $nodeExecutable $weftCli '__background-worker' $workerRole $weftHome > $null 2> $null
+  $workerExitCode=$LASTEXITCODE
   $ErrorActionPreference='Stop'
-  if ($code -eq 0) { exit 0 }
-  if (Test-Path -LiteralPath $stop) { exit 0 }
-  if (([DateTime]::UtcNow-$started).TotalSeconds -ge 60) { $delay=1 }
-  Start-Sleep -Seconds $delay
-  $delay=[Math]::Min(30,$delay*2)
+  if ($workerExitCode -eq 0) { exit 0 }
+  if (Test-Path -LiteralPath $stopMarkerPath) { exit 0 }
+  # The worker crashed. Record it so status can explain repeated failures, then wait and retry.
+  $workerRunSeconds=([DateTime]::UtcNow-$workerStartedAt).TotalSeconds
+  $crashedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  $totalCrashes++
+  if ($workerRunSeconds -ge $healthyRunSeconds) {
+    $restartDelayMs=$restartDelayInitialMs
+    $quickCrashesInARow=0
+    $quickCrashStreakStartedAt=$null
+  } else {
+    if ($quickCrashesInARow -eq 0) { $quickCrashStreakStartedAt=$crashedAt }
+    $quickCrashesInARow++
+  }
+  $restartState=@{
+    role=$workerRole; totalCrashes=$totalCrashes; quickCrashesInARow=$quickCrashesInARow
+    quickCrashStreakStartedAt=$quickCrashStreakStartedAt; lastExitCode=$workerExitCode
+    lastCrashAt=$crashedAt; lastRunSeconds=[Math]::Round($workerRunSeconds,1); nextRestartAt=$crashedAt+$restartDelayMs
+  } | ConvertTo-Json -Compress
+  try {
+    [IO.File]::WriteAllText("$restartStatePath.tmp",$restartState)
+    Move-Item -LiteralPath "$restartStatePath.tmp" -Destination $restartStatePath -Force
+  } catch { }
+  Start-Sleep -Milliseconds $restartDelayMs
+  $restartDelayMs=[Math]::Min($restartDelayMaxMs,$restartDelayMs*2)
 }`;
 }
 
+/** PowerShell that inspects or changes the scheduled task: start, disable, stop or status. */
 export function backgroundTaskScript(operation, {
   role, baseDir = weftHome(), cliPath, nodePath = process.execPath,
 } = {}) {
   if (!["start", "disable", "stop", "status"].includes(operation)) throw new Error("Invalid background task operation.");
-  const name = backgroundTaskName(role, { baseDir });
-  const supervisor = backgroundSupervisorScript({ role, baseDir, cliPath, nodePath });
-  const args = "-NoLogo -NoProfile -NonInteractive -EncodedCommand " +
-    Buffer.from(supervisor, "utf16le").toString("base64");
-  const shell = win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const prefix = `$ErrorActionPreference='Stop'
+  const taskName = backgroundTaskName(role, { baseDir });
+  const supervisorScript = backgroundSupervisorScript({ role, baseDir, cliPath, nodePath });
+  const supervisorArguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand " +
+    Buffer.from(supervisorScript, "utf16le").toString("base64");
+  const powerShellExecutable = win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  // Every operation first finds the task and refuses to touch one owned by another Windows user.
+  const findTaskAndCheckOwner = `$ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-$name=${psString(name)}
-$stop=${psString(win32.join(resolve(baseDir), `background-${role}.stop`))}
-$user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$task=Get-ScheduledTask -TaskPath '\\' | Where-Object { $_.TaskName -eq $name }
-if ($task) {
-  $owner=[string]$task.Principal.UserId
-  if ($owner -notmatch '^S-\\d+-') {
-    $owner=([Security.Principal.NTAccount]$owner).Translate([Security.Principal.SecurityIdentifier]).Value
+$taskName=${powerShellLiteral(taskName)}
+$stopMarkerPath=${powerShellLiteral(stopMarkerPath(role, baseDir))}
+$currentUserSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$existingTask=Get-ScheduledTask -TaskPath '\\' | Where-Object { $_.TaskName -eq $taskName }
+if ($existingTask) {
+  $taskOwnerSid=[string]$existingTask.Principal.UserId
+  if ($taskOwnerSid -notmatch '^S-\\d+-') {
+    $taskOwnerSid=([Security.Principal.NTAccount]$taskOwnerSid).Translate([Security.Principal.SecurityIdentifier]).Value
   }
-  if ($owner -ne $user) { throw 'The Weft task belongs to another identity; no changes were made.' }
+  if ($taskOwnerSid -ne $currentUserSid) { throw 'The Weft task belongs to another identity; no changes were made.' }
 }
 `;
   if (operation === "status") {
-    return `${prefix}
-if ($task) {
-  $lastResult=$null
-  try { $lastResult=[int64](Get-ScheduledTaskInfo -TaskName $name -TaskPath '\\').LastTaskResult } catch { }
-  @{state=[string]$task.State; taskName=$name; lastResult=$lastResult} | ConvertTo-Json -Compress
+    return `${findTaskAndCheckOwner}
+if ($existingTask) {
+  $lastTaskResult=$null
+  try { $lastTaskResult=[int64](Get-ScheduledTaskInfo -TaskName $taskName -TaskPath '\\').LastTaskResult } catch { }
+  @{state=[string]$existingTask.State; taskName=$taskName; lastResult=$lastTaskResult} | ConvertTo-Json -Compress
 }
-else { @{state='NotRegistered'; taskName=$name} | ConvertTo-Json -Compress }`;
+else { @{state='NotRegistered'; taskName=$taskName} | ConvertTo-Json -Compress }`;
   }
   if (operation === "disable" || operation === "stop") {
-    return `${prefix}
-if ($task) {
-  Disable-ScheduledTask -TaskName $name -TaskPath '\\' | Out-Null
-  [IO.File]::WriteAllText($stop,'stopped')
-  ${operation === "stop" ? `Stop-ScheduledTask -TaskName $name -TaskPath '\\'
-  $deadline=[DateTime]::UtcNow.AddSeconds(10)
+    // Disable and write the stop marker BEFORE stopping, so the supervisor cannot restart the worker.
+    return `${findTaskAndCheckOwner}
+if ($existingTask) {
+  Disable-ScheduledTask -TaskName $taskName -TaskPath '\\' | Out-Null
+  [IO.File]::WriteAllText($stopMarkerPath,'stopped')
+  ${operation === "stop" ? `Stop-ScheduledTask -TaskName $taskName -TaskPath '\\'
+  $stopDeadline=[DateTime]::UtcNow.AddSeconds(10)
   do {
-    $current=Get-ScheduledTask -TaskName $name -TaskPath '\\'
-    if ([string]$current.State -ne 'Running') { break }
+    $currentTask=Get-ScheduledTask -TaskName $taskName -TaskPath '\\'
+    if ([string]$currentTask.State -ne 'Running') { break }
     Start-Sleep -Milliseconds 100
-  } while ([DateTime]::UtcNow -lt $deadline)
-  if ([string]$current.State -eq 'Running') { throw 'Weft did not stop; no stopped status was reported.' }` : ""}
+  } while ([DateTime]::UtcNow -lt $stopDeadline)
+  if ([string]$currentTask.State -eq 'Running') { throw 'Weft did not stop; no stopped status was reported.' }` : ""}
 }
-@{state='${operation === "stop" ? "Stopped" : "Disabled"}'; taskName=$name} | ConvertTo-Json -Compress`;
+@{state='${operation === "stop" ? "Stopped" : "Disabled"}'; taskName=$taskName} | ConvertTo-Json -Compress`;
   }
-  return `${prefix}
-$execute=${psString(shell)}
-$arguments=${psString(args)}
-if (Test-Path -LiteralPath $stop) { Remove-Item -LiteralPath $stop -Force }
-if ($task -and ([string]$task.State -eq 'Running')) {
-  if ($task.Actions.Count -ne 1 -or $task.Actions[0].Execute -ne $execute -or $task.Actions[0].Arguments -ne $arguments) {
-    throw 'Weft is running from another installation. Stop it there before starting this one.'
+  // start: run the task once. An already-running task from this installation is left alone.
+  return `${findTaskAndCheckOwner}
+$actionExecutable=${powerShellLiteral(powerShellExecutable)}
+$actionArguments=${powerShellLiteral(supervisorArguments)}
+if (Test-Path -LiteralPath $stopMarkerPath) { Remove-Item -LiteralPath $stopMarkerPath -Force }
+if ($existingTask -and ([string]$existingTask.State -eq 'Running')) {
+  if ($existingTask.Actions.Count -ne 1 -or $existingTask.Actions[0].Execute -ne $actionExecutable -or $existingTask.Actions[0].Arguments -ne $actionArguments) {
+    throw 'Weft is already running from a different installation or an earlier Weft version. Run weft stop, then start again.'
   }
 } else {
-  $action=New-ScheduledTaskAction -Execute $execute -Argument $arguments
-  $principal=New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-  $settings=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
-  $definition=New-ScheduledTask -Action $action -Principal $principal -Settings $settings -Description 'Manually started Weft background workload. No boot or sign-in triggers.'
-  Register-ScheduledTask -TaskName $name -TaskPath '\\' -InputObject $definition -Force | Out-Null
-  Start-ScheduledTask -TaskName $name -TaskPath '\\'
+  # A fresh start clears crash information from the previous run.
+  foreach ($previousRunFile in @(${powerShellLiteral(win32.join(resolve(baseDir), restartStateFileName(role)))}, ${powerShellLiteral(win32.join(resolve(baseDir), workerFailureFileName(role)))})) {
+    if (Test-Path -LiteralPath $previousRunFile) { Remove-Item -LiteralPath $previousRunFile -Force }
+  }
+  $taskAction=New-ScheduledTaskAction -Execute $actionExecutable -Argument $actionArguments
+  $taskPrincipal=New-ScheduledTaskPrincipal -UserId $currentUserSid -LogonType Interactive -RunLevel Limited
+  $taskSettings=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+  $taskDefinition=New-ScheduledTask -Action $taskAction -Principal $taskPrincipal -Settings $taskSettings -Description 'Manually started Weft background workload. No boot or sign-in triggers.'
+  Register-ScheduledTask -TaskName $taskName -TaskPath '\\' -InputObject $taskDefinition -Force | Out-Null
+  Start-ScheduledTask -TaskName $taskName -TaskPath '\\'
 }
-@{state='Starting'; taskName=$name} | ConvertTo-Json -Compress`;
+@{state='Starting'; taskName=$taskName} | ConvertTo-Json -Compress`;
+}
+
+const EXIT_CODE_MEANINGS = new Map([
+  [1, "Weft exited because of an error."],
+  [0xC000013A, "The worker's console was interrupted or closed (Ctrl+C, console close or Windows sign-out)."],
+  [0xC0000005, "Native crash: access violation."],
+  [0xC00000FD, "Native crash: stack overflow."],
+  [0xC0000409, "Native crash: the process stopped itself after detecting a fatal error."],
+  [0xC0000142, "Windows could not initialize the process, often because the session is ending."],
+  [0x41306, "Task Scheduler terminated the task."],
+]);
+
+/** Exit code as Windows shows it (hex for status codes) plus a plain-English meaning. */
+export function describeExitCode(exitCode) {
+  if (!Number.isInteger(exitCode)) return { code: "unknown", meaning: "No exit code was reported." };
+  const unsigned = exitCode >>> 0;
+  return {
+    code: unsigned > 0xFFFF ? "0x" + unsigned.toString(16).toUpperCase() : String(unsigned),
+    meaning: EXIT_CODE_MEANINGS.get(unsigned) ?? "The worker exited with an unexpected code.",
+  };
+}
+
+/** A safe, one-line summary of a fatal worker error: no stack, credentials or addresses. */
+export function summarizeWorkerError(error) {
+  const text = (value, limit) => String(value ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/https?:\/\/\S+|wss?:\/\/\S+/gi, "[address]")
+    .replace(/\b(Bearer|token|secret|password|api[-_]?key)(\s*[:= ]\s*)\S+/gi, "$1$2[redacted]")
+    .trim().slice(0, limit);
+  const firstLine = String(error?.message ?? error ?? "Unknown error").split(/\r?\n/)[0];
+  const frame = String(error?.stack ?? "").split(/\r?\n/).slice(1)
+    .map((line) => /\(?([^()\s]+?):(\d+):\d+\)?\s*$/.exec(line.trim())).find(Boolean);
+  return {
+    name: text(error?.name ?? "Error", 60) || "Error",
+    code: typeof error?.code === "string" || Number.isInteger(error?.code) ? text(error.code, 60) : null,
+    message: text(firstLine, 500) || "Unknown error",
+    location: frame ? `${text(frame[1].split(/[\\/]/).pop(), 80)}:${frame[2]}` : null,
+  };
+}
+
+function recordedFailure(role, baseDir) {
+  const failure = readRegistry(workerFailureFileName(role), { baseDir });
+  return failure && typeof failure.message === "string"
+    ? { name: failure.name ?? "Error", code: failure.code ?? null, message: failure.message, location: failure.location ?? null, at: failure.at ?? null }
+    : null;
+}
+
+/**
+ * Current crash information for a worker, or null when it has not crashed recently or has since
+ * stayed up for a healthy run. `repeated` means it keeps crashing within a minute of starting.
+ */
+export function readWorkerCrashReport(role, { baseDir = weftHome(), now = Date.now(), workerStartedAt = null } = {}) {
+  const restarts = readRegistry(restartStateFileName(role), { baseDir });
+  if (!restarts || !Number.isFinite(restarts.lastCrashAt) || now - restarts.lastCrashAt > CRASH_REPORT_WINDOW_MS) return null;
+  const recoveredSince = Number.isFinite(workerStartedAt) && workerStartedAt > restarts.lastCrashAt &&
+    now - workerStartedAt >= HEALTHY_RUN_SECONDS * 1000;
+  if (recoveredSince) return null;
+  const failure = recordedFailure(role, baseDir);
+  const quickCrashesInARow = Number.isInteger(restarts.quickCrashesInARow) ? restarts.quickCrashesInARow : 0;
+  return {
+    repeated: quickCrashesInARow >= REPEATED_CRASH_THRESHOLD,
+    quickCrashesInARow,
+    totalCrashes: Number.isInteger(restarts.totalCrashes) ? restarts.totalCrashes : null,
+    streakStartedAt: Number.isFinite(restarts.quickCrashStreakStartedAt) ? restarts.quickCrashStreakStartedAt : null,
+    lastCrashAt: restarts.lastCrashAt,
+    lastRunSeconds: Number.isFinite(restarts.lastRunSeconds) ? restarts.lastRunSeconds : null,
+    nextRestartAt: Number.isFinite(restarts.nextRestartAt) ? restarts.nextRestartAt : null,
+    exit: describeExitCode(restarts.lastExitCode),
+    // The worker writes its failure just before exiting, so only a record from this crash applies.
+    lastError: failure && Math.abs(restarts.lastCrashAt - (failure.at ?? 0)) < CRASH_REPORT_WINDOW_MS ? failure : null,
+  };
+}
+
+/** When the whole task ended without `weft stop`: its exit code, meaning and last recorded error. */
+export function readUnexpectedTaskExit(role, task, { baseDir = weftHome() } = {}) {
+  // Weft stop disables the task, so an enabled, idle task with a failure result ended on its own.
+  if (task?.state !== "Ready" || !Number.isInteger(task.lastResult) ||
+      [TASK_RESULT_SUCCESS, TASK_RESULT_NOT_RUN_YET].includes(task.lastResult)) return null;
+  return { exit: describeExitCode(task.lastResult), lastError: recordedFailure(role, baseDir) };
+}
+
+/** Plain-language summary used by both the dashboard and `weft status`. */
+export function describeWorkerProblem(role, { crash = null, unexpectedStop = null } = {}) {
+  const label = role === "station" ? "Station" : "The relay";
+  const detail = (report) => `exit code ${report.exit.code}: ${report.exit.meaning}` +
+    (report.lastError ? ` Last error: ${report.lastError.name}: ${report.lastError.message}` +
+      (report.lastError.location ? ` (${report.lastError.location})` : "") : "");
+  if (crash?.repeated) return `${label} is crashing repeatedly: ${crash.quickCrashesInARow} crashes in a row, each within a minute of starting (${detail(crash)}). Weft keeps retrying every 30 seconds or less; fix the cause, then restart it.`;
+  if (unexpectedStop) return `${label} stopped unexpectedly (${detail(unexpectedStop)}). Start it again; saved phone trust is unchanged.`;
+  if (crash) return `${label} crashed and was restarted (${detail(crash)}).`;
+  return null;
 }
 
 export async function backgroundTaskOperation(operation, options, { exec = execFileAsync } = {}) {
@@ -153,7 +323,7 @@ export async function backgroundTaskOperation(operation, options, { exec = execF
 export async function backgroundCommand(role, command = "status", payload = null, {
   baseDir = weftHome(), request = sendLifecycleCommand, timeoutMs = 2_000,
 } = {}) {
-  const record = readRegistry(registryName(role), { baseDir });
+  const record = readRegistry(controlRegistryFileName(role), { baseDir });
   if (!record) return null;
   if (
     record.role !== role ||
@@ -177,26 +347,35 @@ export async function backgroundCommand(role, command = "status", payload = null
   return response.result;
 }
 
+/**
+ * Start the role's task (a no-op if it is already running) and wait until the worker reports ready
+ * over its authenticated control endpoint. A slow or busy worker is polled again, not failed.
+ */
 export async function startBackground(role, options, {
   taskOperation = backgroundTaskOperation,
   inspect = () => backgroundCommand(role, "status", null, options),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = Date.now,
   timeoutMs = 180_000,
+  pollIntervalMs = 500,
   onProgress = null,
 } = {}) {
   await taskOperation("start", { ...options, role });
-  const deadline = now() + timeoutMs;
-  while (now() < deadline) {
-    const status = await inspect();
-    if (status) onProgress?.(status);
-    if (["ready", "endpoint-refresh-needed"].includes(status?.state)) return status;
-    if (status?.state === "failed") throw new Error(status.error ?? "Weft background startup failed.");
-    await sleep(500);
+  const readyDeadline = now() + timeoutMs;
+  while (now() < readyDeadline) {
+    const workerStatus = await inspect();
+    if (workerStatus) onProgress?.(workerStatus);
+    if (["ready", "endpoint-refresh-needed"].includes(workerStatus?.state)) return workerStatus;
+    if (workerStatus?.state === "failed") throw new Error(workerStatus.error ?? "Weft background startup failed.");
+    await sleep(pollIntervalMs);
   }
   throw new Error(`Weft ${role} has not become ready. Use \`weft ${role === "station" ? "status" : "devtunnel status"}\` to inspect it; no duplicate process was started.`);
 }
 
+/**
+ * Stop deliberately: disable the task first (so nothing restarts it), ask the worker to shut down
+ * cleanly, then stop the task.
+ */
 export async function stopBackground(role, options, {
   taskOperation = backgroundTaskOperation,
   quiesce = () => backgroundCommand(role, "quiesce", null, options),
@@ -205,22 +384,21 @@ export async function stopBackground(role, options, {
   now = Date.now,
   timeoutMs = 10_000,
 } = {}) {
-  // Disable first so a graceful exit or a racing failure cannot schedule another restart.
   await taskOperation("disable", { ...options, role });
-  let graceful = false;
-  let error = null;
+  let stoppedGracefully = false;
+  let shutdownError = null;
   try {
-    const reply = await quiesce();
-    const deadline = now() + timeoutMs;
-    while (reply && now() < deadline) {
-      if (!(await inspect())) { graceful = true; break; }
+    const shutdownAccepted = await quiesce();
+    const shutdownDeadline = now() + timeoutMs;
+    while (shutdownAccepted && now() < shutdownDeadline) {
+      if (!(await inspect())) { stoppedGracefully = true; break; }
       await sleep(100);
     }
   } catch (failure) {
-    error = failure.message;
+    shutdownError = failure.message;
   }
   await taskOperation("stop", { ...options, role });
-  return { state: "stopped", graceful, ...(error ? { error } : {}) };
+  return { state: "stopped", graceful: stoppedGracefully, ...(shutdownError ? { error: shutdownError } : {}) };
 }
 
 export async function createBackgroundControl(role, {
@@ -250,7 +428,7 @@ export async function createBackgroundControl(role, {
       },
     },
   }, { connectionTimeoutMs: 60_000, keepAlive: true });
-  if (!writeRegistryAtomic(registryName(role), {
+  if (!writeRegistryAtomic(controlRegistryFileName(role), {
     role, identity, capability, endpoint, pid: process.pid, processStartedAt,
   }, { baseDir })) {
     await host.close();
@@ -258,8 +436,8 @@ export async function createBackgroundControl(role, {
   }
   return {
     async close() {
-      if (readRegistry(registryName(role), { baseDir })?.identity?.runtimeInstanceId === identity.runtimeInstanceId) {
-        clearRegistry(registryName(role), { baseDir });
+      if (readRegistry(controlRegistryFileName(role), { baseDir })?.identity?.runtimeInstanceId === identity.runtimeInstanceId) {
+        clearRegistry(controlRegistryFileName(role), { baseDir });
       }
       await host.close();
     },

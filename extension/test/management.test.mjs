@@ -202,7 +202,7 @@ test("status reports partial failures and unexpected worker exits without failin
   });
   const state = await manager.state();
   assert.equal(state.station.state, "stopped");
-  assert.equal(state.station.unexpectedStop.exitCode, "0xC000013A");
+  assert.equal(state.station.unexpectedStop.exit.code, "0xC000013A");
   assert.match(state.station.error, /stopped unexpectedly/);
   assert.equal(state.relay.state, "unknown");
   assert.deepEqual(state.sessions, []);
@@ -222,6 +222,42 @@ test("status reports partial failures and unexpected worker exits without failin
   assert.match(log, /ui\.status_part_failed phase=sessions code=EPERM/);
   assert.match(log, /ui\.status_part_failed phase=relay code=EIO/);
   assert.ok(!log.includes("private"));
+});
+
+test("a worker stuck crashing is reported as crash-looping with its exact last error, logged once", async (t) => {
+  const baseDir = await home(t);
+  const now = Date.now();
+  await writeFile(join(baseDir, "background-station-restarts.json"), JSON.stringify({
+    role: "station", totalCrashes: 6, quickCrashesInARow: 6, quickCrashStreakStartedAt: now - 40_000,
+    lastExitCode: 1, lastCrashAt: now - 2_000, lastRunSeconds: 1.4, nextRestartAt: now + 28_000,
+  }));
+  await writeFile(join(baseDir, "background-station-failure.json"), JSON.stringify({
+    at: now - 2_100, name: "Error", code: "EADDRINUSE", message: "listen EADDRINUSE: address already in use 127.0.0.1:4590", location: "listener.mjs:301",
+  }));
+  let workerReady = false;
+  const manager = createManagement({ baseDir, platform: "win32", discover: async () => ({ runtimes: [] }),
+    background: {
+      command: async (role) => role === "station" && workerReady ? { state: "ready", pid: 4242, startedAt: now - 1_000 } : null,
+      task: async (_operation, { role }) => ({ state: role === "station" ? "Running" : "Disabled", taskName: `Weft-${role}`, lastResult: 267009 }),
+    },
+    authentication: async () => ({ state: "signed-in" }),
+  });
+  const state = await manager.state();
+  assert.equal(state.station.state, "crash-looping");
+  assert.equal(state.station.crash.repeated, true);
+  assert.equal(state.station.crash.quickCrashesInARow, 6);
+  assert.deepEqual({ ...state.station.crash.lastError, at: undefined }, {
+    name: "Error", code: "EADDRINUSE", message: "listen EADDRINUSE: address already in use 127.0.0.1:4590", location: "listener.mjs:301", at: undefined,
+  });
+  assert.match(state.station.error, /crashing repeatedly: 6 crashes in a row.*EADDRINUSE: address already in use/);
+  assert.equal(state.relay.crash, undefined);
+  await manager.state();
+  workerReady = true;
+  const recovered = await manager.state();
+  assert.equal(recovered.station.state, "ready", "a worker that came back up is not shown as crash-looping");
+  assert.equal(recovered.station.crash.repeated, true);
+  const log = await readFile(join(baseDir, "station.log"), "utf8");
+  assert.equal(log.match(/worker\.crash_loop role=station count=6 code=1/g).length, 1);
 });
 
 test("phone traffic merges Station and session sources, newest first, without unsupported workers failing it", async (t) => {

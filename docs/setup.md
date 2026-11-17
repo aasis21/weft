@@ -240,9 +240,18 @@ require confirmation; unregistering a folder removes only its shortcut registrat
 
 Windows status checks can take several seconds on a busy laptop. Control Center
 waits up to 30 seconds and shows the parts it could verify; sign-in is checked in the
-background. If Station or the relay exits without `weft stop`, its card and
-`weft status` report "stopped unexpectedly" with the Windows exit code. Start it
-again; saved phone trust is unchanged.
+background in. If Station or the relay exits without `weft stop`, its card and
+`weft status` report "stopped unexpectedly" with the Windows exit code, what the
+code means, and the last recorded error. Start it again; saved phone trust is
+unchanged.
+
+A crashed worker restarts after 1 second, and the wait doubles to at most 30
+seconds; a run of 60 seconds or more resets it. After 5 crashes in a row, each
+within a minute of starting, the card and `weft status` show **Crashing
+repeatedly**. They also show the exact last error (name, code, message, and file
+and line), the exit code and the next retry time. **Copy error details** copies
+the details for a bug report. Fix the cause, then **Restart**; **Stop** ends the
+retries. Errors are recorded only while local diagnostics are on.
 
 Phone connectivity is based on recent authenticated peer traffic, not a saved
 pairing record. When no recent evidence is available, the panel reports unknown;

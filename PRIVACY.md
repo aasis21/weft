@@ -210,3 +210,11 @@ timing, and pass/fail or reply status. Message text, prompts, approvals, file an
 terminal content, clipboard contents and keys are not recorded. Only the
 authorized local dashboard can read it, and it stops recording while local
 diagnostics are off. **Copy for bug report** omits session names.
+
+**Background worker crash information** on Windows stays in `~/.weft`. After a
+crash, the restart loop writes `background-<role>-restarts.json`: crash counts,
+exit code, timestamps and run length. When local diagnostics are on, a worker
+that exits on a fatal error first writes `background-<role>-failure.json`. It
+holds only the latest error's name, code, first message line (addresses and
+credential-like values redacted) and source file name and line, with no stack
+trace or folder path. A fresh Start deletes both files. Weft never uploads them.

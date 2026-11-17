@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
   backgroundTaskScript, backgroundTaskOperation, backgroundTaskName, backgroundSupervisorScript,
   startBackground, stopBackground, createBackgroundControl, backgroundCommand,
+  describeExitCode, summarizeWorkerError, readWorkerCrashReport, readUnexpectedTaskExit,
+  describeWorkerProblem, restartStateFileName, workerFailureFileName,
 } from "../src/backgroundLifecycle.mjs";
 
 const options = { baseDir: "C:\\User's files\\Weft", cliPath: "C:\\Weft tools\\weft.mjs", nodePath: "C:\\node\\node.exe" };
@@ -23,15 +26,101 @@ test("background tasks are user-scoped, manual, limited, and safely quoted", () 
   assert.ok(!script.includes("-AtLogOn"));
   const supervisor = backgroundSupervisorScript({ ...options, role: "station" });
   assert.ok(supervisor.includes("User''s files"));
-  assert.ok(supervisor.includes("$code -eq 0"));
-  assert.ok(supervisor.includes("Start-Sleep -Seconds $delay"));
+  assert.ok(supervisor.includes("$workerExitCode -eq 0"));
+  assert.ok(supervisor.includes("Start-Sleep -Milliseconds $restartDelayMs"));
+  assert.ok(supervisor.includes("$restartDelayInitialMs=1000"));
+  assert.ok(supervisor.includes("$restartDelayMaxMs=30000"));
   assert.match(script, /belongs to another identity/);
-  assert.match(script, /running from another installation/);
+  assert.match(script, /different installation or an earlier Weft version/);
+  assert.ok(script.includes(restartStateFileName("station")) && script.includes(workerFailureFileName("station")),
+    "a fresh start clears the previous run's crash information");
   assert.notEqual(backgroundTaskName("station", options), backgroundTaskName("relay", options));
   assert.match(backgroundTaskScript("stop", { ...options, role: "station" }), /Weft did not stop/);
   const status = backgroundTaskScript("status", { ...options, role: "station" });
   assert.match(status, /Get-ScheduledTaskInfo/);
-  assert.match(status, /lastResult=\$lastResult/);
+  assert.match(status, /lastResult=\$lastTaskResult/);
+});
+
+test("exit codes and fatal errors are described plainly without stacks, addresses or secrets", () => {
+  assert.deepEqual(describeExitCode(-1073741510), { code: "0xC000013A", meaning: describeExitCode(0xC000013A).meaning });
+  assert.match(describeExitCode(0xC000013A).meaning, /interrupted or closed/);
+  assert.equal(describeExitCode(1).code, "1");
+  assert.equal(describeExitCode(null).code, "unknown");
+  const error = new TypeError("listener.start is not a function\nsecond line https://private.example/x token=abc");
+  error.stack = "TypeError: listener.start is not a function\n    at start (C:\\Users\\me\\private\\weft.mjs:812:17)\n    at main (C:\\x\\y.mjs:1:1)";
+  assert.deepEqual(summarizeWorkerError(error), {
+    name: "TypeError", code: null, message: "listener.start is not a function", location: "weft.mjs:812",
+  });
+  const secret = summarizeWorkerError(Object.assign(new Error("connect to https://host.example/a failed, Bearer abc123 token=xyz"), { code: "ECONNRESET" }));
+  assert.equal(secret.code, "ECONNRESET");
+  assert.ok(!/host\.example|abc123|xyz/.test(secret.message));
+});
+
+test("crash reports distinguish repeated quick crashes, one-off crashes, recovery and unexpected task exits", async (t) => {
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-crash-report-"));
+  t.after(() => rm(baseDir, { recursive: true, force: true }));
+  const now = 10_000_000;
+  const writeRestarts = (fields) => writeFile(join(baseDir, restartStateFileName("station")), JSON.stringify({
+    role: "station", totalCrashes: 7, quickCrashesInARow: 6, quickCrashStreakStartedAt: now - 60_000,
+    lastExitCode: 1, lastCrashAt: now - 5_000, lastRunSeconds: 2.1, nextRestartAt: now + 25_000, ...fields,
+  }));
+  assert.equal(readWorkerCrashReport("station", { baseDir, now }), null);
+  await writeRestarts({});
+  await writeFile(join(baseDir, workerFailureFileName("station")), JSON.stringify({
+    at: now - 5_200, name: "Error", code: "EADDRINUSE", message: "listen EADDRINUSE: address already in use", location: "listener.mjs:301",
+  }));
+  const repeated = readWorkerCrashReport("station", { baseDir, now });
+  assert.equal(repeated.repeated, true);
+  assert.equal(repeated.quickCrashesInARow, 6);
+  assert.equal(repeated.lastError.code, "EADDRINUSE");
+  assert.match(describeWorkerProblem("station", { crash: repeated }),
+    /Station is crashing repeatedly: 6 crashes in a row.*exit code 1.*EADDRINUSE: address already in use \(listener\.mjs:301\)/);
+
+  await writeRestarts({ quickCrashesInARow: 4 });
+  assert.equal(readWorkerCrashReport("station", { baseDir, now }).repeated, false);
+  assert.equal(readWorkerCrashReport("station", { baseDir, now: now + 3 * 60_000 }), null, "old crash information expires");
+  assert.equal(readWorkerCrashReport("station", { baseDir, now: now + 70_000, workerStartedAt: now - 1_000 }), null,
+    "a worker that stayed up for a healthy minute is no longer reported");
+
+  assert.equal(readUnexpectedTaskExit("station", { state: "Disabled", lastResult: 1 }, { baseDir }), null);
+  assert.equal(readUnexpectedTaskExit("station", { state: "Ready", lastResult: 0x41303 }, { baseDir }), null);
+  const stopped = readUnexpectedTaskExit("station", { state: "Ready", lastResult: 3221225786 }, { baseDir });
+  assert.equal(stopped.exit.code, "0xC000013A");
+  assert.match(describeWorkerProblem("station", { unexpectedStop: stopped }), /stopped unexpectedly \(exit code 0xC000013A/);
+});
+
+test("native supervisor records a crash loop and a stop marker ends the retries", {
+  skip: process.platform !== "win32", timeout: 60_000,
+}, async (t) => {
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-crash-loop-"));
+  t.after(() => rm(baseDir, { recursive: true, force: true }));
+  const cliPath = join(baseDir, "always-crashes.mjs");
+  await writeFile(cliPath, "process.exit(3);\n");
+  const supervisor = backgroundSupervisorScript({
+    role: "relay", baseDir, cliPath, restartDelayInitialMs: 50, restartDelayMaxMs: 200,
+  });
+  const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+    Buffer.from(supervisor, "utf16le").toString("base64")], { windowsHide: true, stdio: "ignore" });
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const restartStatePath = join(baseDir, restartStateFileName("relay"));
+  let restarts = null;
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    if (existsSync(restartStatePath)) {
+      try { restarts = JSON.parse(await readFile(restartStatePath, "utf8")); } catch { restarts = null; }
+      if (restarts?.quickCrashesInARow >= 5) break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(restarts?.quickCrashesInARow >= 5, "the supervisor counted quick crashes in a row");
+  assert.equal(restarts.lastExitCode, 3);
+  assert.ok(restarts.nextRestartAt > restarts.lastCrashAt);
+  const report = readWorkerCrashReport("relay", { baseDir });
+  assert.equal(report.repeated, true);
+  assert.equal(report.exit.code, "3");
+  await writeFile(join(baseDir, "background-relay.stop"), "stopped");
+  assert.equal(await exited, 0, "the stop marker ends the retry loop cleanly");
 });
 
 test("task execution sends an encoded script without a shell argument interpolation", async () => {

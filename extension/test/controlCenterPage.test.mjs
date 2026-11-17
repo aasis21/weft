@@ -497,6 +497,43 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     assert.equal(h.calls.length, 0);
   });
 
+  await t.test("a crash-looping worker shows the exact error, exit code and next retry, and offers Restart and Stop", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.settings.transport = { kind: "devtunnel" };
+      h.state.station = { ...h.state.station, state: "crash-looping", supported: true,
+        error: "Station is crashing repeatedly: summary duplicated by the crash panel",
+        crash: { repeated: true, quickCrashesInARow: 6, totalCrashes: 6, lastCrashAt: Date.now() - 3000, lastRunSeconds: 1.4,
+          nextRestartAt: Date.now() + 25_000, exit: { code: "1", meaning: "Weft exited because of an error." },
+          lastError: { name: "Error", code: "EADDRINUSE", message: "listen EADDRINUSE: address already in use 127.0.0.1:4590", location: "listener.mjs:301" } } };
+      h.state.relay = { ...h.state.relay, state: "stopped", supported: true,
+        unexpectedStop: { exit: { code: "0xC000013A", meaning: "The worker's console was interrupted or closed." }, lastError: null } };
+    });
+    await expect(h.page.locator("#station-status")).toHaveText("Crashing repeatedly");
+    await expect(h.page.locator("#health-summary")).toHaveText("Station is crashing repeatedly");
+    const panel = h.page.locator("#station-crash");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("6 crashes in a row, each within a minute of starting.");
+    await expect(panel).toContainText("1 — Weft exited because of an error.");
+    await expect(panel).toContainText("Error [EADDRINUSE]: listen EADDRINUSE: address already in use 127.0.0.1:4590");
+    await expect(panel).toContainText("listener.mjs:301");
+    await expect(panel).toContainText("Retrying in");
+    await expect(h.page.locator("#station-error")).toBeHidden();
+    await expect(h.page.locator("#station-start")).toBeDisabled();
+    await expect(h.page.locator("#station-stop")).toBeEnabled();
+    await expect(h.page.locator("#station-restart")).toBeEnabled();
+    await expect(h.page.locator("#control-primary")).toHaveText("Restart Station");
+    const relayPanel = h.page.locator("#relay-crash");
+    await expect(relayPanel).toContainText("Stopped unexpectedly");
+    await expect(relayPanel).toContainText("0xC000013A");
+    await expect(relayPanel).toContainText("No error message was recorded");
+    h.state.station = { ...h.state.station, state: "ready", crash: undefined, error: undefined };
+    h.state.relay = { ...h.state.relay, unexpectedStop: undefined };
+    await h.page.locator("#refresh").click();
+    await expect(panel).toBeHidden();
+    await expect(relayPanel).toBeHidden();
+    assert.equal(h.calls.length, 0);
+  });
+
   await t.test("accepted startup shows the backend's measured progress rather than a synthetic percentage", async (st) => {
     const h = await harness(st, (h) => {
       h.runningPolls = 5;

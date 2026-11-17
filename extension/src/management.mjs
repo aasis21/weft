@@ -12,7 +12,10 @@ import {
   isDiagnosticLoggingEnabled,
 } from "./transportConfig.mjs";
 import { rotatePersistedIdentity, clearPersistedIdentity, getOrCreatePersistedIdentity, readSavedPairing } from "./pairingIdentity.mjs";
-import { backgroundCommand, backgroundTaskOperation, startBackground, stopBackground } from "./backgroundLifecycle.mjs";
+import {
+  backgroundCommand, backgroundTaskOperation, startBackground, stopBackground,
+  readWorkerCrashReport, readUnexpectedTaskExit, describeWorkerProblem,
+} from "./backgroundLifecycle.mjs";
 import {
   healthyRegistryEntry, probePublicRelay, findDevTunnelBinary, isDevTunnelLoggedIn,
   ensureDevTunnelLogin, DEVTUNNEL_REGISTRY_FILE, describeStage, readDevTunnelAuthentication,
@@ -160,7 +163,13 @@ export function createManagement({
     }
     return result;
   }
-  const reportedStops = new Set();
+  // Log each crash loop and each unexpected task exit once, not on every 5-second status poll.
+  const reportedWorkerProblems = new Set();
+  function reportWorkerProblemOnce(key, event, fields) {
+    if (reportedWorkerProblems.has(key)) return;
+    reportedWorkerProblems.add(key);
+    appendStationLog(event, fields, { baseDir, level: "warn" });
+  }
   let lastPresences = null;
   // Merge the in-memory phone traffic of Station and active sessions. Session discovery is reused
   // from the dashboard's own status polling, so this stays cheap enough to refresh every 2 seconds.
@@ -216,11 +225,11 @@ export function createManagement({
   }
   async function roleStatus(role, result) {
     const controlRecord = readRegistry(`background-${role}.json`, options);
-    const raw = await background.command(role, "status", null, options);
-    if (raw) {
+    const workerStatus = await background.command(role, "status", null, options);
+    if (workerStatus) {
       const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
         connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
-        nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint } = raw;
+        nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint } = workerStatus;
       result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
         connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
         nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint,
@@ -232,20 +241,33 @@ export function createManagement({
         result[role].pid ??= controlRecord.pid;
         result[role].startedAt ??= controlRecord.processStartedAt;
       }
+      attachCrashReport(role, result[role]);
       return;
     }
     const task = await background.task("status", { ...options, role });
     result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true };
-    // Weft stop disables the task, so an enabled, idle task with a failure result ended on its own.
-    if (task.state === "Ready" && Number.isInteger(task.lastResult) && ![0, 0x41303].includes(task.lastResult)) {
-      const exitCode = "0x" + (task.lastResult >>> 0).toString(16).toUpperCase();
-      result[role].unexpectedStop = { exitCode };
-      if (!reportedStops.has(role + exitCode)) {
-        reportedStops.add(role + exitCode);
-        appendStationLog("worker.unexpected_stop", { role, code: exitCode }, { baseDir, level: "warn" });
-      }
-      result[role].error = `${role === "station" ? "Station" : "The relay"} stopped unexpectedly (exit code ${exitCode}). Start it again; saved phone trust is unchanged.`;
+    if (task.state === "Running") {
+      // Between crashes the worker is down while the supervisor waits to restart it.
+      attachCrashReport(role, result[role]);
+      return;
     }
+    const unexpectedStop = readUnexpectedTaskExit(role, task, { baseDir });
+    if (unexpectedStop) {
+      result[role].unexpectedStop = unexpectedStop;
+      result[role].error = describeWorkerProblem(role, { unexpectedStop });
+      reportWorkerProblemOnce(`${role}:stop:${unexpectedStop.exit.code}`, "worker.unexpected_stop", { role, code: unexpectedStop.exit.code });
+    }
+  }
+  function attachCrashReport(role, workload) {
+    const crash = readWorkerCrashReport(role, { baseDir, workerStartedAt: workload.startedAt });
+    if (!crash) return;
+    workload.crash = crash;
+    if (!crash.repeated) return;
+    // A worker that reached ready is up again; otherwise it is stuck crashing and restarting.
+    if (workload.state !== "ready") workload.state = "crash-looping";
+    workload.error = describeWorkerProblem(role, { crash });
+    reportWorkerProblemOnce(`${role}:loop:${crash.streakStartedAt}`, "worker.crash_loop",
+      { role, count: crash.quickCrashesInARow, code: crash.exit.code, error: crash.lastError?.name });
   }
   async function relayStatus(result) {
     if (!result.relay) return;
