@@ -571,6 +571,7 @@ export default function App(): JSX.Element {
       }
       onInterrupt={() => void sessionRuntime.sendInterrupt(active.meta.channelId)}
       onModeChange={(mode: SessionMode) => void sessionRuntime.sendMode(active.meta.channelId, mode)}
+      onModelChange={(change) => void sessionRuntime.sendModelChange(active.meta.channelId, change)}
       onCommand={(name, input) => void sessionRuntime.sendCommand(active.meta.channelId, name, input)}
       onRetry={(itemId) => void sessionRuntime.retryPrompt(active.meta.channelId, itemId)}
       onSelectSession={(id) => sessionRuntime.setActive(id)}

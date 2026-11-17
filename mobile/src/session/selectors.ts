@@ -66,6 +66,7 @@ export function toSessionView(session: Session): SessionView {
     needsAttention: (session.connection.pendingApprovals ?? session.requests.approvals.length) +
       (session.connection.pendingForms ?? session.requests.elicitations.length),
     meta: { ...session.meta },
+    ...(session.connection.model ? { model: session.connection.model } : {}),
     ...(session.workspaceCapabilities ? { workspaceCapabilities: session.workspaceCapabilities } : {}),
     status: session.connection.status,
     timeline: toTimelineState(session),

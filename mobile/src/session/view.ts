@@ -1,3 +1,4 @@
+import type { ModelStateMsg } from '@aasis21/weft-shared';
 import type { TimelineState } from '@/lib/timeline';
 import type { DebugEvent, ListenerDeviceState, SessionConnection, SessionMeta, SessionStatus } from './model';
 
@@ -10,6 +11,8 @@ export type { SessionMeta, SessionStatus };
  */
 export interface SessionView {
   needsAttention?: number;
+  /** Current model and effort, and the models this session can switch to (reported by the laptop). */
+  model?: ModelStateMsg;
   workspaceCapabilities?: string[];
   meta: SessionMeta;
   status: SessionStatus;

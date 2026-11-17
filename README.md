@@ -165,9 +165,10 @@ Cloud and remote-host app sessions are not discovered on this laptop.
 - **Native approval relay** — allow once, allow for the session, or deny the exact action
   Copilot requested.
 - **Session control** — stop an active turn, queue the next instruction, and use supported slash
-  commands through one searchable command flow. Commands can run directly, request text, or offer
-  a curated option list; `/model` exposes supported model choices without leaking internal IDs.
-  Weft reports command failures from Copilot instead of claiming a model change succeeded.
+  commands through one searchable command flow. The composer's model dropdown shows the models
+  your Copilot account offers and the current model's reasoning-effort levels; `/model` and
+  `/effort` do the same from the keyboard, and `/interactive`, `/plan` and `/autopilot` switch mode.
+  Weft reports failures from Copilot instead of claiming a change succeeded.
 - **Multi-device workspace** — use one phone to move among paired laptops, registered
   projects, and active or historical sessions.
 - **Safe launch recovery** — reconnect to slow Start and Resume operations instead of

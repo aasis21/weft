@@ -219,6 +219,8 @@ interface SessionScreenProps {
   ): void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): void;
+  /** Switch the model and/or reasoning effort of the laptop session. */
+  onModelChange?(change: { modelId?: string; reasoningEffort?: string }): void;
   /** Run a whitelisted CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
   onCommand(name: string, input?: string): void;
   onRetry(itemId: string): void;
@@ -261,6 +263,7 @@ export function SessionScreen({
   onElicitationRespond,
   onInterrupt,
   onModeChange,
+  onModelChange,
   onCommand,
   onRetry,
   onSelectSession,
@@ -1068,10 +1071,12 @@ export function SessionScreen({
           {...(ended || offline ? { disabledReason: ended ? 'ended' as const : 'offline' as const } : {})}
           busy={agentBusy}
           mode={timeline.mode}
+          {...(active.model ? { model: active.model } : {})}
           cwd={meta.cwd}
           onPrompt={onPrompt}
           onInterrupt={onInterrupt}
           onModeChange={onModeChange}
+          {...(onModelChange ? { onModelChange } : {})}
           onCommand={onCommand}
           onOpenVoiceMode={() => setVoiceOpen(true)}
           vox={{

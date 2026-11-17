@@ -99,6 +99,10 @@ export const SUBTYPE = Object.freeze({
     CHANNEL_DOWN: "channel_down",
     HEARTBEAT: "heartbeat",
     MODE: "mode",
+    // ext -> phone: the session's model, reasoning effort and the models it can switch to.
+    MODEL_STATE: "model_state",
+    // phone -> ext: switch the model and/or reasoning effort.
+    MODEL_SET: "model_set",
     INTERRUPT: "interrupt",
     HISTORY_REQUEST: "history_request",
     HISTORY: "history",
@@ -518,6 +522,19 @@ export const channelDown = (reason) =>
 export const heartbeat = (latestTurnIndex = null, busy = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.HEARTBEAT, { latestTurnIndex, busy });
 export const modeChange = (mode) => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODE, { mode });
+/**
+ * Ext -> phone: the session's current model and reasoning effort, and the models this account can
+ * switch to. `current` is `{ modelId, name, reasoningEffort }` or null; each model is
+ * `{ id, name, efforts, defaultEffort }` where `efforts` lists its supported reasoning efforts.
+ */
+export const modelState = ({ current = null, models = [] } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODEL_STATE, { current, models });
+/** Phone -> ext: switch the model and/or reasoning effort. Omit `modelId` to change only the effort. */
+export const modelSet = ({ modelId = null, reasoningEffort = null } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODEL_SET, {
+    ...(modelId ? { modelId } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  });
 /** Phone -> ext request to stop the current turn (best-effort; safe when nothing is running). */
 export const interrupt = () => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.INTERRUPT, {});
 

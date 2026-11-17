@@ -12,6 +12,7 @@ import {
   recentTurnsRequest,
   interrupt,
   modeChange,
+  modelSet,
   PAIR_KIND,
   parsePairingPayload,
   prompt,
@@ -3168,6 +3169,24 @@ export class SessionRuntime {
           id: channelId,
           level: 'warning',
           text: `Couldn't switch to ${mode} — still in ${prev}.`,
+          ts: this.clock(),
+        }),
+      );
+      this.schedulePersist(channelId);
+    }
+  }
+
+  /** Switch the model and/or reasoning effort on the laptop session (CONTROL.MODEL_SET). */
+  async sendModelChange(channelId: string, change: { modelId?: string; reasoningEffort?: string }): Promise<void> {
+    if (!this.session(channelId)) return;
+    try {
+      await this.send(channelId, modelSet(change));
+    } catch {
+      this.store.dispatch(
+        noticeAppended({
+          id: channelId,
+          level: 'warning',
+          text: 'Couldn’t change the model — check the connection and try again.',
           ts: this.clock(),
         }),
       );

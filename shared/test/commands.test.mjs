@@ -10,6 +10,10 @@ import {
   getPhoneCommandOption,
   isPhoneCommandAllowed,
   validatePhoneCommandInput,
+  SESSION_CONTROL_COMMANDS,
+  getSessionControlCommand,
+  withCommandOptions,
+  describeReasoningEffort,
 } from "../commands.mjs";
 import { EVENT_TYPE, SUBTYPE, invokeCommand } from "../messages.mjs";
 
@@ -40,52 +44,56 @@ test("normalizeCommandName strips slashes/whitespace and lowercases", () => {
   assert.equal(normalizeCommandName(null), "");
 });
 
-test("getPhoneCommand resolves whitelisted names case/slash-insensitively", () => {
-  assert.equal(getPhoneCommand("/MODEL")?.name, "model");
-  assert.equal(getPhoneCommand("rename")?.name, "rename");
+test("getPhoneCommand resolves whitelisted CLI commands case/slash-insensitively", () => {
+  assert.equal(getPhoneCommand("/RENAME")?.name, "rename");
+  assert.equal(getPhoneCommand("compact")?.name, "compact");
   assert.equal(getPhoneCommand("resume"), null);
   assert.equal(getPhoneCommand(""), null);
 });
 
-test("isPhoneCommandAllowed gates non-whitelisted commands", () => {
+test("mode, model and effort are session controls, never laptop CLI commands", () => {
+  for (const name of ["interactive", "plan", "autopilot", "model", "effort"]) {
+    assert.equal(isPhoneCommandAllowed(name), false, `${name} is not sent as a CLI command`);
+    assert.equal(getSessionControlCommand(`/${name.toUpperCase()}`)?.name, name);
+  }
   assert.equal(isPhoneCommandAllowed("clear"), true);
-  assert.equal(isPhoneCommandAllowed("/plan"), true);
   assert.equal(isPhoneCommandAllowed("resume"), false);
-  assert.equal(isPhoneCommandAllowed("settings"), false);
+  assert.equal(getSessionControlCommand("rename"), null);
+  assert.ok(Object.isFrozen(SESSION_CONTROL_COMMANDS));
 });
 
 test("confirm-gated commands are marked and destructive", () => {
   assert.equal(getPhoneCommand("clear")?.confirm, true);
   assert.equal(getPhoneCommand("allow-all")?.confirm, true);
-  assert.equal(getPhoneCommand("plan")?.confirm, undefined);
+  assert.equal(getPhoneCommand("review")?.confirm, undefined);
 });
 
-test("model exposes curated friendly options with hidden canonical values", () => {
-  const model = getPhoneCommand("model");
-  assert.equal(model?.input.kind, "options");
-  assert.deepEqual(
-    model.input.options.map(({ value, label, hint }) => ({ value, label, hint })),
-    [
-      { value: "auto", label: "Auto", hint: "Recommended" },
-      { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", hint: undefined },
-      { value: "claude-sonnet-5", label: "Claude Sonnet 5", hint: undefined },
-      { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", hint: undefined },
-    ],
-  );
+test("the fallback model list includes Opus and GPT-6.1 Sol, and live options replace it", () => {
+  const model = getSessionControlCommand("model");
+  assert.deepEqual(model.input.options.map((option) => option.value),
+    ["auto", "claude-opus-5.5", "claude-sonnet-5", "gpt-6.1-sol", "gpt-5.6-sol", "gemini-3.8-flash"]);
+  assert.equal(validatePhoneCommandInput(model, "opus").input, "claude-opus-5.5");
+  assert.equal(getPhoneCommandOption(model, "recommended")?.value, "auto");
+  const live = withCommandOptions(model, [{ value: "gpt-6.1-sol", label: "GPT-6.1 Sol" }]);
+  assert.equal(validatePhoneCommandInput(live, "GPT-6.1 Sol").input, "gpt-6.1-sol");
+  assert.deepEqual(validatePhoneCommandInput(live, "claude-opus-5.5"), {
+    valid: false, error: "That value isn't available for /model.",
+  });
+  assert.equal(withCommandOptions(model, []), model, "an empty live list keeps the fallback");
 });
 
-test("option lookup accepts values, friendly labels, and aliases", () => {
-  assert.equal(getPhoneCommandOption("model", "GPT-5.6 Sol")?.value, "gpt-5.6-sol");
-  assert.equal(getPhoneCommandOption("model", "recommended")?.value, "auto");
-  assert.equal(getPhoneCommandOption("model", "claude-sonnet-5")?.label, "Claude Sonnet 5");
-  assert.equal(getPhoneCommandOption("rename", "anything"), null);
+test("reasoning effort values read naturally", () => {
+  assert.equal(describeReasoningEffort("xhigh"), "Extra high");
+  assert.equal(describeReasoningEffort("medium"), "Medium");
+  assert.equal(describeReasoningEffort("turbo"), "turbo");
+  assert.equal(validatePhoneCommandInput(getSessionControlCommand("effort"), "Extra high").input, "xhigh");
 });
 
-test("input validation preserves text/no-input behavior and canonicalizes options", () => {
-  assert.deepEqual(validatePhoneCommandInput("plan", ""), { valid: true });
-  assert.deepEqual(validatePhoneCommandInput("plan", "extra"), {
+test("input validation preserves text/no-input behavior", () => {
+  assert.deepEqual(validatePhoneCommandInput("review", ""), { valid: true });
+  assert.deepEqual(validatePhoneCommandInput("review", "extra"), {
     valid: false,
-    error: "/plan does not accept an argument.",
+    error: "/review does not accept an argument.",
   });
   assert.deepEqual(validatePhoneCommandInput("rename", "  My Session  "), {
     valid: true,
@@ -95,17 +103,7 @@ test("input validation preserves text/no-input behavior and canonicalizes option
     valid: false,
     error: "/rename needs an argument.",
   });
-
-  const model = validatePhoneCommandInput("model", "Sonnet");
-  assert.equal(model.valid, true);
-  assert.equal(model.input, "claude-sonnet-5");
-  assert.equal(model.option?.label, "Claude Sonnet 5");
-  assert.deepEqual(validatePhoneCommandInput("model", "unlisted-model"), {
-    valid: false,
-    error: "That value isn't available for /model.",
-  });
 });
-
 test("option validation supports custom values only when the definition allows them", () => {
   const customCommand = {
     name: "custom",

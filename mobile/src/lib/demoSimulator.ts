@@ -16,6 +16,8 @@ import {
   history,
   logLine,
   modeChange,
+  modelState,
+  describeReasoningEffort,
   randomChannelId,
   channelDown,
   channelUp,
@@ -26,11 +28,19 @@ import {
   WORKSPACE_CAPABILITY,
   SESSION_FILES_CAPABILITY,
 } from '@aasis21/weft-shared';
-import type { ApprovalDecision, ElicitationResponse, ModeChange, PromptMessage } from '@aasis21/weft-shared';
+import type { ApprovalDecision, CurrentSessionModel, ElicitationResponse, ModeChange, ModelSet, PromptMessage, SessionModelOption } from '@aasis21/weft-shared';
 import { pairSession } from './weftClient';
 import type { WeftClient } from './weftClient';
 import { startDemoStation } from './demoStation';
 import { attachDemoWorkspace } from './demoWorkspace';
+
+/** What a real laptop would report from the session's model list, for the demo's model dropdown. */
+const DEMO_MODELS: SessionModelOption[] = [
+  { id: 'auto', name: 'Auto', efforts: [], defaultEffort: null },
+  { id: 'claude-opus-5.5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' },
+  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
+  { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' },
+];
 
 export interface DemoSession {
   client: WeftClient;
@@ -78,6 +88,7 @@ export async function startDemoSession(): Promise<DemoSession> {
   await extension.connect();
 
   const timers: number[] = [];
+  let demoModel: CurrentSessionModel = { modelId: 'claude-sonnet-5', name: 'Claude Sonnet 5', reasoningEffort: 'medium' };
   // Tracks which scripted tool is mid-run so a phone "interrupt" can end the right card.
   let runningToolId: string | null = null;
   const push = (delay: number, action: () => void | Promise<void>): void => {
@@ -120,6 +131,17 @@ export async function startDemoSession(): Promise<DemoSession> {
         void extension.send(logLine('info', `Session mode changed to ${control.msg.mode}`));
         return;
       }
+      if (message.eventSubtype === SUBTYPE.CONTROL.MODEL_SET) {
+        const change = (message as ModelSet).msg;
+        const target = DEMO_MODELS.find((model) => model.id === (change.modelId ?? demoModel.modelId));
+        if (target) {
+          const effort = change.reasoningEffort ?? (target.efforts.includes(demoModel.reasoningEffort ?? '') ? demoModel.reasoningEffort : target.defaultEffort);
+          demoModel = { modelId: target.id, name: target.name, reasoningEffort: effort };
+          void extension.send(modelState({ current: demoModel, models: DEMO_MODELS }));
+          void extension.send(logLine('info', `▷ Switched to ${[target.name, effort ? describeReasoningEffort(effort) : null].filter(Boolean).join(' · ')} from your phone.`));
+        }
+        return;
+      }
       if (message.eventSubtype === SUBTYPE.CONTROL.INTERRUPT) {
         // Make the phone's Stop button visibly take effect: end the turn (busy=false)
         // and any running tool, then ack. busy=false hides Stop even mid text-stream.
@@ -136,6 +158,7 @@ export async function startDemoSession(): Promise<DemoSession> {
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
   push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session', [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY])));
+  push(150, () => extension.send(modelState({ current: demoModel, models: DEMO_MODELS })));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>

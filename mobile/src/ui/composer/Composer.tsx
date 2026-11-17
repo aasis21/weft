@@ -2,9 +2,17 @@ import '@/ui/styles/composer.css';
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
-import { MODES } from '@aasis21/weft-shared';
-import type { PhoneCommand, PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
-import { PHONE_COMMANDS, getPhoneCommand, validatePhoneCommandInput } from '@aasis21/weft-shared';
+import type { ModelStateMsg, PhoneCommand, PhoneCommandOption, PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
+import {
+  FALLBACK_MODEL_OPTIONS,
+  PHONE_COMMANDS,
+  SESSION_CONTROL_COMMANDS,
+  describeReasoningEffort,
+  getPhoneCommand,
+  getSessionControlCommand,
+  validatePhoneCommandInput,
+  withCommandOptions,
+} from '@aasis21/weft-shared';
 import { useSpeechInput } from '@/ui/hooks/useSpeechInput';
 import { VoxDock } from '@/ui/voice/VoxDock';
 import type { VoiceState } from '@/ui/voice/useVoxEngine';
@@ -49,10 +57,14 @@ interface ComposerProps {
   disabledReason?: 'ended' | 'offline';
   busy: boolean;
   mode: SessionMode;
+  /** Current model and effort, and the models the laptop session can switch to. */
+  model?: ModelStateMsg;
   cwd: string | null;
   onPrompt(text: string, attachments?: PromptAttachment[], delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
+  /** Switch the model and/or reasoning effort (dropdown, /model, /effort). */
+  onModelChange?(change: { modelId?: string; reasoningEffort?: string }): void;
   /** Run a whitelisted Copilot CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
   onCommand(name: string, input?: string): void;
   onOpenVoiceMode(): void;
@@ -64,7 +76,8 @@ interface ComposerProps {
 const MAX_ATTACHMENTS = 6;
 
 /**
- * A slash-menu entry. Two kinds are merged into one menu:
+ * A slash-menu entry. Three kinds are merged into one menu:
+ *  - `control`  — mode, model or effort, applied by Weft itself (CONTROL.MODE / CONTROL.MODEL_SET).
  *  - `command`  — a real Copilot CLI slash command run ON THE LAPTOP via the whitelist
  *                 (session.rpc.commands.invoke). Selecting inserts `/name ` and Enter runs it.
  *  - `template` — prompt sugar with no CLI equivalent; selecting expands to an English instruction
@@ -72,7 +85,7 @@ const MAX_ATTACHMENTS = 6;
  */
 interface SlashItem {
   command: string;
-  kind: 'command' | 'template';
+  kind: 'control' | 'command' | 'template';
   hint: string;
   /** Only for `template` kind: the text inserted into the composer. */
   template?: string;
@@ -113,9 +126,11 @@ const MODE_LABEL: Record<string, string> = {
   autopilot: 'Autopilot',
 };
 
-// Real CLI commands (executed on the laptop) come first, built from the shared whitelist so the
-// palette and the extension's guard can never drift. Then prompt-template sugar that has no CLI
-// equivalent (the colliding /plan and /review are dropped in favor of the real commands).
+const MODE_COMMANDS = new Set(['interactive', 'plan', 'autopilot']);
+
+// Real CLI commands (executed on the laptop), built from the shared whitelist so the palette and the
+// extension's guard can never drift. Session controls (mode, model, effort) are added per render
+// because /model and /effort offer the laptop's live choices. Then prompt-template sugar.
 const COMMAND_ITEMS: SlashItem[] = PHONE_COMMANDS.map((c) => ({
   command: c.label,
   kind: 'command',
@@ -129,7 +144,9 @@ const TEMPLATE_ITEMS: SlashItem[] = [
   { command: '/commit', kind: 'template', hint: 'Stage & commit changes', template: 'Stage all changes and commit with a clear, conventional message.' },
 ];
 
-const SLASH_ITEMS: SlashItem[] = [...COMMAND_ITEMS, ...TEMPLATE_ITEMS];
+const CONTROL_ITEMS: SlashItem[] = SESSION_CONTROL_COMMANDS.map((c) => ({ command: c.label, kind: 'control', hint: c.hint }));
+
+const SLASH_ITEMS: SlashItem[] = [...CONTROL_ITEMS, ...COMMAND_ITEMS, ...TEMPLATE_ITEMS];
 
 const DRAFT_KEY_PREFIX = 'weft.draft.v1.';
 const ATTACHMENTS_KEY_PREFIX = 'weft.draft-attachments.v1.';
@@ -210,15 +227,36 @@ function commandQuery(value: string): string | null {
 }
 
 /**
- * If `value` is a whitelisted CLI command invocation ("/rename My Session"), return its parsed
+ * If `value` invokes a known command ("/rename My Session", "/model opus"), return its parsed
  * name + trimmed input; otherwise null (so it falls through to being sent as a normal prompt).
  */
-function parseCommand(value: string): { name: string; input: string } | null {
+function parseCommand(value: string, findCommand: (name: string) => PhoneCommand | null): { name: string; input: string } | null {
   const match = value.match(/^\/([a-z][a-z-]*)(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
   const name = (match[1] ?? '').toLowerCase();
-  if (!getPhoneCommand(name)) return null;
+  if (!findCommand(name)) return null;
   return { name, input: (match[2] ?? '').trim() };
+}
+
+/** Live model choices for the dropdown and /model; the shared fallback until the laptop reports. */
+function modelOptions(model: ModelStateMsg | undefined): PhoneCommandOption[] {
+  if (!model?.models.length) return [...FALLBACK_MODEL_OPTIONS];
+  return model.models.map((item) => {
+    const hint = item.id === model.current?.modelId ? 'Current model'
+      : item.efforts.length ? `Effort: ${item.efforts.map(describeReasoningEffort).join(', ')}` : null;
+    return { value: item.id, label: item.name, ...(hint ? { hint } : {}) };
+  });
+}
+
+/** Effort levels the current model supports, as command options. */
+function effortOptions(model: ModelStateMsg | undefined): PhoneCommandOption[] {
+  const current = model?.models.find((item) => item.id === model.current?.modelId);
+  return (current?.efforts ?? []).map((effort) => ({
+    value: effort,
+    label: describeReasoningEffort(effort),
+    ...(effort === model?.current?.reasoningEffort ? { hint: 'Current effort' }
+      : effort === current?.defaultEffort ? { hint: 'Model default' } : {}),
+  }));
 }
 
 export function Composer({
@@ -227,10 +265,12 @@ export function Composer({
   disabledReason,
   busy,
   mode,
+  model,
   cwd,
   onPrompt,
   onInterrupt,
   onModeChange,
+  onModelChange,
   onCommand,
   onOpenVoiceMode,
   vox,
@@ -245,8 +285,8 @@ export function Composer({
   const activeSlashRef = useRef<HTMLButtonElement | null>(null);
   const attachWrapRef = useRef<HTMLDivElement | null>(null);
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
-  const modeWrapRef = useRef<HTMLDivElement | null>(null);
-  const modeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const modelWrapRef = useRef<HTMLDivElement | null>(null);
+  const modelButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingPickRef = useRef<'library' | 'camera' | null>(null);
   const speechCommittedRef = useRef('');
@@ -298,12 +338,12 @@ export function Composer({
   useEffect(() => {
     if (!menuOpen) return undefined;
     const onDocMouseDown = (event: MouseEvent): void => {
-      if (modeWrapRef.current && !modeWrapRef.current.contains(event.target as Node)) setMenuOpen(false);
+      if (modelWrapRef.current && !modelWrapRef.current.contains(event.target as Node)) setMenuOpen(false);
     };
     const onDocKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key === 'Escape') {
         setMenuOpen(false);
-        modeButtonRef.current?.focus();
+        modelButtonRef.current?.focus();
       }
     };
     document.addEventListener('mousedown', onDocMouseDown);
@@ -333,8 +373,18 @@ export function Composer({
     };
   }, [attachMenuOpen]);
 
-  const parsedDraft = parseCommand(text.trimEnd());
-  const argumentStage = busy ? null : getCommandArgumentStage(text, parsedDraft ? getPhoneCommand(parsedDraft.name) : null);
+  // /model and /effort offer the laptop's live choices; other commands come from the shared lists.
+  const liveModelOptions = modelOptions(model);
+  const liveEffortOptions = effortOptions(model);
+  const findCommand = (name: string): PhoneCommand | null => {
+    const control = getSessionControlCommand(name);
+    if (control?.name === 'model') return withCommandOptions(control, liveModelOptions);
+    if (control?.name === 'effort') return withCommandOptions(control, liveEffortOptions);
+    return control ?? getPhoneCommand(name);
+  };
+
+  const parsedDraft = parseCommand(text.trimEnd(), findCommand);
+  const argumentStage = busy ? null : getCommandArgumentStage(text, parsedDraft ? findCommand(parsedDraft.name) : null);
   const query = busy ? null : commandQuery(text);
   const commandOptions: PaletteItem[] = query === null
     ? []
@@ -373,9 +423,33 @@ export function Composer({
     saveAttachments(sessionId, []);
   };
 
+  /** Switch model, keeping the current effort when the new model supports it, else its default. */
+  const chooseModel = (modelId: string): void => {
+    const target = model?.models.find((item) => item.id === modelId);
+    const currentEffort = model?.current?.reasoningEffort ?? null;
+    const effort = target && currentEffort && target.efforts.includes(currentEffort) ? currentEffort : target?.defaultEffort ?? null;
+    onModelChange?.(effort ? { modelId, reasoningEffort: effort } : { modelId });
+  };
+
+  const chooseEffort = (reasoningEffort: string): void => {
+    onModelChange?.({ reasoningEffort });
+  };
+
+  /** Mode, model and effort are applied by Weft itself, never sent as CLI commands. */
+  const applySessionControl = (name: string, input?: string): void => {
+    if (MODE_COMMANDS.has(name)) {
+      if (name !== mode) void onModeChange(name as SessionMode);
+    } else if (name === 'model' && input) {
+      if (input !== model?.current?.modelId) chooseModel(input);
+    } else if (name === 'effort' && input) {
+      chooseEffort(input);
+    }
+  };
+
   const runCommand = (name: string, input?: string): void => {
     clearDraft();
-    onCommand(name, input);
+    if (getSessionControlCommand(name)) applySessionControl(name, input);
+    else onCommand(name, input);
   };
 
   const submitCommand = (command: PhoneCommand, rawInput: string): boolean => {
@@ -400,9 +474,9 @@ export function Composer({
     // sent as a prompt. Unknown "/foo" falls through to onPrompt as literal text (legacy behavior).
     // While Copilot is busy, every submission is steering text for the active turn.
     if (!busy && outgoing.length === 0) {
-      const parsed = parseCommand(trimmed);
+      const parsed = parseCommand(trimmed, findCommand);
       if (parsed) {
-        const meta = getPhoneCommand(parsed.name);
+        const meta = findCommand(parsed.name);
         if (!meta || !submitCommand(meta, parsed.input)) return;
         return;
       }
@@ -562,8 +636,8 @@ export function Composer({
       submitCommand(item.command, item.input);
       return;
     }
-    if (item.kind === 'command') {
-      const meta = getPhoneCommand(item.command.slice(1));
+    if (item.kind === 'command' || item.kind === 'control') {
+      const meta = findCommand(item.command.slice(1));
       const suffix = meta && meta.input.kind !== 'none' ? ' ' : '';
       const next = text.replace(/^\/[a-z-]*/i, `${item.command}${suffix}`);
       onTextChange(next);
@@ -672,21 +746,21 @@ export function Composer({
   };
 
   const focusMenuItem = (direction: 1 | -1): void => {
-    const items = Array.from(modeWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+    const items = Array.from(modelWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
     if (!items.length) return;
     const active = document.activeElement;
     const index = active instanceof HTMLButtonElement ? items.indexOf(active) : -1;
     items[(index + direction + items.length) % items.length]?.focus();
   };
 
-  const onModeButtonKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+  const onModelButtonKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     event.preventDefault();
     setMenuOpen(true);
     window.requestAnimationFrame(() => focusMenuItem(event.key === 'ArrowDown' ? 1 : -1));
   };
 
-  const onModeMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+  const onModelMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       focusMenuItem(event.key === 'ArrowDown' ? 1 : -1);
@@ -695,6 +769,10 @@ export function Composer({
 
   const folder = basename(cwd);
   const emptyPrompt = text.trim() === '' && attachments.length === 0;
+  const currentEffort = model?.current?.reasoningEffort ? describeReasoningEffort(model.current.reasoningEffort) : null;
+  const modelPillLabel = model?.current
+    ? [model.current.name, currentEffort].filter(Boolean).join(' · ')
+    : 'Model';
 
   return (
     <form
@@ -881,41 +959,74 @@ export function Composer({
                 </div>
               ) : null}
             </div>
-            <div className="mode-wrap" ref={modeWrapRef}>
+            <div className="mode-wrap" ref={modelWrapRef}>
               <button
-                ref={modeButtonRef}
+                ref={modelButtonRef}
                 type="button"
-                className="mode-pill"
+                className="mode-pill model-pill"
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
+                aria-label={`Model: ${modelPillLabel}`}
+                disabled={disabled || !onModelChange}
                 onClick={() => setMenuOpen((v) => !v)}
-                onKeyDown={onModeButtonKeyDown}
+                onKeyDown={onModelButtonKeyDown}
               >
                 <span className="pill-dot" aria-hidden="true" />
-                {MODE_LABEL[mode] ?? mode}
+                <span className="model-pill-name">{modelPillLabel}</span>
                 <span className="pill-caret" aria-hidden="true">▾</span>
               </button>
               {menuOpen ? (
-                <div className="mode-menu" role="menu" onKeyDown={onModeMenuKeyDown}>
-                  {MODES.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={item === mode}
-                      className={`mode-menu-item${item === mode ? ' active' : ''}`}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        if (item !== mode) void onModeChange(item);
-                      }}
-                    >
-                      <span className="mode-check">{item === mode ? '✓' : ''}</span>
-                      {MODE_LABEL[item] ?? item}
-                    </button>
-                  ))}
+                <div className="mode-menu model-menu" role="menu" aria-label="Model and effort" onKeyDown={onModelMenuKeyDown}>
+                  <div className="model-menu-heading" role="presentation">Model</div>
+                  {liveModelOptions.map((option) => {
+                    const selected = option.value === model?.current?.modelId;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={selected}
+                        className={`mode-menu-item${selected ? ' active' : ''}`}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          if (!selected) chooseModel(option.value);
+                        }}
+                      >
+                        <span className="mode-check">{selected ? '✓' : ''}</span>
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                  {liveEffortOptions.length ? (
+                    <>
+                      <div className="model-menu-heading" role="presentation">Effort</div>
+                      {liveEffortOptions.map((option) => {
+                        const selected = option.value === model?.current?.reasoningEffort;
+                        return (
+                          <button
+                            key={`effort-${option.value}`}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selected}
+                            className={`mode-menu-item${selected ? ' active' : ''}`}
+                            onClick={() => {
+                              setMenuOpen(false);
+                              if (!selected) chooseEffort(option.value);
+                            }}
+                          >
+                            <span className="mode-check">{selected ? '✓' : ''}</span>
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
+            {mode !== 'interactive' ? (
+              <span className="mode-tag" title="Type /interactive to switch back">{MODE_LABEL[mode] ?? mode}</span>
+            ) : null}
             {folder ? <span className="cwd-chip" title={cwd ?? undefined}>📁 {folder}</span> : null}
               </>
             )}

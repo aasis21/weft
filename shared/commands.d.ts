@@ -61,3 +61,19 @@ export function validatePhoneCommandInput(
 ):
   | { valid: true; input?: string; option?: PhoneCommandOption }
   | { valid: false; error: string };
+
+/** Reasoning effort values as people read them ("xhigh" -> "Extra high"). */
+export const REASONING_EFFORT_LABELS: Readonly<Record<string, string>>;
+export function describeReasoningEffort(value: string | null | undefined): string;
+
+/** Shown only until the laptop reports the models this account can use. */
+export const FALLBACK_MODEL_OPTIONS: ReadonlyArray<PhoneCommandOption>;
+
+/** Mode, model and effort: applied by Weft through the session RPC, never run as CLI commands. */
+export const SESSION_CONTROL_COMMANDS: ReadonlyArray<PhoneCommand>;
+
+/** Look up a session control command by name (leading slash + case ignored); null if it is not one. */
+export function getSessionControlCommand(name: string): PhoneCommand | null;
+
+/** The same command with its options replaced, for example by the laptop's live model list. */
+export function withCommandOptions(command: PhoneCommand, options: ReadonlyArray<PhoneCommandOption>): PhoneCommand;

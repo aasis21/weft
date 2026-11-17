@@ -162,6 +162,7 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
   keep.connection.busy = keep.connection.busy || drop.connection.busy;
   keep.connection.lastHeartbeat = Math.max(keep.connection.lastHeartbeat ?? 0, drop.connection.lastHeartbeat ?? 0) || null;
   keep.connection.mode = drop.connection.mode ?? keep.connection.mode;
+  keep.connection.model = drop.connection.model ?? keep.connection.model;
   keep.connection.ended = keep.connection.ended && drop.connection.ended;
   keep.connection.endedReason = keep.connection.endedReason ?? drop.connection.endedReason;
   // Only carry an error forward if the merged session actually lands in a failed/ended state. A live

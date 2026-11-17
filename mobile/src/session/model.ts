@@ -8,6 +8,7 @@ import type {
   HistoryItem,
   ListenerProject,
   LogLineMsg,
+  ModelStateMsg,
   PromptAttachment,
   PromptDelivery,
   SessionMode,
@@ -207,6 +208,8 @@ export interface SessionConnection {
   thinkingSince: number | null;
   mode: SessionMode;
   pendingMode?: SessionMode;
+  /** The session's model, reasoning effort and switchable models, as last reported by the laptop. */
+  model?: ModelStateMsg;
   reconnecting: boolean;
   settling: boolean;
   /** True once the session was evicted from the warm pool (subscription/socket dropped) and has no

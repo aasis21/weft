@@ -33,6 +33,7 @@ import {
   toolComplete,
   logLine,
   userMessage,
+  modelSet,
 } from "@aasis21/weft-shared";
 import {
   attachRelay as createRelay,
@@ -162,6 +163,65 @@ async function withRelay(run) {
     await relay.stop("test", { closeTransport: false });
   }
 }
+
+test("phone sees the live model list and switches model or effort through the session RPC", async () => {
+  await withRelay(async ({ session, channel }) => {
+    const calls = [];
+    let current = { modelId: "claude-opus-5.5", reasoningEffort: "high" };
+    session.rpc.model = {
+      async getCurrent() { return current; },
+      async list() {
+        return { list: [
+          { id: "claude-opus-5.5", name: "Claude Opus 5.5", supportedReasoningEfforts: ["low", "medium", "high", "xhigh"], defaultReasoningEffort: "medium" },
+          { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },
+          { id: "blocked", name: "Blocked", policy: { state: "disabled" } },
+        ] };
+      },
+      async switchTo(params) {
+        calls.push(["switchTo", params]);
+        current = { modelId: params.modelId, reasoningEffort: params.reasoningEffort ?? null };
+        return { modelId: params.modelId };
+      },
+      async setReasoningEffort(params) {
+        calls.push(["setReasoningEffort", params]);
+        current = { ...current, reasoningEffort: params.reasoningEffort };
+        return params;
+      },
+    };
+    const latestModelState = () => channel.sent.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.MODEL_STATE).at(-1)?.msg;
+    channel.emit(EVENT_TYPE.CONTROL, stateRequest());
+    await flush();
+    assert.deepEqual(latestModelState().current, { modelId: "claude-opus-5.5", name: "Claude Opus 5.5", reasoningEffort: "high" });
+    assert.deepEqual(latestModelState().models.map((model) => model.id), ["claude-opus-5.5", "gpt-6.1-sol"],
+      "models disabled by policy are not offered");
+    assert.deepEqual(latestModelState().models[1].efforts, ["low", "medium", "high"]);
+
+    for (const change of [
+      { modelId: "gpt-6.1-sol", reasoningEffort: "high" }, { reasoningEffort: "low" },
+      { reasoningEffort: "xhigh" }, { modelId: "blocked" },
+    ]) {
+      channel.emit(EVENT_TYPE.CONTROL, modelSet(change));
+      await flush();
+    }
+    assert.deepEqual(calls, [
+      ["switchTo", { modelId: "gpt-6.1-sol", reasoningEffort: "high" }],
+      ["setReasoningEffort", { reasoningEffort: "low" }],
+    ], "unsupported efforts and unavailable models never reach the runtime");
+    const lines = channel.sent.filter((message) => message.eventSubtype === SUBTYPE.STREAM.LOG).map((message) => message.msg.message);
+    assert.ok(lines.includes("▷ Switched to GPT-6.1 Sol · High from your phone."));
+    assert.ok(lines.includes("▷ Reasoning effort set to Low from your phone."));
+    assert.ok(lines.includes("GPT-6.1 Sol doesn't support Extra high effort."));
+    assert.ok(lines.includes("blocked isn't available for this session."));
+    assert.deepEqual(latestModelState().current, { modelId: "gpt-6.1-sol", name: "GPT-6.1 Sol", reasoningEffort: "low" });
+
+    current = { modelId: "claude-opus-5.5", reasoningEffort: "medium" };
+    const before = channel.sent.length;
+    session.emitEvent({ type: "session.model_change", data: { newModel: "claude-opus-5.5" } });
+    await flush();
+    assert.ok(channel.sent.slice(before).some((message) => message.eventSubtype === SUBTYPE.CONTROL.MODEL_STATE &&
+      message.msg.current.modelId === "claude-opus-5.5"), "a change made at the laptop reaches the phone");
+  });
+});
 
 test("attention expires after sleep, respects cooldown, and fences an older watch", () => {
   let clock = 0;
@@ -918,9 +978,9 @@ test("invokes a whitelisted phone command via session.rpc.commands.invoke and re
 
 test("omits input when invoking a no-arg command", async () => {
   await withRelay(async ({ channel, session }) => {
-    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("plan"));
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("review"));
     await flush();
-    assert.deepEqual(session.invokedCommands, [{ name: "plan" }]);
+    assert.deepEqual(session.invokedCommands, [{ name: "review" }]);
   });
 });
 
@@ -948,28 +1008,16 @@ test("refuses a required-arg command with no argument", async () => {
   });
 });
 
-test("canonicalizes an approved model label before invoking the SDK", async () => {
+test("mode and model are session controls, not CLI commands the phone can run", async () => {
   await withRelay(async ({ channel, session }) => {
-    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "Claude Sonnet 5"));
-    await flush();
-    assert.deepEqual(session.invokedCommands, [{ name: "model", input: "claude-sonnet-5" }]);
-    const ok = channel.sent.find(
-      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /Ran \/model Claude Sonnet 5/.test(m.msg.message ?? "")
-    );
-    assert.ok(ok, "expected the friendly model label in the success notice");
-    assert.equal(channel.sent.some((m) => /claude-sonnet-5/.test(m.msg.message ?? "")), false);
-  });
-});
-
-test("refuses an unlisted model before invoking the SDK", async () => {
-  await withRelay(async ({ channel, session }) => {
-    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "unlisted-model"));
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "auto"));
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("plan"));
     await flush();
     assert.deepEqual(session.invokedCommands, []);
-    const warn = channel.sent.find(
-      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /isn't available for \/model/i.test(m.msg.message ?? "")
+    const refusals = channel.sent.filter(
+      (m) => m.eventSubtype === SUBTYPE.STREAM.LOG && /isn't allowed from the phone/i.test(m.msg.message ?? ""),
     );
-    assert.ok(warn, "expected an unavailable-option warning relayed to the phone");
+    assert.equal(refusals.length, 2);
   });
 });
 
@@ -977,15 +1025,15 @@ test("relays a resolved SDK command failure without a success-shaped fallback", 
   await withRelay(async ({ channel, session }) => {
     session.rpc.commands.invoke = async (params) => {
       session.invokedCommands.push(params);
-      return { success: false, error: { message: "Model unavailable for this account" } };
+      return { success: false, error: { message: "Nothing to compact yet" } };
     };
 
-    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("model", "auto"));
+    channel.emit(EVENT_TYPE.CONTROL, invokeCommand("compact"));
     await flush();
 
     const logs = channel.sent.filter((m) => m.eventSubtype === SUBTYPE.STREAM.LOG);
-    assert.ok(logs.some((m) => /\/model Auto failed: Model unavailable/i.test(m.msg.message ?? "")));
-    assert.equal(logs.some((m) => /Ran \/model Auto/i.test(m.msg.message ?? "")), false);
+    assert.ok(logs.some((m) => /\/compact failed: Nothing to compact yet/i.test(m.msg.message ?? "")));
+    assert.equal(logs.some((m) => /Ran \/compact/i.test(m.msg.message ?? "")), false);
   });
 });
 

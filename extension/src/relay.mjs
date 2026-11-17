@@ -24,8 +24,10 @@ import {
   history,
   recentTurns,
   stateSnapshot,
+  modelState,
   getPhoneCommand,
   validatePhoneCommandInput,
+  describeReasoningEffort,
   WORKSPACE_CAPABILITY,
   SESSION_FILES_CAPABILITY,
   WORKSPACE_LIMITS,
@@ -629,7 +631,8 @@ export async function attachRelay({
       session.on((event) =>
         {
           captureChain = captureChain.then(() =>
-            handleSessionEvent(event, sendEvent, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus, captureMessage),
+            handleSessionEvent(event, sendEvent, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus, captureMessage,
+              async () => modelState(await readModelState(session))),
           ).catch((error) => appendSessionLog("session.capture_failed", { error: error.name }, { level: "error" }));
         },
       ),
@@ -740,6 +743,10 @@ export async function attachRelay({
         void applyMode(session, msg.msg?.mode, logger, reply);
         return;
       }
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.MODEL_SET) {
+        void applyModelChange(session, msg.msg, logger, reply);
+        return;
+      }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.INTERRUPT) {
         void applyInterrupt(session, logger, reply);
         return;
@@ -765,7 +772,10 @@ export async function attachRelay({
         return;
       }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.STATE_REQUEST) {
-        void serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe: reply, logger, readWorkspaceCapabilities, busyFallback: lastBusy });
+        void (async () => {
+          await serveStateSnapshot({ session, sessionId, approvals, elicitations, exitPlans, sendSafe: reply, logger, readWorkspaceCapabilities, busyFallback: lastBusy });
+          await reply(modelState(await readModelState(session)));
+        })();
       }
     }),
   );
@@ -837,7 +847,7 @@ export async function attachRelay({
       connected: !channel ? false : lastPeerContactAt && Date.now() - lastPeerContactAt < 120_000 ? true : null }) };
 }
 
-async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus, captureMessage) {
+async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, exitPlans, turnBuffer, relayActivity, agentStatus, captureMessage, currentModelState = null) {
   if (event?.data?.toolName === "weft_workspace_access") return;
   if (!event?.type) return;
   const data = event.data ?? {};
@@ -995,6 +1005,10 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
     case "session.mode_changed":
       await sendSafe(modeChange(data.newMode ?? data.mode));
       break;
+    case "session.model_change":
+      // Changed at the laptop, from the phone, or by the runtime (e.g. Auto routing).
+      if (currentModelState) await sendSafe(await currentModelState());
+      break;
   }
 }
 
@@ -1134,6 +1148,93 @@ async function applyMode(session, mode, logger, sendSafe) {
   if (typeof session.send === "function") {
     await session.send({ prompt: `/${mode}`, mode: "immediate" });
   }
+}
+
+async function callIfAvailable(method, ...args) {
+  if (typeof method !== "function") return null;
+  try { return await method(...args); } catch { return null; }
+}
+
+const MAX_REPORTED_MODELS = 60;
+
+/**
+ * The session's model and reasoning effort, and the models this account can switch to, read from
+ * the session RPC (model.getCurrent and model.list). Models disabled by policy are left out.
+ */
+async function readModelState(session) {
+  const modelApi = session?.rpc?.model;
+  const [current, listed] = await Promise.all([
+    callIfAvailable(modelApi?.getCurrent?.bind(modelApi)),
+    callIfAvailable(modelApi?.list?.bind(modelApi)),
+  ]);
+  const models = (Array.isArray(listed?.list) ? listed.list : []).flatMap((model) => {
+    if (!model || typeof model.id !== "string" || !model.id || model.policy?.state === "disabled") return [];
+    return [{
+      id: model.id,
+      name: typeof model.name === "string" && model.name ? model.name : model.id,
+      efforts: Array.isArray(model.supportedReasoningEfforts)
+        ? model.supportedReasoningEfforts.filter((effort) => typeof effort === "string" && effort) : [],
+      defaultEffort: typeof model.defaultReasoningEffort === "string" ? model.defaultReasoningEffort : null,
+    }];
+  }).slice(0, MAX_REPORTED_MODELS);
+  const modelId = typeof current?.modelId === "string" && current.modelId ? current.modelId : null;
+  return {
+    current: modelId ? {
+      modelId,
+      name: models.find((model) => model.id === modelId)?.name ?? modelId,
+      reasoningEffort: typeof current.reasoningEffort === "string" && current.reasoningEffort ? current.reasoningEffort : null,
+    } : null,
+    models,
+  };
+}
+
+/**
+ * Apply a phone's model and/or reasoning-effort choice through the session RPC: model.switchTo when
+ * the model changes, model.setReasoningEffort when only the effort does. Only models the session
+ * lists, and efforts that model supports, are accepted. The phone gets a short outcome line and the
+ * refreshed model state either way.
+ */
+async function applyModelChange(session, request, logger, sendSafe) {
+  const before = await readModelState(session);
+  const modelId = typeof request?.modelId === "string" && request.modelId ? request.modelId : null;
+  const effort = typeof request?.reasoningEffort === "string" && request.reasoningEffort ? request.reasoningEffort : null;
+  const targetId = modelId ?? before.current?.modelId ?? null;
+  const target = before.models.find((model) => model.id === targetId) ?? null;
+  const report = async (level, text) => {
+    logger(`Weft: ${text}`, { level, ephemeral: false });
+    await sendSafe(logLine(level, text));
+  };
+  const modelApi = session.rpc?.model;
+  try {
+    if (!modelId && !effort) {
+      await report("warning", "Model change ignored: nothing to change.");
+    } else if (before.models.length && !target) {
+      await report("warning", `${modelId ?? "That model"} isn't available for this session.`);
+    } else if (effort && target && !target.efforts.includes(effort)) {
+      await report("warning", `${target.name} doesn't support ${describeReasoningEffort(effort)} effort.`);
+    } else if (modelId && modelId !== before.current?.modelId) {
+      if (typeof modelApi?.switchTo !== "function") {
+        await report("warning", "This Copilot version can't switch models from the phone.");
+      } else {
+        const result = await modelApi.switchTo({ modelId, ...(effort ? { reasoningEffort: effort } : {}) });
+        const label = [target?.name ?? modelId, effort ? describeReasoningEffort(effort) : null].filter(Boolean).join(" · ");
+        await report("info", result?.deferred
+          ? `▷ ${label} will apply after the current turn.` : `▷ Switched to ${label} from your phone.`);
+      }
+    } else if (effort) {
+      if (typeof modelApi?.setReasoningEffort !== "function") {
+        await report("warning", "This Copilot version can't change reasoning effort from the phone.");
+      } else {
+        await modelApi.setReasoningEffort({ reasoningEffort: effort });
+        await report("info", `▷ Reasoning effort set to ${describeReasoningEffort(effort)} from your phone.`);
+      }
+    } else {
+      await report("info", `Already using ${target?.name ?? modelId}.`);
+    }
+  } catch (error) {
+    await report("warning", `Couldn't change the model: ${error?.message ?? error}`);
+  }
+  await sendSafe(modelState(await readModelState(session)));
 }
 
 // A phone "Stop" maps to the SDK's turn-abort RPC. We probe session.rpc.abort the same

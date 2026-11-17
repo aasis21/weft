@@ -81,6 +81,8 @@ export const SUBTYPE: {
     readonly CHANNEL_DOWN: "channel_down";
     readonly HEARTBEAT: "heartbeat";
     readonly MODE: "mode";
+    readonly MODEL_STATE: "model_state";
+    readonly MODEL_SET: "model_set";
     readonly INTERRUPT: "interrupt";
     readonly HISTORY_REQUEST: "history_request";
     readonly HISTORY: "history";
@@ -734,6 +736,13 @@ export type SessionMeta = Envelope<"control", "session_meta", SessionMetaMsg>;
 export type ChannelDown = Envelope<"control", "channel_down", ChannelDownMsg>;
 export type Heartbeat = Envelope<"control", "heartbeat", HeartbeatMsg>;
 export type ModeChange = Envelope<"control", "mode", ModeChangeMsg>;
+/** A model the session can switch to, with the reasoning efforts it supports (may be empty). */
+export interface SessionModelOption { id: string; name: string; efforts: string[]; defaultEffort: string | null }
+export interface CurrentSessionModel { modelId: string; name: string; reasoningEffort: string | null }
+export interface ModelStateMsg { current: CurrentSessionModel | null; models: SessionModelOption[] }
+export interface ModelSetMsg { modelId?: string; reasoningEffort?: string }
+export type ModelState = Envelope<"control", "model_state", ModelStateMsg>;
+export type ModelSet = Envelope<"control", "model_set", ModelSetMsg>;
 export type InterruptMessage = Envelope<"control", "interrupt", InterruptMsg>;
 export type HistoryRequest = Envelope<"control", "history_request", HistoryRequestMsg>;
 export type History = Envelope<"control", "history", HistoryMsg>;
@@ -841,6 +850,8 @@ export type EventEnvelope =
   | ChannelDown
   | Heartbeat
   | ModeChange
+  | ModelState
+  | ModelSet
   | InterruptMessage
   | HistoryRequest
   | History
@@ -939,6 +950,8 @@ export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function channelDown(reason?: string): ChannelDown;
 export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
 export function modeChange(mode: SessionMode): ModeChange;
+export function modelState(state?: { current?: CurrentSessionModel | null; models?: SessionModelOption[] }): ModelState;
+export function modelSet(change: { modelId?: string | null; reasoningEffort?: string | null }): ModelSet;
 export function interrupt(): InterruptMessage;
 export function historyRequest(
   before?: number | null,

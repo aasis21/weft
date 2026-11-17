@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Weft — whitelist of Copilot CLI slash commands the phone is allowed to invoke on the laptop
-// session (via CONTROL.INVOKE_COMMAND -> session.rpc.commands.invoke on the extension side).
+// Weft — slash commands offered in the phone composer. Two kinds:
+//   - PHONE_COMMANDS: the whitelist of Copilot CLI slash commands the phone may run on the laptop
+//     session (CONTROL.INVOKE_COMMAND -> session.rpc.commands.invoke on the extension side).
+//   - SESSION_CONTROL_COMMANDS: mode, model and reasoning effort, which Weft changes itself through
+//     the session RPC (CONTROL.MODE, CONTROL.MODEL_SET). They are never sent as CLI commands.
 //
 // SINGLE SOURCE OF TRUTH: the mobile command palette renders from this list, and the extension
 // re-validates against it before invoking — so a command can never be run from a phone unless it
@@ -60,19 +63,6 @@ export const PHONE_COMMANDS = Object.freeze(
     // --- Tier 1: safe, fire-and-return, meaningful when driving from a phone ---
     { name: "rename", label: "/rename", hint: "Rename this session", input: textInput(true, "Session name") },
     { name: "compact", label: "/compact", hint: "Summarize context to free space", input: textInput(false, "Optional focus") },
-    {
-      name: "model",
-      label: "/model",
-      hint: "Switch the model for this session",
-      input: optionsInput(true, false, "Choose a model", [
-        { value: "auto", label: "Auto", hint: "Recommended", aliases: ["recommended", "default"] },
-        { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", aliases: ["gpt", "sol"] },
-        { value: "claude-sonnet-5", label: "Claude Sonnet 5", aliases: ["claude", "sonnet"] },
-        { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", aliases: ["gemini", "flash"] },
-      ]),
-    },
-    { name: "autopilot", label: "/autopilot", hint: "Toggle autopilot mode", input: textInput(false, "Optional instructions") },
-    { name: "plan", label: "/plan", hint: "Enter plan mode", input: noInput },
     { name: "review", label: "/review", hint: "Review the current changes", input: noInput },
     { name: "security-review", label: "/security-review", hint: "Security-review the changes", input: noInput },
     { name: "rubber-duck", label: "/rubber-duck", hint: "Independent critique of the work", input: noInput },
@@ -159,4 +149,67 @@ export function validatePhoneCommandInput(commandOrName, raw) {
   if (option) return { valid: true, input: option.value, option };
   if (command.input.allowCustom) return { valid: true, input };
   return { valid: false, error: `That value isn't available for /${command.name}.` };
+}
+
+// ---- Session controls ---------------------------------------------------------------------------
+
+/** Reasoning effort values as people read them. Unknown values are shown as sent. */
+export const REASONING_EFFORT_LABELS = Object.freeze({
+  none: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max",
+});
+
+export function describeReasoningEffort(value) {
+  return REASONING_EFFORT_LABELS[value] ?? String(value ?? "");
+}
+
+/** Shown only until the laptop reports the models this account can actually use. */
+export const FALLBACK_MODEL_OPTIONS = Object.freeze(
+  [
+    { value: "auto", label: "Auto", hint: "Recommended", aliases: ["recommended", "default"] },
+    { value: "claude-opus-5.5", label: "Claude Opus 5.5", aliases: ["opus"] },
+    { value: "claude-sonnet-5", label: "Claude Sonnet 5", aliases: ["claude", "sonnet"] },
+    { value: "gpt-6.1-sol", label: "GPT-6.1 Sol", aliases: ["gpt", "sol"] },
+    { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", aliases: ["gemini", "flash"] },
+  ].map((option) => Object.freeze({ ...option, ...(option.aliases ? { aliases: Object.freeze(option.aliases) } : {}) })),
+);
+
+const FALLBACK_EFFORT_OPTIONS = ["low", "medium", "high", "xhigh"]
+  .map((value) => ({ value, label: describeReasoningEffort(value) }));
+
+/** @type {ReadonlyArray<PhoneCommand>} */
+export const SESSION_CONTROL_COMMANDS = Object.freeze(
+  [
+    { name: "interactive", label: "/interactive", hint: "Interactive mode: asks before acting", input: noInput },
+    { name: "plan", label: "/plan", hint: "Plan mode: agree a plan before changes", input: noInput },
+    { name: "autopilot", label: "/autopilot", hint: "Autopilot mode: keeps working without asking", input: noInput },
+    {
+      name: "model",
+      label: "/model",
+      hint: "Switch the model for this session",
+      input: optionsInput(true, false, "Choose a model", FALLBACK_MODEL_OPTIONS),
+    },
+    {
+      name: "effort",
+      label: "/effort",
+      hint: "Set how hard the model thinks",
+      input: optionsInput(true, false, "Choose an effort level", FALLBACK_EFFORT_OPTIONS),
+    },
+  ].map((command) => Object.freeze(command)),
+);
+
+/** Look up a session control command (mode, model, effort) by name; null if it is not one. */
+export function getSessionControlCommand(name) {
+  const canonical = normalizeCommandName(name);
+  if (!canonical) return null;
+  return SESSION_CONTROL_COMMANDS.find((c) => c.name === canonical) ?? null;
+}
+
+/** The same command with its options replaced, for example by the laptop's live model list. */
+export function withCommandOptions(command, options) {
+  if (!command || command.input.kind !== "options" || !Array.isArray(options) || options.length === 0) return command;
+  return Object.freeze({
+    ...command,
+    input: optionsInput(command.input.required, command.input.allowCustom, command.input.placeholder, options),
+  });
 }

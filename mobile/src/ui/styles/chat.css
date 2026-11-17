@@ -955,6 +955,28 @@
 .mode-menu-item:hover { background: var(--bg); }
 .mode-menu-item.active { color: var(--accent); }
 .mode-check { width: 12px; color: var(--accent); }
+/* Model dropdown: live model list plus the current model's effort levels. */
+.model-pill { max-width: 52vw; min-width: 0; }
+.model-pill:disabled { cursor: default; opacity: 0.6; }
+.model-pill-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.model-menu { min-width: 220px; max-width: min(320px, 86vw); max-height: min(60vh, 420px); overflow-y: auto; }
+.model-menu-heading {
+  padding: 8px 9px 4px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.mode-tag {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+}
 
 .composer-input {
   width: 100%;

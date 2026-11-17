@@ -2,13 +2,23 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
-import type { PromptAttachment, SessionMode } from '@aasis21/weft-shared';
+import type { ModelStateMsg, PromptAttachment, SessionMode } from '@aasis21/weft-shared';
 import { Composer } from '@/ui/composer/Composer';
 
 const mockAttachment: PromptAttachment = {
   data: 'ZmFrZS1qcGVn',
   mimeType: 'image/jpeg',
   name: 'picked.jpg',
+};
+
+/** What the laptop reports: the current model with its effort, and the models it can switch to. */
+const liveModels: ModelStateMsg = {
+  current: { modelId: 'claude-opus-5.5', name: 'Claude Opus 5.5', reasoningEffort: 'high' },
+  models: [
+    { id: 'auto', name: 'Auto', efforts: [], defaultEffort: null },
+    { id: 'claude-opus-5.5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' },
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' },
+  ],
 };
 
 const { fileToAttachment } = vi.hoisted(() => ({
@@ -77,10 +87,31 @@ describe('Composer', () => {
 
     expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attach image' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Interactive' })).toHaveClass('mode-pill');
+    expect(screen.getByRole('button', { name: /^Model:/ })).toHaveClass('model-pill');
+    expect(screen.queryByRole('button', { name: 'Interactive' })).not.toBeInTheDocument();
+    expect(container.querySelector('.mode-tag')).not.toBeInTheDocument();
     expect(screen.getByText('📁 weft')).toHaveClass('cwd-chip');
     expect(screen.getByRole('button', { name: 'Open Vox' })).toBeEnabled();
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
+  });
+
+  it('switches model and effort from the dropdown, keeping a supported effort', async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderComposer({ model: liveModels, onModelChange, mode: 'plan' as SessionMode });
+
+    expect(screen.getByText('Plan')).toHaveClass('mode-tag');
+    await user.click(screen.getByRole('button', { name: 'Model: Claude Opus 5.5 · High' }));
+    const menu = screen.getByRole('menu', { name: 'Model and effort' });
+    expect(within(menu).getAllByRole('menuitemradio').map((item) => item.textContent?.replace('✓', '')))
+      .toEqual(['Auto', 'Claude Opus 5.5', 'GPT-6.1 Sol', 'Low', 'Medium', 'High', 'Extra high']);
+    expect(within(menu).getByRole('menuitemradio', { name: /Claude Opus 5\.5/ })).toHaveAttribute('aria-checked', 'true');
+    await user.click(within(menu).getByRole('menuitemradio', { name: /GPT-6\.1 Sol/ }));
+    expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'high' });
+
+    await user.click(screen.getByRole('button', { name: /^Model:/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: /Extra high/ }));
+    expect(onModelChange).toHaveBeenLastCalledWith({ reasoningEffort: 'xhigh' });
   });
 
   it('shows distinct disabled placeholder copy for ended and reconnecting sessions', () => {
@@ -517,10 +548,11 @@ describe('Composer', () => {
       expect(textbox).toHaveValue('');
     });
 
-    it('filters model choices by friendly metadata and invokes the hidden value on touch selection', async () => {
+    it('offers the laptop model list for /model and keeps the current effort when supported', async () => {
       const user = userEvent.setup();
       const onCommand = vi.fn();
-      const { container } = renderComposer({ onCommand });
+      const onModelChange = vi.fn();
+      const { container } = renderComposer({ onCommand, onModelChange, model: liveModels });
       const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
 
       await user.type(textbox, '/mod');
@@ -528,30 +560,32 @@ describe('Composer', () => {
       expect(textbox).toHaveValue('/model ');
 
       const modelMenu = screen.getByRole('listbox', { name: 'Arguments for /model' });
-      expect(within(modelMenu).getByText('Auto')).toBeInTheDocument();
-      expect(within(modelMenu).getByText('Recommended')).toBeInTheDocument();
-      expect(container).not.toHaveTextContent('gpt-5.6-sol');
-      expect(container).not.toHaveTextContent('claude-sonnet-5');
-      expect(container).not.toHaveTextContent('gemini-3.8-flash');
+      expect(within(modelMenu).getAllByRole('option').map((option) => option.querySelector('.slash-command')?.textContent))
+        .toEqual(['Auto', 'Claude Opus 5.5', 'GPT-6.1 Sol']);
+      expect(within(modelMenu).getByText('Current model')).toBeInTheDocument();
+      expect(container).not.toHaveTextContent('gpt-6.1-sol');
 
-      await user.type(textbox, 'recommended');
-      expect(within(modelMenu).getAllByRole('option')).toHaveLength(1);
-      await user.click(within(modelMenu).getByRole('option', { name: /AutoRecommended/i }));
+      await user.type(textbox, 'sol');
+      await user.click(within(modelMenu).getByRole('option', { name: /GPT-6\.1 Sol/ }));
 
-      expect(onCommand).toHaveBeenCalledWith('model', 'auto');
+      expect(onModelChange).toHaveBeenCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'high' });
+      expect(onCommand).not.toHaveBeenCalled();
       expect(textbox).toHaveValue('');
     });
 
-    it('canonicalizes a friendly model label when the command is submitted directly', async () => {
+    it('uses the fallback model list before the laptop reports one, and sets effort by friendly name', async () => {
       const user = userEvent.setup();
-      const onCommand = vi.fn();
-      renderComposer({ onCommand });
+      const onModelChange = vi.fn();
+      renderComposer({ onModelChange });
       const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
 
-      await user.type(textbox, '/model Claude Sonnet 5');
+      await user.type(textbox, '/model Claude Opus 5.5');
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(onModelChange).toHaveBeenCalledWith({ modelId: 'claude-opus-5.5' });
 
-      expect(onCommand).toHaveBeenCalledWith('model', 'claude-sonnet-5');
+      await user.type(textbox, '/effort Extra high');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(onModelChange).toHaveBeenLastCalledWith({ reasoningEffort: 'xhigh' });
     });
 
     it('does not submit a curated option command with an unknown value', async () => {
@@ -587,10 +621,27 @@ describe('Composer', () => {
       renderComposer({ onCommand });
       const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
 
-      await user.type(textbox, '/plan');
+      await user.type(textbox, '/review');
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-      expect(onCommand).toHaveBeenCalledWith('plan', undefined);
+      expect(onCommand).toHaveBeenCalledWith('review', undefined);
+    });
+
+    it('switches mode with /plan, /autopilot and /interactive instead of running a CLI command', async () => {
+      const user = userEvent.setup();
+      const onCommand = vi.fn();
+      const onModeChange = vi.fn();
+      renderComposer({ onCommand, onModeChange });
+      const textbox = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+
+      await user.type(textbox, '/plan');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(onModeChange).toHaveBeenCalledWith('plan');
+
+      await user.type(textbox, '/interactive');
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(onModeChange).toHaveBeenCalledTimes(1);
+      expect(onCommand).not.toHaveBeenCalled();
     });
 
     it('waits for a required argument before invoking', async () => {

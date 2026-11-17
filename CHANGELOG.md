@@ -5,6 +5,18 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.51
+
+- The composer's mode chip is now a **model dropdown**. It shows the current model and reasoning
+  effort, lists the models your Copilot account can use (read from the laptop, so Claude Opus and
+  GPT-6.1 Sol appear when available), and offers the effort levels the chosen model supports.
+  Switching model keeps your effort level when the new model supports it.
+- New slash commands: `/effort` sets the reasoning effort; `/interactive`, `/plan` and
+  `/autopilot` switch mode. `/model` offers the same live list as the dropdown. A small tag shows
+  Plan or Autopilot when you are not in Interactive mode.
+- Mode, model and effort are applied by Weft through the session API, not run as Copilot CLI
+  commands; the laptop accepts only models the session lists and efforts that model supports.
+
 ## 0.2.50
 
 - Catch-up now shows what you would have seen live. Tool cards you missed keep their real

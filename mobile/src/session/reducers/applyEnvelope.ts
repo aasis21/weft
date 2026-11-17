@@ -317,6 +317,9 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
           session.connection.mode = message.msg.mode;
           delete session.connection.pendingMode;
           return;
+        case SUBTYPE.CONTROL.MODEL_STATE:
+          session.connection.model = message.msg;
+          return;
         default:
           return;
       }
