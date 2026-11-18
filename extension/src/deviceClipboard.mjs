@@ -23,12 +23,21 @@ if ($text.Length -eq 0) {
   [System.Windows.Forms.Clipboard]::SetText($text)
 }
 `;
-// pbpaste can fall back to RTF/PostScript when plain text is absent.
+// Native text conversion can strip a leading BOM; transfer the UTF-8 pasteboard bytes.
 const MAC_READ_SCRIPT = String.raw`
 ObjC.import("AppKit");
-const text = $.NSPasteboard.generalPasteboard.stringForType($.NSPasteboardTypeString);
-if (typeof ObjC.unwrap(text) === "string") {
-  $.NSFileHandle.fileHandleWithStandardOutput.writeData(text.dataUsingEncoding($.NSUTF8StringEncoding));
+const data = $.NSPasteboard.generalPasteboard.dataForType($.NSPasteboardTypeString);
+if (ObjC.unwrap(data) != null) {
+  $.NSFileHandle.fileHandleWithStandardOutput.writeData(data);
+}
+`;
+const MAC_WRITE_SCRIPT = String.raw`
+ObjC.import("AppKit");
+const data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+const pasteboard = $.NSPasteboard.generalPasteboard;
+pasteboard.clearContents;
+if (data.length > 0 && !pasteboard.setDataForType(data, $.NSPasteboardTypeString)) {
+  throw new Error("unavailable");
 }
 `;
 
@@ -74,10 +83,10 @@ export function createDeviceClipboard({
       timer = setTimeout(() => finish("timeout", true), timeoutMs);
       try {
         const command = platform === "darwin"
-          ? operation === "read" ? "/usr/bin/osascript" : "/usr/bin/pbcopy"
+          ? "/usr/bin/osascript"
           : "powershell.exe";
         const args = platform === "darwin"
-          ? operation === "read" ? ["-l", "JavaScript", "-e", MAC_READ_SCRIPT] : []
+          ? ["-l", "JavaScript", "-e", operation === "read" ? MAC_READ_SCRIPT : MAC_WRITE_SCRIPT]
           : ["-NoProfile", "-NonInteractive", "-STA", "-Command", operation === "read" ? READ_SCRIPT : WRITE_SCRIPT];
         child = spawnFn(command, args, {
           windowsHide: true,

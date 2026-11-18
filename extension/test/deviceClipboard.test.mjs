@@ -139,15 +139,11 @@ test("macOS clipboard uses native plain-text APIs and preserves exact UTF-8 thro
       assert.equal(options.env.LC_ALL, "en_US.UTF-8");
       assert.equal(options.stdio[2], "ignore");
       assert.equal(args.includes(text), false);
-      if (children.length === 0) {
-        assert.equal(file, "/usr/bin/pbcopy");
-        assert.deepEqual(args, []);
-      } else {
-        assert.equal(file, "/usr/bin/osascript");
-        assert.deepEqual(args.slice(0, 3), ["-l", "JavaScript", "-e"]);
-        assert.match(args[3], /NSPasteboardTypeString/);
-        assert.doesNotMatch(args[3], /console\.log/);
-      }
+      assert.equal(file, "/usr/bin/osascript");
+      assert.deepEqual(args.slice(0, 3), ["-l", "JavaScript", "-e"]);
+      assert.match(args[3], /NSPasteboardTypeString/);
+      assert.match(args[3], children.length === 0 ? /setDataForType/ : /dataForType/);
+      assert.doesNotMatch(args[3], /console\.log/);
       const child = childProcess();
       children.push(child);
       return child;
