@@ -306,6 +306,11 @@ export function SessionScreen({
     settling: boolean;
   } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [promptSendCount, setPromptSendCount] = useState(0);
+  const sendPrompt: SessionScreenProps['onPrompt'] = (text, attachments, delivery) => {
+    onPrompt(text, attachments, delivery);
+    setPromptSendCount((count) => count + 1);
+  };
   const [approvalMountTimes, setApprovalMountTimes] = useState<Record<string, number>>({});
   // Desktop (wide viewport): dock the session list as a persistent, collapsible sidebar
   // instead of the mobile overlay drawer (#183). Narrow viewports are untouched below.
@@ -854,7 +859,7 @@ export function SessionScreen({
           thinkingSince={active.thinkingSince ?? null}
           toolActive={toolActive}
           disabled={ended || offline}
-          onPrompt={(text, delivery) => onPrompt(text, undefined, delivery)}
+          onPrompt={(text, delivery) => sendPrompt(text, undefined, delivery)}
           onInterrupt={onInterrupt}
           onActiveChange={handleVoiceModeActive}
           onStateChange={setVoxState}
@@ -883,6 +888,7 @@ export function SessionScreen({
           historyLoading={timeline.historyLoading}
           initialLoading={initialLoading}
           conversationKey={activeId}
+          promptSendCount={promptSendCount}
         />
       </main>
 
@@ -1073,7 +1079,7 @@ export function SessionScreen({
           mode={timeline.mode}
           {...(active.model ? { model: active.model } : {})}
           cwd={meta.cwd}
-          onPrompt={onPrompt}
+          onPrompt={sendPrompt}
           onInterrupt={onInterrupt}
           onModeChange={onModeChange}
           {...(onModelChange ? { onModelChange } : {})}

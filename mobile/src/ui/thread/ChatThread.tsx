@@ -48,6 +48,8 @@ interface ChatThreadProps {
   /** Identity of the conversation on screen. Changing it means the reader arrived somewhere new, so
    *  the thread re-arms its "open at the newest message" behaviour. */
   conversationKey?: string;
+  /** Changes only when the reader explicitly submits a prompt in this chat. */
+  promptSendCount?: number;
 }
 
 const COPILOT_AVATAR: ReactNode = (
@@ -151,7 +153,7 @@ function selectionWithin(container: Node | null): string | null {
   return container.contains(range.commonAncestorContainer) ? text : null;
 }
 
-export function ChatThread({ items, streaming = false, busy = false, intent = null, thinkingSince = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey, onOpenFile }: ChatThreadProps): JSX.Element {
+export function ChatThread({ items, streaming = false, busy = false, intent = null, thinkingSince = null, emptyHint, onRetry, offline = false, offlineLabel, historyLoading = false, initialLoading: initialLoadingProp, conversationKey, promptSendCount = 0, onOpenFile }: ChatThreadProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -178,16 +180,15 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   // check could conclude the reader had scrolled up and stop following altogether, stranding the
   // thread mid-history behind a jump-to-latest button on arrival.
   //
-  // While settling, the thread pins hard: it jumps instantly rather than smoothly, refuses to
-  // unpin, and hides the jump-to-latest affordance. It settles a short beat after the history pull
-  // goes quiet, at which point normal read-anywhere behaviour resumes.
+  // Ignore layout-generated scroll events during catch-up, but end settling immediately
+  // when the reader deliberately scrolls toward older messages.
   const settlingRef = useRef(true);
   const [settling, setSettling] = useState(true);
   const [hasNewWhileUnpinned, setHasNewWhileUnpinned] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [collapsedToolRuns, setCollapsedToolRuns] = useState<Record<string, boolean>>({});
   const [liveText, setLiveText] = useState('');
-  const prevItemsLenRef = useRef(items.length);
+  const prevPromptSendRef = useRef({ conversationKey, count: promptSendCount });
 
   const last = items[items.length - 1];
   const lastSignal = last?.kind === 'tool'
@@ -196,7 +197,6 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       ? last.text
       : undefined;
   const lastId = last?.id ?? null;
-  const lastIsPhoneUser = last?.kind === 'user' && last.origin === 'phone';
   const latestSendFailed = last?.kind === 'user' && last.failed === true;
   const trailingRunningTool = last?.kind === 'tool' && last.status === 'running';
   const showThinking =
@@ -299,17 +299,23 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
     [cancelLongPress, openMenu],
   );
 
+  const endSettling = useCallback((): void => {
+    settlingRef.current = false;
+    setSettling(false);
+  }, []);
+
   const scrollToLatest = useCallback((): void => {
     if (touchReleaseTimerRef.current !== null) {
       window.clearTimeout(touchReleaseTimerRef.current);
       touchReleaseTimerRef.current = null;
     }
+    endSettling();
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     readerDetachedRef.current = false;
     pinnedRef.current = true;
     setIsPinned(true);
     setHasNewWhileUnpinned(false);
-  }, []);
+  }, [endSettling]);
 
   // Re-arm on arrival at a different conversation.
   useLayoutEffect(() => {
@@ -317,6 +323,8 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       window.clearTimeout(touchReleaseTimerRef.current);
       touchReleaseTimerRef.current = null;
     }
+    touchingRef.current = false;
+    touchStartYRef.current = null;
     settlingRef.current = true;
     setSettling(true);
     readerDetachedRef.current = false;
@@ -329,21 +337,18 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   // filling in. A layout effect runs before the browser paints, so the newest message is simply
   // where the thread opens — there is no frame in which it is somewhere else.
   useLayoutEffect(() => {
-    if (!settlingRef.current) return;
+    if (!settlingRef.current || touchingRef.current) return;
     endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
   });
 
   // Settle once the history pull has gone quiet for a beat. Keyed on the item count too, so a
   // second page restarts the wait rather than settling between pages.
   useEffect(() => {
-    if (!settlingRef.current) return undefined;
+    if (!settling || !settlingRef.current) return undefined;
     if (initialLoading || historyLoading) return undefined;
-    const timer = window.setTimeout(() => {
-      settlingRef.current = false;
-      setSettling(false);
-    }, 250);
+    const timer = window.setTimeout(endSettling, 250);
     return () => window.clearTimeout(timer);
-  }, [historyLoading, initialLoading, items.length]);
+  }, [conversationKey, endSettling, historyLoading, initialLoading, items.length, settling]);
 
   // Track how far the reader is from the bottom of the scrolling ancestor.
   useEffect(() => {
@@ -355,11 +360,8 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       // the reader went anywhere. Believing them is what stranded the view mid-history.
       if (settlingRef.current) return;
       const nextPinned = bottomGap(scroller) < PIN_SLACK_PX;
-      if (nextPinned && readerDetachedRef.current && touchReleaseTimerRef.current !== null) {
-        pinnedRef.current = false;
-        setIsPinned(false);
-        return;
-      }
+      if (nextPinned && readerDetachedRef.current &&
+        (touchingRef.current || touchReleaseTimerRef.current !== null)) return;
       readerDetachedRef.current = !nextPinned;
       pinnedRef.current = nextPinned;
       setIsPinned(nextPinned);
@@ -371,6 +373,7 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       readerDetachedRef.current = true;
       pinnedRef.current = false;
       setIsPinned(false);
+      endSettling();
     };
     const hold = (event: TouchEvent): void => {
       if (touchReleaseTimerRef.current !== null) {
@@ -398,11 +401,10 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       }
       touchReleaseTimerRef.current = window.setTimeout(() => {
         touchReleaseTimerRef.current = null;
-        update();
       }, MOMENTUM_GRACE_MS);
     };
     const wheel = (event: WheelEvent): void => {
-      if (settlingRef.current || event.deltaY >= 0) return;
+      if (event.deltaY >= 0) return;
       detachReader();
     };
     update();
@@ -424,7 +426,7 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
         touchReleaseTimerRef.current = null;
       }
     };
-  }, [cancelLongPress]);
+  }, [cancelLongPress, endSettling]);
 
   // Auto-scroll only when content at the live tail changes, and only if the reader is still
   // following it or just sent a prompt from this phone.
@@ -432,9 +434,11 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
     const tailId = lastId;
     const tailChanged = tailId !== prevTailIdRef.current;
     const tailContentChanged = tailChanged || lastSignal !== prevTailSignalRef.current;
-    const phoneJustSent = tailChanged && lastIsPhoneUser;
+    const previousSend = prevPromptSendRef.current;
+    const phoneJustSent = previousSend.conversationKey === conversationKey &&
+      promptSendCount > previousSend.count;
+    prevPromptSendRef.current = { conversationKey, count: promptSendCount };
     const rememberTail = (): void => {
-      prevItemsLenRef.current = items.length;
       prevTailIdRef.current = tailId;
       prevTailSignalRef.current = lastSignal;
     };
@@ -445,6 +449,9 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       }
       readerDetachedRef.current = false;
       pinnedRef.current = true;
+      setIsPinned(true);
+      setHasNewWhileUnpinned(false);
+      endSettling();
     }
     const following =
       settlingRef.current || (!readerDetachedRef.current && pinnedRef.current);
@@ -464,17 +471,17 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
     }
     // Prepending an older history page changes the item count but not the live tail. It must
     // preserve the browser's anchored reading position instead of treating the old page as new.
-    if (!tailContentChanged && !showThinking) {
+    if (!phoneJustSent && !tailContentChanged && !showThinking) {
       rememberTail();
       return;
     }
     // A brand-new item (or the user's own send) scrolls smoothly; streaming deltas that only grow
     // the current message scroll instantly, so rapid tokens don't stack competing smooth animations
     // into visible jitter (#106).
-    const smooth = !settlingRef.current && tailChanged;
+    const smooth = phoneJustSent || (!settlingRef.current && tailChanged);
     rememberTail();
     endRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' });
-  }, [items.length, lastId, lastIsPhoneUser, lastSignal, showThinking]);
+  }, [conversationKey, endSettling, items.length, lastId, lastSignal, promptSendCount, showThinking]);
 
   // The scroll container getting shorter does not move scrollTop, so the newest messages simply
   // fall below the fold and nothing puts them back — the auto-scroll above only runs when the item

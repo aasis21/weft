@@ -405,7 +405,7 @@ describe('letting the reader scroll away while the agent is still writing', () =
   function mountStreaming(): {
     scroller: HTMLElement;
     scrollIntoView: ReturnType<typeof vi.fn>;
-    rerender: (items: TimelineItem[]) => void;
+    rerender: (items: TimelineItem[], promptSendCount?: number) => void;
   } {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView as never;
@@ -419,10 +419,10 @@ describe('letting the reader scroll away while the agent is still writing', () =
     return {
       scroller,
       scrollIntoView,
-      rerender: (items) =>
+      rerender: (items, promptSendCount) =>
         raw(
           <div className="thread-scroll">
-            <ChatThread items={items} streaming busy />
+            <ChatThread items={items} streaming busy promptSendCount={promptSendCount ?? 0} />
           </div>,
         ),
     };
@@ -584,6 +584,46 @@ describe('letting the reader scroll away while the agent is still writing', () =
     expect(scrollIntoView).toHaveBeenCalled();
   });
 
+  it.each(['touch', 'wheel'])('keeps the reading position after a %s scroll during chat switch catch-up', (gesture) => {
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const reply = { kind: 'assistant', id: 'a1', text: 'reply', ts: now } as const;
+    const items: TimelineItem[] = [reply];
+    const thread = (key: string, rows = items, historyLoading = true) => (
+      <div className="thread-scroll">
+        <ChatThread conversationKey={key} items={rows} historyLoading={historyLoading} />
+      </div>
+    );
+    const { container, rerender } = render(thread('first'));
+    rerender(thread('second', [{ ...reply, id: 'a2' }]));
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'auto', block: 'end' });
+    scrollIntoView.mockClear();
+    const scroller = container.querySelector('.thread-scroll') as HTMLElement;
+    if (gesture === 'touch') {
+      fireEvent.touchStart(scroller, { touches: [{ clientY: 200 }] });
+      // The next render can arrive even before the browser delivers touchmove.
+      rerender(thread('second', [{ ...reply, id: 'a2', text: 'longer reply' }]));
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 240 }] });
+      fireEvent.touchEnd(scroller);
+    } else {
+      fireEvent.wheel(scroller, { deltaY: -120 });
+    }
+    scrollUp(scroller);
+    fireEvent.scroll(scroller);
+    rerender(thread('second', [
+      ...items,
+      { kind: 'user', id: 'replayed', text: 'Earlier prompt from this phone', ts: now + 1, origin: 'phone' },
+    ], false));
+    fireEvent(window, new Event('resize'));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
+
+    // The next conversation still opens at its own newest message.
+    rerender(thread('third'));
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'auto', block: 'end' });
+    scrollIntoView.mockRestore();
+  });
+
   it('still jumps to the end when the reader sends something themselves', async () => {
     const { scroller, scrollIntoView, rerender } = mountStreaming();
     await settleThread();
@@ -594,7 +634,7 @@ describe('letting the reader scroll away while the agent is still writing', () =
     rerender([
       { kind: 'assistant', id: 'a1', text: 'one', ts: now },
       { kind: 'user', id: 'u1', text: 'stop', ts: now + 1, origin: 'phone' },
-    ]);
+    ], 1);
 
     expect(scrollIntoView).toHaveBeenCalled();
   });
