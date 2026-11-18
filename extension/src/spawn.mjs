@@ -11,7 +11,7 @@ export { writeIdentityFile } from "./handoffIdentity.mjs";
 
 export function detectTerminal(env = process.env, platform = process.platform) {
   if (platform === "win32") return env.WT_SESSION ? "windows-terminal" : "windows-console";
-  if (platform === "darwin" && env.TERM_PROGRAM) return "macos-terminal";
+  if (platform === "darwin") return "macos-terminal";
   if (platform === "linux" && (env.GNOME_TERMINAL_SCREEN || env.GNOME_TERMINAL_SERVICE)) {
     return "gnome-terminal";
   }

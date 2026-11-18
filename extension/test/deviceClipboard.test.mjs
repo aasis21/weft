@@ -129,3 +129,76 @@ test("clipboard capability is platform-gated and spawn exceptions are sanitized"
   assert.equal(broken.supported, true);
   assert.deepEqual(await broken.readText(), { code: "unavailable" });
 });
+
+test("macOS clipboard uses native plain-text APIs and preserves exact UTF-8 through stdin/stdout", async () => {
+  const children = [];
+  const text = "\uFEFF  café😀 $x; 'quotes'\r\n\r\n";
+  const adapter = createDeviceClipboard({
+    platform: "darwin",
+    spawnFn(file, args, options) {
+      assert.equal(options.env.LC_ALL, "en_US.UTF-8");
+      assert.equal(options.stdio[2], "ignore");
+      assert.equal(args.includes(text), false);
+      if (children.length === 0) {
+        assert.equal(file, "/usr/bin/pbcopy");
+        assert.deepEqual(args, []);
+      } else {
+        assert.equal(file, "/usr/bin/osascript");
+        assert.deepEqual(args.slice(0, 3), ["-l", "JavaScript", "-e"]);
+        assert.match(args[3], /NSPasteboardTypeString/);
+        assert.doesNotMatch(args[3], /console\.log/);
+      }
+      const child = childProcess();
+      children.push(child);
+      return child;
+    },
+  });
+  assert.equal(adapter.supported, true);
+  const write = adapter.writeText(text);
+  await tick();
+  assert.deepEqual(children[0].input, Buffer.from(text));
+  children[0].emit("close", 0);
+  assert.deepEqual(await write, { code: "ok" });
+  const read = adapter.readText();
+  await tick();
+  const bytes = Buffer.from(text);
+  children[1].stdout.emit("data", bytes.subarray(0, 11));
+  children[1].stdout.emit("data", bytes.subarray(11));
+  children[1].emit("close", 0);
+  assert.deepEqual(await read, { code: "ok", text });
+  await adapter.shutdown();
+});
+
+test("macOS clipboard bounds output and sanitizes native failures, timeout, and shutdown", async () => {
+  for (const mode of ["size", "error", "timeout", "shutdown"]) {
+    const child = childProcess();
+    const adapter = createDeviceClipboard({ platform: "darwin", spawnFn: () => child, timeoutMs: 20 });
+    assert.deepEqual(await adapter.writeText("a\0b"), { code: "invalid-request" });
+    assert.deepEqual(await adapter.writeText("x".repeat(CLIPBOARD_MAX_BYTES + 1)), { code: "too-large" });
+    const read = adapter.readText();
+    await tick();
+    if (mode === "size") child.stdout.emit("data", Buffer.alloc(CLIPBOARD_MAX_BYTES + 1));
+    if (mode === "error") child.emit("error", new Error("private clipboard"));
+    if (mode === "shutdown") await adapter.shutdown();
+    assert.deepEqual(await read, { code: mode === "size" ? "too-large" : mode === "timeout" ? "timeout" : "unavailable" });
+    assert.equal(child.kills, 1);
+    await adapter.shutdown();
+  }
+});
+
+test("native macOS clipboard round-trips text without losing BOM, Unicode, whitespace, or trailing newlines", {
+  skip: process.platform !== "darwin" || process.env.WEFT_NATIVE_MACOS_TEST !== "1",
+}, async (t) => {
+  const adapter = createDeviceClipboard();
+  const original = await adapter.readText();
+  assert.equal(original.code, "ok", "Clipboard must be readable before changing it.");
+  t.after(async () => {
+    assert.equal((await adapter.writeText(original.text)).code, "ok");
+    await adapter.shutdown();
+  });
+  const text = "\uFEFF  café😀 $x; 'quotes'\r\n\r\n";
+  assert.equal((await adapter.writeText(text)).code, "ok");
+  assert.deepEqual(await adapter.readText(), { code: "ok", text });
+  assert.equal((await adapter.writeText("")).code, "ok");
+  assert.deepEqual(await adapter.readText(), { code: "ok", text: "" });
+});

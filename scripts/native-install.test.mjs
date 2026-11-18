@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { build } from "esbuild";
 import { generateReleaseManifest, REQUIRED_RELEASE_FILES } from "./generate-release-manifest.mjs";
 import { nativeAssetName, NATIVE_TARGETS } from "./native-runtime.mjs";
@@ -16,6 +17,69 @@ import { nativeAssetName, NATIVE_TARGETS } from "./native-runtime.mjs";
 const run = promisify(execFile);
 const dist = fileURLToPath(new URL("../extension/dist/", import.meta.url));
 const target = `${process.platform}-${process.arch}`;
+
+test("POSIX bootstrap supports BSD temporary directories, fresh shell profiles, quoted paths, and idempotent reruns", {
+  skip: process.platform === "win32",
+  timeout: 60_000,
+}, async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "weft-posix-bootstrap-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const home = join(directory, "home with 'quotes' $literal");
+  const installed = join(home, "installed extension");
+  const bin = join(home, "local bin");
+  const temporary = join(directory, "temporary downloads");
+  mkdirSync(join(home, ".weft"), { recursive: true });
+  mkdirSync(temporary);
+  const config = '{"transport":{"kind":"supabase"},"deviceName":"fixture"}';
+  writeFileSync(join(home, ".weft", "weft.config.json"), config);
+  const bootstrap = `
+import { copyFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+if (process.argv[2] === "install") {
+  mkdirSync(process.env.WEFT_INSTALL_DIR, { recursive: true });
+  copyFileSync(fileURLToPath(import.meta.url), join(process.env.WEFT_INSTALL_DIR, "weft.mjs"));
+} else if (process.argv[2] === "help") {
+  console.log("fixture-ready");
+} else {
+  throw new Error("Unexpected fixture CLI invocation");
+}
+`;
+  let corruptManifest = false;
+  const server = createServer((request, response) => {
+    if (request.url === "/release-manifest.json") {
+      response.end(JSON.stringify({ files: { "weft.mjs": {
+        sha256: corruptManifest ? "0".repeat(64) : createHash("sha256").update(bootstrap).digest("hex"),
+      } } }));
+    } else if (request.url === "/weft.mjs") response.end(bootstrap);
+    else response.writeHead(404).end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const env = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("WEFT_"))),
+    HOME: home, USERPROFILE: home, SHELL: "/bin/zsh", ZDOTDIR: home, TMPDIR: temporary,
+    BASH_ENV: "", ENV: "", NODE_OPTIONS: "",
+    WEFT_INSTALL_DIR: installed, WEFT_BIN_DIR: bin,
+    WEFT_INSTALL_BASE: `http://127.0.0.1:${server.address().port}`,
+  };
+  const installer = fileURLToPath(new URL("../mobile/public/install.sh", import.meta.url));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await run("/bin/bash", [installer], { cwd: directory, env, timeout: 15_000 });
+    assert.deepEqual(readdirSync(temporary), [], "Temporary bootstrap files must be removed.");
+    assert.equal(readFileSync(join(home, ".weft", "weft.config.json"), "utf8"), config);
+    const rc = readFileSync(join(home, ".zshrc"), "utf8");
+    assert.equal(rc.split("# Added by Weft installer").length - 1, 1);
+    const { stdout } = process.platform === "darwin"
+      ? await run("/bin/zsh", ["-ic", "weft help"], { env, timeout: 5_000 })
+      : await run("/bin/bash", ["-c", '. "$HOME/.zshrc"; weft help'], { env, timeout: 5_000 });
+    assert.equal(stdout.trim(), "fixture-ready");
+  }
+  corruptManifest = true;
+  await assert.rejects(run("/bin/bash", [installer], { env, timeout: 15_000 }), /integrity check failed/);
+  assert.deepEqual(readdirSync(temporary), [], "Failed bootstrap downloads must also be removed.");
+});
 
 test("bundled help and Copilot startup work without native assets; terminal fails explicitly", {
   skip: !existsSync(join(dist, "weft.mjs")) && "Build extension first",

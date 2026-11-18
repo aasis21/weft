@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { join, resolve } from "node:path";
+import { join, resolve, posix } from "node:path";
 import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { createManagement, ManagementError, validateManagementAction, withManagementLock } from "./management.mjs";
@@ -102,6 +102,11 @@ export function findControlCenterBrowser({ platform = process.platform, environm
     ["Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
     ["Microsoft Edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
     ["Chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"],
+    ...(environment.HOME ? [
+      ["Google Chrome", posix.join(environment.HOME, "Applications/Google Chrome.app/Contents/MacOS/Google Chrome")],
+      ["Microsoft Edge", posix.join(environment.HOME, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge")],
+      ["Chromium", posix.join(environment.HOME, "Applications/Chromium.app/Contents/MacOS/Chromium")],
+    ] : []),
   ] : [
     ["Google Chrome", "/usr/bin/google-chrome"],
     ["Google Chrome", "/usr/bin/google-chrome-stable"],

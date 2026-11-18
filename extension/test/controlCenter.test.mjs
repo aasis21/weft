@@ -52,12 +52,39 @@ test("app-window mode uses an installed browser and private Weft profile without
     },
     execute: async () => assert.fail("Default-browser command must not run in app mode."),
   });
+
   assert.equal(result.mode, "app-window");
   assert.ok(launched.args.includes("--app=http://127.0.0.1:4321/open/test"));
   assert.ok(launched.args.includes("--user-data-dir=" + join(baseDir, "control-center-profile")));
   assert.equal(launched.options.shell, false);
   assert.ok(!launched.args.includes("--no-sandbox"));
   assert.equal(findControlCenterBrowser({ exists: () => false }), null);
+});
+
+test("macOS Control Center discovers per-user browsers while preserving system-browser priority", () => {
+  const userBrowser = "/Users/Test User/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const systemBrowser = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+  const options = { platform: "darwin", environment: { HOME: "/Users/Test User" } };
+  assert.deepEqual(findControlCenterBrowser({ ...options, exists: (path) => path === userBrowser }),
+    { name: "Google Chrome", path: userBrowser });
+  assert.deepEqual(findControlCenterBrowser({
+    ...options, exists: (path) => path === userBrowser || path === systemBrowser,
+  }), { name: "Microsoft Edge", path: systemBrowser });
+  assert.equal(findControlCenterBrowser({ ...options, exists: () => false }), null);
+});
+
+test("macOS Control Center uses the explicit default-browser fallback when no app browser is installed", async () => {
+  let calls = 0;
+  const result = await openControlCenterBrowser("http://127.0.0.1:4321/open/test", {
+    platform: "darwin", findBrowser: () => null,
+    execute: async (command, args) => {
+      calls++;
+      assert.equal(command, "open");
+      assert.deepEqual(args, ["http://127.0.0.1:4321/open/test"]);
+    },
+  });
+  assert.deepEqual(result, { mode: "browser", fallback: true });
+  assert.equal(calls, 1);
 });
 
 test("browser fallback is explicit and an app launch error is not silently retried", async (t) => {

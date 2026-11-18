@@ -237,9 +237,81 @@ test("a failing battery provider does not hide independently observed desktop AC
       stdout: args.at(-1).includes("Get-Process") ? "[]" : '{"onAcPower":true,"batteryUnavailable":true}',
     }),
   });
+
   const snapshot = await collector.collectDeviceSnapshot();
   assert.equal(snapshot.system.onAcPower, true);
   assert.equal(snapshot.system.batteryPercent, null);
   assert.equal(snapshot.system.batteryCharging, null);
   assert.deepEqual(snapshot.issues, [{ component: "battery", code: "unavailable" }]);
+});
+
+test("macOS power telemetry parses battery states and battery-free desktop AC power without private identifiers", async () => {
+  for (const [source, row, percent, charging, onAcPower] of [
+    ["Battery Power", "88%; discharging; 3:15 remaining", 88, false, false],
+    ["AC Power", "45%; charging; 1:15 remaining", 45, true, true],
+    ["AC Power", "100%; charged; 0:00 remaining", 100, false, true],
+    ["AC Power", "80%; not charging; 0:00 remaining", 80, false, true],
+    ["AC Power", "99%; finishing charge; 0:00 remaining", 99, true, true],
+    ["AC Power", null, null, null, true],
+  ]) {
+    const collector = createDeviceTelemetryCollector({
+      platform: "darwin", now: () => 1_000, osApi: fakeOs(), wait: async () => {},
+      statfsFn: async () => ({ bsize: 10, blocks: 100, bavail: 25 }),
+      execFn: async (file, args, options) => {
+        assert.equal(file, "/usr/bin/pmset");
+        assert.deepEqual(args, ["-g", "batt"]);
+        assert.equal(options.timeout, 5_000);
+        assert.equal(options.env.LC_ALL, "C");
+        return { stdout: `Now drawing from '${source}'\n${row ? ` -InternalBattery-0 (id=private-id)\t${row}; present: true\n` : ""}` };
+      },
+    });
+    const snapshot = await collector.collectDeviceSnapshot();
+    assert.equal(snapshot.system.batteryPercent, percent);
+    assert.equal(snapshot.system.batteryCharging, charging);
+    assert.equal(snapshot.system.onAcPower, onAcPower);
+    assert.equal(snapshot.observedAt.battery, 1_000);
+    assert.deepEqual(snapshot.issues, [{ component: "apps", code: "unavailable" }]);
+    assert.equal(JSON.stringify(snapshot).includes("private-id"), false);
+  }
+});
+
+test("macOS power telemetry caches successful observations and preserves them on malformed output or native failure", async () => {
+  let clock = 1_000;
+  let calls = 0;
+  let output = "Now drawing from 'Battery Power'\n -InternalBattery-0\t65%; discharging; 2:00 remaining\n";
+  const collector = createDeviceTelemetryCollector({
+    platform: "darwin", now: () => clock, osApi: fakeOs(), wait: async () => {},
+    statfsFn: async () => ({ bsize: 10, blocks: 100, bavail: 25 }),
+    execFn: async () => {
+      calls++;
+      if (output === null) throw Object.assign(new Error("private failure"), { killed: true });
+      return { stdout: output };
+    },
+  });
+  const first = await collector.collectDeviceSnapshot();
+  await collector.collectDeviceSnapshot();
+  assert.equal(calls, 1);
+  for (const malformed of ["private garbage", "Now drawing from 'Battery Power'\n",
+    "Now drawing from 'AC Power'\n -InternalBattery-0\t101%; charged;\n", null]) {
+    clock += 60_000;
+    output = malformed;
+    const snapshot = await collector.collectDeviceSnapshot();
+    assert.equal(snapshot.system.batteryPercent, 65);
+    assert.equal(snapshot.observedAt.battery, first.observedAt.battery);
+    assert.ok(snapshot.issues.some((issue) => issue.component === "battery" &&
+      issue.code === (malformed === null ? "timeout" : "unavailable")));
+    assert.equal(JSON.stringify(snapshot).includes("private"), false);
+    const before = calls;
+    await collector.collectDeviceSnapshot();
+    assert.equal(calls, before);
+  }
+});
+
+test("native macOS power telemetry reports real AC/battery observations", {
+  skip: process.platform !== "darwin" || process.env.WEFT_NATIVE_MACOS_TEST !== "1",
+}, async () => {
+  const snapshot = await createDeviceTelemetryCollector({ wait: async () => {} }).collectDeviceSnapshot();
+  assert.equal(typeof snapshot.system.onAcPower, "boolean");
+  assert.notEqual(snapshot.observedAt.battery, null);
+  assert.equal(snapshot.issues.some((issue) => issue.component === "battery"), false);
 });

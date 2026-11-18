@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
-import { spawn as childSpawn } from "node:child_process";
+import { spawn as childSpawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { exportKeyPair, generateKeyPair, importKeyPair } from "@aasis21/weft-shared";
 import { spawnCopilotSession, writeIdentityFile, detectTerminal } from "../src/spawn.mjs";
 import {
@@ -16,6 +17,74 @@ import {
 
 const cleanupFiles = [];
 const cleanupDirs = [];
+
+test("macOS launches a visible Terminal.app without inherited TERM_PROGRAM and preserves quoted handoff arguments", async (t) => {
+  const oldTerm = process.env.TERM_PROGRAM;
+  delete process.env.TERM_PROGRAM;
+  t.after(() => {
+    if (oldTerm === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = oldTerm;
+  });
+  assert.equal(detectTerminal({}, "darwin"), "macos-terminal");
+  const directory = mkdtempSync(join(tmpdir(), "weft-mac-launch-"));
+  cleanupDirs.push(directory);
+  const captured = join(directory, "captured.json");
+  const executable = join(directory, "fake copilot's $cli.mjs");
+  writeFileSync(executable, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(captured)}, JSON.stringify({
+  args: process.argv.slice(2), cwd: process.cwd(),
+  identity: process.env.WEFT_IDENTITY_FILE, channel: process.env.WEFT_CHANNEL_ID,
+}));
+`, { mode: 0o700 });
+  let launcher;
+  const result = await spawnCopilotSession({
+    project: { path: directory }, baseDir: directory, platform: "darwin",
+    name: "Mac's $session", mode: "allow-all", identity: await identity("mac-launch"),
+    copilotExecutable: executable,
+    spawnFn(command, args, options) {
+      assert.equal(command, "osascript");
+      assert.equal(options.shell, false);
+      assert.match(args[1], /tell application "Terminal" to do script/);
+      launcher = args.at(-1);
+      cleanupFiles.push(launcher, options.env.WEFT_IDENTITY_FILE);
+      const child = new EventEmitter();
+      child.pid = 12_345;
+      child.unref = () => {};
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    },
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.pid, null, "Terminal broker is not the Copilot runtime.");
+  assert.match(readFileSync(launcher, "utf8"), /export WEFT_IDENTITY_FILE=/);
+  if (process.platform !== "win32") {
+    await promisify(execFile)("/bin/bash", [launcher], { timeout: 5_000 });
+    assert.deepEqual(JSON.parse(readFileSync(captured, "utf8")), {
+      args: ["-n", "Mac's $session", "--allow-all"], cwd: realpathSync(directory),
+      identity: result.identityFile, channel: "mac-launch",
+    });
+  }
+});
+
+test("macOS Terminal.app failure cleans the launcher and private identity instead of reporting success", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "weft-mac-failed-"));
+  cleanupDirs.push(directory);
+  const files = [];
+  const result = await spawnCopilotSession({
+    project: { path: directory }, baseDir: directory, platform: "darwin",
+    identity: await identity("mac-failed"),
+    spawnFn(_command, args, options) {
+      files.push(args.at(-1), options.env.WEFT_IDENTITY_FILE);
+      const child = new EventEmitter();
+      queueMicrotask(() => child.emit("close", 1));
+      return child;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Terminal launcher exited with code 1/);
+  assert.ok(files.every((file) => !existsSync(file)));
+});
 
 afterEach(() => {
   for (const file of cleanupFiles.splice(0)) {

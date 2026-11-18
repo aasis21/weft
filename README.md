@@ -128,6 +128,11 @@ not yet proof of a connected session; Weft waits for the session runtime handoff
 Finish any native Copilot startup prompts in that terminal, including unrelated
 extension permission requests. Weft does not automatically approve them.
 
+On macOS, phone-launched CLI sessions open in Terminal.app, including when Station
+has no inherited terminal environment. Clipboard text transfer, bounded Keep Awake
+leases, and battery/AC status work on Windows and macOS. Running-app lists, shared
+terminals, and background Station supervision remain Windows-only.
+
 > **Already paired?** Run `weft start` normally. Use `weft start --new-device` only when
 > replacing the trusted phone or after clearing the phone browser's storage.
 

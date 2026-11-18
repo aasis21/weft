@@ -138,6 +138,29 @@ async function runPowerShell(execFn, script, timeoutMs) {
   return JSON.parse(String(stdout ?? "").replace(/^\uFEFF/, "").trim() || "null");
 }
 
+async function readMacBattery(execFn, timeoutMs) {
+  const { stdout } = await execFn("/usr/bin/pmset", ["-g", "batt"], {
+    timeout: timeoutMs,
+    maxBuffer: 64 * 1024,
+    env: { ...process.env, LC_ALL: "C", LANG: "C" },
+  });
+  const output = String(stdout ?? "");
+  const source = output.match(/^Now drawing from '(AC Power|Battery Power)'/m);
+  if (!source) throw new Error("unavailable");
+  const row = output.split(/\r?\n/).find((line) => /^\s*-\S/.test(line));
+  if (!row) {
+    if (source[1] !== "AC Power") throw new Error("unavailable");
+    return { percent: null, charging: null, onAcPower: true };
+  }
+  const battery = row.match(/(\d+)%;\s*(charging|discharging|charged|not charging|finishing charge);/);
+  if (!battery || Number(battery[1]) > 100) throw new Error("unavailable");
+  return {
+    percent: Number(battery[1]),
+    charging: battery[2] === "charging" || battery[2] === "finishing charge",
+    onAcPower: source[1] === "AC Power",
+  };
+}
+
 function issue(component, error) {
   return {
     component,
@@ -216,7 +239,7 @@ export function createDeviceTelemetryCollector({
   }
 
   async function refreshBattery(capturedAt) {
-    if (platform !== "win32") {
+    if (platform !== "win32" && platform !== "darwin") {
       batteryCache.observedAt ??= capturedAt;
       return;
     }
@@ -228,7 +251,9 @@ export function createDeviceTelemetryCollector({
     }
     batteryCache.attemptedAt = capturedAt;
     try {
-      const battery = await runPowerShell(execFn, BATTERY_SCRIPT, powershellTimeoutMs);
+      const battery = platform === "darwin"
+        ? await readMacBattery(execFn, powershellTimeoutMs)
+        : await runPowerShell(execFn, BATTERY_SCRIPT, powershellTimeoutMs);
       batteryCache.value = {
         percent: battery?.batteryUnavailable === true
           ? batteryCache.value.percent

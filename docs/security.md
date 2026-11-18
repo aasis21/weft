@@ -85,7 +85,7 @@ channel identifiers, timing, and traffic sizes) remain visible.
 | Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
 | Lost/stolen phone | `/weft` keys die with the session; Device Station identities can be invalidated with `weft rotate-pairing` | a phone paired to a persistent Device Station can reconnect until its identity is rotated |
 | Clipboard exposes copied secrets | clipboard reads and writes require explicit user action, accept bounded plain text only, stay inside the encrypted channel, and are excluded from persistence and diagnostic logs | a trusted paired phone can read text currently placed on the laptop clipboard when the user explicitly requests it |
-| Keep Awake remains active unexpectedly | one station-owned lease is duration-capped, visibly expiring, explicitly stoppable, and cleared on expiry or Device Station shutdown without changing the Windows power plan | the laptop intentionally remains awake until the active lease ends |
+| Keep Awake remains active unexpectedly | one station-owned lease is duration-capped, visibly expiring, explicitly stoppable, and cleared on expiry or Device Station shutdown without changing persistent OS power settings; the macOS inhibitor also has a native timeout and watches the Station PID | the laptop intentionally remains awake until the active lease ends |
 
 ### The QR is a bearer credential
 

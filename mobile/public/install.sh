@@ -137,9 +137,14 @@ fi
 # PATH-coupled and OS-specific, so it stays in this installer.)
 # ---------------------------------------------------------------------------
 step 2 "Downloading Weft bundles"
-MANIFEST_TMP="$(mktemp "${TMPDIR:-/tmp}/weft-manifest.XXXXXX")"
-BOOTSTRAP_TMP="$(mktemp "${TMPDIR:-/tmp}/weft-bootstrap.XXXXXX.mjs")"
-trap 'rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"' EXIT
+INSTALL_TMP="$(mktemp -d "${TMPDIR:-/tmp}/weft-install.XXXXXX")"
+MANIFEST_TMP="$INSTALL_TMP/release-manifest.json"
+BOOTSTRAP_TMP="$INSTALL_TMP/bootstrap.mjs"
+cleanup_bootstrap() {
+  rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"
+  rmdir "$INSTALL_TMP"
+}
+trap cleanup_bootstrap EXIT
 curl -fsSL "$BASE/release-manifest.json" -o "$MANIFEST_TMP"
 curl -fsSL "$BASE/weft.mjs" -o "$BOOTSTRAP_TMP"
 EXPECTED_BOOTSTRAP_HASH="$(node -e '
@@ -158,7 +163,7 @@ if [ "$ACTUAL_BOOTSTRAP_HASH" != "$EXPECTED_BOOTSTRAP_HASH" ]; then
   exit 1
 fi
 WEFT_INSTALL_BASE="$BASE" WEFT_INSTALL_DIR="$INSTALL_DIR" node "$BOOTSTRAP_TMP" install >/dev/null
-rm -f "$MANIFEST_TMP" "$BOOTSTRAP_TMP"
+cleanup_bootstrap
 trap - EXIT
 SKILL_DIR="$HOME/.copilot/skills/weft-how-to-use"
 ok "Required release bundles -> $INSTALL_DIR"
@@ -264,9 +269,10 @@ fi
 step 5 'Registering the `weft` command'
 mkdir -p "$BIN_DIR"
 SHIM_PATH="$BIN_DIR/weft"
+printf -v CLI_PATH_QUOTED '%q' "$INSTALL_DIR/weft.mjs"
 cat > "$SHIM_PATH" <<EOF
 #!/usr/bin/env bash
-exec node "$INSTALL_DIR/weft.mjs" "\$@"
+exec node $CLI_PATH_QUOTED "\$@"
 EOF
 chmod +x "$SHIM_PATH"
 ok "weft -> $SHIM_PATH"
@@ -276,18 +282,28 @@ case ":$PATH:" in
     ;;
   *)
     MARKER="# Added by Weft installer"
-    for rc in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+    case "${SHELL:-}" in
+      */zsh|zsh) SHELL_RC="${ZDOTDIR:-$HOME}/.zshrc" ;;
+      */bash|bash)
+        if [ "$(uname -s)" = "Darwin" ]; then SHELL_RC="$HOME/.profile"
+        else SHELL_RC="$HOME/.bashrc"; fi
+        ;;
+      *) SHELL_RC="$HOME/.profile" ;;
+    esac
+    mkdir -p "$(dirname "$SHELL_RC")"
+    [ -f "$SHELL_RC" ] || touch "$SHELL_RC"
+    for rc in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.bashrc" "${ZDOTDIR:-$HOME}/.zprofile" "${ZDOTDIR:-$HOME}/.zshrc"; do
       [ -f "$rc" ] || continue
       if ! grep -qF "$MARKER" "$rc" 2>/dev/null; then
         {
           echo ""
           echo "$MARKER"
-          echo "export PATH=\"$BIN_DIR:\$PATH\""
+          printf 'export PATH=%q:"$PATH"\n' "$BIN_DIR"
         } >> "$rc"
       fi
     done
     warn "Added $BIN_DIR to PATH in your shell rc file(s)."
-    warn "Open a NEW terminal (or 'source ~/.profile') for \`weft\` to be found."
+    warn "Open a NEW terminal (or source $SHELL_RC) for \`weft\` to be found."
     ;;
 esac
 

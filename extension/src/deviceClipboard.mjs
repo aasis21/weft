@@ -23,19 +23,28 @@ if ($text.Length -eq 0) {
   [System.Windows.Forms.Clipboard]::SetText($text)
 }
 `;
+// pbpaste can fall back to RTF/PostScript when plain text is absent.
+const MAC_READ_SCRIPT = String.raw`
+ObjC.import("AppKit");
+const text = $.NSPasteboard.generalPasteboard.stringForType($.NSPasteboardTypeString);
+if (typeof ObjC.unwrap(text) === "string") {
+  $.NSFileHandle.fileHandleWithStandardOutput.writeData(text.dataUsingEncoding($.NSUTF8StringEncoding));
+}
+`;
 
 export function createDeviceClipboard({
   platform = process.platform,
   spawnFn = spawn,
   timeoutMs = 5_000,
 } = {}) {
+  const supported = platform === "win32" || platform === "darwin";
   let closed = false;
   let queue = Promise.resolve();
   const pending = new Set();
 
   function run(operation, text) {
     if (closed) return Promise.resolve({ code: "unavailable" });
-    if (platform !== "win32") return Promise.resolve({ code: "unsupported" });
+    if (!supported) return Promise.resolve({ code: "unsupported" });
     if (operation === "write") {
       const code = clipboardTextError(text) ?? (text.includes("\0") ? "invalid-request" : null);
       if (code) return Promise.resolve({ code });
@@ -64,11 +73,17 @@ export function createDeviceClipboard({
       pending.add(cancel);
       timer = setTimeout(() => finish("timeout", true), timeoutMs);
       try {
-        child = spawnFn(
-          "powershell.exe",
-          ["-NoProfile", "-NonInteractive", "-STA", "-Command", operation === "read" ? READ_SCRIPT : WRITE_SCRIPT],
-          { windowsHide: true, stdio: ["pipe", "pipe", "ignore"] },
-        );
+        const command = platform === "darwin"
+          ? operation === "read" ? "/usr/bin/osascript" : "/usr/bin/pbcopy"
+          : "powershell.exe";
+        const args = platform === "darwin"
+          ? operation === "read" ? ["-l", "JavaScript", "-e", MAC_READ_SCRIPT] : []
+          : ["-NoProfile", "-NonInteractive", "-STA", "-Command", operation === "read" ? READ_SCRIPT : WRITE_SCRIPT];
+        child = spawnFn(command, args, {
+          windowsHide: true,
+          stdio: ["pipe", "pipe", "ignore"],
+          ...(platform === "darwin" ? { env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" } } : {}),
+        });
         child.on("error", () => finish("unavailable", true));
         child.stdin.on("error", () => finish("unavailable", true));
         child.stdout.on("error", () => finish("unavailable", true));
@@ -94,7 +109,7 @@ export function createDeviceClipboard({
   }
 
   return {
-    supported: platform === "win32",
+    supported,
     readText: () => enqueue("read"),
     writeText: (text) => enqueue("write", text),
     shutdown() {

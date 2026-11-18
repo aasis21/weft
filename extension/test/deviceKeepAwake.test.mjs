@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
+import { spawn } from "node:child_process";
 import { KEEP_AWAKE_MIN_MS, KEEP_AWAKE_MAX_MS } from "@aasis21/weft-shared";
 import {
   createDeviceKeepAwakeController,
   createWindowsKeepAwakeHelper,
+  createMacKeepAwakeHelper,
 } from "../src/deviceKeepAwake.mjs";
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -307,6 +309,7 @@ test("Windows helper reports unexpected exit and renewal timeout without raw dia
     const pending = createWindowsKeepAwakeHelper({
       expiresAt: 1_000_000, spawnFn: () => child, timeoutMs: 10, onFailure: (code) => failures.push(code),
     });
+
     child.stdout.emit("data", Buffer.from("ready\n"));
     const helper = await pending;
     const updated = helper.updateExpiry(2_000_000);
@@ -316,4 +319,102 @@ test("Windows helper reports unexpected exit and renewal timeout without raw dia
     assert.deepEqual(failures, [mode === "timeout" ? "timeout" : "unavailable"]);
     assert.equal(child.kills, 1);
   }
+});
+
+test("macOS Keep Awake exposes the same bounded, expiring, stoppable lease", async () => {
+  const h = harness({ platform: "darwin" });
+  assert.equal(h.controller.supported, true);
+  const started = await h.controller.start({ leaseId: "mac", durationMs: KEEP_AWAKE_MIN_MS });
+  assert.equal(started.code, "ok");
+  assert.equal(started.active, true);
+  h.advance(1_000);
+  assert.equal((await h.controller.start({ leaseId: "mac", durationMs: KEEP_AWAKE_MIN_MS })).expiresAt,
+    started.expiresAt + 1_000);
+  h.advance(KEEP_AWAKE_MIN_MS);
+  await h.fire();
+  assert.equal((await h.controller.status()).active, false);
+  assert.equal(h.helpers[0].stops, 1);
+  await h.controller.start({ leaseId: "another", durationMs: KEEP_AWAKE_MIN_MS });
+  assert.equal((await h.controller.stop("another")).code, "ok");
+  await h.controller.shutdown();
+});
+
+test("macOS helper confirms a PID-specific idle-sleep assertion before replacing its bounded predecessor", async () => {
+  const children = [];
+  const failures = [];
+  let probes = 0;
+  const helper = await createMacKeepAwakeHelper({
+    now: () => 1_000, expiresAt: 61_000, onFailure: (code) => failures.push(code),
+    spawnFn(file, args, options) {
+      assert.equal(file, "/usr/bin/caffeinate");
+      assert.deepEqual(args, ["-i", "-t", children.length ? "120" : "60", "-w", String(process.pid)]);
+      assert.equal(options.shell, false);
+      const child = childProcess();
+      child.pid = 1_234 + children.length;
+      children.push(child);
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    },
+    async execFn(file, args) {
+      assert.equal(file, "/usr/bin/pmset");
+      assert.deepEqual(args, ["-g", "assertions"]);
+      assert.equal(children[0].kills, 0, "Previous assertion stays until replacement is confirmed.");
+      probes++;
+      return { stdout: `pid ${children.at(-1).pid}(caffeinate): [0x1] 00:00:00 PreventUserIdleSystemSleep named: "caffeinate"` };
+    },
+  });
+  assert.equal(probes, 1);
+  await helper.updateExpiry(121_000);
+  assert.equal(probes, 2);
+  assert.equal(children[0].kills, 1);
+  children[0].emit("close", 0);
+  assert.deepEqual(failures, []);
+  children[1].emit("close", 1);
+  assert.deepEqual(failures, ["unavailable"]);
+  helper.stop();
+  assert.equal(children[1].kills, 1);
+});
+
+test("macOS helper fails closed on unconfirmed assertions, native failure, and abort", async () => {
+  for (const mode of ["timeout", "error", "probe", "abort"]) {
+    const child = childProcess();
+    child.pid = 1_234;
+    const aborter = new AbortController();
+    const pending = createMacKeepAwakeHelper({
+      expiresAt: Date.now() + 60_000, timeoutMs: 20, signal: aborter.signal,
+      spawnFn() { queueMicrotask(() => child.emit("spawn")); return child; },
+      async execFn() {
+        if (mode === "probe") throw new Error("private system failure");
+        return { stdout: "pid 999(caffeinate): PreventUserIdleSystemSleep" };
+      },
+    });
+    const rejected = assert.rejects(pending, { message: mode === "timeout" ? "timeout" : "unavailable" });
+    if (mode === "error") child.emit("error", new Error("private native error"));
+    if (mode === "abort") aborter.abort();
+    await rejected;
+    assert.equal(child.kills, 1);
+  }
+});
+
+test("native macOS Keep Awake acquires, renews and releases a real idle-sleep assertion", {
+  skip: process.platform !== "darwin" || process.env.WEFT_NATIVE_MACOS_TEST !== "1",
+  timeout: 20_000,
+}, async (t) => {
+  const children = [];
+  const helper = await createMacKeepAwakeHelper({
+    expiresAt: Date.now() + 60_000,
+    spawnFn(...args) {
+      const child = spawn(...args);
+      children.push(child);
+      return child;
+    },
+  });
+  t.after(() => helper.stop());
+  const previousClosed = once(children[0], "close");
+  await helper.updateExpiry(Date.now() + 120_000);
+  await previousClosed;
+  assert.equal(children.length, 2);
+  const closed = once(children[1], "close");
+  helper.stop();
+  await closed;
 });

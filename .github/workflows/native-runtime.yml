@@ -27,5 +27,16 @@ jobs:
         run: node --test scripts/native-runtime.test.mjs scripts/release-manifest.test.mjs
       - name: Build installed bundles
         run: npm run build -w @aasis21/weft-extension
+      - name: Exercise macOS host integrations
+        if: runner.os == 'macOS'
+        env:
+          WEFT_NATIVE_MACOS_TEST: "1"
+        run: >-
+          node --test --test-concurrency=1
+          extension/test/deviceClipboard.test.mjs
+          extension/test/deviceKeepAwake.test.mjs
+          extension/test/deviceTelemetry.test.mjs
+          extension/test/spawn.test.mjs
+          extension/test/controlCenter.test.mjs
       - name: Exercise installation and update transaction
         run: node --test extension/test/cliUpdate.test.mjs scripts/native-install.test.mjs

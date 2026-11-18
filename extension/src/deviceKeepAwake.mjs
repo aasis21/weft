@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { KEEP_AWAKE_MAX_MS, normalizeKeepAwakeDuration } from "@aasis21/weft-shared";
 
 // The native call and its reset run on the same thread. The child independently enforces
@@ -145,13 +146,93 @@ export function createWindowsKeepAwakeHelper({
   });
 }
 
+export async function createMacKeepAwakeHelper({
+  expiresAt, signal, onFailure = () => {}, spawnFn = spawn,
+  execFn = promisify(execFile), now = Date.now, timeoutMs = 5_000,
+} = {}) {
+  let active = null;
+  let pending = null;
+  let stopped = false;
+  function stop() {
+    stopped = true;
+    signal?.removeEventListener("abort", stop);
+    pending?.cancel();
+    active?.cancel();
+  }
+  function start(value) {
+    if (stopped || signal?.aborted || pending || !Number.isSafeInteger(value) || value <= now()) {
+      return Promise.reject(failure());
+    }
+    return new Promise((resolve, reject) => {
+      const expiry = Math.min(value, now() + KEEP_AWAKE_MAX_MS);
+      const entry = { child: null, ended: false, ready: false, cancel: () => finish("unavailable", true) };
+      pending = entry;
+      const timer = setTimeout(() => finish("timeout"), timeoutMs);
+      function finish(code = "unavailable", intentional = false) {
+        if (entry.ended) return;
+        entry.ended = true;
+        clearTimeout(timer);
+        if (pending === entry) pending = null;
+        try { entry.child?.kill(); } catch { /* already gone */ }
+        if (!entry.ready) reject(failure(code));
+        else if (!intentional && active === entry && now() < expiry) {
+          try { onFailure(code); } catch { /* best-effort notification */ }
+        }
+      }
+      try {
+        // Both the native timeout and Station PID watch survive an abrupt Station exit.
+        entry.child = spawnFn("/usr/bin/caffeinate", [
+          "-i", "-t", String(Math.ceil((expiry - now()) / 1000)), "-w", String(process.pid),
+        ], { stdio: "ignore", shell: false });
+        entry.child.on("error", () => finish());
+        entry.child.on("close", () => finish());
+        entry.child.once("spawn", async () => {
+          try {
+            const assertion = new RegExp(`^\\s*pid ${entry.child.pid}\\(caffeinate\\):.*\\bPreventUserIdleSystemSleep\\b`, "m");
+            while (!entry.ended) {
+              const { stdout } = await execFn("/usr/bin/pmset", ["-g", "assertions"], {
+                timeout: timeoutMs, maxBuffer: 1024 * 1024, signal,
+              });
+              if (entry.ended) return;
+              if (assertion.test(String(stdout))) {
+                entry.ready = true;
+                clearTimeout(timer);
+                pending = null;
+                const previous = active;
+                active = entry;
+                previous?.cancel();
+                resolve();
+                return;
+              }
+              await new Promise((done) => setTimeout(done, 50));
+            }
+          } catch (error) {
+            finish(error?.killed || error?.code === "ETIMEDOUT" ? "timeout" : "unavailable");
+          }
+        });
+      } catch {
+        finish();
+      }
+    });
+  }
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    await start(expiresAt);
+    return { stop, updateExpiry: start };
+  } catch (error) {
+    stop();
+    throw error;
+  }
+}
+
 export function createDeviceKeepAwakeController({
   platform = process.platform,
   now = Date.now,
-  helperFactory = createWindowsKeepAwakeHelper,
+  helperFactory = platform === "darwin" ? createMacKeepAwakeHelper : createWindowsKeepAwakeHelper,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
 } = {}) {
+  const supported = platform === "win32" || platform === "darwin";
   const listeners = new Set();
   const stoppedHelpers = new WeakSet();
   const lifetime = new AbortController();
@@ -239,7 +320,7 @@ export function createDeviceKeepAwakeController({
   }
 
   return {
-    supported: platform === "win32",
+    supported,
     onStatus(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -250,7 +331,7 @@ export function createDeviceKeepAwakeController({
         const duration = normalizeKeepAwakeDuration(durationMs);
         if (!validUtilityId(leaseId) || duration === null) return snapshot("invalid-request");
         if (closed) return snapshot("unavailable");
-        if (platform !== "win32") return snapshot("unsupported");
+        if (!supported) return snapshot("unsupported");
         const expiresAt = Math.max(
           state.active && state.leaseId === leaseId ? state.expiresAt : 0,
           now() + Math.min(duration, KEEP_AWAKE_MAX_MS),
@@ -290,7 +371,7 @@ export function createDeviceKeepAwakeController({
         await expire();
         if (!validUtilityId(leaseId)) return snapshot("invalid-request");
         if (closed) return snapshot("unavailable");
-        if (platform !== "win32") return snapshot("unsupported");
+        if (!supported) return snapshot("unsupported");
         if (state.leaseId !== leaseId) return snapshot("lease-mismatch");
         await release();
         return snapshot();
@@ -299,7 +380,7 @@ export function createDeviceKeepAwakeController({
     status() {
       return enqueue(async () => {
         await expire();
-        return snapshot(closed ? "unavailable" : platform === "win32" ? "ok" : "unsupported");
+        return snapshot(closed ? "unavailable" : supported ? "ok" : "unsupported");
       });
     },
     shutdown() {
