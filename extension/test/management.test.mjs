@@ -105,6 +105,41 @@ test("Station management shares relay startup, confirms stops, and never claims 
   assert.equal(calls.at(-1), "stop-station");
   assert.ok(!calls.includes("stop-relay"));
 });
+
+test("macOS management exposes background Station, relay, and Station traffic", async (t) => {
+  const baseDir = await home(t);
+  saveTransportConfig({ kind: "devtunnel" }, { baseDir });
+  const calls = [];
+  const manager = createManagement({
+    baseDir, platform: "darwin",
+    discover: async () => ({ status: "none", runtimes: [] }),
+    relayHealth: async () => ({ baseUrl: "https://relay.example.test" }),
+    background: {
+      command: async (role, command) => {
+        calls.push(`${role}.${command}`);
+        if (command === "traffic") return { entries: [{ id: "phone-message", direction: "in", lastAt: Date.now(), count: 1 }] };
+        if (command === "status") return { state: "ready", paired: true };
+        return null;
+      },
+      start: async (role) => { calls.push(`start-${role}`); return { state: "ready", deviceName: "Mac", paired: true }; },
+      stop: async (role) => { calls.push(`stop-${role}`); return { state: "stopped" }; },
+      task: async () => ({ state: "NotRegistered" }),
+    },
+  });
+  await manager.execute("project.add", { name: "work", path: baseDir });
+  await manager.execute("station.start");
+  assert.deepEqual(calls.slice(0, 2), ["start-relay", "start-station"]);
+  const state = await manager.state();
+  assert.equal(state.station.supported, true);
+  assert.equal(state.relay.supported, true);
+  assert.equal(state.station.state, "ready");
+  const traffic = await manager.traffic();
+  assert.equal(traffic.sources[0].kind, "station");
+  assert.equal(traffic.entries[0].source, "Station");
+  await manager.execute("station.stop", { confirmed: true });
+  assert.ok(calls.includes("stop-station"));
+});
+
 test("operational telemetry keeps worker identity, relay health and secrets separate", async (t) => {
   const baseDir = await home(t);
   const startedAt = Date.now() - 60_000;

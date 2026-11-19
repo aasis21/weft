@@ -96,7 +96,7 @@ export function renderControlCenterPage() {
         </article>
         <article class="card remediation"><div class="section-heading"><h2>Recent local diagnostic events</h2><button id="diagnostics-refresh" class="button compact" type="button">Load diagnostics</button></div><p id="diagnostics-log-status" class="muted small">Load up to 100 sanitized local events. No transcripts, commands, credentials or raw logs are returned.</p><pre id="diagnostics-events" class="path" role="region" tabindex="0" aria-label="Sanitized local diagnostic events"></pre></article>
         <div class="service-grid"><article class="card"><span class="icon-tile" data-icon="pulse"></span><h2>Local installation</h2><dl class="diagnostic-list"><div><dt>Running version</dt><dd id="diagnostic-version">Unknown</dd></div><div><dt>Computer</dt><dd id="diagnostic-device">Unknown</dd></div><div><dt>Platform</dt><dd id="diagnostic-platform">Unknown</dd></div><div><dt>Last checked</dt><dd id="diagnostic-checked">Not yet checked</dd></div><div><dt>Transport</dt><dd id="diagnostic-transport">Unknown</dd></div></dl><p class="hint">This is the version served by the local Control Center. Repository source changes are not installed updates; running workers may need a restart after an installed update.</p></article><article class="card"><span class="icon-tile" data-icon="update"></span><h2>Release check</h2><p class="muted">Check availability without installing, deploying, or restarting anything.</p><p id="update-result" class="hint" role="status" aria-live="polite">No release check requested.</p><button id="update-check" type="button" class="button">Check for updates</button><p class="small muted">Installed clients change only after a published release is explicitly installed.</p></article></div>
-        <article class="card remediation"><h2>When something isn’t connected</h2><div class="remedy-grid"><div><h3>Unknown or stale status</h3><p>Refresh status. If the local service is unavailable, reopen Control Center from Weft. Unknown does not mean disconnected.</p></div><div><h3>Phone trusted, not connected</h3><p>Keep your existing trust. Check the selected transport and open the phone app before replacing a pairing.</p></div><div><h3>Worker unsupported</h3><p>Background workload controls require Windows. Copilot session discovery and supported session actions remain separate.</p></div></div><div id="diagnostic-warnings" class="notice warning" hidden><strong>Reported warnings</strong><ul id="diagnostic-warning-list"></ul></div><p class="small muted">Only status and sanitized remediation are shown here. No transcripts, logs, or pairing secrets.</p></article>
+        <article class="card remediation"><h2>When something isn’t connected</h2><div class="remedy-grid"><div><h3>Unknown or stale status</h3><p>Refresh status. If the local service is unavailable, reopen Control Center from Weft. Unknown does not mean disconnected.</p></div><div><h3>Phone trusted, not connected</h3><p>Keep your existing trust. Check the selected transport and open the phone app before replacing a pairing.</p></div><div><h3>Worker unsupported</h3><p>Background workload controls require Windows or macOS. Copilot session discovery and supported session actions remain separate.</p></div></div><div id="diagnostic-warnings" class="notice warning" hidden><strong>Reported warnings</strong><ul id="diagnostic-warning-list"></ul></div><p class="small muted">Only status and sanitized remediation are shown here. No transcripts, logs, or pairing secrets.</p></article>
       </section>
     </main>
     <footer><span>Weft Control Center <span aria-hidden="true">·</span> Build <span id="control-build">Not checked</span> <span aria-hidden="true">·</span> Loopback only</span><button class="button compact" type="button" data-go="diagnostics">Version &amp; diagnostics</button></footer>
@@ -371,7 +371,7 @@ function controlCenterClient() {
     const title = repeated ? "Crashing repeatedly" : item.unexpectedStop ? "Stopped unexpectedly" : "Restarted after a crash";
     const whatHappened = repeated
       ? report.quickCrashesInARow + " crashes in a row, each within a minute of starting."
-      : item.unexpectedStop ? label + "'s background task ended without Stop."
+      : item.unexpectedStop ? label + "'s background workload ended without Stop."
         : "Crashed " + elapsed(report.lastCrashAt) + " ago after running " + (report.lastRunSeconds ?? "?") + " s, and was restarted.";
     const rows = [["What happened", whatHappened], ["Exit code", report.exit.code + " — " + report.exit.meaning]];
     const lastError = report.lastError;
@@ -401,7 +401,7 @@ function controlCenterClient() {
     panel.replaceChildren(heading, list, copy);
   }
   function workloadSupported() {
-    return state && /^(win32|windows)$/i.test(state.platform || "");
+    return state && /^(win32|windows|darwin|macos)$/i.test(state.platform || "");
   }
   function phoneStatus(item) {
     if (stale || isUnknown(item?.state)) return "Phone connection unknown";
@@ -574,7 +574,7 @@ function controlCenterClient() {
       if (item.error) text(kind + "-error", message(item.error));
       renderCrashDetails(kind, item);
       const supported = workloadSupported() && (kind !== "station" || item.supported !== false);
-      const remedy = !supported ? "Background workload controls require Windows and a supported local installation."
+      const remedy = !supported ? "Background workload controls require Windows or macOS and a supported local installation."
         : stale || isUnknown(item.state) ? "Refresh status before changing this worker."
           : item.state === "crash-looping" ? "Weft keeps restarting this worker. Fix the error shown here, then Restart, or Stop to end the retries."
           : isRunning(item.state) ? "Running locally. Restart and stop always ask for confirmation."
@@ -944,7 +944,7 @@ function controlCenterClient() {
       for (const action of ["start", "restart", "stop"]) {
         const button = $(kind + "-" + action);
         button.disabled = unavailable || unsupported || unknown || (action === "start" ? workloadActive(item?.state) : !workloadActive(item?.state)) || /^(starting|stopping|restarting)$/i.test(item?.state || "");
-        button.title = unsupported ? "Background workload controls require Windows and a supported installation." : stale || unknown ? "Refresh to get a known status first." : busy ? "Wait for the current operation." : "";
+        button.title = unsupported ? "Background workload controls require Windows or macOS and a supported installation." : stale || unknown ? "Refresh to get a known status first." : busy ? "Wait for the current operation." : "";
       }
     }
     for (const button of document.querySelectorAll("[data-session-action]")) {
@@ -976,7 +976,7 @@ function controlCenterClient() {
     const transportReady = ["supabase", "devtunnel"].includes(state?.settings?.transport?.kind);
     $("session-start").disabled = unavailable || !stationReady || !transportReady || !state?.projects?.length;
     text("session-start-remedy", stale ? "Refresh local status before starting a session."
-      : !stationReady ? "Start Device Station from Control first. Background Station controls require Windows."
+      : !stationReady ? "Start Device Station from Control first. Background Station controls require Windows or macOS."
         : !transportReady ? "Choose a transport in Setup before starting a session."
           : !state?.projects?.length ? "Register a project first."
             : "Starts a new local Copilot process only when you choose Start session.");

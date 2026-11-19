@@ -119,8 +119,11 @@ export function createManagement({
     loggingEnabled: isDiagnosticLoggingEnabled(options),
   });
   const settingsRevision = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-  const requireWindows = () => {
-    if (platform !== "win32") throw new ManagementError("unsupported-host", "Background workload controls currently require Windows. Use foreground CLI commands on this platform.");
+  const supportsBackgroundWorkloads = () => ["win32", "darwin"].includes(platform);
+  const requireBackgroundWorkloads = () => {
+    if (!supportsBackgroundWorkloads()) {
+      throw new ManagementError("unsupported-host", "Background workload controls require Windows or macOS. Use foreground CLI commands on this platform.");
+    }
   };
   const ensureNotForeground = (role) => {
     if (role !== "station") return;
@@ -147,7 +150,7 @@ export function createManagement({
   async function workloads() {
     const result = {};
     await Promise.all(["station", "relay"].map(async (role) => {
-      if (platform !== "win32") { result[role] = { state: "unsupported", supported: false }; return; }
+      if (!supportsBackgroundWorkloads()) { result[role] = { state: "unsupported", supported: false }; return; }
       try { await roleStatus(role, result); }
       catch (error) {
         statusPartFailed(role, error);
@@ -155,7 +158,7 @@ export function createManagement({
       }
     }));
     await relayStatus(result);
-    if (platform === "win32" && result.station.state === "stopped") {
+    if (supportsBackgroundWorkloads() && result.station.state === "stopped") {
       let pid;
       try { pid = Number.parseInt(readFileSync(join(baseDir, "listener.lock"), "utf8"), 10); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -181,7 +184,7 @@ export function createManagement({
       for (const entry of list) entries.push({ ...entry, id: `${kind}:${source.id}:${entry.id}`, source: source.name, sourceKind: kind });
       sources.push({ ...source, kind, state: "reporting", count: list.length });
     };
-    if (platform === "win32") {
+    if (supportsBackgroundWorkloads()) {
       try {
         const result = await background.command("station", "traffic", null, { ...options, timeoutMs: 3000 });
         if (result) collect({ id: "station", name: "Station" }, "station", result);
@@ -378,7 +381,7 @@ export function createManagement({
         await rotatePersistedIdentity(options);
         return { message: "Saved pairing identity rotated. Restart Station and scan a new QR." };
       }
-      requireWindows();
+      requireBackgroundWorkloads();
       const role = action.startsWith("relay.") ? "relay" : "station";
       await ensureNotForeground(role);
       if (action === "pairing.replace") {

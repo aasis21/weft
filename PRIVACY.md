@@ -46,10 +46,11 @@ removed first above a 100 MiB machine budget. Removing the folder deletes laptop
 catch-up without resetting pairing. Current approvals and forms are obtained from live
 session state, not replayed as historical actions.
 
-Windows background Station and relay tasks run with the signed-in user's existing
-permissions. They start only when requested, have no boot/sign-in triggers, and
-restart failed workloads. `weft stop` and `weft devtunnel stop` disable their
-respective restart paths before stopping them.
+Windows background Station and relay tasks, and manually bootstrapped macOS
+launchd jobs, run with the signed-in user's existing permissions. They start only
+when requested, have no boot/sign-in triggers, and restart failed workloads.
+`weft stop` and `weft devtunnel stop` disable their respective restart paths
+before stopping them.
 
 Files and Changes transfer workspace or session-touched names only when requested, and selected file
 contents or patches only when opened or refreshed. Weft's configured sharing roots

@@ -37,6 +37,7 @@ test("Control Center is self-contained and its browser script parses", () => {
   assert.match(html, /aria-labelledby="confirmation-title"/);
   assert.match(html, /prefers-color-scheme:dark/);
   assert.match(html, /prefers-reduced-motion:reduce/);
+  assert.match(html, /win32\|windows\|darwin\|macos/);
   const source = html.match(/<script>([\s\S]+?)<\/script>/)?.[1];
   assert.ok(source);
   assert.doesNotThrow(() => new Script(source));
@@ -827,6 +828,19 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     await expect(h.page.locator("#session-start")).toBeDisabled();
     await expect(h.page.getByRole("button", { name: "Activate Weft" }).first()).toBeEnabled();
     assert.equal(h.calls.length, 0);
+  });
+
+  await t.test("macOS enables explicit Station and relay start controls", async (st) => {
+    const h = await harness(st, (h) => {
+      h.state.platform = "darwin";
+      h.state.station.state = "stopped";
+      h.state.relay.state = "stopped";
+    });
+    await expect(h.page.locator("#station-start")).toBeEnabled();
+    await expect(h.page.locator("#relay-start")).toBeEnabled();
+    await expect(h.page.locator("#station-stop")).toBeDisabled();
+    await expect(h.page.locator("#control-primary")).toHaveText("Start Station");
+    await expect(h.page.locator("#control-primary")).toBeEnabled();
   });
 
   await t.test("explicit activation opens only that session's pairing and explicit launch shows returned QR", async (st) => {

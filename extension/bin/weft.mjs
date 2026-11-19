@@ -44,7 +44,7 @@ import { parseStartOptions } from "../src/startOptions.mjs";
 import {
   backgroundCommand, backgroundTaskOperation, createBackgroundControl,
   startBackground, stopBackground, summarizeWorkerError, workerFailureFileName,
-  readWorkerCrashReport, readUnexpectedTaskExit, describeWorkerProblem,
+  readWorkerCrashReport, readUnexpectedTaskExit, describeWorkerProblem, runBackgroundSupervisor,
 } from "../src/backgroundLifecycle.mjs";
 import { attachTerminal } from "../src/terminalClient.mjs";
 import { NATIVE_TARGETS, requiredNativeFiles, stageNativeRuntime } from "../../scripts/native-runtime.mjs";
@@ -124,7 +124,7 @@ function recordBackgroundWorkerFailure(error) {
 process.on("unhandledRejection", (reason) => {
   console.error(`\n${c.red("✗ unhandled rejection (station kept running):")}`, reason?.stack ?? reason);
   appendStationLog("process.unhandled_rejection", { error: reason?.stack ?? String(reason) }, { level: "error" });
-  if (["__background-worker", "__ui-host"].includes(command)) {
+  if (["__background-worker", "__background-supervisor", "__ui-host"].includes(command)) {
     recordBackgroundWorkerFailure(reason);
     process.exit(1);
   }
@@ -132,7 +132,7 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err) => {
   console.error(`\n${c.red("✗ uncaught exception (station kept running):")}`, err?.stack ?? err);
   appendStationLog("process.uncaught_exception", { error: err?.stack ?? String(err) }, { level: "error" });
-  if (["__background-worker", "__ui-host"].includes(command)) {
+  if (["__background-worker", "__background-supervisor", "__ui-host"].includes(command)) {
     recordBackgroundWorkerFailure(err);
     process.exit(1);
   }
@@ -186,6 +186,9 @@ async function main() {
       await createControlCenterHost({ baseDir: args[0], cliPath: fileURLToPath(import.meta.url) });
     } else if (command === "__background-worker") {
       await backgroundWorker(args);
+    } else if (command === "__background-supervisor") {
+      if (process.platform !== "darwin" || args.length !== 2) throw new Error("Invalid background supervisor invocation.");
+      await runBackgroundSupervisor(args[0], args[1], { cliPath: fileURLToPath(import.meta.url) });
     } else if (command === "terminal") {
       if (args.length !== 1 || args[0] !== "attach") throw new Error("Usage: weft terminal attach (opened by Station)");
       await attachTerminal();
@@ -289,7 +292,7 @@ async function devtunnelCommand([sub, ...rest]) {
     if (rest.some((arg) => arg !== "--foreground") || rest.length > 1) {
       throw new Error("Usage: weft devtunnel start [--foreground]");
     }
-    if (process.platform !== "win32" || rest.includes("--foreground")) return devtunnelStart();
+    if (!["win32", "darwin"].includes(process.platform) || rest.includes("--foreground")) return devtunnelStart();
     const status = await management.execute("relay.start", {}, { interactive: true });
     console.log(`Dev Tunnel relay ready in the background: ${status.baseUrl}\nUse \`weft devtunnel stop\` to stop it.`);
     return;
@@ -312,7 +315,7 @@ async function prepareBackgroundRelay() {
 }
 
 async function startCommand(options) {
-  if (process.platform !== "win32" || options.foreground) return start(options);
+  if (!["win32", "darwin"].includes(process.platform) || options.foreground) return start(options);
   resolveTransportDescriptor();
   await ensureAtLeastOneProject();
   if (options.newDevice) {
@@ -334,13 +337,19 @@ function readFileSyncSafe(path) {
 }
 
 async function stationStatus() {
-  if (process.platform !== "win32") throw new Error("Background Station management is currently supported on Windows. Use foreground Station on this platform.");
+  if (!["win32", "darwin"].includes(process.platform)) throw new Error("Background Station management requires Windows or macOS. Use foreground Station on this platform.");
   const options = backgroundOptions();
   for (const role of ["station", "relay"]) {
     const label = role === "station" ? "Station" : "Relay";
     const workerStatus = await backgroundCommand(role);
     const crash = readWorkerCrashReport(role, { baseDir: options.baseDir, workerStartedAt: workerStatus?.startedAt });
     const task = workerStatus ? null : await backgroundTaskOperation("status", { ...options, role });
+    const foregroundPid = role === "station"
+      ? Number.parseInt(readFileSyncSafe(join(options.baseDir, "listener.lock")), 10) : null;
+    if (!workerStatus && role === "station" && isPidAlive(foregroundPid)) {
+      console.log(`Station: foreground (PID ${foregroundPid}).`);
+      continue;
+    }
     const unexpectedStop = task ? readUnexpectedTaskExit(role, task, { baseDir: options.baseDir }) : null;
     const problem = describeWorkerProblem(role, { crash, unexpectedStop });
     if (workerStatus) {
@@ -359,13 +368,13 @@ async function stationStatus() {
 }
 
 async function stationStop() {
-  if (process.platform !== "win32") throw new Error("Use Ctrl+C in the foreground Station terminal on this platform.");
+  if (!["win32", "darwin"].includes(process.platform)) throw new Error("Use Ctrl+C in the foreground Station terminal on this platform.");
   const result = await management.execute("station.stop", { confirmed: true });
   console.log(`Background Station stopped.${result.error ? ` Graceful shutdown failed: ${result.error}` : ""} The shared relay remains available until \`weft devtunnel stop\`.`);
 }
 
 async function backgroundWorker([role, home, ...rest]) {
-  if (process.platform !== "win32" || rest.length || !["station", "relay"].includes(role) || !home || !isAbsolute(home)) {
+  if (!["win32", "darwin"].includes(process.platform) || rest.length || !["station", "relay"].includes(role) || !home || !isAbsolute(home)) {
     throw new Error("Invalid background worker invocation.");
   }
   process.env.WEFT_HOME = home;
@@ -580,7 +589,7 @@ async function watchExistingRelay(pid) {
 }
 
 async function devtunnelStatus() {
-  if (process.platform === "win32") {
+  if (["win32", "darwin"].includes(process.platform)) {
     const manager = await backgroundCommand("relay");
     if (manager) console.log(`Background relay: ${manager.state}${manager.error ? ` - ${manager.error}` : ""}.`);
   }
@@ -626,7 +635,7 @@ async function devtunnelStatus() {
 }
 
 async function devtunnelStop() {
-  if (process.platform === "win32") {
+  if (["win32", "darwin"].includes(process.platform)) {
     const result = await stopBackground("relay", backgroundOptions());
     if (result.error) console.error(`Background relay required a forced stop: ${result.error}`);
   }
@@ -1826,8 +1835,8 @@ start with a fresh QR. Run \`weft rotate-pairing\` to rotate without starting, o
 \`weft set-pairing ephemeral\` to mint a new identity on every station start. The in-session
 \`/weft\` command remains per-session and always uses a fresh channel + key.
 
-On Windows, \`weft start\` and \`weft devtunnel start\` run in the background through
-manually started, per-user Scheduled Tasks. Closing this terminal does not stop them.
+On Windows and macOS, \`weft start\` and \`weft devtunnel start\` run as manually
+started, per-user background workloads. Closing this terminal does not stop them.
 There are no boot/sign-in triggers. Crashes restart automatically, and the shared relay
 recovers network/tunnel failures, preferring its saved endpoint. First-time sign-in is
 handled before launching the worker.
@@ -1855,8 +1864,8 @@ Options:
   --new-device       Forget the previously trusted phone, create a fresh persistent
                      pairing identity, and start the Device Station with a new QR.
   --rotate-pairing   Alias for --new-device.
-  --foreground      Keep Station owned by this terminal (the default outside Windows).
-                     Windows normally uses a manually started, user-level background task.
+  --foreground      Keep Station owned by this terminal (the default outside Windows/macOS).
+                     Windows uses a Scheduled Task; macOS uses a manually bootstrapped launchd job.
                      No machine-boot or sign-in startup is registered.
 Terminal access:
   Enabled by default on supported Windows laptops, with your local account permissions.

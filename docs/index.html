@@ -105,7 +105,7 @@
         <div class="code-example"><div class="code-label">All platforms &middot; laptop terminal</div><pre tabindex="0" role="region" aria-label="Open the laptop Control Center"><code>weft</code></pre></div>
         <p><strong>You should see:</strong> the local Control Center in its own app-style window. Review <strong>Setup</strong> for connection, projects and access settings, then use <strong>Control &rarr; Start Station</strong> explicitly. <code>weft ui</code> opens the same dashboard; <code>weft help</code> shows terminal help. Opening the UI does not start a worker or activate sessions.</p>
         <p>The window uses installed Edge/Chrome/Chromium with a separate local profile, not Electron. <code>weft ui --browser</code> explicitly opens the default browser. When no supported Chromium is found, Weft reports its browser fallback; it never installs one automatically.</p>
-        <p>For terminal-only operation, use <code>weft start</code>. On Windows, startup returns after background readiness and you can close its launch terminal. Use <code>weft status</code> and <code>weft stop</code>; stopping Station leaves the relay available. Other platforms use foreground Station; <code>weft start --foreground</code> also keeps terminal ownership on Windows. No boot/sign-in startup is added.</p>
+        <p>For terminal-only operation, use <code>weft start</code>. On Windows and macOS, startup returns after background readiness and you can close its launch terminal. Use <code>weft status</code> and <code>weft stop</code>; stopping Station leaves the relay available. Other platforms use foreground Station; <code>weft start --foreground</code> keeps terminal ownership on supported background platforms. No boot/sign-in startup is added.</p>
         <p>If <code>weft</code> is not found, open a new terminal and follow <a href="#command-not-found">the command-not-found steps</a>.</p>
         <h3 id="connect-phone"><a class="heading-link" href="#connect-phone">3. Pair from your phone</a></h3>
         <ol>
@@ -360,8 +360,8 @@ weft update</code></pre></div>
             <tr><td><code>weft ui status</code> / <code>weft ui stop</code></td><td>Inspect or stop only the local UI host; workloads remain unchanged.</td></tr>
             <tr><td><code>weft ui shortcut</code></td><td>Add the Windows desktop shortcut.</td></tr>
             <tr><td><code>weft start</code></td><td>Start Device Station; reuse persistent phone trust by default.</td></tr>
-            <tr><td><code>weft start --foreground</code></td><td>Keep Station owned by this terminal, instead of Windows background operation.</td></tr>
-            <tr><td><code>weft status</code> / <code>weft stop</code></td><td>Check or stop background Station; stop leaves the shared relay available.</td></tr>
+            <tr><td><code>weft start --foreground</code></td><td>Keep Station owned by this terminal, instead of Windows or macOS background operation.</td></tr>
+            <tr><td><code>weft status</code> / <code>weft stop</code></td><td>Check or stop background Station on Windows or macOS; stop leaves the shared relay available.</td></tr>
             <tr><td><code>weft start --new-device</code></td><td>Replace phone trust and start with a fresh QR. Stop the old station first.</td></tr>
             <tr><td><code>weft start --help</code></td><td>Show station options without starting.</td></tr>
             <tr><td><code>weft set-pairing &lt;persistent|ephemeral&gt;</code></td><td>Choose whether subsequent station starts reuse the pairing identity.</td></tr>
@@ -394,7 +394,7 @@ weft update</code></pre></div>
             <tr><td><code>weft set-transport &lt;supabase|devtunnel&gt;</code></td><td>Choose the relay for subsequent connections.</td></tr>
             <tr><td><code>weft set-transport clear</code></td><td>Clear the choice, not the saved Supabase details. Select a transport again before pairing.</td></tr>
             <tr><td><code>weft devtunnel &lt;start|status|stop&gt;</code></td><td>Operate the shared dev-tunnel relay. Stopping it disconnects its users.</td></tr>
-            <tr><td><code>weft devtunnel start --foreground</code></td><td>Run the relay under terminal ownership rather than Windows background operation.</td></tr>
+            <tr><td><code>weft devtunnel start --foreground</code></td><td>Run the relay under terminal ownership rather than Windows or macOS background operation.</td></tr>
             <tr><td><code>weft terminal attach</code></td><td>Internal laptop frontend for the Station-owned shared terminal; not arbitrary terminal takeover.</td></tr>
             <tr><td><code>weft install [--from &lt;dir&gt;] [--skill &lt;file&gt;]</code></td><td>Install code bundles and the usage skill; developer/source installation option.</td></tr>
             <tr><td><code>weft clean-install [--yes]</code></td><td><strong>Destructive:</strong> delete installed code and <code>~/.weft/</code> data, then reinstall. <code>--yes</code> skips confirmation.</td></tr>

@@ -140,10 +140,11 @@ configured yet.
 Developers who need to build the native shell from source can run `npx cap sync android`
 and use Android Studio, but that build is not a distributed release APK.
 
-**3. Pair and drive it.** Run `weft start`. On Windows you can close its terminal once
-startup succeeds; Station continues in a manually started per-user background task.
-Use `weft status` and `weft stop` to manage it. For terminal-owned operation, use
-`weft start --foreground`; other platforms retain foreground mode.
+**3. Pair and drive it.** Run `weft start`. On Windows and macOS you can close its
+terminal once startup succeeds; Station continues in a manually started per-user
+background workload. Use `weft status` and `weft stop` to manage it. For
+terminal-owned operation, use `weft start --foreground`; other platforms retain
+foreground mode.
 Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
 code. The phone can then start or resume Copilot sessions in registered projects.
 For a source-built phone UI, use your HTTPS development deployment instead.
@@ -241,7 +242,7 @@ require confirmation; unregistering a folder removes only its shortcut registrat
 Windows status checks can take several seconds on a busy laptop. Control Center
 waits up to 30 seconds and shows the parts it could verify; sign-in is checked in the
 background in. If Station or the relay exits without `weft stop`, its card and
-`weft status` report "stopped unexpectedly" with the Windows exit code, what the
+`weft status` report "stopped unexpectedly" with the worker exit code, what the
 code means, and the last recorded error. Start it again; saved phone trust is
 unchanged.
 
@@ -410,12 +411,12 @@ copilot                       # then run /weft inside the session
 weft start
 ```
 
-On Windows the shared relay is supervised by a manually started Scheduled Task.
-Closing the launching terminal does not stop it. Repeated starts reuse the workload,
-not competing provisioners. Use `weft devtunnel status` for health and
-`weft devtunnel stop` to disable restart before stopping it.
-Foreground mode (`weft devtunnel start --foreground`) and other platforms retain a
-terminal-owned relay. Every activated session discovers it through
+On Windows and macOS the shared relay is supervised by a manually started
+per-user background workload. Closing the launching terminal does not stop it.
+Repeated starts reuse the workload, not competing provisioners. Use
+`weft devtunnel status` for health and `weft devtunnel stop` to disable restart
+before stopping it. Foreground mode (`weft devtunnel start --foreground`) and
+other platforms retain a terminal-owned relay. Every activated session discovers it through
 `~/.weft/devtunnel.json`; `/weft` never starts infrastructure.
 
 If you run `/weft` with `transport = devtunnel` and no relay is running, pairing fails
@@ -424,10 +425,11 @@ fast with an actionable error pointing you at `weft devtunnel start`. This is de
 
 ### Self-provisioning with `weft start`
 
-On Windows, `weft start` validates configuration/projects and completes any required
-interactive sign-in, then starts the shared background relay and background Station.
-Neither task has boot/sign-in triggers. A failed workload restarts under the same
-signed-in user's limited permissions. Station stopping leaves the relay available.
+On Windows and macOS, `weft start` validates configuration/projects and completes
+any required interactive sign-in, then starts the shared background relay and
+background Station. Neither workload starts at boot/sign-in. A failed workload
+restarts under the same signed-in user's permissions. Station stopping leaves the
+relay available.
 
 The relay manager checks local service health and public forwarding every 30 seconds.
 An unreachable network does not cause endpoint replacement; repeated public rejection

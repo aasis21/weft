@@ -94,14 +94,16 @@ read-only and separate from Copilot authentication. Supabase configuration is no
 proof of a live subscription, and no transport key is displayed. Saved pairing can
 be shown while Station is stopped; a fresh QR requires the endpoint to be running.
 
-On Windows, `weft start` and `weft devtunnel start` use manually started per-user
-background tasks. Their launch terminal can close. Crashes restart automatically
+On Windows and macOS, `weft start` and `weft devtunnel start` use manually started
+per-user background workloads. Their launch terminal can close. Crashes restart automatically
 (1 s backoff doubling to 30 s); after 5 quick crashes in a row, the dashboard and
 `weft status` show "crashing repeatedly" with the exit code and exact last error.
 `weft stop` disables Station restart but leaves the shared relay available;
 `weft devtunnel stop` disables relay restart and stops the shared relay.
-No boot/sign-in startup is registered. Use `--foreground` for terminal-owned
-operation, which remains the default outside Windows.
+On macOS, launchd registers the job only when you start it; its job file stays
+outside `~/Library/LaunchAgents`. No boot/sign-in startup is registered. Use
+`--foreground` for terminal-owned operation, which remains the default outside
+Windows and macOS.
 
 The dashboard reports unknown connectivity when no recent authenticated peer
 traffic proves contact. Foreground-owned workloads stay under their terminal's
@@ -222,7 +224,7 @@ See [terminal operation and boundaries](https://aasis21.github.io/weft/#open-ter
 | Transport | Setup | Best for |
 |---|---|---|
 | `supabase` | Installer seeds `~/.weft/supabase.json` with the hosted defaults. Point at your own project with `weft set-transport supabase --url <url> --anon-key <key>`, or just `weft set-transport supabase` (no flags) if the creds file is already there. | No local process to manage; works from anywhere |
-| `devtunnel` | `weft set-transport devtunnel` (no flags). Station can arrange the relay; direct `/weft` requires `weft devtunnel start` first. Windows background operation survives closing the launch terminal; `--foreground` remains terminal-owned. | Self-hosted; requires the `devtunnel` CLI and a Microsoft or GitHub account |
+| `devtunnel` | `weft set-transport devtunnel` (no flags). Station can arrange the relay; direct `/weft` requires `weft devtunnel start` first. Windows and macOS background operation survives closing the launch terminal; `--foreground` remains terminal-owned. | Self-hosted; requires the `devtunnel` CLI and a Microsoft or GitHub account |
 
 Pairing is *mostly* symmetric across both transports: it just *uses* the "server" —
 Supabase for `supabase`, the local relay + tunnel for `devtunnel`. `/weft` never tries to
@@ -231,7 +233,7 @@ spin the relay up for you; if it isn't running you get an actionable error point
 
 ### Self-provisioning (`weft start` on the `devtunnel` transport)
 
-On Windows, `weft start` checks setup before starting supervised background workers:
+On Windows and macOS, `weft start` checks setup before starting supervised background workers:
 
 1. **reuse** an already-healthy relay from `~/.weft/devtunnel.json`, otherwise
 2. **check the `devtunnel` CLI and sign in** — including the sneaky case where

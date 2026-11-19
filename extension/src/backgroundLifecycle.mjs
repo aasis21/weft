@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { execFile } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { resolve, win32 } from "node:path";
+import { execFile, spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { isAbsolute, join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import {
   createLifecycleEndpoint,
@@ -9,6 +10,7 @@ import {
   runtimeEndpointAddress,
   sendLifecycleCommand,
 } from "./lifecycleEndpoint.mjs";
+import { appendStationLog } from "./stationLog.mjs";
 import { createRuntimeIdentity } from "./runtimeIdentity.mjs";
 import { getProcessStartTime } from "./processIdentity.mjs";
 import { clearRegistry, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
@@ -65,11 +67,13 @@ export function workerFailureFileName(role) {
 }
 
 function stopMarkerPath(role, baseDir) {
-  return win32.join(resolve(baseDir), `background-${requireRole(role)}.stop`);
+  return join(resolve(baseDir), `background-${requireRole(role)}.stop`);
 }
 
-export function backgroundTaskName(role, { baseDir = weftHome() } = {}) {
-  const homeHash = createHash("sha256").update(resolve(baseDir).toLowerCase()).digest("hex").slice(0, 16);
+export function backgroundTaskName(role, { baseDir = weftHome(), platform = process.platform } = {}) {
+  const resolvedHome = resolve(baseDir);
+  const homeIdentity = platform === "win32" ? resolvedHome.toLowerCase() : resolvedHome;
+  const homeHash = createHash("sha256").update(homeIdentity).digest("hex").slice(0, 16);
   return `Weft-${requireRole(role)}-${homeHash}`;
 }
 
@@ -210,6 +214,140 @@ if ($existingTask -and ([string]$existingTask.State -eq 'Running')) {
 @{state='Starting'; taskName=$taskName} | ConvertTo-Json -Compress`;
 }
 
+function launchAgentPath(role, baseDir) {
+  return join(resolve(baseDir), `background-${requireRole(role)}.plist`);
+}
+
+function launchDomain(uid = process.getuid?.()) {
+  if (!Number.isInteger(uid) || uid < 0) throw new Error("A logged-in macOS user session is required for background workloads.");
+  return `gui/${uid}`;
+}
+
+function xmlText(value) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+
+/** Per-user launchd job. It is stored under ~/.weft, not ~/Library/LaunchAgents, so it is never
+ * loaded automatically at sign-in. RunAtLoad is also false: registration alone does not start it. */
+export function backgroundLaunchAgentPlist({
+  role, baseDir = weftHome(), cliPath, nodePath = process.execPath,
+} = {}) {
+  requireRole(role);
+  if (!cliPath || !isAbsolute(cliPath)) throw new Error("An absolute Weft CLI path is required.");
+  const label = backgroundTaskName(role, { baseDir, platform: "darwin" });
+  const values = [nodePath, resolve(cliPath), "__background-supervisor", role, resolve(baseDir)];
+  const argumentsXml = values.map((value) => `<string>${xmlText(value)}</string>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>${xmlText(label)}</string>
+<key>ProgramArguments</key><array>${argumentsXml}</array>
+<key>RunAtLoad</key><false/>
+<key>KeepAlive</key><false/>
+<key>StandardOutPath</key><string>/dev/null</string>
+<key>StandardErrorPath</key><string>/dev/null</string>
+<key>EnvironmentVariables</key><dict><key>WEFT_HOME</key><string>${xmlText(resolve(baseDir))}</string></dict>
+</dict></plist>
+`;
+}
+
+function writeLaunchAgent(role, options) {
+  const path = launchAgentPath(role, options.baseDir);
+  const content = backgroundLaunchAgentPlist({ ...options, role });
+  mkdirSync(resolve(options.baseDir), { recursive: true, mode: 0o700 });
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temp, content, { mode: 0o600, flag: "wx" });
+  try {
+    chmodSync(temp, 0o600);
+    renameSync(temp, path);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+  return { path, content };
+}
+
+function isMissingLaunchService(error) {
+  return /could not find service|service not found|no such process/i.test(
+    `${error?.stderr ?? ""}\n${error?.stdout ?? ""}\n${error?.message ?? ""}`,
+  );
+}
+
+async function launchdStatus(role, options, exec) {
+  const label = backgroundTaskName(role, { ...options, platform: "darwin" });
+  const domain = launchDomain(options.uid);
+  try {
+    const { stdout } = await exec("launchctl", ["print", `${domain}/${label}`], {
+      encoding: "utf8", timeout: 30_000,
+    });
+    const stateMatch = /^\s*state\s*=\s*(.+?)\s*$/mi.exec(stdout);
+    if (!stateMatch) throw new Error("launchctl returned an invalid Weft status.");
+    const stateName = stateMatch[1].toLowerCase();
+    const state = stateName === "running" ? "Running"
+      : ["waiting", "not running", "spawn scheduled"].includes(stateName) ? "Ready" : null;
+    if (!state) throw new Error("launchctl returned an unknown Weft workload state.");
+    const exitMatch = /^\s*last exit code\s*=\s*(-?\d+)\s*$/mi.exec(stdout);
+    return {
+      state, taskName: label,
+      lastResult: exitMatch ? Number(exitMatch[1]) : null,
+    };
+  } catch (error) {
+    if (isMissingLaunchService(error)) return { state: "NotRegistered", taskName: label, lastResult: null };
+    throw new Error(`Weft background status failed: ${error.message}`, { cause: error });
+  }
+}
+
+async function launchdOperation(operation, options, exec) {
+  const { role, baseDir = weftHome() } = options;
+  requireRole(role);
+  const label = backgroundTaskName(role, { ...options, baseDir, platform: "darwin" });
+  const domain = launchDomain(options.uid);
+  const target = `${domain}/${label}`;
+  const path = launchAgentPath(role, baseDir);
+  if (operation === "status") return launchdStatus(role, { ...options, baseDir }, exec);
+  if (operation === "disable") {
+    mkdirSync(resolve(baseDir), { recursive: true, mode: 0o700 });
+    writeFileSync(stopMarkerPath(role, baseDir), "stopped", { mode: 0o600 });
+    return { state: "Disabled", taskName: label };
+  }
+  if (operation === "stop") {
+    const current = await launchdStatus(role, { ...options, baseDir }, exec);
+    if (current.state !== "NotRegistered") {
+      try {
+        await exec("launchctl", ["bootout", target], { encoding: "utf8", timeout: 30_000 });
+      } catch (error) {
+        if (!isMissingLaunchService(error)) throw new Error(`Weft background stop failed: ${error.message}`, { cause: error });
+      }
+    }
+    rmSync(path, { force: true });
+    return { state: "Stopped", taskName: label };
+  }
+  if (operation !== "start") throw new Error("Invalid background task operation.");
+  const current = await launchdStatus(role, { ...options, baseDir }, exec);
+  const desired = backgroundLaunchAgentPlist({ ...options, role, baseDir });
+  if (current.state === "NotRegistered") {
+    writeLaunchAgent(role, { ...options, role, baseDir });
+    await exec("launchctl", ["bootstrap", domain, path], { encoding: "utf8", timeout: 30_000 });
+  } else {
+    let installed;
+    try { installed = readFileSync(path, "utf8"); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (installed !== desired) {
+      throw new Error("Weft is already registered from a different installation or earlier version. Run `weft stop`, then start again.");
+    }
+  }
+  rmSync(stopMarkerPath(role, baseDir), { force: true });
+  if (current.state !== "Running") {
+    clearRegistry(restartStateFileName(role), { baseDir });
+    clearRegistry(workerFailureFileName(role), { baseDir });
+    await exec("launchctl", ["kickstart", target], { encoding: "utf8", timeout: 30_000 });
+  }
+  return { state: "Starting", taskName: label };
+}
+
 const EXIT_CODE_MEANINGS = new Map([
   [1, "Weft exited because of an error."],
   [0xC000013A, "The worker's console was interrupted or closed (Ctrl+C, console close or Windows sign-out)."],
@@ -275,6 +413,7 @@ export function readWorkerCrashReport(role, { baseDir = weftHome(), now = Date.n
     lastRunSeconds: Number.isFinite(restarts.lastRunSeconds) ? restarts.lastRunSeconds : null,
     nextRestartAt: Number.isFinite(restarts.nextRestartAt) ? restarts.nextRestartAt : null,
     exit: describeExitCode(restarts.lastExitCode),
+    signal: typeof restarts.lastSignal === "string" ? restarts.lastSignal : null,
     // The worker writes its failure just before exiting, so only a record from this crash applies.
     lastError: failure && Math.abs(restarts.lastCrashAt - (failure.at ?? 0)) < CRASH_REPORT_WINDOW_MS ? failure : null,
   };
@@ -291,7 +430,7 @@ export function readUnexpectedTaskExit(role, task, { baseDir = weftHome() } = {}
 /** Plain-language summary used by both the dashboard and `weft status`. */
 export function describeWorkerProblem(role, { crash = null, unexpectedStop = null } = {}) {
   const label = role === "station" ? "Station" : "The relay";
-  const detail = (report) => `exit code ${report.exit.code}: ${report.exit.meaning}` +
+  const detail = (report) => (report.signal ? `signal ${report.signal}` : `exit code ${report.exit.code}: ${report.exit.meaning}`) +
     (report.lastError ? ` Last error: ${report.lastError.name}: ${report.lastError.message}` +
       (report.lastError.location ? ` (${report.lastError.location})` : "") : "");
   if (crash?.repeated) return `${label} is crashing repeatedly: ${crash.quickCrashesInARow} crashes in a row, each within a minute of starting (${detail(crash)}). Weft keeps retrying every 30 seconds or less; fix the cause, then restart it.`;
@@ -301,6 +440,9 @@ export function describeWorkerProblem(role, { crash = null, unexpectedStop = nul
 }
 
 export async function backgroundTaskOperation(operation, options, { exec = execFileAsync } = {}) {
+  if ((options.platform ?? process.platform) === "darwin") {
+    return launchdOperation(operation, options, exec);
+  }
   const script = backgroundTaskScript(operation, options);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   let stdout;
@@ -318,6 +460,118 @@ export async function backgroundTaskOperation(operation, options, { exec = execF
     throw new Error("Task Scheduler returned an invalid Weft status.");
   }
   return result;
+}
+
+/** Run the same bounded-retry worker loop on macOS that the Windows task supervisor runs. */
+export async function runBackgroundSupervisor(role, baseDir, {
+  cliPath, nodePath = process.execPath, spawnWorker = spawn,
+  restartDelayInitialMs = RESTART_DELAY_INITIAL_MS, restartDelayMaxMs = RESTART_DELAY_MAX_MS,
+  healthyRunSeconds = HEALTHY_RUN_SECONDS, now = Date.now,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  requireRole(role);
+  if (!baseDir || !isAbsolute(baseDir) || !cliPath || !isAbsolute(cliPath)) {
+    throw new Error("Invalid background supervisor invocation.");
+  }
+  const home = resolve(baseDir);
+  const marker = stopMarkerPath(role, home);
+  let stopping = false;
+  let activeChild = null;
+  let activeExit = null;
+  let stopTask = null;
+  const requestStop = () => {
+    if (stopTask) return stopTask;
+    stopping = true;
+    try { writeFileSync(marker, "stopped", { mode: 0o600 }); }
+    catch (error) {
+      process.exitCode = 1;
+      appendStationLog("supervisor.stop_marker_failed", { role, code: error.code ?? error.name }, { baseDir: home, level: "error" });
+    }
+    stopTask = (async () => {
+      const child = activeChild;
+      const exited = activeExit;
+      if (!child || !exited) return;
+      try {
+        const reply = await backgroundCommand(role, "quiesce", null, { baseDir: home, timeoutMs: 2_000 });
+        if (!reply) child.kill("SIGTERM");
+      } catch (error) {
+        appendStationLog("supervisor.quiesce_failed", { role, code: error.code ?? error.name }, { baseDir: home, level: "warn" });
+        child.kill("SIGTERM");
+      }
+      let timeout;
+      const stopped = await Promise.race([
+        exited.then(() => true),
+        new Promise((resolveStop) => { timeout = setTimeout(() => resolveStop(false), 10_000); }),
+      ]);
+      clearTimeout(timeout);
+      if (!stopped) child.kill("SIGKILL");
+    })();
+    return stopTask;
+  };
+  const handleSignal = () => { void requestStop(); };
+  process.once("SIGTERM", handleSignal);
+  process.once("SIGINT", handleSignal);
+  let restartDelayMs = restartDelayInitialMs;
+  let totalCrashes = 0;
+  let quickCrashesInARow = 0;
+  let quickCrashStreakStartedAt = null;
+  try {
+    while (!stopping) {
+      if (existsSync(marker)) return 0;
+      const workerStartedAt = now();
+      const child = spawnWorker(nodePath, [resolve(cliPath), "__background-worker", role, home], {
+        stdio: "ignore", windowsHide: true, env: { ...process.env, WEFT_HOME: home },
+      });
+      activeChild = child;
+      activeExit = new Promise((resolveExit) => {
+        let settled = false;
+        const finish = (result) => {
+          if (settled) return;
+          settled = true;
+          resolveExit(result);
+        };
+        child.once("error", (error) => finish({ code: 1, error }));
+        child.once("exit", (code, signal) => finish({ code, signal }));
+      });
+      const exit = await activeExit;
+      activeChild = null;
+      activeExit = null;
+      if (stopping || existsSync(marker)) {
+        await stopTask;
+        return 0;
+      }
+      if (exit.code === 0) return 0;
+      const crashedAt = now();
+      const workerRunSeconds = (crashedAt - workerStartedAt) / 1000;
+      if (exit.error) {
+        writeRegistryAtomic(workerFailureFileName(role), {
+          at: crashedAt, ...summarizeWorkerError(exit.error),
+        }, { baseDir: home });
+      }
+      totalCrashes++;
+      if (workerRunSeconds >= healthyRunSeconds) {
+        restartDelayMs = restartDelayInitialMs;
+        quickCrashesInARow = 0;
+        quickCrashStreakStartedAt = null;
+      } else {
+        if (quickCrashesInARow === 0) quickCrashStreakStartedAt = crashedAt;
+        quickCrashesInARow++;
+      }
+      writeRegistryAtomic(restartStateFileName(role), {
+        role, totalCrashes, quickCrashesInARow, quickCrashStreakStartedAt,
+        lastExitCode: exit.code, lastSignal: exit.signal ?? null, lastCrashAt: crashedAt,
+        lastRunSeconds: Math.round(workerRunSeconds * 10) / 10,
+        nextRestartAt: crashedAt + restartDelayMs,
+      }, { baseDir: home });
+      await sleep(restartDelayMs);
+      restartDelayMs = Math.min(restartDelayMaxMs, restartDelayMs * 2);
+    }
+    await stopTask;
+    return 0;
+  } finally {
+    process.removeListener("SIGTERM", handleSignal);
+    process.removeListener("SIGINT", handleSignal);
+  }
 }
 
 export async function backgroundCommand(role, command = "status", payload = null, {

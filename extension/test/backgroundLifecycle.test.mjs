@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import {
   backgroundTaskScript, backgroundTaskOperation, backgroundTaskName, backgroundSupervisorScript,
   startBackground, stopBackground, createBackgroundControl, backgroundCommand,
+  backgroundLaunchAgentPlist, runBackgroundSupervisor,
   describeExitCode, summarizeWorkerError, readWorkerCrashReport, readUnexpectedTaskExit,
   describeWorkerProblem, restartStateFileName, workerFailureFileName,
 } from "../src/backgroundLifecycle.mjs";
@@ -39,6 +40,89 @@ test("background tasks are user-scoped, manual, limited, and safely quoted", () 
   const status = backgroundTaskScript("status", { ...options, role: "station" });
   assert.match(status, /Get-ScheduledTaskInfo/);
   assert.match(status, /lastResult=\$lastTaskResult/);
+});
+
+test("macOS launchd jobs are manually started and keep their job file outside LaunchAgents", () => {
+  const plist = backgroundLaunchAgentPlist({
+    role: "station", baseDir: "/Users/example/Weft & data",
+    cliPath: "/Applications/Weft & Tools/weft.mjs", nodePath: "/opt/node/bin/node",
+  });
+  assert.match(plist, /<key>RunAtLoad<\/key><false\/>/);
+  assert.match(plist, /<key>KeepAlive<\/key><false\/>/);
+  assert.match(plist, /Weft &amp; data/);
+  assert.match(plist, /Weft &amp; Tools\\weft\.mjs/);
+  assert.match(plist, /__background-supervisor/);
+  assert.doesNotMatch(plist, /Library\/LaunchAgents/);
+});
+
+test("macOS lifecycle operations bootstrap, inspect, and unload the explicit job", async (t) => {
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-launchd-"));
+  t.after(() => rm(baseDir, { recursive: true, force: true }));
+  const calls = [];
+  let loaded = false;
+  let state = "not running";
+  const exec = async (executable, args) => {
+    assert.equal(executable, "launchctl");
+    calls.push(args);
+    if (args[0] === "print") {
+      if (!loaded) throw Object.assign(new Error("launch service missing"), { stderr: "Could not find service" });
+      return { stdout: `state = ${state}\nlast exit code = 0\n` };
+    }
+    if (args[0] === "bootstrap") { loaded = true; return { stdout: "" }; }
+    if (args[0] === "kickstart") { state = "running"; return { stdout: "" }; }
+    if (args[0] === "bootout") { loaded = false; state = "not running"; return { stdout: "" }; }
+    throw new Error(`Unexpected launchctl operation: ${args[0]}`);
+  };
+  const macOptions = {
+    ...options, role: "station", baseDir, platform: "darwin", uid: 501,
+    cliPath: "/Users/example/.copilot/extensions/weft/weft.mjs",
+    nodePath: "/opt/homebrew/bin/node",
+  };
+  const started = await backgroundTaskOperation("start", macOptions, { exec });
+  assert.equal(started.state, "Starting");
+  assert.deepEqual(calls.map((args) => args[0]), ["print", "bootstrap", "kickstart"]);
+  const running = await backgroundTaskOperation("status", macOptions, { exec });
+  assert.equal(running.state, "Running");
+  const existingStart = await backgroundTaskOperation("start", macOptions, { exec });
+  assert.equal(existingStart.state, "Starting");
+  assert.equal(calls.filter((args) => args[0] === "kickstart").length, 1);
+  const disabled = await backgroundTaskOperation("disable", macOptions, { exec });
+  assert.equal(disabled.state, "Disabled");
+  assert.ok(existsSync(join(baseDir, "background-station.stop")));
+  const stopped = await backgroundTaskOperation("stop", macOptions, { exec });
+  assert.equal(stopped.state, "Stopped");
+  assert.equal((await backgroundTaskOperation("status", macOptions, { exec })).state, "NotRegistered");
+  assert.equal(existsSync(join(baseDir, "background-station.plist")), false);
+});
+
+test("macOS supervisor records repeated worker crashes and stops retrying on its marker", async (t) => {
+  const baseDir = await mkdtemp(join(tmpdir(), "weft-launchd-supervisor-"));
+  t.after(() => rm(baseDir, { recursive: true, force: true }));
+  const cliPath = join(baseDir, "worker.mjs");
+  await writeFile(cliPath, `
+    import { existsSync, readFileSync, writeFileSync } from "node:fs";
+    import { join } from "node:path";
+    const attemptsPath = join(process.argv[4], "attempts");
+    const attempts = (existsSync(attemptsPath) ? Number(readFileSync(attemptsPath, "utf8")) : 0) + 1;
+    writeFileSync(attemptsPath, String(attempts));
+    process.exit(1);
+  `);
+  let clock = 0;
+  const result = await runBackgroundSupervisor("station", baseDir, {
+    cliPath, nodePath: process.execPath,
+    restartDelayInitialMs: 1, restartDelayMaxMs: 4, now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+      const attempts = Number(await readFile(join(baseDir, "attempts"), "utf8"));
+      if (attempts === 5) await writeFile(join(baseDir, "background-station.stop"), "stopped");
+    },
+  });
+  assert.equal(result, 0);
+  assert.equal(Number(await readFile(join(baseDir, "attempts"), "utf8")), 5);
+  const restarts = JSON.parse(await readFile(join(baseDir, restartStateFileName("station")), "utf8"));
+  assert.equal(restarts.quickCrashesInARow, 5);
+  assert.equal(restarts.lastExitCode, 1);
+  assert.ok(restarts.nextRestartAt > restarts.lastCrashAt);
 });
 
 test("exit codes and fatal errors are described plainly without stacks, addresses or secrets", () => {
