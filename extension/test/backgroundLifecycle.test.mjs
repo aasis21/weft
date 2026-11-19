@@ -50,7 +50,7 @@ test("macOS launchd jobs are manually started and keep their job file outside La
   assert.match(plist, /<key>RunAtLoad<\/key><false\/>/);
   assert.match(plist, /<key>KeepAlive<\/key><false\/>/);
   assert.match(plist, /Weft &amp; data/);
-  assert.match(plist, /Weft &amp; Tools\\weft\.mjs/);
+  assert.match(plist, /Weft &amp; Tools[\\/]weft\.mjs/);
   assert.match(plist, /__background-supervisor/);
   assert.doesNotMatch(plist, /Library\/LaunchAgents/);
 });
