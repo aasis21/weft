@@ -65,9 +65,9 @@ export function DevicesScreen({
   const menuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const now = useNowTick();
   const sortedDevices = sortDevices(devices);
-  const mainRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   useLeftEdgeSwipe(!drawerOpen && !settingsOpen, () => setDrawerOpen(true));
-  const pull = usePullToRefresh(mainRef, () => sortedDevices.forEach((device) => onRefreshProjects(device.channelId)),
+  const pull = usePullToRefresh(scrollRef, () => sortedDevices.forEach((device) => onRefreshProjects(device.channelId)),
     sortedDevices.length > 0);
   const onlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone !== 'offline');
   const offlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone === 'offline');
@@ -123,144 +123,117 @@ export function DevicesScreen({
         ? `${device.projects.length} project${device.projects.length === 1 ? '' : 's'}`
         : 'No projects yet';
     const menuOpen = menuOpenId === device.channelId;
-    const startDisabled = !device.connected;
-    const startHintId = `device-start-hint-${device.channelId}`;
     const openMenu = (button: HTMLButtonElement): void => {
       const rect = button.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       setMenuPlacement(spaceBelow < 180 && rect.top > spaceBelow ? 'up' : 'down');
       setMenuOpenId(device.channelId);
     };
+    const offline = status.tone === 'offline';
+    const meta = [
+      lastSeen ? `last seen ${lastSeen}` : null,
+      lastTried ? `tried ${lastTried}` : null,
+      offline ? null : projectsLabel,
+    ].filter(Boolean).join(' · ');
     return (
-      <div
-        key={device.channelId}
-        className="device-card device-tile"
-      >
+      <li key={device.channelId} className={`device-row${offline ? ' offline' : ''}`}>
         <button
           type="button"
-          className="device-tile-main"
+          className="device-row-main"
           aria-label={`View details for ${deviceLabel(device)}`}
           onClick={() => onOpenDetails(device.channelId)}
         >
-          <span className="device-tile-head">
-            <DeviceAvatar tone={status.tone} />
-            <span className="session-info">
-              <span className="session-title">
-                {deviceLabel(device)}
-                {device.isDefault ? <span className="tag">default</span> : null}
-              </span>
-              <span className="session-sub">
-                <span className={`device-status device-status-${status.tone}`}>
-                  <span className="device-status-dot" aria-hidden="true" />
-                  {status.label}
-                </span>
-                {lastSeen ? ` · last seen ${lastSeen}` : ''}
-                {lastTried ? ` · tried ${lastTried}` : ''}
-                {` · ${projectsLabel}`}
-              </span>
+          <DeviceAvatar tone={status.tone} />
+          <span className="device-row-text">
+            <span className="device-row-name">
+              <span className="device-row-title">{deviceLabel(device)}</span>
+              {device.isDefault ? <span className="tag">default</span> : null}
             </span>
+            {meta ? <span className="device-row-meta">{meta}</span> : null}
+            {device.error ? (
+              <span className="device-row-error" title={device.error}>{device.error}</span>
+            ) : null}
           </span>
         </button>
-
-        {device.error ? <p className="error-banner">Connection issue: {device.error}</p> : null}
-
-        <div className="device-tile-actions">
+        {offline ? null : (
           <button
             type="button"
-            className="session-primary-action device-start-btn"
-            disabled={startDisabled}
-            aria-describedby={startDisabled ? startHintId : undefined}
-            title={startDisabled ? 'Device is offline — reconnect it to start a session.' : 'Start a session on this device'}
-            onClick={(e) => {
-              e.stopPropagation();
-              onStartOnDevice(device.channelId);
-            }}
+            className="device-row-start"
+            aria-label={`Start session on ${deviceLabel(device)}`}
+            title="Start a session on this device"
+            onClick={() => onStartOnDevice(device.channelId)}
           >
             <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
-            Start session
+            Start
           </button>
-          <div className="device-menu-wrap" data-device-menu-root={device.channelId}>
-            <button
-              ref={(node) => {
-                if (node) menuTriggerRefs.current.set(device.channelId, node);
-                else menuTriggerRefs.current.delete(device.channelId);
-              }}
-              className="icon-btn device-menu-btn"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label={`Device actions for ${deviceLabel(device)}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (menuOpen) {
-                  setMenuOpenId(null);
-                } else {
-                  openMenu(e.currentTarget);
-                }
-              }}
-            >
-              <MoreHorizontalGlyph />
-            </button>
-            {menuOpen ? (
-              <div
-                ref={menuRef}
-                className={`device-menu device-menu-${menuPlacement}`}
-                role="menu"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {!device.isDefault ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="device-menu-item"
-                    onClick={() => {
-                      setMenuOpenId(null);
-                      void onSetDefault(device.channelId);
-                    }}
-                  >
-                    <span className="device-action-icon" aria-hidden="true"><StarGlyph /></span>
-                    Make default
-                  </button>
-                ) : null}
+        )}
+        <div className="device-menu-wrap" data-device-menu-root={device.channelId}>
+          <button
+            ref={(node) => {
+              if (node) menuTriggerRefs.current.set(device.channelId, node);
+              else menuTriggerRefs.current.delete(device.channelId);
+            }}
+            className="icon-btn device-menu-btn"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`Device actions for ${deviceLabel(device)}`}
+            onClick={(e) => {
+              if (menuOpen) setMenuOpenId(null);
+              else openMenu(e.currentTarget);
+            }}
+          >
+            <MoreHorizontalGlyph />
+          </button>
+          {menuOpen ? (
+            <div ref={menuRef} className={`device-menu device-menu-${menuPlacement}`} role="menu">
+              {!device.isDefault ? (
                 <button
                   type="button"
                   role="menuitem"
                   className="device-menu-item"
                   onClick={() => {
                     setMenuOpenId(null);
-                    onRefreshProjects(device.channelId);
+                    void onSetDefault(device.channelId);
                   }}
                 >
-                  <span className="device-action-icon" aria-hidden="true"><RefreshGlyph /></span>
-                  Refresh projects
+                  <span className="device-action-icon" aria-hidden="true"><StarGlyph /></span>
+                  Make default
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="device-menu-item danger"
-                  onClick={() => {
-                    setMenuOpenId(null);
-                    void onForget(device.channelId);
-                  }}
-                >
-                  <span className="device-action-icon" aria-hidden="true"><TrashGlyph /></span>
-                  Forget device
-                </button>
-              </div>
-            ) : null}
-          </div>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className="device-menu-item"
+                onClick={() => {
+                  setMenuOpenId(null);
+                  onRefreshProjects(device.channelId);
+                }}
+              >
+                <span className="device-action-icon" aria-hidden="true"><RefreshGlyph /></span>
+                Refresh projects
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="device-menu-item danger"
+                onClick={() => {
+                  setMenuOpenId(null);
+                  void onForget(device.channelId);
+                }}
+              >
+                <span className="device-action-icon" aria-hidden="true"><TrashGlyph /></span>
+                Forget device
+              </button>
+            </div>
+          ) : null}
         </div>
-        {startDisabled ? (
-          <p id={startHintId} className="device-action-hint">
-            Offline — reconnect this device before starting a session.
-          </p>
-        ) : null}
-      </div>
+      </li>
     );
   };
 
   return (
-    <main className="weft-session join-session devices-screen" ref={mainRef}>
+    <main className="weft-session join-session fixed-frame devices-screen">
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -275,9 +248,9 @@ export function DevicesScreen({
           </span>
         </button>
         <div className="status-id">
-          <span className="status-title">Manage devices</span>
+          <span className="status-title">Devices</span>
           <span className="status-line">
-            <span className="status-dot" aria-hidden="true" />
+            <span className={`status-dot${onlineCount > 0 ? ' live' : ''}`} aria-hidden="true" />
             {countLabel}
           </span>
         </div>
@@ -303,40 +276,39 @@ export function DevicesScreen({
           </button>
         </span>
       </header>
-      <PullIndicator state={pull} />
-
-      <div className="session-join-inner">
-        <p className="session-join-hint">
-          A <strong>device</strong> is a laptop running <code>weft start</code>. Pair one here,
-          then start <strong>sessions</strong> (live Copilot runs) on it from your phone.
-          {sortedDevices.length > 0 ? ' Tap a card to view its details, projects, and event log.' : ''}
-        </p>
-
-        {sortedDevices.length === 0 ? (
-          <section className="session-join-scanner start-empty">
-            <p>No devices saved yet.</p>
-            <button type="button" className="session-primary-action" onClick={onScanListener}>
-              Scan to connect
-            </button>
-          </section>
-        ) : (
-          <section className="session-join-fallback devices-list">
-            {onlineDevices.length > 0 ? (
-              <div className="device-group">
-                <h3 className="device-group-header">Online</h3>
-                {onlineDevices.map(renderDevice)}
-              </div>
-            ) : null}
-            {offlineDevices.length > 0 ? (
-              <div className="device-group">
-                <h3 className="device-group-header">
-                  {onlineDevices.length > 0 ? 'Offline' : 'Offline · no devices reachable'}
-                </h3>
-                {offlineDevices.map(renderDevice)}
-              </div>
-            ) : null}
-          </section>
-        )}
+      <div className="page-scroll" ref={scrollRef}>
+        <PullIndicator state={pull} />
+        <div className="session-join-inner">
+          {sortedDevices.length === 0 ? (
+            <section className="session-join-scanner start-empty">
+              <p>
+                A <strong>device</strong> is a laptop running <code>weft start</code>. Pair one, then start
+                Copilot sessions on it from your phone.
+              </p>
+              <button type="button" className="session-primary-action" onClick={onScanListener}>
+                Scan to connect
+              </button>
+            </section>
+          ) : (
+            <>
+              {onlineDevices.length > 0 ? (
+                <section className="device-group" aria-labelledby="devices-online-heading">
+                  <h3 id="devices-online-heading" className="device-group-header">Online</h3>
+                  <ul className="device-rows">{onlineDevices.map(renderDevice)}</ul>
+                </section>
+              ) : null}
+              {offlineDevices.length > 0 ? (
+                <section className="device-group" aria-labelledby="devices-offline-heading">
+                  <h3 id="devices-offline-heading" className="device-group-header">
+                    {onlineDevices.length > 0 ? 'Offline' : 'Offline · no devices reachable'}
+                  </h3>
+                  <ul className="device-rows">{offlineDevices.map(renderDevice)}</ul>
+                  <p className="device-group-note">Run <code>weft start</code> on a laptop to bring it back online.</p>
+                </section>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
 
       {drawerOpen ? (

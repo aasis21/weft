@@ -107,15 +107,16 @@ describe('DevicesScreen', () => {
     expect(screen.getByText(/last seen 3m ago/i)).toBeInTheDocument();
   });
 
-  it('disables starting a session on an offline device with an explanation', () => {
+  it('hides Start for an offline device and points to weft start, while details stay reachable', () => {
     const onStartOnDevice = vi.fn();
-    renderDevices({ devices: [makeDevice({ connected: false })], onStartOnDevice });
+    const onOpenDetails = vi.fn();
+    renderDevices({ devices: [makeDevice({ connected: false, error: 'Couldn’t reach your session' })], onStartOnDevice, onOpenDetails });
 
-    const start = screen.getByRole('button', { name: /start session/i });
-    expect(start).toBeDisabled();
-    expect(start).toHaveAccessibleDescription(/offline/i);
-    fireEvent.click(start);
-    expect(onStartOnDevice).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /start session/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach your session')).toBeInTheDocument();
+    expect(screen.getByText(/to bring it back online/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /view details for macbook pro/i }));
+    expect(onOpenDetails).toHaveBeenCalledWith('chan-1');
   });
 
   it('closes the overflow menu on outside tap and Escape, restoring trigger focus on Escape', () => {

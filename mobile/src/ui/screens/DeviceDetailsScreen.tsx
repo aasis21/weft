@@ -28,7 +28,7 @@ import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { DEVICE_CAPABILITY, transportIdentity, type DeviceSystemSnapshot } from '@aasis21/weft-shared';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNowTick } from '@/ui/hooks/useNowTick';
-import { useLeftEdgeSwipe } from '@/ui/gestures/touchGestures';
+import { PullIndicator, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
 import { DeviceClipboardSheet, DeviceKeepAwakeSheet, keepAwakeRemaining } from './DeviceUtilitySheets';
 
 interface DeviceDetailsScreenProps {
@@ -183,6 +183,8 @@ export function DeviceDetailsScreen({
   const [menuOpen, setMenuOpen] = useState(false);
   const [utility, setUtility] = useState<{ kind: 'clipboard' | 'keep-awake'; channelId: string } | null>(null);
   useLeftEdgeSwipe(!drawerOpen && !settingsOpen && utility === null, () => setDrawerOpen(true));
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pull = usePullToRefresh(scrollRef, () => onRefreshProjects(device.channelId), device.connected);
   // Forget is destructive and irreversible from here, so the menu item flips into a confirm state
   // in place rather than firing on first tap.
   const [confirmForget, setConfirmForget] = useState(false);
@@ -427,7 +429,7 @@ export function DeviceDetailsScreen({
   };
 
   return (
-    <main className="weft-session join-session device-details-screen">
+    <main className="weft-session join-session fixed-frame device-details-screen">
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -540,6 +542,8 @@ export function DeviceDetailsScreen({
         </div>
       </header>
 
+      <div className="page-scroll" ref={scrollRef}>
+      <PullIndicator state={pull} />
       <div className="session-join-inner">
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
@@ -872,6 +876,7 @@ export function DeviceDetailsScreen({
             </>
           ) : null}
         </section>
+      </div>
       </div>
 
       {logOpen ? (
