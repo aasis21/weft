@@ -4,6 +4,9 @@ Status: draft for discussion; not implemented, installed, or released.
 Created: 2026-11-07.
 Scope: optional Copilot, Codex, and Claude integrations, centered on Device Station.
 
+Detailed current-code contracts and implementation gates are in the
+[Station-managed low-level design](multi-agent-station-lld.md).
+
 This document records confirmed requirements, proposed architecture, user flows,
 and compatibility gates. It does not authorize product-code changes, installation,
 provider upgrades, background processes, or release. Commands, protocol capability
@@ -18,6 +21,7 @@ names, and new screens described as proposed do not exist yet.
 | Confirmed | Plan the architecture and user experience before implementation. |
 | Confirmed: 2026-11-07 follow-up | Prioritize Station-managed Codex and Claude before native session-by-session integration. Prove the approach locally before recommending the implementation. |
 | Confirmed: 2026-11-07 follow-up | Aim for one session with multiple participants, including laptop and phone. Investigate a common abstraction without forcing Copilot through a new runtime. |
+| Confirmed: 2026-11-07 v1 follow-up | Include saved-conversation Resume in v1 and show the distinction clearly in the UI: Open/Connect for a live runtime, Resume for stopped work. Never start a second writer merely to open a session by ID. |
 | Existing contract | Station starts manually; no boot/sign-in startup. Direct Copilot `/weft` remains usable without Station. |
 | Proposed | Keep Copilot as the default for legacy installs and fresh unattended installs; Codex and Claude require explicit opt-in. |
 | Proposed | Enabled means permitted to integrate, not a running agent. Load adapters and start processes only for requested work. |
@@ -27,6 +31,15 @@ names, and new screens described as proposed do not exist yet.
 Do not interpret enabling one provider as enabling another. Do not silently switch
 provider, authentication method, model, permission policy, or execution environment
 to make a failed operation succeed.
+
+Native laptop UX clarification: Copilot already allows its native terminal and
+Weft phone to interact with the same live session. Codex documents a remote TUI
+on the same App Server, making native terminal participation a concrete candidate
+for v1, subject to concurrent-control verification. The current Claude SDK plan
+provides shared Weft laptop/phone chat, not proven native Claude terminal parity.
+If native parity is required in v1, validate a native background-session backend
+with a supported Weft bridge before committing to SDK-only Claude delivery.
+Do not present the SDK experience as equivalent or silently change backends.
 
 ## 2. Current pattern and proposed deviations
 
