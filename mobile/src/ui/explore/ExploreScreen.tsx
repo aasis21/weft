@@ -1128,8 +1128,6 @@ interface Point {
 const THREAD_EDGES: Array<[number, number]> = [
   [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0], [0, 2], [2, 4], [4, 0],
 ];
-type PlayMode = 'daily' | 'free';
-
 function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
@@ -1144,9 +1142,17 @@ export function createSignalSequence(seed: number, length = 32): number[] {
   return Array.from({ length }, () => Math.floor(random() * 9));
 }
 
-function dailySeed(offset = 0): number {
+function todaySeed(offset = 0): number {
   const date = new Date();
   return Number(`${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`) + offset;
+}
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 2_147_483_647);
+}
+
+function randomPuzzleSeed(offset = 0): number {
+  return todaySeed(offset) + randomSeed();
 }
 
 export function createThreadlinePoints(seed: number): Point[] {
@@ -1255,30 +1261,21 @@ function PlayView({
   onChange(next: Required<ExploreStoredState>): void;
 }): JSX.Element {
   const [game, setGame] = useState<PlayGame | null>(null);
-  const [mode, setMode] = useState<PlayMode>('daily');
   const back = (): void => setGame(null);
   if (game === 'threadline') {
-    return <ThreadlineGame mode={mode} stored={stored} onChange={onChange} onBack={back} />;
+    return <ThreadlineGame stored={stored} onChange={onChange} onBack={back} />;
   }
   if (game === 'signal') {
-    return <SignalSteps mode={mode} stored={stored} onChange={onChange} onBack={back} />;
+    return <SignalSteps stored={stored} onChange={onChange} onBack={back} />;
   }
   if (game === 'glow') {
-    return <GlowOffGame mode={mode} stored={stored} onChange={onChange} onBack={back} />;
+    return <GlowOffGame stored={stored} onChange={onChange} onBack={back} />;
   }
   if (game === 'slide') {
-    return <SlideGame mode={mode} stored={stored} onChange={onChange} onBack={back} />;
+    return <SlideGame stored={stored} onChange={onChange} onBack={back} />;
   }
   return (
     <section className="activity-picker">
-      <div className="duration-row" role="group" aria-label="Play mode">
-        <button type="button" className={mode === 'daily' ? 'active' : ''} onClick={() => setMode('daily')}>
-          Daily
-        </button>
-        <button type="button" className={mode === 'free' ? 'active' : ''} onClick={() => setMode('free')}>
-          Free play
-        </button>
-      </div>
       <div className="activity-cards play-cards">
         <button type="button" className="activity-card" onClick={() => setGame('threadline')}>
           <span className="activity-preview thread-preview" aria-hidden="true">╲╱</span>
@@ -1309,7 +1306,6 @@ function PlayView({
  *  remaining space in any orientation, and one action row. The view never scrolls. */
 function GameFrame({
   name,
-  mode,
   stat,
   status,
   onBack,
@@ -1317,7 +1313,6 @@ function GameFrame({
   actions,
 }: {
   name: string;
-  mode: PlayMode;
   stat: string;
   status: string;
   onBack(): void;
@@ -1330,7 +1325,6 @@ function GameFrame({
         <button type="button" className="game-back" onClick={onBack} aria-label="Back to Play">‹</button>
         <span className="game-title">
           <strong>{name}</strong>
-          <small>{mode === 'daily' ? 'Daily' : 'Free play'}</small>
         </span>
         <span className="game-stat">{stat}</span>
       </header>
@@ -1342,19 +1336,15 @@ function GameFrame({
 }
 
 function ThreadlineGame({
-  mode,
   stored,
   onChange,
   onBack,
 }: {
-  mode: PlayMode;
   stored: Required<ExploreStoredState>;
   onChange(next: Required<ExploreStoredState>): void;
   onBack(): void;
 }): JSX.Element {
-  const [seed, setSeed] = useState(() =>
-    mode === 'daily' ? dailySeed() : dailySeed(1_000 + stored.threadlineCompleted),
-  );
+  const [seed, setSeed] = useState(() => todaySeed());
   const [points, setPoints] = useState<Point[]>(() => createThreadlinePoints(seed));
   const [dragging, setDragging] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -1387,7 +1377,7 @@ function ThreadlineGame({
   };
 
   const reset = (): void => {
-    const nextSeed = mode === 'daily' ? dailySeed() : seed + 1;
+    const nextSeed = crossings === 0 ? randomPuzzleSeed() : seed;
     setSeed(nextSeed);
     completedRef.current = false;
     setPoints(createThreadlinePoints(nextSeed));
@@ -1396,7 +1386,6 @@ function ThreadlineGame({
   return (
     <GameFrame
       name="Threadline"
-      mode={mode}
       stat={`${stored.threadlineCompleted} solved`}
       status={crossings === 0 ? 'Untangled!' : `${crossings} crossing${crossings === 1 ? '' : 's'} left · drag the points`}
       onBack={onBack}
@@ -1451,7 +1440,7 @@ function ThreadlineGame({
       }
       actions={
         <button type="button" className="explore-secondary" onClick={reset}>
-          {mode === 'daily' ? 'Reset daily puzzle' : 'New puzzle'}
+          {crossings === 0 ? 'Next puzzle' : 'Restart'}
         </button>
       }
     />
@@ -1461,23 +1450,15 @@ function ThreadlineGame({
 type SignalPhase = 'idle' | 'showing' | 'input' | 'success' | 'error';
 
 function SignalSteps({
-  mode,
   stored,
   onChange,
   onBack,
 }: {
-  mode: PlayMode;
   stored: Required<ExploreStoredState>;
   onChange(next: Required<ExploreStoredState>): void;
   onBack(): void;
 }): JSX.Element {
-  const sequence = useMemo(
-    () =>
-      createSignalSequence(
-        mode === 'daily' ? dailySeed(91) : dailySeed(10_000 + stored.signalBest),
-      ),
-    [mode, stored.signalBest],
-  );
+  const [sequence, setSequence] = useState(() => createSignalSequence(randomSeed()));
   const [round, setRound] = useState(3);
   const [phase, setPhase] = useState<SignalPhase>('idle');
   const [lit, setLit] = useState<number | null>(null);
@@ -1520,6 +1501,7 @@ function SignalSteps({
       if (stored.vibration) navigator.vibrate?.(18);
       timers.current.push(window.setTimeout(() => {
         setRound((value) => value + 1);
+        setSequence(createSignalSequence(randomSeed()));
         setPhase('idle');
         setInput([]);
       }, 700));
@@ -1529,7 +1511,6 @@ function SignalSteps({
   return (
     <GameFrame
       name="Signal Steps"
-      mode={mode}
       stat={`Best ${stored.signalBest}`}
       status={`Round ${round - 2} · ${
         phase === 'showing' ? 'Watch the sequence.' :
@@ -1597,17 +1578,15 @@ export function createGlowBoard(seed: number): boolean[] {
 }
 
 function GlowOffGame({
-  mode,
   stored,
   onChange,
   onBack,
 }: {
-  mode: PlayMode;
   stored: Required<ExploreStoredState>;
   onChange(next: Required<ExploreStoredState>): void;
   onBack(): void;
 }): JSX.Element {
-  const [seed, setSeed] = useState(() => (mode === 'daily' ? dailySeed(37) : dailySeed(2_000 + stored.glowSolved)));
+  const [seed, setSeed] = useState(() => todaySeed(37));
   const [board, setBoard] = useState(() => createGlowBoard(seed));
   const [moves, setMoves] = useState(0);
   const lit = board.filter(Boolean).length;
@@ -1625,7 +1604,7 @@ function GlowOffGame({
   };
 
   const reset = (): void => {
-    const nextSeed = mode === 'daily' || !solved ? seed : seed + 1;
+    const nextSeed = solved ? randomPuzzleSeed(37) : seed;
     setSeed(nextSeed);
     setBoard(createGlowBoard(nextSeed));
     setMoves(0);
@@ -1634,7 +1613,6 @@ function GlowOffGame({
   return (
     <GameFrame
       name="Glow Off"
-      mode={mode}
       stat={`${stored.glowSolved} solved`}
       status={solved ? `All dark in ${moves} moves!` : `${lit} lit · ${moves} moves · a tap flips its neighbours too`}
       onBack={onBack}
@@ -1654,7 +1632,7 @@ function GlowOffGame({
       }
       actions={
         <button type="button" className="explore-secondary" onClick={reset}>
-          {solved && mode === 'free' ? 'Next puzzle' : 'Restart'}
+          {solved ? 'Next puzzle' : 'Restart'}
         </button>
       }
     />
@@ -1705,17 +1683,15 @@ export function createSlideBoard(seed: number): number[] {
 }
 
 function SlideGame({
-  mode,
   stored,
   onChange,
   onBack,
 }: {
-  mode: PlayMode;
   stored: Required<ExploreStoredState>;
   onChange(next: Required<ExploreStoredState>): void;
   onBack(): void;
 }): JSX.Element {
-  const [seed, setSeed] = useState(() => (mode === 'daily' ? dailySeed(53) : dailySeed(3_000) + Math.floor(Math.random() * 1_000)));
+  const [seed, setSeed] = useState(() => todaySeed(53));
   const [board, setBoard] = useState(() => createSlideBoard(seed));
   const [moves, setMoves] = useState(0);
   const solved = isSlideSolved(board);
@@ -1734,7 +1710,7 @@ function SlideGame({
   };
 
   const reset = (): void => {
-    const nextSeed = mode === 'daily' || !solved ? seed : seed + 1;
+    const nextSeed = solved ? randomPuzzleSeed(53) : seed;
     setSeed(nextSeed);
     setBoard(createSlideBoard(nextSeed));
     setMoves(0);
@@ -1743,7 +1719,6 @@ function SlideGame({
   return (
     <GameFrame
       name="Slide 8"
-      mode={mode}
       stat={stored.slideBest ? `Best ${stored.slideBest}` : 'No best yet'}
       status={solved ? `In order in ${moves} moves!` : `${moves} moves · tap a tile next to the gap`}
       onBack={onBack}
@@ -1762,7 +1737,7 @@ function SlideGame({
       }
       actions={
         <button type="button" className="explore-secondary" onClick={reset}>
-          {solved && mode === 'free' ? 'Next puzzle' : 'Restart'}
+          {solved ? 'Next puzzle' : 'Restart'}
         </button>
       }
     />

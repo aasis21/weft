@@ -451,7 +451,9 @@ describe('Explore navigation and Discover deck', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
     expect(screen.getByRole('button', { name: 'Show Play' })).toHaveClass('active');
-    expect(document.querySelector('.activity-picker > .duration-row')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Play mode' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Daily')).not.toBeInTheDocument();
+    expect(screen.queryByText('Free play')).not.toBeInTheDocument();
     expect(document.querySelectorAll('.activity-cards > .activity-card')).toHaveLength(4);
     expect(document.querySelector('.explore-header')?.nextElementSibling).toHaveClass('explore-category-body');
     expect(document.querySelector('.explore-category-body')?.nextElementSibling).toHaveClass('live-copilot-dock');
@@ -625,13 +627,12 @@ describe('Threadline logic', () => {
     ))).toBeGreaterThan(0);
   });
 
-  it('supports free play and keyboard point movement', () => {
+  it('starts Threadline without a mode choice and supports keyboard point movement', () => {
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Free play' }));
     fireEvent.click(screen.getByRole('button', { name: /Threadline/ }));
 
-    expect(document.querySelector('.game-title')).toHaveTextContent('ThreadlineFree play');
+    expect(document.querySelector('.game-title')).toHaveTextContent(/^Threadline$/);
     const point = screen.getByRole('button', { name: 'Move point 1' });
     const before = point.getAttribute('transform');
     fireEvent.keyDown(point, { key: 'ArrowRight' });
@@ -662,7 +663,6 @@ describe('Glow Off and Slide 8', () => {
   it('records a solved Glow Off board', () => {
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Free play' }));
     fireEvent.click(screen.getByRole('button', { name: /Glow Off/ }));
     expect(screen.getByRole('group', { name: 'Glow Off grid' }).children).toHaveLength(16);
     // Lights Out over GF(2): try every press combination until the board is dark.
@@ -684,26 +684,40 @@ describe('Glow Off and Slide 8', () => {
     }
     expect(screen.getByText(/All dark in/)).toBeInTheDocument();
     expect(localStorage.getItem('weft.explore.v1')).toContain('"glowSolved":1');
+    fireEvent.click(screen.getByRole('button', { name: 'Next puzzle' }));
+    expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
+    expect(document.querySelectorAll('.glow-grid button.on').length).toBeGreaterThan(0);
   });
 });
 
 describe('Signal Steps and Unwind', () => {
-  it('advances Signal Steps after the deterministic sequence is repeated', () => {
+  it('uses a fresh random sequence for each round', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2025-01-01T12:00:00Z'));
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.1).mockReturnValueOnce(0.9);
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
     fireEvent.click(screen.getByRole('button', { name: /Signal Steps/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Show sequence' }));
     act(() => vi.advanceTimersByTime(2_700));
 
-    const expected = createSignalSequence(20_250_192, 3);
-    for (const cell of expected) {
+    const firstSequence = createSignalSequence(Math.floor(0.1 * 2_147_483_647), 3);
+    for (const cell of firstSequence) {
       fireEvent.click(screen.getByRole('button', { name: `Signal tile ${cell + 1}` }));
     }
 
     expect(screen.getByText(/Correct\./)).toBeInTheDocument();
     expect(localStorage.getItem('weft.explore.v1')).toContain('"signalBest":3');
+    act(() => vi.advanceTimersByTime(700));
+    fireEvent.click(screen.getByRole('button', { name: 'Show sequence' }));
+    act(() => vi.advanceTimersByTime(3_400));
+
+    const nextSequence = createSignalSequence(Math.floor(0.9 * 2_147_483_647), 4);
+    for (const cell of nextSequence) {
+      fireEvent.click(screen.getByRole('button', { name: `Signal tile ${cell + 1}` }));
+    }
+
+    expect(screen.getByText(/Correct\./)).toBeInTheDocument();
+    expect(localStorage.getItem('weft.explore.v1')).toContain('"signalBest":4');
   });
 
   it('uses elapsed deadlines for sparse callbacks while preserving pause and restart', () => {

@@ -1581,17 +1581,6 @@
   gap: 9px;
 }
 
-.activity-picker .duration-row {
-  display: grid;
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 3px;
-  grid-template-columns: 1fr 1fr;
-  border: 1px solid var(--bg-rule);
-  border-radius: 999px;
-  background: var(--bg-elev);
-}
-
 .activity-cards {
   display: grid;
   min-height: 0;
