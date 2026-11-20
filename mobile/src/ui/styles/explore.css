@@ -1810,6 +1810,20 @@
 
 .game-view .game-actions > button { min-width: 160px; }
 
+.game-action-pair {
+  display: flex;
+  width: min(100%, 360px);
+  gap: 8px;
+}
+
+.game-action-pair > button {
+  min-width: 0;
+  flex: 1;
+  padding-inline: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .glow-grid,
 .slide-grid {
   display: grid;

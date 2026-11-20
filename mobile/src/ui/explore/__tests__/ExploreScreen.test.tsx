@@ -660,30 +660,41 @@ describe('Glow Off and Slide 8', () => {
     expect(isSlideSolved(slideTile(slideTile(solved, 7), 8))).toBe(true);
   });
 
-  it('records a solved Glow Off board', () => {
+  it('records Glow Off progress and offers reset plus next puzzle when solved', () => {
     renderExplore();
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
     fireEvent.click(screen.getByRole('button', { name: /Glow Off/ }));
     expect(screen.getByRole('group', { name: 'Glow Off grid' }).children).toHaveLength(16);
-    // Lights Out over GF(2): try every press combination until the board is dark.
     const start = Array.from(document.querySelectorAll('.glow-grid button'), (el) => el.classList.contains('on'));
-    let solution: number[] | null = null;
-    for (let mask = 0; mask < 1 << 16 && !solution; mask += 1) {
-      let board = start;
-      const presses: number[] = [];
-      for (let cell = 0; cell < 16; cell += 1) {
-        if (mask & (1 << cell)) {
-          board = toggleGlow(board, cell);
-          presses.push(cell);
+    const solveBoard = (): void => {
+      // Lights Out over GF(2): try every press combination until the board is dark.
+      const boardStart = Array.from(document.querySelectorAll('.glow-grid button'), (el) => el.classList.contains('on'));
+      let solution: number[] | null = null;
+      for (let mask = 0; mask < 1 << 16 && !solution; mask += 1) {
+        let board = boardStart;
+        const presses: number[] = [];
+        for (let cell = 0; cell < 16; cell += 1) {
+          if (mask & (1 << cell)) {
+            board = toggleGlow(board, cell);
+            presses.push(cell);
+          }
         }
+        if (!board.some(Boolean)) solution = presses;
       }
-      if (!board.some(Boolean)) solution = presses;
-    }
-    for (const cell of solution ?? []) {
-      fireEvent.click(document.querySelectorAll('.glow-grid button')[cell] as HTMLElement);
-    }
+      for (const cell of solution ?? []) {
+        fireEvent.click(document.querySelectorAll('.glow-grid button')[cell] as HTMLElement);
+      }
+    };
+
+    solveBoard();
     expect(screen.getByText(/All dark in/)).toBeInTheDocument();
     expect(localStorage.getItem('weft.explore.v1')).toContain('"glowSolved":1');
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next puzzle' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(Array.from(document.querySelectorAll('.glow-grid button'), (el) => el.classList.contains('on'))).toEqual(start);
+    expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
+    solveBoard();
     fireEvent.click(screen.getByRole('button', { name: 'Next puzzle' }));
     expect(screen.getByRole('button', { name: 'Restart' })).toBeInTheDocument();
     expect(document.querySelectorAll('.glow-grid button.on').length).toBeGreaterThan(0);

@@ -1377,7 +1377,12 @@ function ThreadlineGame({
   };
 
   const reset = (): void => {
-    const nextSeed = crossings === 0 ? randomPuzzleSeed() : seed;
+    completedRef.current = false;
+    setPoints(createThreadlinePoints(seed));
+  };
+
+  const nextPuzzle = (): void => {
+    const nextSeed = randomPuzzleSeed();
     setSeed(nextSeed);
     completedRef.current = false;
     setPoints(createThreadlinePoints(nextSeed));
@@ -1439,9 +1444,14 @@ function ThreadlineGame({
       </svg>
       }
       actions={
-        <button type="button" className="explore-secondary" onClick={reset}>
-          {crossings === 0 ? 'Next puzzle' : 'Restart'}
-        </button>
+        crossings === 0 ? (
+          <div className="game-action-pair">
+            <button type="button" className="explore-secondary" onClick={reset}>Reset</button>
+            <button type="button" className="explore-secondary" onClick={nextPuzzle}>Next puzzle</button>
+          </div>
+        ) : (
+          <button type="button" className="explore-secondary" onClick={reset}>Restart</button>
+        )
       }
     />
   );
@@ -1604,7 +1614,12 @@ function GlowOffGame({
   };
 
   const reset = (): void => {
-    const nextSeed = solved ? randomPuzzleSeed(37) : seed;
+    setBoard(createGlowBoard(seed));
+    setMoves(0);
+  };
+
+  const nextPuzzle = (): void => {
+    const nextSeed = randomPuzzleSeed(37);
     setSeed(nextSeed);
     setBoard(createGlowBoard(nextSeed));
     setMoves(0);
@@ -1631,9 +1646,14 @@ function GlowOffGame({
         </div>
       }
       actions={
-        <button type="button" className="explore-secondary" onClick={reset}>
-          {solved ? 'Next puzzle' : 'Restart'}
-        </button>
+        solved ? (
+          <div className="game-action-pair">
+            <button type="button" className="explore-secondary" onClick={reset}>Reset</button>
+            <button type="button" className="explore-secondary" onClick={nextPuzzle}>Next puzzle</button>
+          </div>
+        ) : (
+          <button type="button" className="explore-secondary" onClick={reset}>Restart</button>
+        )
       }
     />
   );
@@ -1710,7 +1730,12 @@ function SlideGame({
   };
 
   const reset = (): void => {
-    const nextSeed = solved ? randomPuzzleSeed(53) : seed;
+    setBoard(createSlideBoard(seed));
+    setMoves(0);
+  };
+
+  const nextPuzzle = (): void => {
+    const nextSeed = randomPuzzleSeed(53);
     setSeed(nextSeed);
     setBoard(createSlideBoard(nextSeed));
     setMoves(0);
@@ -1736,9 +1761,14 @@ function SlideGame({
         </div>
       }
       actions={
-        <button type="button" className="explore-secondary" onClick={reset}>
-          {solved ? 'Next puzzle' : 'Restart'}
-        </button>
+        solved ? (
+          <div className="game-action-pair">
+            <button type="button" className="explore-secondary" onClick={reset}>Reset</button>
+            <button type="button" className="explore-secondary" onClick={nextPuzzle}>Next puzzle</button>
+          </div>
+        ) : (
+          <button type="button" className="explore-secondary" onClick={reset}>Restart</button>
+        )
       }
     />
   );
