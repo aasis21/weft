@@ -508,7 +508,7 @@ export function ExploreScreen({
         </header>
 
         {view === null ? (
-          <ExploreHome onOpen={openCategory} />
+          <ExploreHome stored={stored} onOpen={openCategory} />
         ) : (
           <div className="explore-category-body">
             {view === 'discover' ? (
@@ -529,10 +529,29 @@ export function ExploreScreen({
 }
 
 function ExploreHome({
+  stored,
   onOpen,
 }: {
+  stored: Required<ExploreStoredState>;
   onOpen(category: ExploreCategory): void;
 }): JSX.Element {
+  const discoverTitle = useMemo(() => {
+    const today = discoverDayKey();
+    const cycle = stored.discoverDay === today ? stored.discoverCycle : 0;
+    const index = stored.discoverDay === today ? stored.discoverIndex : 0;
+    const deck = buildDiscoverDeck(DISCOVER_CARDS, hashSeed(`${today}:${cycle}`));
+    return deck[Math.min(index, deck.length - 1)]?.title ?? null;
+  }, [stored.discoverCycle, stored.discoverDay, stored.discoverIndex]);
+  const previews: Record<ExploreCategory, JSX.Element> = {
+    discover: <span className="explore-choice-quote">{discoverTitle ?? 'A new card every day'}</span>,
+    watch: <span className="explore-choice-bars"><i /><i /><i /><i /></span>,
+    play: (
+      <span className="explore-choice-stats">
+        <b>{stored.threadlineCompleted}</b> solved · best <b>{stored.signalBest}</b>
+      </span>
+    ),
+    unwind: <span className="explore-choice-breath"><i /></span>,
+  };
   return (
     <section className="explore-home" aria-labelledby="explore-question">
       <div className="explore-intro">
@@ -550,6 +569,7 @@ function ExploreHome({
               onClick={() => onOpen(category)}
             >
               <span className="explore-choice-icon" aria-hidden="true">{meta.icon}</span>
+              <span className="explore-choice-preview" aria-hidden="true">{previews[category]}</span>
               <strong>{meta.title}</strong>
               <span>{meta.subtitle}</span>
             </button>
@@ -600,9 +620,8 @@ function LiveCopilotDock({
   const elapsed = formatElapsed(dock.startedAt, now);
   const activityText = activity.map((item) => item.text).join('. ');
   const streaming = activity.find((item) => item.kind === 'assistant' && item.state === 'live') ?? null;
-  const steps = activity.filter((item) => item !== streaming);
-  const current = steps.at(-1) ?? null;
-  const previous = steps.length > 1 ? steps.at(-2) ?? null : null;
+  const current =
+    (dock.tone === 'working' ? activity.filter((item) => item !== streaming).at(-1) : activity[0]) ?? null;
   const needsAttention = dock.tone === 'attention' || dock.tone === 'error';
   return (
     <button
@@ -616,37 +635,28 @@ function LiveCopilotDock({
       </span>
       <span className="live-copilot-copy">
         <span className="live-copilot-status">
-          <span>
-            <i className="live-copilot-dot" aria-hidden="true" />
-            <strong>{dock.label}</strong>
-          </span>
+          <i className="live-copilot-dot" aria-hidden="true" />
+          <strong>{dock.label}</strong>
           {elapsed ? <time>{elapsed}</time> : null}
         </span>
         {needsAttention ? (
           <span className="live-copilot-attention">
-            <strong>{dock.text}</strong>
-            {dock.detail ? <small>{dock.detail}</small> : null}
+            {dock.tone === 'attention' && dock.detail ? `${dock.text} · ${dock.detail}` : dock.text}
           </span>
-        ) : (
-          <span className="live-copilot-feed" aria-hidden="true">
-            {current ? (
-              <span className={`live-copilot-current live-copilot-line-${current.state}`}>
-                <i>{current.state === 'complete' ? '✓' : current.state === 'error' ? '!' : '›'}</i>
-                <span>{current.text}{(current.count ?? 1) > 1 ? ` ×${current.count}` : ''}</span>
-              </span>
-            ) : null}
-            {streaming ? <span className="live-copilot-stream">{streaming.text}<b /></span> : null}
-            {previous ? (
-              <span className="live-copilot-previous">
-                {previous.text}{(previous.count ?? 1) > 1 ? ` ×${previous.count}` : ''}
-              </span>
-            ) : null}
+        ) : current ? (
+          <span className={`live-copilot-feed live-copilot-line-${current.state}`} aria-hidden="true">
+            <i>{current.state === 'complete' ? '✓' : current.state === 'error' ? '!' : '›'}</i>
+            <span>{current.text}{(current.count ?? 1) > 1 ? ` ×${current.count}` : ''}</span>
           </span>
-        )}
-        <span className="live-copilot-action">
-          {needsAttention ? (dock.tone === 'attention' ? 'Review in chat' : 'Open chat') : 'Open chat'}
-          <span aria-hidden="true">›</span>
-        </span>
+        ) : streaming ? (
+          <span className="live-copilot-feed live-copilot-stream" aria-hidden="true">
+            <span>{streaming.text}</span><b />
+          </span>
+        ) : null}
+      </span>
+      <span className="live-copilot-action">
+        {dock.tone === 'attention' ? 'Review in chat' : 'Open chat'}
+        <span aria-hidden="true">›</span>
       </span>
     </button>
   );
@@ -884,55 +894,55 @@ function DiscoverView({
       }}
       onPointerUp={onPointerUp}
     >
-      {preview ? (
+      <div className="discover-stage">
+        {preview ? (
+          <DiscoverDeckCard
+            card={preview.card}
+            className="discover-deck-card discover-deck-card-underlay"
+            hidden
+          />
+        ) : null}
         <DiscoverDeckCard
-          card={preview.card}
-          index={preview.index}
-          total={deck.length}
-          className="discover-deck-card discover-deck-card-underlay"
-          hidden
+          card={card}
+          className={`discover-deck-card discover-deck-card-current discover-deck-card-${motion.phase}`}
+          style={cardStyle}
         />
-      ) : null}
-      <DiscoverDeckCard
-        card={card}
-        index={index}
-        total={deck.length}
-        className={`discover-deck-card discover-deck-card-current discover-deck-card-${motion.phase}`}
-        style={cardStyle}
-      />
-      <button
-        type="button"
-        className="discover-edge-nav discover-edge-nav-previous"
-        aria-label="Previous Discover card"
-        disabled={index === 0 || motion.phase === 'exiting'}
-        onClick={() => animateCard(-1)}
-      >
-        ←
-      </button>
-      <button
-        type="button"
-        className="discover-edge-nav discover-edge-nav-next"
-        aria-label="Next Discover card"
-        disabled={motion.phase === 'exiting'}
-        onClick={() => animateCard(1)}
-      >
-        →
-      </button>
+      </div>
+      <div className="discover-pager">
+        <button
+          type="button"
+          className="discover-pager-btn"
+          aria-label="Previous Discover card"
+          disabled={index === 0 || motion.phase === 'exiting'}
+          onClick={() => animateCard(-1)}
+        >
+          ‹
+        </button>
+        <span className="discover-pager-count">{index + 1} / {deck.length}</span>
+        <span className="discover-pager-track" aria-hidden="true">
+          <i style={{ width: `${((index + 1) / deck.length) * 100}%` }} />
+        </span>
+        <button
+          type="button"
+          className="discover-pager-btn"
+          aria-label="Next Discover card"
+          disabled={motion.phase === 'exiting'}
+          onClick={() => animateCard(1)}
+        >
+          ›
+        </button>
+      </div>
     </section>
   );
 }
 
 function DiscoverDeckCard({
   card,
-  index,
-  total,
   className,
   style,
   hidden = false,
 }: {
   card: DiscoverCard;
-  index: number;
-  total: number;
   className: string;
   style?: CSSProperties;
   hidden?: boolean;
@@ -941,11 +951,7 @@ function DiscoverDeckCard({
     <article className={className} style={style} aria-live={hidden ? undefined : 'polite'} aria-hidden={hidden || undefined}>
       <div className="discover-deck-topline">
         <span>{DISCOVER_TOPIC_LABELS[card.topic]}</span>
-        <span>
-          <b>{index + 1} / {total}</b>
-          <i aria-hidden="true">·</i>
-          <b>{card.minutes} min</b>
-        </span>
+        <span>{card.minutes} min</span>
       </div>
       <h1>{card.title}</h1>
       <p className="discover-deck-summary">{card.summary}</p>
@@ -1254,16 +1260,18 @@ function PlayView({
           Free play
         </button>
       </div>
-      <button type="button" className="activity-card" onClick={() => setGame('threadline')}>
-        <span className="activity-preview thread-preview" aria-hidden="true">╲╱</span>
-        <span><small>Logic · 1–3 min</small><strong>Threadline</strong><p>Move the points until no threads cross.</p></span>
-        <b>{stored.threadlineCompleted} solved</b>
-      </button>
-      <button type="button" className="activity-card" onClick={() => setGame('signal')}>
-        <span className="activity-preview signal-preview" aria-hidden="true">● ○ ●</span>
-        <span><small>Memory · 30 sec+</small><strong>Signal Steps</strong><p>Watch a sequence, then repeat it.</p></span>
-        <b>Best {stored.signalBest}</b>
-      </button>
+      <div className="activity-cards">
+        <button type="button" className="activity-card" onClick={() => setGame('threadline')}>
+          <span className="activity-preview thread-preview" aria-hidden="true">╲╱</span>
+          <span><small>Logic · 1–3 min</small><strong>Threadline</strong><p>Move the points until no threads cross.</p></span>
+          <b>{stored.threadlineCompleted} solved</b>
+        </button>
+        <button type="button" className="activity-card" onClick={() => setGame('signal')}>
+          <span className="activity-preview signal-preview" aria-hidden="true">● ○ ●</span>
+          <span><small>Memory · 30 sec+</small><strong>Signal Steps</strong><p>Watch a sequence, then repeat it.</p></span>
+          <b>Best {stored.signalBest}</b>
+        </button>
+      </div>
     </section>
   );
 }
@@ -1509,14 +1517,16 @@ function UnwindView({
   }
   return (
     <section className="activity-picker">
-      <button type="button" className="activity-card" onClick={() => setActivity('breathe')}>
-        <span className="activity-preview breathe-preview" aria-hidden="true"><WaveGlyph /></span>
-        <span><small>1, 2, or 5 min</small><strong>Weave Breath</strong><p>A quiet guided breathing rhythm.</p></span>
-      </button>
-      <button type="button" className="activity-card" onClick={() => setActivity('eyes')}>
-        <span className="activity-preview horizon-preview" aria-hidden="true">— ◯ —</span>
-        <span><small>20 seconds</small><strong>Eye Horizon</strong><p>Look away and let your eyes reset.</p></span>
-      </button>
+      <div className="activity-cards">
+        <button type="button" className="activity-card" onClick={() => setActivity('breathe')}>
+          <span className="activity-preview breathe-preview" aria-hidden="true"><WaveGlyph /></span>
+          <span><small>1, 2, or 5 min</small><strong>Weave Breath</strong><p>A quiet guided breathing rhythm.</p></span>
+        </button>
+        <button type="button" className="activity-card" onClick={() => setActivity('eyes')}>
+          <span className="activity-preview horizon-preview" aria-hidden="true">— ◯ —</span>
+          <span><small>20 seconds</small><strong>Eye Horizon</strong><p>Look away and let your eyes reset.</p></span>
+        </button>
+      </div>
       <label className="explore-toggle">
         <input
           type="checkbox"

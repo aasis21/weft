@@ -9,13 +9,13 @@ import {
   type SessionOpenIntent,
 } from '@/session/access/sessionAccess';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
-import { DeviceAvatar, PlusGlyph } from '@/ui/screens/deviceGlyphs';
+import { PlusGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { useNowTick } from '@/ui/hooks/useNowTick';
 import { ALL_FOLDERS, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
 
-/** Which of the two ways into a session this screen is showing. They share every step — device,
- *  folder, permissions — and differ only in what the folder step is choosing *within*. */
+/** Which of the two ways into a session this screen is showing. Both share the device picker and
+ *  permissions; New leads with the first message, Resume with the list of stored sessions. */
 export type StartMode = 'new' | 'resume';
 
 interface StartSessionScreenProps {
@@ -73,18 +73,16 @@ export function StartSessionScreen({
   const [mode, setMode] = useState<SpawnMode>('default');
   const modeTouchedRef = useRef(false);
   const modeDeviceRef = useRef<string | null>(null);
+  // --- new-tab draft: kept across tab switches so flipping to Resume and back loses nothing -------
+  const [firstMessage, setFirstMessage] = useState('');
   const [name, setName] = useState('');
+  const [nameOpen, setNameOpen] = useState(false);
   const [nameEditing, setNameEditing] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<LifecycleStatusMsg | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  /** Arriving with a device already chosen (the "Start session" / "Resume a session" buttons on a
-   *  device row) means the device question is already answered, so step 1 opens collapsed to a
-   *  single summary row. Coming in cold from home there is nothing to summarise, so it opens as
-   *  the full list. Either way "Change" re-expands it — this only picks the starting state. */
-  const [deviceOpen, setDeviceOpen] = useState(!initialChannelId);
   // --- resume-tab state -------------------------------------------------------------------------
   const [sessionQuery, setSessionQuery] = useState('');
   const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
@@ -263,12 +261,15 @@ export function StartSessionScreen({
     if (!selected || !selected.connected || !projectName) return;
     setBusy(true);
     setError(null);
+    const initialPrompt = firstMessage.trim();
     try {
+      // The draft stays in state until the screen closes, so a refused launch keeps the text.
       applyStatus(await onOpen({
         deviceChannelId: selected.channelId,
         target: { kind: 'new', projectName },
         mode,
         name: name.trim() || null,
+        ...(initialPrompt ? { initialPrompt } : {}),
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the session.');
@@ -333,7 +334,48 @@ export function StartSessionScreen({
           : `${chosenSession?.running ? 'Connect' : 'Resume'} on ${selected ? deviceLabel(selected) : 'device'}`
     : busy
       ? 'Starting…'
-      : `Start on ${selected ? deviceLabel(selected) : 'device'}`;
+      : firstMessage.trim()
+        ? 'Start & send'
+        : 'Start session';
+  const selectedStatus = selected ? deviceStatus(selected) : null;
+  const selectedLastSeen = selected ? formatLastSeen(selected.lastSeenAt, now) : null;
+
+  const permissionsControl = (
+    <div className="start-permissions">
+      <span className="start-field-label" id="start-mode-label">Permissions</span>
+      <div className="start-mode-toggle" role="radiogroup" aria-labelledby="start-mode-label">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === 'default'}
+          className={mode === 'default' ? 'selected' : ''}
+          onClick={() => {
+            modeTouchedRef.current = true;
+            setMode('default');
+          }}
+        >
+          Default
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={mode === 'allow-all'}
+          className={mode === 'allow-all' ? 'selected' : ''}
+          onClick={() => {
+            modeTouchedRef.current = true;
+            setMode('allow-all');
+          }}
+        >
+          Allow all
+        </button>
+      </div>
+      {mode === 'allow-all' ? (
+        <p className="start-mode-hint">
+          Grants full permissions: tools, file paths, and URLs run without confirmation.
+        </p>
+      ) : null}
+    </div>
+  );
 
   return (
     <main className={`weft-session join-session start-session-v2${nameEditing ? ' name-editing' : ''}`}>
@@ -399,75 +441,42 @@ export function StartSessionScreen({
               </button>
             </div>
 
-            <section className="start-section">
-              <h3 className="start-section-title">
-                1. Device
-                {sortedDevices.length > 1 && deviceOpen
-                  ? <span className="start-section-count">{sortedDevices.length}</span>
-                  : null}
-                {deviceOpen || sortedDevices.length < 2 ? (
-                  <button
-                    type="button"
-                    className="start-add-device"
-                    onClick={onScanListener}
-                    aria-label="Add a new device"
-                  >
-                    <span className="device-action-icon" aria-hidden="true"><PlusGlyph /></span>
-                    Add device
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="session-link-btn"
-                    onClick={() => setDeviceOpen(true)}
-                  >
-                    Change
-                  </button>
-                )}
-              </h3>
-              <div
-                className="start-device-list"
-                role={deviceOpen ? 'radiogroup' : undefined}
-                aria-label={deviceOpen ? 'Device' : undefined}
+            <div className="start-device-row">
+              <select
+                className="start-device-select"
+                aria-label="Device"
+                value={selected?.channelId ?? ''}
+                onChange={(e) => setSelectedId(e.currentTarget.value)}
               >
-                {(deviceOpen ? sortedDevices : sortedDevices.filter((d) => d.channelId === selected?.channelId)).map((device) => {
-                  const status = deviceStatus(device);
-                  const isSelected = device.channelId === selected?.channelId;
-                  const lastSeen = formatLastSeen(device.lastSeenAt, now);
-                  return (
-                    <button
-                      key={device.channelId}
-                      type="button"
-                      role={deviceOpen ? 'radio' : undefined}
-                      aria-checked={deviceOpen ? isSelected : undefined}
-                      className={`start-device-card${isSelected ? ' selected' : ''}`}
-                      onClick={() => (deviceOpen ? setSelectedId(device.channelId) : setDeviceOpen(true))}
-                    >
-                      <DeviceAvatar tone={status.tone} />
-                      <span className="start-device-info">
-                        <span className="start-device-name">
-                          {deviceLabel(device)}
-                          {device.isDefault ? <span className="start-device-default">default</span> : null}
-                        </span>
-                        <span className={`start-device-status device-status-${status.tone}`}>
-                          <span className="device-status-dot" aria-hidden="true" />
-                          {status.label}
-                          {lastSeen ? ` · seen ${lastSeen}` : ''}
-                          {device.connected && device.projectsLoading ? ' · refreshing projects…' : ''}
-                        </span>
-                      </span>
-                      <span className="start-device-check" aria-hidden="true">✓</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-            </section>
+                {sortedDevices.map((device) => (
+                  <option key={device.channelId} value={device.channelId}>
+                    {`${deviceLabel(device)}${device.isDefault ? ' (default)' : ''} · ${deviceStatus(device).label}`}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="start-add-device"
+                onClick={onScanListener}
+                aria-label="Add a new device"
+              >
+                <span className="device-action-icon" aria-hidden="true"><PlusGlyph /></span>
+                Add
+              </button>
+            </div>
+            {selected && selectedStatus ? (
+              <p className={`start-device-status device-status-${selectedStatus.tone}`}>
+                <span className="device-status-dot" aria-hidden="true" />
+                {selectedStatus.label}
+                {selectedLastSeen ? ` · seen ${selectedLastSeen}` : ''}
+                {selected.connected && selected.projectsLoading ? ' · refreshing projects…' : ''}
+              </p>
+            ) : null}
 
             {resuming ? (
-              <section className="start-section start-resume-section">
-                <h3 className="start-section-title">
-                  2. Folder &amp; session
+              <section className="start-resume-section" aria-label="Sessions to resume">
+                <div className="start-resume-head">
+                  <span className="start-field-label">Recent sessions</span>
                   <button
                     type="button"
                     className="session-link-btn"
@@ -482,7 +491,7 @@ export function StartSessionScreen({
                   >
                     {selected?.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}
                   </button>
-                </h3>
+                </div>
                 <div className="session-filter-bar">
                   <select
                     className="session-filter-folder"
@@ -568,90 +577,74 @@ export function StartSessionScreen({
                   </>
                 )}
                 {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
+                {permissionsControl}
               </section>
             ) : (
-              <section className="start-section">
-                <h3 className="start-section-title">2. Folder</h3>
-                {selected?.projectsLoading ? (
-                  <p className="session-join-hint start-loading">Loading projects from the device…</p>
-                ) : selected && selected.projects.length === 0 ? (
-                  <p className="session-join-hint">No projects received yet. Refresh after the device is online.</p>
-                ) : (
-                  <label className="session-field start-project-field">
-                    <select
-                      value={projectName}
-                      disabled={!selected || selected.projects.length === 0}
-                      onChange={(e) => setProjectName(e.target.value)}
-                    >
-                      {selected?.projects.map((project) => (
-                        <option key={project.name} value={project.name}>
-                          {project.name}{project.isDefault ? ' (default)' : ''}
-                        </option>
-                      ))}
-                    </select>
+              <section className="start-new-composer" aria-label="New session">
+                <textarea
+                  className="start-first-message"
+                  aria-label="First message"
+                  placeholder="What should Copilot work on?"
+                  rows={4}
+                  value={firstMessage}
+                  onChange={(e) => setFirstMessage(e.currentTarget.value)}
+                />
+                <div className="start-new-controls">
+                  {selected?.projectsLoading ? (
+                    <p className="session-join-hint start-loading">Loading projects from the device…</p>
+                  ) : selected && selected.projects.length === 0 ? (
+                    <p className="session-join-hint">No projects received yet. Refresh after the device is online.</p>
+                  ) : (
+                    <label className="start-project-field">
+                      <span className="start-field-label">Folder</span>
+                      <select
+                        value={projectName}
+                        disabled={!selected || selected.projects.length === 0}
+                        onChange={(e) => setProjectName(e.target.value)}
+                      >
+                        {selected?.projects.map((project) => (
+                          <option key={project.name} value={project.name}>
+                            {project.name}{project.isDefault ? ' (default)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {permissionsControl}
+                </div>
+                {nameOpen ? (
+                  <label className="session-field start-name-field">
+                    <span>Session name (optional)</span>
+                    <input
+                      ref={nameInputRef}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onFocus={() => setNameEditing(true)}
+                      onBlur={() => setNameEditing(false)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' || ctaDisabled) return;
+                        e.preventDefault();
+                        setNameEditing(false);
+                        e.currentTarget.blur();
+                        void submitNew();
+                      }}
+                      enterKeyHint="go"
+                      placeholder="e.g. Mobile bug sweep"
+                    />
                   </label>
+                ) : (
+                  <button
+                    type="button"
+                    className="session-link-btn start-name-toggle"
+                    aria-expanded={false}
+                    onClick={() => setNameOpen(true)}
+                  >
+                    + Name (optional)
+                  </button>
                 )}
                 {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
               </section>
             )}
-
-            <section className="start-section">
-              <h3 className="start-section-title">3. Options</h3>
-              {resuming ? null : (
-                <label className="session-field start-name-field">
-                  <span>Session name (optional)</span>
-                  <input
-                    ref={nameInputRef}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    onFocus={() => setNameEditing(true)}
-                    onBlur={() => setNameEditing(false)}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter' || ctaDisabled) return;
-                      e.preventDefault();
-                      setNameEditing(false);
-                      e.currentTarget.blur();
-                      void submitNew();
-                    }}
-                    enterKeyHint="go"
-                    placeholder="e.g. Mobile bug sweep"
-                  />
-                </label>
-              )}
-              <span className="start-field-label" id="start-mode-label">Permissions</span>
-              <div className="start-mode-toggle" role="radiogroup" aria-labelledby="start-mode-label">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={mode === 'default'}
-                  className={mode === 'default' ? 'selected' : ''}
-                  onClick={() => {
-                    modeTouchedRef.current = true;
-                    setMode('default');
-                  }}
-                >
-                  Default
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={mode === 'allow-all'}
-                  className={mode === 'allow-all' ? 'selected' : ''}
-                  onClick={() => {
-                    modeTouchedRef.current = true;
-                    setMode('allow-all');
-                  }}
-                >
-                  Allow all
-                </button>
-              </div>
-              {mode === 'allow-all' ? (
-                <p className="start-mode-hint">
-                  Grants full permissions: tools, file paths, and URLs run without confirmation.
-                </p>
-              ) : null}
-
-            </section>
 
             {error ? <p className="error-banner">{error}</p> : null}
 

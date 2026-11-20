@@ -28,6 +28,8 @@ export interface PendingOperation {
   spawnedFromDeviceName?: string;
   projectName: string;
   name?: string;
+  /** First message typed before launch; sent through the normal prompt path once paired. */
+  initialPrompt?: string;
   mode: SpawnMode;
   sessionId?: string;
   storeAuthority?: string | null;

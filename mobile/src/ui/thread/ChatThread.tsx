@@ -643,6 +643,11 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
           const followsTool = previousRenderableItem(items, idx)?.kind === 'tool';
           return (
             <div key={item.id} className={`row user${followsTool ? ' after-tool' : ''}`}>
+              <div className="user-meta">
+                <span className="user-who">You</span>
+                <DeviceChip origin={item.origin} />
+                <span className="ts user-ts">{formatTime(item.ts)}</span>
+              </div>
               {images.length > 0 ? (
                 <div className="msg-attachments">
                   {images.map((att, i) => (
@@ -670,24 +675,24 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
                   {item.text}
                 </div>
               ) : null}
-              <div className="user-meta">
-                <span className="ts user-ts">{formatTime(item.ts)}</span>
-                <DeviceChip origin={item.origin} />
-                {item.delivery === 'enqueue' ? <span className="user-queued">Queued</span> : null}
-                {item.failed ? (
-                  <span className="user-failed" role="alert">Not delivered</span>
-                ) : null}
-                {item.failed && onRetry ? (
-                  <button
-                    type="button"
-                    className="reconnect-btn user-retry"
-                    aria-label="Retry sending message"
-                    onClick={() => onRetry(item.id)}
-                  >
-                    Retry
-                  </button>
-                ) : null}
-              </div>
+              {item.delivery === 'enqueue' || item.failed ? (
+                <div className="user-status">
+                  {item.delivery === 'enqueue' ? <span className="user-queued">Queued</span> : null}
+                  {item.failed ? (
+                    <span className="user-failed" role="alert">Not delivered</span>
+                  ) : null}
+                  {item.failed && onRetry ? (
+                    <button
+                      type="button"
+                      className="reconnect-btn user-retry"
+                      aria-label="Retry sending message"
+                      onClick={() => onRetry(item.id)}
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           );
         }

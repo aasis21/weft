@@ -110,6 +110,47 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.snapshot().devices).toHaveLength(0);
   });
 
+  it('shows a first message as queued while launching and sends it once through the normal sender on pairing', async () => {
+    await h!.manager.addByQr(listenerQr('listener-write-first'));
+    await h!.flush();
+    const listener = registry.get('listener-write-first')!;
+    listener.emit(B.projectList([{ name: 'weft', path: 'C:\\weft', isDefault: true }], 'Laptop'));
+    await h!.flush();
+
+    const tempId = await h!.manager.spawnSession('listener-write-first', {
+      projectName: 'weft',
+      mode: 'default',
+      initialPrompt: '  Fix the flaky test  ',
+    });
+    await h!.flush();
+
+    expect(h!.byChannel(tempId)?.timeline.items).toEqual([
+      expect.objectContaining({ kind: 'user', text: 'Fix the flaky test', delivery: 'enqueue' }),
+    ]);
+    expect((await loadPendingOperations())[0]).toMatchObject({ initialPrompt: 'Fix the flaky test' });
+
+    const spawn = listener.sentOfKind('control.spawn_session')[0]!;
+    listener.emit(B.spawnPairing(spawn.requestId as string, {
+      v: 1,
+      channelId: 'spawned-write-first',
+      pub: 'spawned-pub',
+      kind: 'session',
+      transport: { kind: 'local' },
+    }, 'weft', 'weft'));
+    await vi.advanceTimersByTimeAsync(0);
+    await h!.flush();
+
+    const session = registry.get('spawned-write-first')!;
+    expect(session.sentOfKind('prompt.prompt')).toEqual([
+      expect.objectContaining({ text: 'Fix the flaky test' }),
+    ]);
+    expect(h!.active()?.timeline.items).toEqual([
+      expect.objectContaining({ kind: 'user', text: 'Fix the flaky test' }),
+    ]);
+    expect(h!.active()?.timeline.items[0]).not.toHaveProperty('promptFailed', true);
+    expect(await loadPendingOperations()).toHaveLength(0);
+  });
+
   it('uses lifecycle Open with a new Station and retains legacy Start for an old Station', async () => {
     await h!.manager.addByQr(listenerQr('listener-matrix'));
     await h!.flush();

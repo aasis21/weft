@@ -33,7 +33,6 @@ export async function spawnCopilotSession({
 } = {}) {
   const cwd = project?.path;
   if (!cwd) return { ok: false, error: "Project path is required" };
-  const sessionName = name || "weft-session";
   const cleanup = [];
   const startedAt = Date.now();
   const operation = createHash("sha256").update(operationId ?? identity?.channelId ?? randomUUID()).digest("hex").slice(0, 12);
@@ -44,10 +43,14 @@ export async function spawnCopilotSession({
       { baseDir },
     );
     cleanup.push(identityFile);
-    // Resume an existing session by id (keeps its stored name/history) vs. name a fresh one.
+    // Resume an existing session by id (keeps its stored name/history) vs. start a fresh one.
     // `--resume=<id>` uses the attached-value form so the CLI never treats the id as a positional
-    // (its `-r, --resume[=value]` takes an OPTIONAL value).
-    const copilotArgs = resumeSessionId ? [`--resume=${resumeSessionId}`] : ["-n", sessionName];
+    // (its `-r, --resume[=value]` takes an OPTIONAL value). A fresh session is named only when the
+    // user chose a name: a placeholder `-n` would be reported as the title (relay fetchTitle reads
+    // `initialName`) and mask the folder fallback until Copilot derives its own title.
+    const copilotArgs = resumeSessionId
+      ? [`--resume=${resumeSessionId}`]
+      : name ? ["-n", name] : [];
     if (mode === "allow-all") copilotArgs.push("--allow-all");
     // The direct-spawn path (no visible terminal) inherits this env correctly. The visible-terminal
     // launchers below can't rely on it — they route through a terminal broker with its own stale

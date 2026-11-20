@@ -333,6 +333,34 @@ test("spawnCopilotSession resumes an existing session by id in its cwd (no -n na
   assert.equal(calls[0].options.env.WEFT_CHANNEL_ID, "chan-resume");
 });
 
+test("spawnCopilotSession leaves an unnamed fresh session for Copilot to title (no -n placeholder)", async () => {
+  const saved = { WT_SESSION: process.env.WT_SESSION, GNOME_TERMINAL_SCREEN: process.env.GNOME_TERMINAL_SCREEN };
+  delete process.env.WT_SESSION;
+  delete process.env.GNOME_TERMINAL_SCREEN;
+  const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-unnamed-"));
+  cleanupDirs.push(projectDir);
+  const calls = [];
+  try {
+    const result = await spawnCopilotSession({
+      project: { name: "app", path: projectDir },
+      platform: "linux",
+      identity: await identity("chan-unnamed"),
+      spawnFn(command, args, options) {
+        calls.push({ command, args, options });
+        cleanupFiles.push(options.env.WEFT_IDENTITY_FILE);
+        return { unref() {} };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls[0].args, []);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("spawnCopilotSession reports spawn errors and cleans up identity file", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "weft-spawn-project-"));
   cleanupDirs.push(projectDir);

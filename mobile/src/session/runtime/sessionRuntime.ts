@@ -304,6 +304,7 @@ interface SpawnRequestOptions {
   projectName: string;
   mode: SpawnMode;
   name?: string;
+  initialPrompt?: string;
   operationId?: string;
 }
 
@@ -356,6 +357,14 @@ function basename(path: string | null): string | null {
   if (!path) return null;
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+
+/** Shows a launch's first message on its Initializing card, labelled Queued until it is sent. */
+function showQueuedFirstMessage(session: Session, operation: PendingOperation): void {
+  if (!operation.initialPrompt) return;
+  session.transcript.items = [
+    makeUserItem(`first-${operation.requestId}`, operation.initialPrompt, operation.createdAt, undefined, 'enqueue'),
+  ];
 }
 
 function titleFor(channelId: string, cwd: string | null, stored: string | null): string {
@@ -929,6 +938,7 @@ export class SessionRuntime {
         mode: operation.mode,
         slow: this.clock() - operation.createdAt >= RESUME_SLOW_MS,
       };
+      showQueuedFirstMessage(session, operation);
       this.pendingSpawns.set(operation.requestId, { ...operation });
       if (operation.lifecycleStatus) {
         this.lifecycleStatuses.set(operation.requestId, operation.lifecycleStatus);
@@ -2095,6 +2105,8 @@ export class SessionRuntime {
       await removePendingOperation(requestId);
       this.store.dispatch(sessionRemoved(pending.tempId));
       if (oldActive === pending.tempId) this.activateSession(pairing.channelId);
+      // The pending launch is gone, so a later pairing retry cannot send this a second time.
+      if (pending.initialPrompt) void this.sendPrompt(pairing.channelId, pending.initialPrompt);
     } catch (err) {
       await this.setPendingStage(
         pending,
@@ -2137,9 +2149,6 @@ export class SessionRuntime {
       createdAt,
       mode: opts.mode,
     };
-    this.store.dispatch(sessionAdded(session));
-    this.activateSession(tempId);
-
     const pending: PendingSpawn = {
       requestId,
       tempId,
@@ -2149,10 +2158,15 @@ export class SessionRuntime {
       kind: 'new',
       projectName: opts.projectName,
       name: opts.name?.trim() || undefined,
+      initialPrompt: opts.initialPrompt?.trim() || undefined,
       mode: opts.mode,
       createdAt,
       stage: 'not-delivered',
     };
+    showQueuedFirstMessage(session, pending);
+    this.store.dispatch(sessionAdded(session));
+    this.activateSession(tempId);
+
     pending.slowTimer = setTimeout(() => {
       if (!this.pendingSpawns.has(requestId)) return;
       this.store.dispatch(spawnSlowSet({ id: tempId }));

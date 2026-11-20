@@ -6,16 +6,29 @@ import type { TimelineItem } from '@/lib/timeline';
 const now = Date.UTC(2026, 6, 1, 12, 0);
 
 describe('ChatThread polish', () => {
-  it('keeps user timestamp and device chip in one metadata row', () => {
+  it('shows sender, device and time above the message and delivery status below', () => {
     const items: TimelineItem[] = [{ kind: 'user', id: 'u1', text: 'hello', ts: now, origin: 'terminal', failed: true }];
+    const { container } = render(<ChatThread items={items} onRetry={() => {}} />);
+
+    const row = container.querySelector('.row.user');
+    const parts = Array.from(row?.children ?? []).map((child) => child.className);
+    expect(parts).toEqual(['user-meta', 'bubble user-bubble', 'user-status']);
+    const meta = row?.querySelector('.user-meta');
+    expect(meta).toHaveTextContent(/^You.*Laptop.*\d{1,2}:\d{2}\s[AP]M$/);
+    expect(screen.getByText('Laptop')).toHaveClass('device-chip', 'laptop');
+    const status = row?.querySelector('.user-status');
+    expect(status).toContainElement(screen.getByText('Not delivered'));
+    expect(status).toContainElement(screen.getByRole('button', { name: 'Retry sending message' }));
+  });
+
+  it('puts metadata above attachment-only messages and omits an empty status row', () => {
+    const items: TimelineItem[] = [
+      { kind: 'user', id: 'u2', text: '', ts: now, origin: 'phone', attachments: [{ name: 'a.png', mimeType: 'image/png', data: 'AA==' }] },
+    ] as TimelineItem[];
     const { container } = render(<ChatThread items={items} />);
 
-    const meta = container.querySelector('.row.user .user-meta');
-    expect(meta).toBeInTheDocument();
-    expect(meta?.querySelector('.user-ts')).toHaveTextContent(/\d{1,2}:\d{2}\s[AP]M/);
-    expect(meta).toContainElement(screen.getByText('Laptop'));
-    expect(meta).toContainElement(screen.getByText('Not delivered'));
-    expect(screen.getByText('Laptop')).toHaveClass('device-chip', 'laptop');
+    const parts = Array.from(container.querySelector('.row.user')?.children ?? []).map((child) => child.className);
+    expect(parts).toEqual(['user-meta', 'msg-attachments']);
   });
 
   it('renders the decorative empty icon inside the styled empty-icon container', () => {

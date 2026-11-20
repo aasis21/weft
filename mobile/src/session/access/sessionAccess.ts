@@ -30,6 +30,8 @@ export interface SessionOpenIntent {
   target: SessionAccessTarget;
   mode?: SpawnMode;
   name?: string | null;
+  /** First message for a new session, typed before it was ready; sent once the phone pairs. */
+  initialPrompt?: string | null;
   title?: string | null;
   cwd?: string | null;
   takeoverRequested?: boolean;
@@ -39,6 +41,7 @@ interface NormalizedSessionOpenIntent extends SessionOpenIntent {
   operationId: string;
   mode: SpawnMode;
   name: string | null;
+  initialPrompt: string | null;
   title: string | null;
   cwd: string | null;
   takeoverRequested: boolean;
@@ -62,6 +65,7 @@ export interface SessionAccessRuntime {
       projectName: string;
       mode: SpawnMode;
       name?: string;
+      initialPrompt?: string;
       operationId?: string;
     },
   ): Promise<string>;
@@ -121,6 +125,7 @@ function normalizeIntent(intent: SessionOpenIntent): NormalizedSessionOpenIntent
     operationId: intent.operationId?.trim() || `open-${crypto.randomUUID()}`,
     mode: intent.mode === 'allow-all' ? 'allow-all' : 'default',
     name: intent.target.kind === 'new' ? intent.name?.trim() || null : null,
+    initialPrompt: intent.target.kind === 'new' ? intent.initialPrompt?.trim() || null : null,
     title: intent.title?.trim() || null,
     cwd: intent.cwd?.trim() || null,
     takeoverRequested: intent.target.kind === 'existing' && intent.takeoverRequested === true,
@@ -448,6 +453,7 @@ export class RuntimeSessionAccess implements SessionAccess {
           projectName: intent.target.projectName,
           mode: intent.mode,
           ...(intent.name ? { name: intent.name } : {}),
+          ...(intent.initialPrompt ? { initialPrompt: intent.initialPrompt } : {}),
           operationId: intent.operationId,
         });
       } else if (intent.target.kind === 'offer') {
@@ -549,6 +555,7 @@ export class RuntimeSessionAccess implements SessionAccess {
             title: operation.title ?? null,
             cwd: operation.cwd ?? null,
             takeoverRequested: operation.force === true,
+            initialPrompt: operation.initialPrompt ?? null,
           };
           const operationFingerprint = await fingerprint(intent);
           this.operations.set(operation.requestId, {

@@ -118,20 +118,22 @@ describe('StartSessionScreen', () => {
   });
 });
 
-describe('StartSessionScreen — new and resume are two shapes of one flow', () => {
-  it('opens on New, and swaps only the middle step when you switch to Resume', () => {
+describe('StartSessionScreen — New leads with the message, Resume with the list', () => {
+  const firstMessage = (): HTMLTextAreaElement => screen.getByLabelText(/first message/i) as HTMLTextAreaElement;
+
+  it('opens on New with the composer first, and swaps to the session list on Resume', () => {
     renderScreen({ devices: [resumeDevice('/home/me/weft')] });
 
-    // Device and Options are shared; only the folder step differs.
     expect(screen.getByRole('tab', { name: /new session/i })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText(/^2\. Folder$/)).toBeTruthy();
-    expect(screen.getByLabelText(/session name/i)).toBeTruthy();
+    expect(firstMessage()).toBeTruthy();
+    expect(screen.queryByLabelText(/search recent sessions/i)).toBeNull();
 
     fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
-    expect(screen.getByText(/2\. Folder & session/)).toBeTruthy();
+    expect(screen.queryByLabelText(/first message/i)).toBeNull();
+    expect(screen.getByLabelText(/search recent sessions/i)).toBeTruthy();
     // A resumed session already has a name — the CLI's own title wins once it pairs.
     expect(screen.queryByLabelText(/session name/i)).toBeNull();
-    expect(screen.getByRole('radiogroup', { name: /^device$/i })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: /^device$/i })).toBeTruthy();
   });
 
   it('can open straight onto the Resume tab', () => {
@@ -147,12 +149,12 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
     expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('places the optional session name before permissions', () => {
+  it('keeps the optional name collapsed until asked for', () => {
     renderScreen();
 
-    const name = screen.getByLabelText(/session name/i);
-    const permissions = screen.getByRole('radiogroup', { name: /permissions/i });
-    expect(name.compareDocumentPosition(permissions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByLabelText(/session name/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /name \(optional\)/i }));
+    expect(screen.getByLabelText(/session name/i)).toBeTruthy();
   });
 
   it('keeps the name field visible while editing and starts from the keyboard action', async () => {
@@ -163,6 +165,7 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
 
     try {
       const { container } = renderScreen({ onOpen });
+      fireEvent.click(screen.getByRole('button', { name: /name \(optional\)/i }));
       const name = screen.getByLabelText(/session name/i);
 
       fireEvent.focus(name);
@@ -194,49 +197,102 @@ describe('StartSessionScreen — new and resume are two shapes of one flow', () 
     expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('names the device in the call to action, and says which thing it will do', () => {    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
-    expect(cta().textContent).toMatch(/start on macbook pro/i);
+  it('says "Start & send" once there is a message, and "Start session" without one', async () => {
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
+    renderScreen({ onOpen });
+    expect(cta()).toHaveTextContent(/^Start session$/);
+
+    fireEvent.change(firstMessage(), { target: { value: '   ' } });
+    expect(cta()).toHaveTextContent(/^Start session$/);
+
+    fireEvent.change(firstMessage(), { target: { value: '  Fix the flaky test  ' } });
+    expect(cta()).toHaveTextContent(/^Start & send$/);
+    fireEvent.click(cta());
+
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith({
+      deviceChannelId: 'chan-1',
+      target: { kind: 'new', projectName: 'demo' },
+      mode: 'default',
+      name: null,
+      initialPrompt: 'Fix the flaky test',
+    }));
+  });
+
+  it('starts without a first message exactly as before when the composer is empty', async () => {
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
+    renderScreen({ onOpen });
+    fireEvent.click(cta());
+    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+    expect(onOpen.mock.calls[0]![0]).not.toHaveProperty('initialPrompt');
+  });
+
+  it('keeps the typed message after a refused launch so nothing is lost', async () => {
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({
+      state: 'failed',
+      failure: { code: 'runtime-unavailable', actions: ['retry', 'cancel'], message: 'The laptop is not reachable right now.' },
+    }));
+    renderScreen({ onOpen });
+    fireEvent.change(firstMessage(), { target: { value: 'Ship it' } });
+    fireEvent.click(cta());
+
+    await waitFor(() => expect(screen.getByText(/not reachable/i)).toBeTruthy());
+    expect(firstMessage().value).toBe('Ship it');
+    expect(cta()).toHaveTextContent(/^Start & send$/);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the New draft and folder apart from Resume across tab switches', () => {
+    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
+    fireEvent.change(firstMessage(), { target: { value: 'Draft survives' } });
+    fireEvent.click(screen.getByRole('button', { name: /name \(optional\)/i }));
+    fireEvent.change(screen.getByLabelText(/session name/i), { target: { value: 'Sweep' } });
 
     fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
+    fireEvent.change(folderPicker(), { target: { value: 'C:\\CLP\\ModernOrder' } });
+    fireEvent.click(screen.getByRole('tab', { name: /new session/i }));
+
+    expect(firstMessage().value).toBe('Draft survives');
+    expect((screen.getByLabelText(/session name/i) as HTMLInputElement).value).toBe('Sweep');
+    expect((screen.getByLabelText(/^folder$/i) as HTMLSelectElement).value).toBe('Default');
+  });
+
+  it('names the device in the Resume call to action', () => {
+    renderScreen({ devices: [resumeDevice('/home/me/weft')], initialMode: 'resume' });
     fireEvent.click(screen.getByRole('radio', { name: /weft pairing/i }));
     expect(cta().textContent).toMatch(/resume on macbook pro/i);
   });
 });
 
-describe('StartSessionScreen — the device step folds away once it is answered', () => {
+describe('StartSessionScreen — the device dropdown', () => {
   const second = () => makeDevice({ channelId: 'chan-2', name: 'ThinkPad', isDefault: false, deviceId: 'device-2' });
+  const devicePicker = (): HTMLSelectElement =>
+    screen.getByRole('combobox', { name: /^device$/i }) as HTMLSelectElement;
 
-  it('collapses to the chosen device when you arrive from that device', () => {
-    // Coming in from a device row, the device question is already answered — showing the whole
-    // list again just pushes the folder and session steps below the fold.
-    renderScreen({ devices: [makeDevice(), second()], initialChannelId: 'chan-2', initialMode: 'resume' });
-
-    expect(screen.queryByRole('radiogroup', { name: /^device$/i })).toBeNull();
-    expect(screen.getByText('ThinkPad')).toBeTruthy();
-    expect(screen.queryByText('MacBook Pro')).toBeNull();
-  });
-
-  it('re-opens the full list on Change, and keeps the arrival choice until you make another', () => {
+  it('lists every device with its status and preselects the one you arrived from', () => {
     renderScreen({ devices: [makeDevice(), second()], initialChannelId: 'chan-2' });
 
-    fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
-    expect(screen.getByRole('radiogroup', { name: /^device$/i })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: /thinkpad/i })).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.click(screen.getByRole('radio', { name: /macbook pro/i }));
-    expect(cta().textContent).toMatch(/macbook pro/i);
+    expect(devicePicker().value).toBe('chan-2');
+    expect([...devicePicker().options].map((o) => o.textContent)).toEqual([
+      expect.stringMatching(/^MacBook Pro \(default\) · /),
+      expect.stringMatching(/^ThinkPad · /),
+    ]);
   });
 
-  it('stays open when you arrive without a device, since there is nothing to summarise', () => {
-    renderScreen({ devices: [makeDevice(), second()] });
-    expect(screen.getByRole('radiogroup', { name: /^device$/i })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^change$/i })).toBeNull();
-  });
+  it('keeps the chosen device when switching between New and Resume', async () => {
+    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
+    renderScreen({ devices: [makeDevice(), second()], onOpen });
+    expect(devicePicker().value).toBe('chan-1');
 
-  it('offers Add device rather than Change when there is nothing else to change to', () => {
-    renderScreen({ devices: [makeDevice()], initialChannelId: 'chan-1' });
-    expect(screen.queryByRole('button', { name: /^change$/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /add a new device/i })).toBeTruthy();
+    fireEvent.change(devicePicker(), { target: { value: 'chan-2' } });
+    fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
+    expect(devicePicker().value).toBe('chan-2');
+    fireEvent.click(screen.getByRole('tab', { name: /new session/i }));
+    expect(devicePicker().value).toBe('chan-2');
+
+    fireEvent.click(cta());
+    await waitFor(() =>
+      expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ deviceChannelId: 'chan-2' })),
+    );
   });
 });
 

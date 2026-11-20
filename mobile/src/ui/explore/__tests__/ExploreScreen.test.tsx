@@ -182,12 +182,11 @@ describe('Live Copilot Dock', () => {
       'I am tightening the card layout.',
     ]);
     renderExplore(active);
-    expect(document.querySelectorAll('.live-copilot-current')).toHaveLength(1);
-    expect(document.querySelectorAll('.live-copilot-previous')).toHaveLength(1);
-    expect(document.querySelectorAll('.live-copilot-stream')).toHaveLength(1);
+    expect(document.querySelectorAll('.live-copilot-feed')).toHaveLength(1);
     expect(document.querySelector('.live-copilot-feed')).toHaveTextContent(
       'Run focused Explore tests',
     );
+    expect(document.querySelector('.live-copilot-dock')).not.toHaveTextContent('Read ExploreScreen.tsx');
 
     const quiet = session({
       intent: 'Thinking through the safest change',
@@ -442,8 +441,13 @@ describe('Explore navigation and Discover deck', () => {
     expect(document.querySelector('.agent-pulse')).not.toBeInTheDocument();
     expect(document.querySelector('.agent-activity-view')).not.toBeInTheDocument();
 
+    expect(document.querySelectorAll('.explore-choice-preview')).toHaveLength(4);
+    expect(document.querySelector('.explore-choice-play')).toHaveTextContent('0 solved · best 0');
+
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
     expect(screen.getByRole('button', { name: 'Show Play' })).toHaveClass('active');
+    expect(document.querySelector('.activity-picker > .duration-row')).toBeInTheDocument();
+    expect(document.querySelectorAll('.activity-cards > .activity-card')).toHaveLength(2);
     expect(document.querySelector('.explore-header')?.nextElementSibling).toHaveClass('explore-category-body');
     expect(document.querySelector('.explore-category-body')?.nextElementSibling).toHaveClass('live-copilot-dock');
   });
@@ -483,11 +487,10 @@ describe('Explore navigation and Discover deck', () => {
     const firstTitle = document.querySelector('.discover-deck-card h1')?.textContent;
     expect(document.querySelector('.discover-deck-illustration')).not.toBeInTheDocument();
     expect(document.querySelector('.discover-deck-actions')).not.toBeInTheDocument();
-    expect(document.querySelector('.discover-deck-topline > span:last-child')).toHaveTextContent(
-      new RegExp(`1 / ${DISCOVER_CARDS.length}·\\d+ min`),
-    );
-    expect(screen.getByRole('button', { name: 'Previous Discover card' })).toHaveClass(
-      'discover-edge-nav',
+    expect(document.querySelector('.discover-deck-topline > span:last-child')).toHaveTextContent(/^\d+ min$/);
+    expect(document.querySelector('.discover-pager-count')).toHaveTextContent(`1 / ${DISCOVER_CARDS.length}`);
+    expect(document.querySelector('.discover-stage')).not.toContainElement(
+      screen.getByRole('button', { name: 'Previous Discover card' }),
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Next Discover card' }));
@@ -535,7 +538,7 @@ describe('Explore navigation and Discover deck', () => {
     renderExplore();
     await user.click(screen.getByRole('button', { name: 'Discover: Read something worth knowing' }));
     expect(localStorage.getItem('weft.explore.v1')).not.toContain(legacyKey);
-    expect(document.querySelectorAll('.discover-edge-nav')).toHaveLength(2);
+    expect(document.querySelectorAll('.discover-pager-btn')).toHaveLength(2);
   });
 
   it('starts a new shuffled cycle only after the current deck is exhausted', () => {
