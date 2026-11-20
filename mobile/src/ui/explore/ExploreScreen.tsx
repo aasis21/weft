@@ -101,7 +101,13 @@ interface ExploreStoredState {
   discoverIndex?: number;
   threadlineCompleted?: number;
   signalBest?: number;
+  glowSolved?: number;
+  slideBest?: number;
   vibration?: boolean;
+}
+
+function storedCount(value: unknown): number {
+  return typeof value === 'number' && value >= 0 ? Math.floor(value) : 0;
 }
 
 const DEFAULT_STORED_STATE: Required<ExploreStoredState> = {
@@ -112,6 +118,8 @@ const DEFAULT_STORED_STATE: Required<ExploreStoredState> = {
   discoverIndex: 0,
   threadlineCompleted: 0,
   signalBest: 0,
+  glowSolved: 0,
+  slideBest: 0,
   vibration: false,
 };
 
@@ -147,6 +155,8 @@ function parseStoredState(): Required<ExploreStoredState> {
           : 0,
       signalBest:
         typeof parsed.signalBest === 'number' && parsed.signalBest >= 0 ? Math.floor(parsed.signalBest) : 0,
+      glowSolved: storedCount(parsed.glowSolved),
+      slideBest: storedCount(parsed.slideBest),
       vibration: parsed.vibration === true,
     };
     const legacyCardPreferenceKey = 'savedCardIds';
@@ -547,7 +557,7 @@ function ExploreHome({
     watch: <span className="explore-choice-bars"><i /><i /><i /><i /></span>,
     play: (
       <span className="explore-choice-stats">
-        <b>{stored.threadlineCompleted}</b> solved · best <b>{stored.signalBest}</b>
+        <b>{stored.threadlineCompleted + stored.glowSolved}</b> solved · best <b>{stored.signalBest}</b>
       </span>
     ),
     unwind: <span className="explore-choice-breath"><i /></span>,
@@ -1235,6 +1245,8 @@ export function countThreadlineCrossings(points: Point[]): number {
   return conflicts;
 }
 
+type PlayGame = 'threadline' | 'signal' | 'glow' | 'slide';
+
 function PlayView({
   stored,
   onChange,
@@ -1242,13 +1254,20 @@ function PlayView({
   stored: Required<ExploreStoredState>;
   onChange(next: Required<ExploreStoredState>): void;
 }): JSX.Element {
-  const [game, setGame] = useState<'threadline' | 'signal' | null>(null);
+  const [game, setGame] = useState<PlayGame | null>(null);
   const [mode, setMode] = useState<PlayMode>('daily');
+  const back = (): void => setGame(null);
   if (game === 'threadline') {
-    return <ThreadlineGame mode={mode} stored={stored} onChange={onChange} onBack={() => setGame(null)} />;
+    return <ThreadlineGame mode={mode} stored={stored} onChange={onChange} onBack={back} />;
   }
   if (game === 'signal') {
-    return <SignalSteps mode={mode} stored={stored} onChange={onChange} onBack={() => setGame(null)} />;
+    return <SignalSteps mode={mode} stored={stored} onChange={onChange} onBack={back} />;
+  }
+  if (game === 'glow') {
+    return <GlowOffGame mode={mode} stored={stored} onChange={onChange} onBack={back} />;
+  }
+  if (game === 'slide') {
+    return <SlideGame mode={mode} stored={stored} onChange={onChange} onBack={back} />;
   }
   return (
     <section className="activity-picker">
@@ -1260,10 +1279,10 @@ function PlayView({
           Free play
         </button>
       </div>
-      <div className="activity-cards">
+      <div className="activity-cards play-cards">
         <button type="button" className="activity-card" onClick={() => setGame('threadline')}>
           <span className="activity-preview thread-preview" aria-hidden="true">╲╱</span>
-          <span><small>Logic · 1–3 min</small><strong>Threadline</strong><p>Move the points until no threads cross.</p></span>
+          <span><small>Logic · 1–3 min</small><strong>Threadline</strong><p>Untangle the crossing threads.</p></span>
           <b>{stored.threadlineCompleted} solved</b>
         </button>
         <button type="button" className="activity-card" onClick={() => setGame('signal')}>
@@ -1271,7 +1290,53 @@ function PlayView({
           <span><small>Memory · 30 sec+</small><strong>Signal Steps</strong><p>Watch a sequence, then repeat it.</p></span>
           <b>Best {stored.signalBest}</b>
         </button>
+        <button type="button" className="activity-card" onClick={() => setGame('glow')}>
+          <span className="activity-preview glow-preview" aria-hidden="true">◐ ◑</span>
+          <span><small>Logic · 1–2 min</small><strong>Glow Off</strong><p>Tap tiles to switch every light off.</p></span>
+          <b>{stored.glowSolved} solved</b>
+        </button>
+        <button type="button" className="activity-card" onClick={() => setGame('slide')}>
+          <span className="activity-preview slide-preview" aria-hidden="true">1 2 3</span>
+          <span><small>Logic · 1–3 min</small><strong>Slide 8</strong><p>Slide the tiles back into order.</p></span>
+          <b>{stored.slideBest ? `Best ${stored.slideBest} moves` : 'Not solved yet'}</b>
+        </button>
       </div>
+    </section>
+  );
+}
+
+/** One fixed-height layout for every game: compact header, a square board that fills the
+ *  remaining space in any orientation, and one action row. The view never scrolls. */
+function GameFrame({
+  name,
+  mode,
+  stat,
+  status,
+  onBack,
+  board,
+  actions,
+}: {
+  name: string;
+  mode: PlayMode;
+  stat: string;
+  status: string;
+  onBack(): void;
+  board: JSX.Element;
+  actions: JSX.Element;
+}): JSX.Element {
+  return (
+    <section className="game-view">
+      <header className="game-topbar">
+        <button type="button" className="game-back" onClick={onBack} aria-label="Back to Play">‹</button>
+        <span className="game-title">
+          <strong>{name}</strong>
+          <small>{mode === 'daily' ? 'Daily' : 'Free play'}</small>
+        </span>
+        <span className="game-stat">{stat}</span>
+      </header>
+      <p className="game-status" aria-live="polite">{status}</p>
+      <div className="game-stage">{board}</div>
+      <div className="game-actions">{actions}</div>
     </section>
   );
 }
@@ -1329,16 +1394,16 @@ function ThreadlineGame({
   };
 
   return (
-    <section className="game-view">
-      <button type="button" className="explore-text-back" onClick={onBack}>‹ Play</button>
-      <div className="game-heading">
-        <p className="explore-kicker">Threadline · {mode === 'daily' ? 'Daily' : 'Free play'}</p>
-        <h1>{crossings === 0 ? 'Untangled' : `${crossings} crossing${crossings === 1 ? '' : 's'} left`}</h1>
-        <p>Drag the points. Connected lines may meet at a point, but no other threads should cross.</p>
-      </div>
+    <GameFrame
+      name="Threadline"
+      mode={mode}
+      stat={`${stored.threadlineCompleted} solved`}
+      status={crossings === 0 ? 'Untangled!' : `${crossings} crossing${crossings === 1 ? '' : 's'} left · drag the points`}
+      onBack={onBack}
+      board={
       <svg
         ref={svgRef}
-        className={`threadline-board${crossings === 0 ? ' complete' : ''}`}
+        className={`game-board threadline-board${crossings === 0 ? ' complete' : ''}`}
         viewBox="0 0 100 100"
         role="group"
         aria-label={`Threadline puzzle with ${crossings} crossings remaining`}
@@ -1383,12 +1448,13 @@ function ThreadlineGame({
           </g>
         ))}
       </svg>
-      <div className="game-actions">
+      }
+      actions={
         <button type="button" className="explore-secondary" onClick={reset}>
           {mode === 'daily' ? 'Reset daily puzzle' : 'New puzzle'}
         </button>
-      </div>
-    </section>
+      }
+    />
   );
 }
 
@@ -1461,32 +1527,32 @@ function SignalSteps({
   };
 
   return (
-    <section className="game-view">
-      <button type="button" className="explore-text-back" onClick={onBack}>‹ Play</button>
-      <div className="game-heading">
-        <p className="explore-kicker">Signal Steps · {mode === 'daily' ? 'Daily' : 'Free play'}</p>
-        <h1>Round {round - 2}</h1>
-        <p>
-          {phase === 'showing' ? 'Watch the sequence.' :
-            phase === 'input' ? `Repeat it: ${input.length} of ${round}` :
-            phase === 'success' ? 'Correct.' :
-            phase === 'error' ? 'That was not the sequence. Try again.' :
-            'Start when you are ready.'}
-        </p>
-      </div>
-      <div className="signal-grid" role="group" aria-label="Signal Steps grid">
-        {Array.from({ length: 9 }, (_, cell) => (
-          <button
-            type="button"
-            key={cell}
-            className={lit === cell ? 'lit' : input.at(-1) === cell && phase === 'input' ? 'pressed' : ''}
-            aria-label={`Signal tile ${cell + 1}`}
-            disabled={phase !== 'input'}
-            onClick={() => choose(cell)}
-          />
-        ))}
-      </div>
-      <div className="game-actions">
+    <GameFrame
+      name="Signal Steps"
+      mode={mode}
+      stat={`Best ${stored.signalBest}`}
+      status={`Round ${round - 2} · ${
+        phase === 'showing' ? 'Watch the sequence.' :
+        phase === 'input' ? `Repeat it: ${input.length} of ${round}` :
+        phase === 'success' ? 'Correct.' :
+        phase === 'error' ? 'Not the sequence. Try again.' :
+        'Start when you are ready.'}`}
+      onBack={onBack}
+      board={
+        <div className="game-board signal-grid" role="group" aria-label="Signal Steps grid">
+          {Array.from({ length: 9 }, (_, cell) => (
+            <button
+              type="button"
+              key={cell}
+              className={lit === cell ? 'lit' : input.at(-1) === cell && phase === 'input' ? 'pressed' : ''}
+              aria-label={`Signal tile ${cell + 1}`}
+              disabled={phase !== 'input'}
+              onClick={() => choose(cell)}
+            />
+          ))}
+        </div>
+      }
+      actions={
         <button
           type="button"
           className="explore-primary"
@@ -1495,9 +1561,211 @@ function SignalSteps({
         >
           {phase === 'error' ? 'Try again' : 'Show sequence'}
         </button>
-        <span>Best sequence: {stored.signalBest}</span>
-      </div>
-    </section>
+      }
+    />
+  );
+}
+
+const GLOW_SIZE = 4;
+
+function glowNeighbors(index: number): number[] {
+  const row = Math.floor(index / GLOW_SIZE);
+  const col = index % GLOW_SIZE;
+  return [
+    index,
+    row > 0 ? index - GLOW_SIZE : -1,
+    row < GLOW_SIZE - 1 ? index + GLOW_SIZE : -1,
+    col > 0 ? index - 1 : -1,
+    col < GLOW_SIZE - 1 ? index + 1 : -1,
+  ].filter((cell) => cell >= 0);
+}
+
+export function toggleGlow(board: boolean[], index: number): boolean[] {
+  const next = [...board];
+  for (const cell of glowNeighbors(index)) next[cell] = !next[cell];
+  return next;
+}
+
+/** Built by pressing random tiles on a dark board, so every puzzle is solvable. */
+export function createGlowBoard(seed: number): boolean[] {
+  const random = seededRandom(seed);
+  let board = Array.from({ length: GLOW_SIZE * GLOW_SIZE }, () => false);
+  for (let press = 0; press < 7; press += 1) {
+    board = toggleGlow(board, Math.floor(random() * board.length));
+  }
+  return board.some(Boolean) ? board : toggleGlow(board, 5);
+}
+
+function GlowOffGame({
+  mode,
+  stored,
+  onChange,
+  onBack,
+}: {
+  mode: PlayMode;
+  stored: Required<ExploreStoredState>;
+  onChange(next: Required<ExploreStoredState>): void;
+  onBack(): void;
+}): JSX.Element {
+  const [seed, setSeed] = useState(() => (mode === 'daily' ? dailySeed(37) : dailySeed(2_000 + stored.glowSolved)));
+  const [board, setBoard] = useState(() => createGlowBoard(seed));
+  const [moves, setMoves] = useState(0);
+  const lit = board.filter(Boolean).length;
+  const solved = lit === 0;
+
+  const press = (index: number): void => {
+    if (solved) return;
+    const next = toggleGlow(board, index);
+    setBoard(next);
+    setMoves((value) => value + 1);
+    if (!next.some(Boolean)) {
+      onChange({ ...stored, glowSolved: stored.glowSolved + 1 });
+      if (stored.vibration) navigator.vibrate?.(18);
+    }
+  };
+
+  const reset = (): void => {
+    const nextSeed = mode === 'daily' || !solved ? seed : seed + 1;
+    setSeed(nextSeed);
+    setBoard(createGlowBoard(nextSeed));
+    setMoves(0);
+  };
+
+  return (
+    <GameFrame
+      name="Glow Off"
+      mode={mode}
+      stat={`${stored.glowSolved} solved`}
+      status={solved ? `All dark in ${moves} moves!` : `${lit} lit · ${moves} moves · a tap flips its neighbours too`}
+      onBack={onBack}
+      board={
+        <div className={`game-board glow-grid${solved ? ' complete' : ''}`} role="group" aria-label="Glow Off grid">
+          {board.map((on, index) => (
+            <button
+              type="button"
+              key={index}
+              className={on ? 'on' : ''}
+              aria-label={`Light ${index + 1} ${on ? 'on' : 'off'}`}
+              aria-pressed={on}
+              onClick={() => press(index)}
+            />
+          ))}
+        </div>
+      }
+      actions={
+        <button type="button" className="explore-secondary" onClick={reset}>
+          {solved && mode === 'free' ? 'Next puzzle' : 'Restart'}
+        </button>
+      }
+    />
+  );
+}
+
+const SLIDE_SIZE = 3;
+const SLIDE_SOLVED = [1, 2, 3, 4, 5, 6, 7, 8, 0];
+
+function slideNeighbors(index: number): number[] {
+  const row = Math.floor(index / SLIDE_SIZE);
+  const col = index % SLIDE_SIZE;
+  return [
+    row > 0 ? index - SLIDE_SIZE : -1,
+    row < SLIDE_SIZE - 1 ? index + SLIDE_SIZE : -1,
+    col > 0 ? index - 1 : -1,
+    col < SLIDE_SIZE - 1 ? index + 1 : -1,
+  ].filter((cell) => cell >= 0);
+}
+
+/** Moves the tile at `index` into the gap when they are adjacent; otherwise returns the same board. */
+export function slideTile(board: number[], index: number): number[] {
+  const gap = board.indexOf(0);
+  if (!slideNeighbors(gap).includes(index)) return board;
+  const next = [...board];
+  next[gap] = next[index] ?? 0;
+  next[index] = 0;
+  return next;
+}
+
+export function isSlideSolved(board: number[]): boolean {
+  return board.every((value, index) => value === SLIDE_SOLVED[index]);
+}
+
+/** Shuffled with legal moves from the solved board, so every puzzle is solvable. */
+export function createSlideBoard(seed: number): number[] {
+  const random = seededRandom(seed);
+  let board = [...SLIDE_SOLVED];
+  let previousGap = -1;
+  for (let step = 0; step < 60; step += 1) {
+    const gap = board.indexOf(0);
+    const options = slideNeighbors(gap).filter((cell) => cell !== previousGap);
+    const pick = options[Math.floor(random() * options.length)] ?? options[0] ?? gap;
+    board = slideTile(board, pick);
+    previousGap = gap;
+  }
+  return isSlideSolved(board) ? slideTile(board, 7) : board;
+}
+
+function SlideGame({
+  mode,
+  stored,
+  onChange,
+  onBack,
+}: {
+  mode: PlayMode;
+  stored: Required<ExploreStoredState>;
+  onChange(next: Required<ExploreStoredState>): void;
+  onBack(): void;
+}): JSX.Element {
+  const [seed, setSeed] = useState(() => (mode === 'daily' ? dailySeed(53) : dailySeed(3_000) + Math.floor(Math.random() * 1_000)));
+  const [board, setBoard] = useState(() => createSlideBoard(seed));
+  const [moves, setMoves] = useState(0);
+  const solved = isSlideSolved(board);
+
+  const press = (index: number): void => {
+    if (solved) return;
+    const next = slideTile(board, index);
+    if (next === board) return;
+    const nextMoves = moves + 1;
+    setBoard(next);
+    setMoves(nextMoves);
+    if (isSlideSolved(next)) {
+      onChange({ ...stored, slideBest: stored.slideBest ? Math.min(stored.slideBest, nextMoves) : nextMoves });
+      if (stored.vibration) navigator.vibrate?.(18);
+    }
+  };
+
+  const reset = (): void => {
+    const nextSeed = mode === 'daily' || !solved ? seed : seed + 1;
+    setSeed(nextSeed);
+    setBoard(createSlideBoard(nextSeed));
+    setMoves(0);
+  };
+
+  return (
+    <GameFrame
+      name="Slide 8"
+      mode={mode}
+      stat={stored.slideBest ? `Best ${stored.slideBest}` : 'No best yet'}
+      status={solved ? `In order in ${moves} moves!` : `${moves} moves · tap a tile next to the gap`}
+      onBack={onBack}
+      board={
+        <div className={`game-board slide-grid${solved ? ' complete' : ''}`} role="group" aria-label="Slide 8 board">
+          {board.map((value, index) =>
+            value === 0 ? (
+              <span key="gap" className="slide-gap" aria-hidden="true" />
+            ) : (
+              <button type="button" key={value} aria-label={`Tile ${value}`} onClick={() => press(index)}>
+                {value}
+              </button>
+            ),
+          )}
+        </div>
+      }
+      actions={
+        <button type="button" className="explore-secondary" onClick={reset}>
+          {solved && mode === 'free' ? 'Next puzzle' : 'Restart'}
+        </button>
+      }
+    />
   );
 }
 

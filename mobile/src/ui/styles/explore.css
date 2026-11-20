@@ -1679,17 +1679,8 @@
     padding: 10px 12px;
   }
   .game-heading { margin-bottom: 8px; }
-  .game-heading h1,
   .unwind-session h1,
   .watch-view h1 { font-size: 23px; }
-  .threadline-board {
-    width: min(100%, calc(100dvh - 300px), 400px);
-  }
-  .signal-grid {
-    width: min(100%, calc(100dvh - 300px), 350px);
-    margin-block: 10px;
-    gap: 7px;
-  }
   .weave-breath-visual {
     width: min(42vh, 190px);
     margin-block: 12px 8px;
@@ -1726,4 +1717,174 @@
   .discover-deck-card-current {
     transition: none;
   }
+}
+
+/* Play: every game shares one non-scrolling frame. The board is a square sized from the
+   space left after the header, status and actions, so it fits portrait and landscape. */
+.explore-category-body:has(> .game-view) { overflow: hidden; }
+
+.game-view {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 12px max(8px, env(safe-area-inset-bottom));
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.game-topbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-back {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--bg-rule);
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--bg-elev);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.game-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.game-title strong {
+  overflow: hidden;
+  font-family: var(--display);
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-title small {
+  color: var(--fg-faint);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.game-stat {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 999px;
+  color: var(--fg-faint);
+  background: var(--bg-elev);
+  font: 700 11px var(--mono);
+}
+
+.game-status {
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-dim, var(--fg-faint));
+  font-size: 13px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-stage {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  container-type: size;
+}
+
+.game-stage .game-board {
+  width: min(100cqw, 100cqh, 520px);
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0;
+}
+
+.game-view .game-actions {
+  flex: 0 0 auto;
+  margin: 0;
+  justify-content: center;
+}
+
+.game-view .game-actions > button { min-width: 160px; }
+
+.glow-grid,
+.slide-grid {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 22px;
+  background: var(--bg-elev);
+}
+
+.glow-grid { grid-template-columns: repeat(4, 1fr); }
+.slide-grid { grid-template-columns: repeat(3, 1fr); }
+
+.glow-grid button {
+  border: 1px solid var(--bg-rule);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--bg-elev));
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.glow-grid button.on {
+  border-color: #ffd166;
+  background: #ffd166;
+  box-shadow: 0 0 18px color-mix(in srgb, #ffd166 45%, transparent);
+}
+
+.glow-grid.complete { border-color: var(--success); }
+
+.slide-grid button {
+  border: 1px solid color-mix(in srgb, #c58cff 45%, var(--bg-rule));
+  border-radius: 14px;
+  color: var(--fg);
+  background: color-mix(in srgb, #c58cff 18%, var(--bg-elev));
+  font: 800 clamp(20px, 9cqmin, 40px) var(--mono);
+}
+
+.slide-grid button:active { transform: scale(0.96); }
+.slide-gap { border-radius: 14px; background: transparent; }
+.slide-grid.complete button { border-color: var(--success); color: var(--success); }
+
+.glow-preview { color: #ffd166; background: color-mix(in srgb, #ffd166 14%, transparent); }
+.slide-preview { color: #c58cff; background: color-mix(in srgb, #c58cff 14%, transparent); font-size: clamp(14px, 3.5vh, 26px); }
+
+.play-cards { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.play-cards .activity-preview { min-height: 0; }
+
+@media (max-height: 640px) {
+  .play-cards .activity-card p { display: none; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .play-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); }
+  .play-cards .activity-card b { display: none; }
+
+  /* Short landscape: controls on the left, the board takes the full height on the right. */
+  .game-view {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) auto;
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas: "top board" "status board" "actions board";
+    column-gap: 16px;
+  }
+  .game-topbar { grid-area: top; }
+  .game-status { grid-area: status; white-space: normal; text-align: left; }
+  .game-view .game-actions { grid-area: actions; align-self: end; justify-content: flex-start; }
+  .game-stage { grid-area: board; height: 100%; width: auto; aspect-ratio: 1; max-width: 60vw; }
 }

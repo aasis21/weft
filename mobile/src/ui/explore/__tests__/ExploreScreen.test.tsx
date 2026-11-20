@@ -9,6 +9,11 @@ import {
   countThreadlineCrossings,
   createSignalSequence,
   createThreadlinePoints,
+  createGlowBoard,
+  createSlideBoard,
+  isSlideSolved,
+  slideTile,
+  toggleGlow,
   deriveLiveDock,
   deriveLiveDockActivity,
 } from '@/ui/explore/ExploreScreen';
@@ -447,7 +452,7 @@ describe('Explore navigation and Discover deck', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
     expect(screen.getByRole('button', { name: 'Show Play' })).toHaveClass('active');
     expect(document.querySelector('.activity-picker > .duration-row')).toBeInTheDocument();
-    expect(document.querySelectorAll('.activity-cards > .activity-card')).toHaveLength(2);
+    expect(document.querySelectorAll('.activity-cards > .activity-card')).toHaveLength(4);
     expect(document.querySelector('.explore-header')?.nextElementSibling).toHaveClass('explore-category-body');
     expect(document.querySelector('.explore-category-body')?.nextElementSibling).toHaveClass('live-copilot-dock');
   });
@@ -626,11 +631,59 @@ describe('Threadline logic', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Free play' }));
     fireEvent.click(screen.getByRole('button', { name: /Threadline/ }));
 
-    expect(screen.getByText('Threadline · Free play')).toBeInTheDocument();
+    expect(document.querySelector('.game-title')).toHaveTextContent('ThreadlineFree play');
     const point = screen.getByRole('button', { name: 'Move point 1' });
     const before = point.getAttribute('transform');
     fireEvent.keyDown(point, { key: 'ArrowRight' });
     expect(point.getAttribute('transform')).not.toBe(before);
+  });
+});
+
+describe('Glow Off and Slide 8', () => {
+  it('generates solvable Glow Off boards that a tap flips with its neighbours', () => {
+    const board = createGlowBoard(7);
+    expect(board).toEqual(createGlowBoard(7));
+    expect(board.some(Boolean)).toBe(true);
+    expect(toggleGlow(toggleGlow(board, 5), 5)).toEqual(board);
+    const corner = toggleGlow(Array.from({ length: 16 }, () => false), 0);
+    expect(corner.flatMap((on, index) => (on ? [index] : []))).toEqual([0, 1, 4]);
+  });
+
+  it('shuffles Slide 8 with legal moves and only slides tiles next to the gap', () => {
+    const board = createSlideBoard(11);
+    expect(board).toEqual(createSlideBoard(11));
+    expect([...board].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(isSlideSolved(board)).toBe(false);
+    const solved = [1, 2, 3, 4, 5, 6, 7, 8, 0];
+    expect(slideTile(solved, 0)).toBe(solved);
+    expect(isSlideSolved(slideTile(slideTile(solved, 7), 8))).toBe(true);
+  });
+
+  it('records a solved Glow Off board', () => {
+    renderExplore();
+    fireEvent.click(screen.getByRole('button', { name: 'Play: Puzzles and mini-games' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Free play' }));
+    fireEvent.click(screen.getByRole('button', { name: /Glow Off/ }));
+    expect(screen.getByRole('group', { name: 'Glow Off grid' }).children).toHaveLength(16);
+    // Lights Out over GF(2): try every press combination until the board is dark.
+    const start = Array.from(document.querySelectorAll('.glow-grid button'), (el) => el.classList.contains('on'));
+    let solution: number[] | null = null;
+    for (let mask = 0; mask < 1 << 16 && !solution; mask += 1) {
+      let board = start;
+      const presses: number[] = [];
+      for (let cell = 0; cell < 16; cell += 1) {
+        if (mask & (1 << cell)) {
+          board = toggleGlow(board, cell);
+          presses.push(cell);
+        }
+      }
+      if (!board.some(Boolean)) solution = presses;
+    }
+    for (const cell of solution ?? []) {
+      fireEvent.click(document.querySelectorAll('.glow-grid button')[cell] as HTMLElement);
+    }
+    expect(screen.getByText(/All dark in/)).toBeInTheDocument();
+    expect(localStorage.getItem('weft.explore.v1')).toContain('"glowSolved":1');
   });
 });
 
@@ -649,7 +702,7 @@ describe('Signal Steps and Unwind', () => {
       fireEvent.click(screen.getByRole('button', { name: `Signal tile ${cell + 1}` }));
     }
 
-    expect(screen.getByText('Correct.')).toBeInTheDocument();
+    expect(screen.getByText(/Correct\./)).toBeInTheDocument();
     expect(localStorage.getItem('weft.explore.v1')).toContain('"signalBest":3');
   });
 
