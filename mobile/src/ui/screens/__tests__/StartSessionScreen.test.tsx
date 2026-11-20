@@ -89,14 +89,33 @@ function resumeDevice(defaultPath: string, sessions: StoredSession[] | undefined
 }
 
 function rowTitles(): string[] {
-  const list = document.querySelector('.device-sessions-list');
-  if (!list) return [];
-  return [...list.querySelectorAll('.device-card-name')].map((el) => el.textContent ?? '');
+  return [...document.querySelectorAll('.start-continue-title')].map((el) => el.textContent ?? '');
 }
 
 const folderPicker = (): HTMLSelectElement => screen.getByLabelText(/^folder$/i) as HTMLSelectElement;
-const cta = (): HTMLButtonElement =>
-  document.querySelector('.start-footer .session-primary-action') as HTMLButtonElement;
+const send = (): HTMLButtonElement => document.querySelector('.start-composer .send-btn') as HTMLButtonElement;
+const composer = (): HTMLTextAreaElement => screen.getByLabelText(/first message/i) as HTMLTextAreaElement;
+
+const controllerConflict = lifecycleStatus({
+  state: 'activating',
+  failure: {
+    code: 'controller-conflict',
+    actions: ['confirm-takeover', 'cancel'],
+    message: 'That session is already running on this laptop and connected to a phone.',
+  },
+  challenge: {
+    challengeId: 'challenge-1',
+    operationId: 'open-1',
+    revision: 1,
+    storeAuthority: null,
+    sessionId: 'a',
+    runtimeInstanceId: 'runtime-1',
+    generation: 1,
+    pid: 42,
+    processStartedAt: 10,
+    responsive: true,
+  },
+});
 
 describe('StartSessionScreen', () => {
   it('explains what a device vs a session is in the empty state (#203)', () => {
@@ -107,506 +126,170 @@ describe('StartSessionScreen', () => {
     expect(screen.getByText(/No devices saved yet/i)).toBeInTheDocument();
   });
 
-  it('offers "Add device" next to the Device section even when devices already exist (#205)', () => {
-    const onScanListener = vi.fn();
-    renderScreen({ onScanListener });
-
-    const addBtn = screen.getByRole('button', { name: /add a new device/i });
-    expect(addBtn).toBeInTheDocument();
-    fireEvent.click(addBtn);
-    expect(onScanListener).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('StartSessionScreen — New leads with the message, Resume with the list', () => {
-  const firstMessage = (): HTMLTextAreaElement => screen.getByLabelText(/first message/i) as HTMLTextAreaElement;
-
-  it('opens on New with the composer first, and swaps to the session list on Resume', () => {
-    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
-
-    expect(screen.getByRole('tab', { name: /new session/i })).toHaveAttribute('aria-selected', 'true');
-    expect(firstMessage()).toBeTruthy();
-    expect(screen.queryByLabelText(/search recent sessions/i)).toBeNull();
-
-    fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
-    expect(screen.queryByLabelText(/first message/i)).toBeNull();
-    expect(screen.getByLabelText(/search recent sessions/i)).toBeTruthy();
-    // A resumed session already has a name — the CLI's own title wins once it pairs.
-    expect(screen.queryByLabelText(/session name/i)).toBeNull();
-    expect(screen.getByRole('combobox', { name: /^device$/i })).toBeTruthy();
+  it('shows one page with device and folder pickers, a composer and no name, tabs or add-device', () => {
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')] });
+    expect(screen.getByLabelText(/^device$/i)).toBeInTheDocument();
+    expect(folderPicker().value).toBe('Default');
+    expect(composer()).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.queryByLabelText(/name/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /add device/i })).toBeNull();
   });
 
-  it('can open straight onto the Resume tab', () => {
-    renderScreen({ devices: [resumeDevice('/home/me/weft')], initialMode: 'resume' });
-    expect(screen.getByRole('tab', { name: /^resume$/i })).toHaveAttribute('aria-selected', 'true');
+  it('preselects the device it was opened for', () => {
+    renderScreen({
+      devices: [makeDevice(), makeDevice({ channelId: 'chan-2', name: 'Studio', isDefault: false })],
+      initialChannelId: 'chan-2',
+    });
+    expect((screen.getByLabelText(/^device$/i) as HTMLSelectElement).value).toBe('chan-2');
   });
 
-  it('labels the permission toggle and opens on the safe mode in both tabs', () => {
-    // It used to sit bare and unlabelled next to a folder filter, reading as another filter chip
-    // pair — and the resume copy reset to allow-all on every visit.
-    renderScreen({ devices: [resumeDevice('/home/me/weft')], initialMode: 'resume' });
-    expect(screen.getByRole('radiogroup', { name: /permissions/i })).toBeTruthy();
-    expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('keeps the optional name collapsed until asked for', () => {
+  it('labels send by whether there is a message, and keeps it inert while the device is offline', () => {
     renderScreen();
+    expect(send()).toHaveAccessibleName('Start session');
+    fireEvent.change(composer(), { target: { value: 'Fix the flaky test' } });
+    expect(send()).toHaveAccessibleName('Start & send');
 
-    expect(screen.queryByLabelText(/session name/i)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /name \(optional\)/i }));
-    expect(screen.getByLabelText(/session name/i)).toBeTruthy();
+    renderScreen({ devices: [makeDevice({ channelId: 'chan-off', connected: false })] });
+    expect(document.querySelectorAll('.start-composer .send-btn')[1]).toBeDisabled();
   });
 
-  it('keeps the name field visible while editing and starts from the keyboard action', async () => {
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
+  it('starts a new session with no name, the first message and the chosen permission', async () => {
+    const { props } = renderScreen();
+    fireEvent.change(composer(), { target: { value: '  Fix the flaky test  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /permissions: ask first/i }));
+    expect(screen.getByRole('button', { name: /permissions: allow all/i })).toHaveClass('auto');
+    fireEvent.click(send());
 
-    try {
-      const { container } = renderScreen({ onOpen });
-      fireEvent.click(screen.getByRole('button', { name: /name \(optional\)/i }));
-      const name = screen.getByLabelText(/session name/i);
-
-      fireEvent.focus(name);
-      expect(container.querySelector('.start-session-v2')).toHaveClass('name-editing');
-      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-
-      fireEvent.change(name, { target: { value: 'Inbox cleanup' } });
-      fireEvent.keyDown(name, { key: 'Enter' });
-
-      await waitFor(() =>
-        expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ name: 'Inbox cleanup' })),
-      );
-      expect(container.querySelector('.start-session-v2')).not.toHaveClass('name-editing');
-    } finally {
-      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
-    }
-  });
-
-  it('uses the selected laptop permission default while preserving a one-launch override', async () => {
-    const device = resumeDevice('/home/me/weft');
-    device.defaultPermissionMode = 'allow-all';
-    const { rerender, props } = renderScreen({ devices: [device] });
-
-    await waitFor(() =>
-      expect(screen.getByRole('radio', { name: /^allow all$/i })).toHaveAttribute('aria-checked', 'true'),
-    );
-    fireEvent.click(screen.getByRole('radio', { name: /^default$/i }));
-    rerender(<StartSessionScreen {...props} devices={[{ ...device }]} />);
-    expect(screen.getByRole('radio', { name: /^default$/i })).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('says "Start & send" once there is a message, and "Start session" without one', async () => {
-    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
-    renderScreen({ onOpen });
-    expect(cta()).toHaveTextContent(/^Start session$/);
-
-    fireEvent.change(firstMessage(), { target: { value: '   ' } });
-    expect(cta()).toHaveTextContent(/^Start session$/);
-
-    fireEvent.change(firstMessage(), { target: { value: '  Fix the flaky test  ' } });
-    expect(cta()).toHaveTextContent(/^Start & send$/);
-    fireEvent.click(cta());
-
-    await waitFor(() => expect(onOpen).toHaveBeenCalledWith({
+    await waitFor(() => expect(props.onOpen).toHaveBeenCalledWith({
       deviceChannelId: 'chan-1',
       target: { kind: 'new', projectName: 'demo' },
-      mode: 'default',
+      mode: 'allow-all',
       name: null,
       initialPrompt: 'Fix the flaky test',
     }));
   });
 
-  it('starts without a first message exactly as before when the composer is empty', async () => {
-    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
-    renderScreen({ onOpen });
-    fireEvent.click(cta());
-    await waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
-    expect(onOpen.mock.calls[0]![0]).not.toHaveProperty('initialPrompt');
+  it('starts from the device default permission mode', () => {
+    renderScreen({ devices: [makeDevice({ defaultPermissionMode: 'allow-all' })] });
+    expect(screen.getByRole('button', { name: /permissions: allow all/i })).toBeInTheDocument();
   });
 
-  it('keeps the typed message after a refused launch so nothing is lost', async () => {
+  it('keeps the draft when the launch is refused', async () => {
     const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({
       state: 'failed',
-      failure: { code: 'runtime-unavailable', actions: ['retry', 'cancel'], message: 'The laptop is not reachable right now.' },
+      failure: { code: 'directory-not-found', actions: ['cancel'], message: 'The folder no longer exists: /gone' },
     }));
     renderScreen({ onOpen });
-    fireEvent.change(firstMessage(), { target: { value: 'Ship it' } });
-    fireEvent.click(cta());
+    fireEvent.change(composer(), { target: { value: 'Keep me' } });
+    fireEvent.click(send());
 
-    await waitFor(() => expect(screen.getByText(/not reachable/i)).toBeTruthy());
-    expect(firstMessage().value).toBe('Ship it');
-    expect(cta()).toHaveTextContent(/^Start & send$/);
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText(/no longer exists/i)).toBeTruthy());
+    expect(composer().value).toBe('Keep me');
+    expect(send()).not.toBeDisabled();
   });
 
-  it('keeps the New draft and folder apart from Resume across tab switches', () => {
-    renderScreen({ devices: [resumeDevice('/home/me/weft')] });
-    fireEvent.change(firstMessage(), { target: { value: 'Draft survives' } });
-    fireEvent.click(screen.getByRole('button', { name: /name \(optional\)/i }));
-    fireEvent.change(screen.getByLabelText(/session name/i), { target: { value: 'Sweep' } });
-
-    fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
-    fireEvent.change(folderPicker(), { target: { value: 'C:\\CLP\\ModernOrder' } });
-    fireEvent.click(screen.getByRole('tab', { name: /new session/i }));
-
-    expect(firstMessage().value).toBe('Draft survives');
-    expect((screen.getByLabelText(/session name/i) as HTMLInputElement).value).toBe('Sweep');
-    expect((screen.getByLabelText(/^folder$/i) as HTMLSelectElement).value).toBe('Default');
-  });
-
-  it('names the device in the Resume call to action', () => {
-    renderScreen({ devices: [resumeDevice('/home/me/weft')], initialMode: 'resume' });
-    fireEvent.click(screen.getByRole('radio', { name: /weft pairing/i }));
-    expect(cta().textContent).toMatch(/resume on macbook pro/i);
-  });
-});
-
-describe('StartSessionScreen — the device dropdown', () => {
-  const second = () => makeDevice({ channelId: 'chan-2', name: 'ThinkPad', isDefault: false, deviceId: 'device-2' });
-  const devicePicker = (): HTMLSelectElement =>
-    screen.getByRole('combobox', { name: /^device$/i }) as HTMLSelectElement;
-
-  it('lists every device with its status and preselects the one you arrived from', () => {
-    renderScreen({ devices: [makeDevice(), second()], initialChannelId: 'chan-2' });
-
-    expect(devicePicker().value).toBe('chan-2');
-    expect([...devicePicker().options].map((o) => o.textContent)).toEqual([
-      expect.stringMatching(/^MacBook Pro \(default\) · /),
-      expect.stringMatching(/^ThinkPad · /),
-    ]);
-  });
-
-  it('keeps the chosen device when switching between New and Resume', async () => {
-    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
-    renderScreen({ devices: [makeDevice(), second()], onOpen });
-    expect(devicePicker().value).toBe('chan-1');
-
-    fireEvent.change(devicePicker(), { target: { value: 'chan-2' } });
-    fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
-    expect(devicePicker().value).toBe('chan-2');
-    fireEvent.click(screen.getByRole('tab', { name: /new session/i }));
-    expect(devicePicker().value).toBe('chan-2');
-
-    fireEvent.click(cta());
-    await waitFor(() =>
-      expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ deviceChannelId: 'chan-2' })),
-    );
-  });
-});
-
-describe('StartSessionScreen — the resumable list', () => {
-  it('pulls the list itself when the Resume tab opens, scoped to the folder it opens on', () => {
-    // It used to park behind a Load button, which made the tab arrive empty and look broken. The
-    // fetch is folder-scoped because the laptop caps the reply AFTER filtering — asking for
-    // everything and narrowing here would show a truncated slice of a busy folder.
+  it('loads the folder\'s sessions on its own, scoped to the selected folder', () => {
     const onRefreshSessions = vi.fn();
-    renderScreen({ devices: [makeDevice({ sessions: undefined })], initialMode: 'resume', onRefreshSessions });
-
-    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', 'C:\\repos\\demo');
-    expect(screen.getByText(/loading sessions/i)).toBeTruthy();
-  });
-
-  it('does not re-ask a device that answered with nothing', () => {
-    // The reply always sets an array, empty included, so "still no sessions" is a real answer and
-    // not a reason to ask again — otherwise an empty laptop is polled forever.
-    const onRefreshSessions = vi.fn();
-    const { rerender, props } = renderScreen({
-      devices: [makeDevice({ sessions: undefined })],
-      initialMode: 'resume',
-      onRefreshSessions,
-    });
-    rerender(<StartSessionScreen {...props} devices={[makeDevice({ sessions: [] })]} />);
-    rerender(<StartSessionScreen {...props} devices={[makeDevice({ sessions: [] })]} />);
-
+    renderScreen({ devices: [{ ...resumeDevice('C:\\CLP\\ModernOrder'), sessions: undefined }], onRefreshSessions });
     expect(onRefreshSessions).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/no resumable sessions found/i)).toBeTruthy();
+    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', 'C:\\CLP\\ModernOrder');
+    expect(screen.getByRole('list', { name: /loading sessions/i })).toBeInTheDocument();
   });
 
-  it('leaves an offline device alone rather than waiting on a reply that cannot come', () => {
+  it('does not fetch while the device is offline', () => {
     const onRefreshSessions = vi.fn();
-    renderScreen({
-      devices: [makeDevice({ sessions: undefined, connected: false })],
-      initialMode: 'resume',
-      onRefreshSessions,
-    });
-
+    renderScreen({ devices: [makeDevice({ connected: false })], onRefreshSessions });
     expect(onRefreshSessions).not.toHaveBeenCalled();
-    expect(screen.getByText(/device is offline/i)).toBeTruthy();
+    expect(screen.getByText(/sessions appear when macbook pro is online/i)).toBeInTheDocument();
   });
 
-  it('refreshes the same folder after reconnect instead of retaining the cached list', () => {
-    const device = resumeDevice('/home/me/weft');
-    const { rerender, props } = renderScreen({ devices: [device], initialMode: 'resume' });
-    expect(props.onRefreshSessions).toHaveBeenCalledTimes(1);
-    rerender(<StartSessionScreen {...props} devices={[{ ...device, connected: false }]} />);
-    rerender(<StartSessionScreen {...props} devices={[{ ...device, connected: true }]} />);
-    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
-    expect(props.onRefreshSessions).toHaveBeenLastCalledWith('chan-1', '/home/me/weft');
-  });
-
-  it('refreshes after a seamless connection attempt and when returning to Resume', () => {
-    const device = resumeDevice('/home/me/weft');
-    const { rerender, props } = renderScreen({ devices: [device], initialMode: 'resume' });
-    rerender(<StartSessionScreen {...props} devices={[{ ...device, lastAttemptAt: 1234 }]} />);
-    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
-    fireEvent.click(screen.getByRole('tab', { name: /new session/i }));
-    fireEvent.click(screen.getByRole('tab', { name: /^resume$/i }));
-    expect(props.onRefreshSessions).toHaveBeenCalledTimes(3);
-  });
-
-  it('offers Connect for a verified running app or CLI session', async () => {
-    const running = storedSession({ sessionId: 'running', title: 'Copilot app session', running: true });
-    const { props } = renderScreen({
-      devices: [makeDevice({ projects: [], sessions: [running] })], initialMode: 'resume',
-    });
-    fireEvent.click(screen.getByRole('radio', { name: /copilot app session/i }));
-    expect(cta()).toHaveTextContent('Connect on MacBook Pro');
-    expect(screen.getByText(/running · connect/)).toBeInTheDocument();
-    fireEvent.click(cta());
-    await waitFor(() => expect(props.onOpen).toHaveBeenCalledWith(expect.objectContaining({
-      target: { kind: 'existing', storeAuthority: null, sessionId: 'running' },
-    })));
-  });
-
-  it('refreshes on foreground return only when Resume is online and not already loading', () => {
-    const device = resumeDevice('/home/me/weft');
-    const { rerender, props } = renderScreen({ devices: [device], initialMode: 'resume' });
-    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-    fireEvent(document, new Event('visibilitychange'));
-    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
-    rerender(<StartSessionScreen {...props} devices={[{ ...device, sessionsLoading: true }]} />);
-    fireEvent(document, new Event('visibilitychange'));
-    expect(props.onRefreshSessions).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not pull anything while the New tab is showing', () => {
+  it('does not ask again when the folder genuinely has no sessions', () => {
     const onRefreshSessions = vi.fn();
-    renderScreen({ devices: [makeDevice({ sessions: undefined })], onRefreshSessions });
-    expect(onRefreshSessions).not.toHaveBeenCalled();
+    const { rerender, props } = renderScreen({ devices: [{ ...resumeDevice('C:\\CLP\\Empty'), sessions: undefined }], onRefreshSessions });
+    rerender(<StartSessionScreen {...props} devices={[resumeDevice('C:\\CLP\\Empty', [])]} />);
+    expect(onRefreshSessions).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/no sessions in default yet/i)).toBeInTheDocument();
   });
 
-  it('re-asks the laptop when the folder changes instead of narrowing the page it has', () => {
-    // The laptop applies its cap after filtering, so the page on hand is only the newest N across
-    // whatever scope it was fetched for. Narrowing locally would quietly show a slice of a busy
-    // folder and read as a stale refresh.
+  it('refetches on reconnect, on a new attempt and when the page becomes visible', () => {
     const onRefreshSessions = vi.fn();
-    renderScreen({
-      devices: [resumeDevice('C:\\CLP\\ModernOrder')],
-      initialMode: 'resume',
-      onRefreshSessions,
-    });
-    onRefreshSessions.mockClear();
+    const base = resumeDevice('C:\\CLP\\ModernOrder');
+    const { rerender, props } = renderScreen({ devices: [base], onRefreshSessions });
+    expect(onRefreshSessions).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(folderPicker(), { target: { value: '/home/me/weft' } });
-    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', '/home/me/weft');
+    rerender(<StartSessionScreen {...props} devices={[{ ...base, connected: false }]} />);
+    rerender(<StartSessionScreen {...props} devices={[{ ...base, connected: true }]} />);
+    expect(onRefreshSessions).toHaveBeenCalledTimes(2);
+
+    rerender(<StartSessionScreen {...props} devices={[{ ...base, lastAttemptAt: 99 }]} />);
+    expect(onRefreshSessions).toHaveBeenCalledTimes(3);
+
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(onRefreshSessions).toHaveBeenCalledTimes(4);
   });
 
-  it('keeps every folder in the picker, and counts them, from the laptop\u2019s whole-store totals', () => {
-    // Scoped to one folder the page contains only that folder's rows; counting them would both
-    // strand the user (nothing else left to switch to) and understate a folder that outgrew the cap.
-    renderScreen({
-      devices: [
-        makeDevice({
-          projects: [],
-          sessions: [storedSession({ sessionId: 'a', title: 'Only one', cwd: '/home/me/weft' })],
-          sessionFolders: [
-            { cwd: '/home/me/weft', count: 96, updatedAt: null },
-            { cwd: 'C:\\CLP\\ModernOrder', count: 4, updatedAt: null },
-          ],
-        }),
-      ],
-      initialMode: 'resume',
-    });
+  it('follows the folder picker: refetches and lists only that folder\'s sessions', () => {
+    const onRefreshSessions = vi.fn();
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')], onRefreshSessions });
+    expect(screen.getByRole('heading', { name: /continue in default/i })).toBeInTheDocument();
+    expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries']);
 
-    const labels = [...folderPicker().options].map((o) => o.textContent ?? '');
-    expect(labels.some((l) => /weft \(96\)/.test(l))).toBe(true);
-    expect(labels.some((l) => /ModernOrder \(4\)/.test(l))).toBe(true);
-  });
-
-  it('narrows the list as you type and restores it when cleared', () => {
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume' });
-    expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries', 'Weft pairing']);
-
-    fireEvent.change(screen.getByLabelText(/search recent sessions/i), { target: { value: 'retry' } });
-    expect(rowTitles()).toEqual(['Add retries']);
-    expect(screen.getByText(/showing 1 of 3/i)).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: /^clear$/i }));
-    expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries', 'Weft pairing']);
-    expect(screen.queryByText(/showing/i)).toBeNull();
-  });
-
-  it('uses compact resume rows with age separated from repository metadata', () => {
-    const sessions = [
-      storedSession({ sessionId: 'a', title: 'Fix the auth bug', updatedAt: Date.now() - 60_000 }),
-    ];
-    renderScreen({ devices: [makeDevice({ sessions, projects: [] })], initialMode: 'resume' });
-
-    const firstRow = screen.getByRole('radio', { name: /fix the auth bug/i });
-    expect(firstRow.querySelector('.device-session-main .device-card-name')).toHaveTextContent('Fix the auth bug');
-    expect(firstRow.querySelector('.device-session-age')).toBeInTheDocument();
-    expect(firstRow.querySelector('.device-session-status')).toHaveTextContent(/resumable.*ModernOrder.*main/i);
-    expect(firstRow.querySelector('.device-session-status')).not.toHaveTextContent(/ago/i);
-  });
-
-  it('offers registered projects above folders the store merely happens to know about', () => {
-    // The two sets diverge: the store knows every cwd a session ever ran in, registered or not.
-    // Resume needs the union, or the folder you are most likely to want is missing whenever it has
-    // nothing resumable in it yet.
-    renderScreen({ devices: [resumeDevice('C:\\CLP\\Untouched')], initialMode: 'resume' });
-
-    expect([...folderPicker().options].map((o) => o.textContent)).toEqual([
-      'All folders (3)',
-      'Other (0)',
-      'Untouched (0)',
-      'ModernOrder (2)',
-      'weft (1)',
-    ]);
-  });
-
-  it('opens on the device default and shows it empty rather than widening to everything', () => {
-    renderScreen({ devices: [resumeDevice('C:\\CLP\\Untouched')], initialMode: 'resume' });
-    expect(folderPicker().value).toBe('C:\\CLP\\Untouched');
+    fireEvent.change(folderPicker(), { target: { value: 'Other' } });
+    expect(onRefreshSessions).toHaveBeenLastCalledWith('chan-1', 'C:\\CLP\\Other');
     expect(rowTitles()).toEqual([]);
   });
 
-  it('returns to the default on Clear rather than widening to all folders', () => {
-    renderScreen({ devices: [resumeDevice('/home/me/weft')], initialMode: 'resume' });
-    expect(folderPicker().value).toBe('/home/me/weft');
-    expect(rowTitles()).toEqual(['Weft pairing']);
-
-    fireEvent.change(folderPicker(), { target: { value: 'C:\\CLP\\ModernOrder' } });
-    expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries']);
-
-    fireEvent.click(screen.getByRole('button', { name: /^clear$/i }));
-    expect(folderPicker().value).toBe('/home/me/weft');
+  it('filters the folder\'s sessions by search', () => {
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')] });
+    fireEvent.click(screen.getByRole('button', { name: /search sessions/i }));
+    fireEvent.change(screen.getByLabelText(/search recent sessions/i), { target: { value: 'retry' } });
+    expect(rowTitles()).toEqual(['Add retries']);
   });
 
-  it('does not yank a folder the user chose when a later projects refresh lands', () => {
-    const { rerender, props } = renderScreen({ devices: [resumeDevice('/home/me/weft')], initialMode: 'resume' });
-    fireEvent.change(folderPicker(), { target: { value: 'C:\\CLP\\ModernOrder' } });
-
-    rerender(<StartSessionScreen {...props} devices={[resumeDevice('C:\\CLP\\Other')]} />);
-
-    expect(folderPicker().value).toBe('C:\\CLP\\ModernOrder');
+  it('opens with search showing when sent from "Continue session"', () => {
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')], initialMode: 'resume' });
+    expect(screen.getByLabelText(/search recent sessions/i)).toBeInTheDocument();
   });
 
-  it('resumes the session the filtered row points at, not the one at that index unfiltered', async () => {
-    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus());
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onOpen });
-
-    fireEvent.change(screen.getByLabelText(/search recent sessions/i), { target: { value: 'weft' } });
-    fireEvent.click(screen.getByRole('radio', { name: /weft pairing/i }));
-    fireEvent.click(cta());
-
-    await waitFor(() =>
-      expect(onOpen).toHaveBeenCalledWith({
-        deviceChannelId: 'chan-1',
-        target: { kind: 'existing', storeAuthority: null, sessionId: 'c' },
-        mode: 'default',
-        title: 'Weft pairing',
-        cwd: '/home/me/weft',
-      }),
-    );
-  });
-
-  it('opens a session the phone already holds instead of forking a second copy of it', () => {
-    const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({ state: 'open', action: 'reconnect' }));
-    const live = {
-      meta: { channelId: 'chan-live', sessionId: 'b', title: 'Add retries' },
-      timeline: { busy: false },
-    } as unknown as SessionView;
-    renderScreen({
-      devices: [makeDevice({ sessions: stored, projects: [] })],
-      sessions: [live],
-      initialMode: 'resume',
-      onOpen,
-    });
-
-    fireEvent.click(screen.getByRole('radio', { name: /add retries/i }));
-    expect(cta().textContent).toMatch(/open add retries/i);
-    fireEvent.click(cta());
-
-    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({
+  it('opens a past session in one tap', async () => {
+    const { props } = renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')] });
+    fireEvent.click(screen.getByRole('button', { name: /add retries/i }));
+    await waitFor(() => expect(props.onOpen).toHaveBeenCalledWith(expect.objectContaining({
+      deviceChannelId: 'chan-1',
       target: { kind: 'existing', storeAuthority: null, sessionId: 'b' },
-    }));
+      title: 'Add retries',
+      cwd: 'C:\\CLP\\ModernOrder',
+    })));
   });
 
-  it('offers the override when the laptop refuses because the session is already attached', async () => {
-    const onOpen = vi
-      .fn()
-      .mockResolvedValue(lifecycleStatus({
-        state: 'activating',
-        failure: {
-          code: 'controller-conflict',
-          actions: ['confirm-takeover', 'cancel'],
-          message: 'That session is already running on this laptop and connected to a phone.',
-        },
-        challenge: {
-          challengeId: 'challenge-1',
-          operationId: 'open-1',
-          revision: 1,
-          storeAuthority: null,
-          sessionId: 'a',
-          runtimeInstanceId: 'runtime-1',
-          generation: 1,
-          pid: 42,
-          processStartedAt: 10,
-          responsive: true,
-        },
-      }));
-    const onConfirmTakeover = vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' }));
+  it('marks a session that is already open on this phone', () => {
     renderScreen({
-      devices: [makeDevice({ sessions: stored, projects: [] })],
-      initialMode: 'resume',
-      onOpen,
-      onConfirmTakeover,
+      devices: [resumeDevice('C:\\CLP\\ModernOrder')],
+      sessions: [{ meta: { sessionId: 'a' } } as unknown as SessionView],
     });
+    expect(screen.getByRole('button', { name: /fix the auth bug/i }).textContent).toMatch(/open on this phone/i);
+  });
 
-    fireEvent.click(screen.getByRole('radio', { name: /fix the auth bug/i }));
-    fireEvent.click(cta());
+  it('offers the takeover when the session is already attached elsewhere', async () => {
+    const onOpen = vi.fn().mockResolvedValue(controllerConflict);
+    const onConfirmTakeover = vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' }));
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')], onOpen, onConfirmTakeover });
 
-    await waitFor(() => expect(cta().textContent).toMatch(/close it and resume anyway/i));
-    expect(screen.getByText(/already running/i)).toBeTruthy();
-
-    fireEvent.click(cta());
+    fireEvent.click(screen.getByRole('button', { name: /fix the auth bug/i }));
+    await waitFor(() => expect(screen.getByText(/already running/i)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /close it and open here/i }));
     await waitFor(() => expect(onConfirmTakeover).toHaveBeenCalledWith('open-1'));
   });
 
-  it('does not offer the override for an ordinary failure', async () => {
+  it('does not offer the takeover for an ordinary failure', async () => {
     const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({
       state: 'failed',
-      failure: {
-        code: 'directory-not-found',
-        actions: ['choose-directory', 'cancel'],
-        message: "The session's folder no longer exists: /gone",
-      },
+      failure: { code: 'directory-not-found', actions: ['choose-directory', 'cancel'], message: "The session's folder no longer exists: /gone" },
     }));
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume', onOpen });
-
-    fireEvent.click(screen.getByRole('radio', { name: /fix the auth bug/i }));
-    fireEvent.click(cta());
-
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')], onOpen });
+    fireEvent.click(screen.getByRole('button', { name: /fix the auth bug/i }));
     await waitFor(() => expect(screen.getByText(/no longer exists/i)).toBeTruthy());
-    expect(cta().textContent).not.toMatch(/anyway/i);
-  });
-
-  it('keeps the call to action inert until a session is picked', () => {
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume' });
-    expect(cta()).toBeDisabled();
-
-    fireEvent.click(screen.getByRole('radio', { name: /add retries/i }));
-    expect(cta()).not.toBeDisabled();
-  });
-
-  it('drops a selection that the filter has scrolled out from under', () => {
-    renderScreen({ devices: [makeDevice({ sessions: stored, projects: [] })], initialMode: 'resume' });
-    fireEvent.click(screen.getByRole('radio', { name: /add retries/i }));
-    expect(cta()).not.toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText(/search recent sessions/i), { target: { value: 'weft' } });
-    expect(cta()).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /close it and open here/i })).toBeNull();
   });
 });

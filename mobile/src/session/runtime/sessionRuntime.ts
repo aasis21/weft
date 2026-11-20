@@ -367,6 +367,26 @@ function showQueuedFirstMessage(session: Session, operation: PendingOperation): 
   ];
 }
 
+const FIRST_MESSAGE_TITLE_CHARS = 40;
+
+/** The first message, trimmed to a title-sized excerpt on a word boundary when possible. */
+export function firstMessageTitle(prompt: string | undefined): string | undefined {
+  const text = prompt?.replace(/\s+/g, ' ').trim();
+  if (!text) return undefined;
+  if (text.length <= FIRST_MESSAGE_TITLE_CHARS) return text;
+  const cut = text.slice(0, FIRST_MESSAGE_TITLE_CHARS);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > FIRST_MESSAGE_TITLE_CHARS / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/** The CLI's `-n` name for a launch. A new session without a chosen name is launched under its
+ *  first-message title: the relay reports `summary || initialName`, so Copilot's own summary still
+ *  replaces it, and the phone keeps `renamed` false so that reported title is accepted. */
+function launchName(pending: PendingSpawn): string | null {
+  if (pending.name) return pending.name;
+  return pending.kind === 'new' ? pending.title ?? null : null;
+}
+
 function titleFor(channelId: string, cwd: string | null, stored: string | null): string {
   return stored || basename(cwd) || creativeName(channelId);
 }
@@ -2013,7 +2033,7 @@ export class SessionRuntime {
             : { kind: 'new', projectName: pending.projectName },
           {
             mode: pending.mode,
-            name: pending.name ?? null,
+            name: launchName(pending),
             takeoverRequested: pending.force === true,
           },
         )
@@ -2028,7 +2048,7 @@ export class SessionRuntime {
             pending.requestId,
             pending.projectName,
             pending.mode,
-            pending.name ?? null,
+            launchName(pending),
           );
     this.recordDeviceEvent(pending.deviceId, 'out', message);
     await ctrl.client.send(message);
@@ -2126,7 +2146,9 @@ export class SessionRuntime {
     if (!device) throw new Error('Choose a registered listener device first.');
     const requestId = opts.operationId ?? `spawn-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
-    const displayName = opts.name?.trim() || opts.projectName;
+    // Without a chosen name, the first message stands in as the title until Copilot reports its own.
+    const provisionalTitle = opts.name?.trim() ? undefined : firstMessageTitle(opts.initialPrompt);
+    const displayName = opts.name?.trim() || provisionalTitle || opts.projectName;
     const createdAt = this.clock();
     const meta: SessionMeta = {
       channelId: tempId,
@@ -2158,6 +2180,7 @@ export class SessionRuntime {
       kind: 'new',
       projectName: opts.projectName,
       name: opts.name?.trim() || undefined,
+      ...(provisionalTitle ? { title: provisionalTitle } : {}),
       initialPrompt: opts.initialPrompt?.trim() || undefined,
       mode: opts.mode,
       createdAt,
@@ -2368,6 +2391,7 @@ export class SessionRuntime {
           projectName: pending.projectName,
           mode: pending.mode,
           name: pending.name,
+          initialPrompt: pending.initialPrompt,
         };
         await this.remove(channelId);
         return this.spawnSession(replacement.deviceId, replacement);

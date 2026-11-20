@@ -97,29 +97,30 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
     const onResumeOnDevice = vi.fn();
     renderDetails({ onStartOnDevice, onResumeOnDevice });
 
-    fireEvent.click(screen.getByRole('button', { name: /start copilot/i }));
+    fireEvent.click(screen.getByRole('button', { name: /new session/i }));
     expect(onStartOnDevice).toHaveBeenCalledWith('chan-1');
 
-    fireEvent.click(screen.getByRole('button', { name: /resume copilot/i }));
+    fireEvent.click(screen.getByRole('button', { name: /continue session/i }));
     expect(onResumeOnDevice).toHaveBeenCalledWith('chan-1');
   });
 
   it('presents five actions without pretending unsupported utilities work', () => {
     renderDetails();
 
-    expect(screen.getByRole('button', { name: /start copilot/i })).toHaveClass('primary');
-    expect(screen.getByRole('button', { name: /resume copilot/i })).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: /new session/i })).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: /continue session/i })).toHaveClass('primary');
     expect(screen.getByRole('button', { name: /open terminal/i })).toHaveClass('secondary');
     expect(screen.getByRole('button', { name: /clipboard/i })).toHaveClass('secondary');
     expect(screen.getByRole('button', { name: /keep awake/i })).toHaveClass('secondary');
-    expect(screen.getByRole('button', { name: /start copilot/i })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: /resume copilot/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /new session/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /continue session/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /clipboard/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /keep awake/i })).toBeDisabled();
     expect(screen.getAllByText('Checking support')).toHaveLength(3);
     expect(screen.queryByText('Terminal unavailable')).toBeNull();
-    expect(screen.queryByText('New session')).toBeNull();
+    // Only the quick action: this screen no longer hosts its own launcher.
+    expect(screen.getAllByText('New session')).toHaveLength(1);
     expect(screen.queryByText('Recent session')).toBeNull();
   });
 
@@ -131,8 +132,8 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
 
   it('keeps the action layout visible but explains why laptop actions are disabled offline', () => {
     renderDetails({ device: makeDevice({ connected: false }) });
-    expect(screen.getByRole('button', { name: /start copilot/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /resume copilot/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /new session/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /continue session/i })).toBeDisabled();
     expect(screen.getAllByText(/weft start/i).some((element) => element.textContent?.includes('weft start'))).toBe(true);
   });
 
@@ -774,12 +775,12 @@ describe('DeviceDetailsScreen monitoring', () => {
       expect(send).toHaveFocus();
       fireEvent.keyDown(document, { key: 'Tab' });
       expect(close).toHaveFocus();
-      expect(screen.queryByRole('button', { name: /Start Copilot/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /New session/ })).toBeNull();
       const header = document.querySelector('.status-bar') as HTMLElement;
       expect(header.inert).toBe(true);
       fireEvent.click(close);
       expect(header.inert).not.toBe(true);
-      expect(screen.getByRole('button', { name: /Start Copilot/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /New session/ })).toBeTruthy();
     });
 
     it.each(['disconnect', 'device switch', 'capability removed', 'unmount'])('clears clipboard on %s', (reason) => {

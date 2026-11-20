@@ -50,8 +50,7 @@ export default function App(): JSX.Element {
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startDeviceId, setStartDeviceId] = useState<string | undefined>(undefined);
-  /** Which tab the start screen opens on — "Resume a session" on a device lands straight on the
-   *  resumable list rather than making you find the tab yourself. */
+  /** "Continue session" on a device opens the start screen with its session search ready. */
   const [startMode, setStartMode] = useState<StartMode>('new');
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [deviceDetailsChannelId, setDeviceDetailsChannelId] = useState<string | undefined>(undefined);

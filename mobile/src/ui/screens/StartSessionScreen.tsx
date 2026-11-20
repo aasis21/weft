@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { LifecycleStatusMsg, SpawnMode } from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, SpawnMode, StoredSession } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import {
@@ -9,34 +9,29 @@ import {
   type SessionOpenIntent,
 } from '@/session/access/sessionAccess';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
-import { PlusGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { useNowTick } from '@/ui/hooks/useNowTick';
-import { ALL_FOLDERS, filterStoredSessions, folderOptions, isFiltering } from '@/ui/screens/sessionFilter';
+import { filterStoredSessions } from '@/ui/screens/sessionFilter';
 
-/** Which of the two ways into a session this screen is showing. Both share the device picker and
- *  permissions; New leads with the first message, Resume with the list of stored sessions. */
+/** Where the screen was opened from. Both lead to the same page: a composer for a new session and
+ *  the folder's recent sessions below it. `resume` opens with session search ready. */
 export type StartMode = 'new' | 'resume';
 
 interface StartSessionScreenProps {
   hasSessions: boolean;
   devices: ListenerDeviceState[];
-  /** Preselect a device (e.g. arriving from the "Start session" button on a DevicesScreen row)
-   *  instead of defaulting to the top of the sorted list. */
+  /** Preselect a device (e.g. arriving from a device row) instead of the top of the sorted list. */
   initialChannelId?: string | undefined;
-  /** Open straight onto the Resume tab (arriving from "Resume a session" on a device). */
   initialMode?: StartMode;
   onConnectDevice(channelId: string): void;
   onOpen(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
   onConfirmTakeover(operationId: string): Promise<LifecycleStatusMsg>;
-  /** Pull recent CLI/app sessions when Resume opens, reconnects, or is refreshed. */
+  /** Pull the folder's recent CLI/app sessions from the device. */
   onRefreshSessions(channelId: string, cwd?: string | null): void;
   onScanListener(): void;
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
   onManageDevices?(): void;
   onCancel(): void;
-  /** Same hamburger + sessions drawer every other screen shows (#186 nav consistency) — lets you
-   *  jump straight to another live session, or back here from it, without losing this in-progress flow. */
   sessions: SessionView[];
   activeId: string | null;
   onSelectSession(channelId: string): void;
@@ -44,6 +39,8 @@ interface StartSessionScreenProps {
   onRenameSession(channelId: string, title: string): void;
   onGoHome(): void;
 }
+
+const MAX_COMPOSER_HEIGHT = 220;
 
 export function StartSessionScreen({
   hasSessions,
@@ -65,42 +62,30 @@ export function StartSessionScreen({
   onGoHome,
 }: StartSessionScreenProps): JSX.Element {
   const [selectedId, setSelectedId] = useState<string>(initialChannelId ?? '');
-  const [startMode, setStartMode] = useState<StartMode>(initialMode ?? 'new');
-  const resuming = startMode === 'resume';
   const [projectName, setProjectName] = useState('');
-  // Permission mode is shared by both tabs and starts from the selected laptop's configured
-  // preference. A user's choice on this screen wins until they switch devices.
+  // Starts from the selected laptop's configured preference; a choice here wins until the device changes.
   const [mode, setMode] = useState<SpawnMode>('default');
   const modeTouchedRef = useRef(false);
   const modeDeviceRef = useRef<string | null>(null);
-  // --- new-tab draft: kept across tab switches so flipping to Resume and back loses nothing -------
-  const [firstMessage, setFirstMessage] = useState('');
-  const [name, setName] = useState('');
-  const [nameOpen, setNameOpen] = useState(false);
-  const [nameEditing, setNameEditing] = useState(false);
-  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [message, setMessage] = useState('');
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<LifecycleStatusMsg | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // --- resume-tab state -------------------------------------------------------------------------
-  const [sessionQuery, setSessionQuery] = useState('');
-  const [sessionFolder, setSessionFolder] = useState<string>(ALL_FOLDERS);
-  const [resumeSessionId, setResumeSessionId] = useState<string>('');
-  /** Whether the user has picked a folder themselves. The device's projects arrive asynchronously,
-   *  so the default can't be a useState initialiser — and once it has been applied, a later refresh
-   *  must not yank the picker back out from under a choice the user has made. */
-  const folderTouchedRef = useRef(false);
-  /** The `device|folder` pair the current `sessions` page was fetched for. The laptop now filters by
-   *  folder BEFORE applying its cap, so a folder that is busier than the cap can only be seen in
-   *  full by re-asking scoped to it — filtering the page we already have would silently show a
-   *  truncated slice. Keyed by pair so switching folders re-pulls, and so the reply landing (which
-   *  always sets an array, even an empty one) can't be mistaken for "still nothing, ask again". */
+  const [searchOpen, setSearchOpen] = useState(initialMode === 'resume');
+  const [query, setQuery] = useState('');
+  /** The `device|folder|attempt` the current list was fetched for. The laptop caps its reply after
+   *  filtering by folder, so every folder change re-asks rather than narrowing a page on hand; a
+   *  reply always sets an array, so an empty answer is not mistaken for "ask again". */
   const fetchedScopeRef = useRef<string>('');
   const now = useNowTick();
 
   const sortedDevices = sortDevices(devices);
   const selected = sortedDevices.find((d) => d.channelId === selectedId) ?? sortedDevices[0] ?? null;
+  const project = selected?.projects.find((p) => p.name === projectName) ?? null;
+  const folderPath = project?.path ?? null;
 
   useEffect(() => {
     if (!selectedId && sortedDevices[0]) setSelectedId(sortedDevices[0].channelId);
@@ -111,192 +96,131 @@ export function StartSessionScreen({
   }, [selected?.channelId, onConnectDevice]);
 
   useEffect(() => {
-    const deviceChanged = modeDeviceRef.current !== selected?.channelId;
-    if (deviceChanged) {
+    if (modeDeviceRef.current !== selected?.channelId) {
       modeDeviceRef.current = selected?.channelId ?? null;
       modeTouchedRef.current = false;
     }
-    if (!modeTouchedRef.current)
-      setMode(selected?.defaultPermissionMode ?? 'default');
+    if (!modeTouchedRef.current) setMode(selected?.defaultPermissionMode ?? 'default');
   }, [selected?.channelId, selected?.defaultPermissionMode]);
 
   useEffect(() => {
     if (!selected) return;
-    const defaultProject = selected.projects.find((p) => p.name === selected.lastProjectName)
+    const fallback = selected.projects.find((p) => p.name === selected.lastProjectName)
       ?? selected.projects.find((p) => p.isDefault)
       ?? selected.projects[0];
-    setProjectName(defaultProject?.name ?? '');
+    setProjectName((current) =>
+      selected.projects.some((p) => p.name === current) ? current : fallback?.name ?? '');
   }, [selected?.channelId, selected?.projects, selected?.lastProjectName]);
 
-  // --- resume derivations -----------------------------------------------------------------------
-  const storeSessions = selected?.sessions ?? [];
-  // Whether the resumable list has ever been pulled this run (undefined = never asked; the reply
-  // always sets an array, even when empty). Drives "Load" vs "none found".
-  const sessionsPulled = selected?.sessions !== undefined;
-  // The folder this laptop is configured to default to. Sessions are almost always resumed in the
-  // folder you work in, so the picker opens there rather than on the full unfiltered list.
-  const defaultFolder = selected?.projects.find((p) => p.isDefault)?.path ?? null;
-  // Registered projects and store cwds are different sets, so resume offers the union — see
-  // folderOptions. New sessions stay registered-only, because you can only launch into a project.
-  // The laptop's whole-store totals also keep every folder in the picker while the rows on hand are
-  // scoped to one — without them, narrowing to a folder would empty the picker you narrowed with.
-  const folderTotals = new Map<string, number>();
-  for (const folder of selected?.sessionFolders ?? []) folderTotals.set(folder.cwd, folder.count);
-  const folderChoices = folderOptions(
-    storeSessions,
-    selected?.projects.map((p) => p.path) ?? [],
-    folderTotals.size > 0 ? folderTotals : undefined,
-  );
-  const activeFolder = folderChoices.some((f) => f.path === sessionFolder) ? sessionFolder : ALL_FOLDERS;
-  const visibleSessions = filterStoredSessions(
-    storeSessions,
-    { query: sessionQuery, folder: activeFolder },
-    folderChoices.map((f) => f.path),
-  );
+  // Past sessions are limited to registered folders: the list always follows the folder a new
+  // session would start in, and loads on its own when the page opens or the device/folder changes.
+  useEffect(() => {
+    if (!selected?.connected || !folderPath) {
+      fetchedScopeRef.current = '';
+      return;
+    }
+    if (selected.sessionsLoading) return;
+    const scope = `${selected.channelId}|${folderPath}|${selected.lastAttemptAt ?? 0}`;
+    if (fetchedScopeRef.current === scope) return;
+    fetchedScopeRef.current = scope;
+    onRefreshSessions(selected.channelId, folderPath);
+  }, [
+    selected?.channelId,
+    selected?.connected,
+    selected?.sessionsLoading,
+    selected?.lastAttemptAt,
+    folderPath,
+    onRefreshSessions,
+  ]);
 
-  // Sessions the phone is already driving, keyed by CLI session id: a store row that matches one is
-  // "Open" (route to the card we have) rather than "Resume" (which would fork a second CLI).
+  useEffect(() => {
+    if (!selected?.connected || !folderPath) return undefined;
+    const refreshOnReturn = (): void => {
+      if (document.visibilityState === 'visible' && !selected.sessionsLoading) {
+        onRefreshSessions(selected.channelId, folderPath);
+      }
+    };
+    document.addEventListener('visibilitychange', refreshOnReturn);
+    return () => document.removeEventListener('visibilitychange', refreshOnReturn);
+  }, [selected?.channelId, selected?.connected, selected?.sessionsLoading, folderPath, onRefreshSessions]);
+
+  const resizeComposer = (): void => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT)}px`;
+  };
+
+  const storeSessions = selected?.sessions ?? [];
+  const sessionsPulled = selected?.sessions !== undefined;
+  const folderSessions: StoredSession[] = folderPath
+    ? filterStoredSessions(storeSessions, { query, folder: folderPath }, [folderPath])
+    : [];
   const liveBySessionId = new Map<string, SessionView>();
   for (const s of sessions) {
     if (s.meta.sessionId) liveBySessionId.set(s.meta.sessionId, s);
   }
 
-  const chosenSession = visibleSessions.find((s) => s.sessionId === resumeSessionId) ?? null;
-  const chosenLive = chosenSession ? liveBySessionId.get(chosenSession.sessionId) ?? null : null;
-
-  useEffect(() => {
-    if (folderTouchedRef.current || !defaultFolder) return;
-    setSessionFolder(defaultFolder);
-  }, [defaultFolder]);
-
-  useEffect(() => {
-    if (!nameEditing) return undefined;
-    const keepNameVisible = (): void => {
-      nameInputRef.current?.scrollIntoView({ block: 'center' });
-    };
-    const frame = window.requestAnimationFrame(keepNameVisible);
-    window.visualViewport?.addEventListener('resize', keepNameVisible);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.visualViewport?.removeEventListener('resize', keepNameVisible);
-    };
-  }, [nameEditing]);
-
-  // Opening the Resume tab is itself the request to see what is resumable, so pull the list rather
-  // than parking behind a Load button — the empty and loading states already cover the wait. Only
-  // while the device is connected: asking an offline laptop just produces a timeout. Re-pulls on
-  // every folder change because the cap is applied by the laptop AFTER filtering.
-  useEffect(() => {
-    if (!resuming || !selected?.connected) {
-      fetchedScopeRef.current = '';
-      return;
-    }
-    if (selected.sessionsLoading) return;
-    // The device's default folder arrives asynchronously with its project list; fetching "all"
-    // first and then immediately re-fetching the default would flash a list we never meant to show.
-    if (!folderTouchedRef.current && defaultFolder && sessionFolder !== defaultFolder) return;
-    const scope = `${selected.channelId}|${sessionFolder}|${selected.lastAttemptAt ?? 0}`;
-    if (fetchedScopeRef.current === scope) return;
-    fetchedScopeRef.current = scope;
-    onRefreshSessions(selected.channelId, sessionFolder === ALL_FOLDERS ? null : sessionFolder);
-  }, [
-    resuming,
-    selected?.channelId,
-    selected?.connected,
-    selected?.sessionsLoading,
-    selected?.lastAttemptAt,
-    sessionFolder,
-    defaultFolder,
-    onRefreshSessions,
-  ]);
-
-  useEffect(() => {
-    if (!resuming || !selected?.connected) return undefined;
-    const refreshOnReturn = (): void => {
-      if (document.visibilityState === 'visible' && !selected.sessionsLoading) {
-        onRefreshSessions(selected.channelId, activeFolder === ALL_FOLDERS ? null : activeFolder);
-      }
-    };
-    document.addEventListener('visibilitychange', refreshOnReturn);
-    return () => document.removeEventListener('visibilitychange', refreshOnReturn);
-  }, [resuming, selected?.channelId, selected?.connected, selected?.sessionsLoading, activeFolder, onRefreshSessions]);
-
-  // A selection that scrolls out of the filtered list is no longer a thing the CTA can act on.
-  useEffect(() => {
-    if (resumeSessionId && !visibleSessions.some((s) => s.sessionId === resumeSessionId)) {
-      setResumeSessionId('');
-    }
-  }, [resumeSessionId, visibleSessions]);
-
-  const clearSessionFilters = (): void => {
-    setSessionQuery('');
-    // Clear returns to the device's default folder, not to everything — that default is the state
-    // the screen opens in, so anything else would make Clear a different, wider view than the one
-    // the user started from.
-    folderTouchedRef.current = false;
-    setSessionFolder(defaultFolder ?? ALL_FOLDERS);
-  };
-
-  const switchMode = (next: StartMode): void => {
-    setStartMode(next);
-    setError(null);
-    setBlocked(null);
-  };
-
-  const applyStatus = (status: LifecycleStatusMsg): boolean => {
+  const applyStatus = (status: LifecycleStatusMsg): void => {
     if (requiresTakeoverConfirmation(status)) {
       setError(lifecycleFailureMessage(status.failure));
       setBlocked(status);
       setBusy(false);
-      return false;
+      setOpeningId(null);
+      return;
     }
-    if (status.state !== 'failed') return true;
+    if (status.state !== 'failed') return;
     setError(lifecycleFailureMessage(status.failure));
     setBlocked(null);
     setBusy(false);
-    return false;
+    setOpeningId(null);
   };
 
+  const fail = (err: unknown, fallback: string): void => {
+    setError(err instanceof Error ? err.message : fallback);
+    setBusy(false);
+    setOpeningId(null);
+  };
+
+  const online = Boolean(selected?.connected);
+  const canStart = !busy && online && Boolean(projectName) && !selected?.projectsLoading;
+
   const submitNew = async (): Promise<void> => {
-    if (!selected || !selected.connected || !projectName) return;
+    if (!selected || !canStart) return;
     setBusy(true);
     setError(null);
-    const initialPrompt = firstMessage.trim();
+    setBlocked(null);
+    const initialPrompt = message.trim();
     try {
       // The draft stays in state until the screen closes, so a refused launch keeps the text.
       applyStatus(await onOpen({
         deviceChannelId: selected.channelId,
         target: { kind: 'new', projectName },
         mode,
-        name: name.trim() || null,
+        name: null,
         ...(initialPrompt ? { initialPrompt } : {}),
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start the session.');
-      setBusy(false);
+      fail(err, 'Could not start the session.');
     }
   };
 
-  const submitResume = async (): Promise<void> => {
-    if (!selected || !selected.connected || !chosenSession) return;
+  const openStored = async (stored: StoredSession): Promise<void> => {
+    if (!selected || !online || busy) return;
     setBusy(true);
+    setOpeningId(stored.sessionId);
     setError(null);
     setBlocked(null);
     try {
       applyStatus(await onOpen({
         deviceChannelId: selected.channelId,
-        target: {
-          kind: 'existing',
-          storeAuthority: null,
-          sessionId: chosenSession.sessionId,
-        },
+        target: { kind: 'existing', storeAuthority: null, sessionId: stored.sessionId },
         mode,
-        title: chosenSession.title || chosenSession.cwd,
-        cwd: chosenSession.cwd,
+        title: stored.title || stored.cwd,
+        cwd: stored.cwd,
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open the session.');
-      setBusy(false);
+      fail(err, 'Could not open the session.');
     }
   };
 
@@ -307,78 +231,67 @@ export function StartSessionScreen({
     try {
       applyStatus(await onConfirmTakeover(blocked.operationId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not take over the session.');
-      setBusy(false);
+      fail(err, 'Could not take over the session.');
     }
   };
 
-  const onlineCount = sortedDevices.filter((d) => deviceStatus(d).tone === 'online').length;
-  const deviceCountLabel = sortedDevices.length === 0
-    ? 'No devices yet'
-    : `${sortedDevices.length} device${sortedDevices.length === 1 ? '' : 's'} · ${onlineCount} online`;
+  const canTakeOver = blocked?.failure?.actions.includes('confirm-takeover') === true;
+  const status = selected ? deviceStatus(selected) : null;
+  const lastSeen = selected ? formatLastSeen(selected.lastSeenAt, now) : null;
+  const hasText = message.trim().length > 0;
+  const sendLabel = busy && !openingId ? 'Starting…' : hasText ? 'Start & send' : 'Start session';
+  const folderLabel = project?.name ?? 'this folder';
 
-  const forcing =
-    blocked?.failure?.actions.includes('confirm-takeover') === true &&
-    blocked.challenge?.sessionId === chosenSession?.sessionId;
-  const ctaDisabled = busy
-    || !selected
-    || !selected.connected
-    || (resuming ? !chosenSession : !projectName || selected.projectsLoading);
-  const ctaLabel = resuming
-    ? busy
-      ? chosenSession?.running ? 'Connecting…' : 'Resuming…'
-      : chosenLive
-        ? `Open ${chosenLive.meta.title || 'session'}`
-        : forcing
-          ? 'Close it and resume anyway'
-          : `${chosenSession?.running ? 'Connect' : 'Resume'} on ${selected ? deviceLabel(selected) : 'device'}`
-    : busy
-      ? 'Starting…'
-      : firstMessage.trim()
-        ? 'Start & send'
-        : 'Start session';
-  const selectedStatus = selected ? deviceStatus(selected) : null;
-  const selectedLastSeen = selected ? formatLastSeen(selected.lastSeenAt, now) : null;
-
-  const permissionsControl = (
-    <div className="start-permissions">
-      <span className="start-field-label" id="start-mode-label">Permissions</span>
-      <div className="start-mode-toggle" role="radiogroup" aria-labelledby="start-mode-label">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={mode === 'default'}
-          className={mode === 'default' ? 'selected' : ''}
-          onClick={() => {
-            modeTouchedRef.current = true;
-            setMode('default');
-          }}
-        >
-          Default
-        </button>
-        <button
-          type="button"
-          role="radio"
-          aria-checked={mode === 'allow-all'}
-          className={mode === 'allow-all' ? 'selected' : ''}
-          onClick={() => {
-            modeTouchedRef.current = true;
-            setMode('allow-all');
-          }}
-        >
-          Allow all
-        </button>
-      </div>
-      {mode === 'allow-all' ? (
-        <p className="start-mode-hint">
-          Grants full permissions: tools, file paths, and URLs run without confirmation.
+  const listBody = (): JSX.Element => {
+    if (!online) return <p className="start-hint">Sessions appear when {selected ? deviceLabel(selected) : 'the device'} is online.</p>;
+    if (!folderPath) return <p className="start-hint">No folders on this device yet.</p>;
+    if (selected?.sessionsLoading || !sessionsPulled) {
+      return (
+        <ul className="start-continue-list" aria-label="Loading sessions" aria-busy="true">
+          {[0, 1, 2].map((i) => <li key={i} className="start-continue-skeleton" />)}
+        </ul>
+      );
+    }
+    if (folderSessions.length === 0) {
+      return (
+        <p className="start-hint">
+          {query.trim() ? 'No sessions match your search.' : `No sessions in ${folderLabel} yet.`}
         </p>
-      ) : null}
-    </div>
-  );
+      );
+    }
+    return (
+      <ul className="start-continue-list" aria-label="Recent sessions">
+        {folderSessions.map((s) => {
+          const live = liveBySessionId.get(s.sessionId);
+          const when = formatLastSeen(s.updatedAt ?? undefined, now);
+          const detail = [s.branch, live ? 'open on this phone' : null].filter(Boolean).join(' · ');
+          const opening = openingId === s.sessionId;
+          return (
+            <li key={s.sessionId}>
+              <button
+                type="button"
+                className={`start-continue-row${opening ? ' opening' : ''}`}
+                disabled={busy}
+                onClick={() => void openStored(s)}
+              >
+                <span className="start-continue-main">
+                  <span className="start-continue-title">{s.title || 'Untitled session'}</span>
+                  <span className="start-continue-meta">
+                    {s.running || live ? <span className="start-live-dot" aria-label="Running" /> : null}
+                    {opening ? 'Opening…' : when}
+                  </span>
+                </span>
+                {detail ? <span className="start-continue-detail">{detail}</span> : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  };
 
   return (
-    <main className={`weft-session join-session start-session-v2${nameEditing ? ' name-editing' : ''}`}>
+    <main className="weft-session join-session start-session-v3">
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -393,20 +306,22 @@ export function StartSessionScreen({
           </span>
         </button>
         <div className="status-id">
-          <span className="status-title">{resuming ? 'Resume a session' : 'Start a session'}</span>
-          <span className="status-line">
-            <span className="status-dot" aria-hidden="true" />
-            {deviceCountLabel}
-          </span>
+          <span className="status-title">New session</span>
+          {selected && status ? (
+            <span className={`status-line device-status-${status.tone}`}>
+              <span className="device-status-dot" aria-hidden="true" />
+              {status.tone === 'online' || !lastSeen ? status.label : `${status.label} · seen ${lastSeen}`}
+            </span>
+          ) : null}
         </div>
         {hasSessions ? (
-          <button className="icon-btn" type="button" onClick={onCancel} aria-label="Cancel">
+          <button className="icon-btn" type="button" onClick={onCancel} aria-label="Close">
             ✕
           </button>
         ) : null}
       </header>
 
-      <div className="session-join-inner">
+      <div className="session-join-inner start-page">
         {sortedDevices.length === 0 ? (
           <section className="session-join-scanner start-empty">
             <p className="session-join-hint start-empty-explainer">
@@ -420,245 +335,145 @@ export function StartSessionScreen({
           </section>
         ) : (
           <>
-            <div className="start-mode-tabs" role="tablist" aria-label="New or resume">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={!resuming}
-                className={!resuming ? 'selected' : ''}
-                onClick={() => switchMode('new')}
-              >
-                New session
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={resuming}
-                className={resuming ? 'selected' : ''}
-                onClick={() => switchMode('resume')}
-              >
-                Resume
-              </button>
-            </div>
-
-            <div className="start-device-row">
-              <select
-                className="start-device-select"
-                aria-label="Device"
-                value={selected?.channelId ?? ''}
-                onChange={(e) => setSelectedId(e.currentTarget.value)}
-              >
-                {sortedDevices.map((device) => (
-                  <option key={device.channelId} value={device.channelId}>
-                    {`${deviceLabel(device)}${device.isDefault ? ' (default)' : ''} · ${deviceStatus(device).label}`}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="start-add-device"
-                onClick={onScanListener}
-                aria-label="Add a new device"
-              >
-                <span className="device-action-icon" aria-hidden="true"><PlusGlyph /></span>
-                Add
-              </button>
-            </div>
-            {selected && selectedStatus ? (
-              <p className={`start-device-status device-status-${selectedStatus.tone}`}>
+            <div className="start-pickers">
+              <label className={`start-picker device-status-${status?.tone ?? 'offline'}`}>
                 <span className="device-status-dot" aria-hidden="true" />
-                {selectedStatus.label}
-                {selectedLastSeen ? ` · seen ${selectedLastSeen}` : ''}
-                {selected.connected && selected.projectsLoading ? ' · refreshing projects…' : ''}
-              </p>
-            ) : null}
+                <select
+                  aria-label="Device"
+                  value={selected?.channelId ?? ''}
+                  onChange={(e) => setSelectedId(e.currentTarget.value)}
+                >
+                  {sortedDevices.map((device) => (
+                    <option key={device.channelId} value={device.channelId}>
+                      {`${deviceLabel(device)} · ${deviceStatus(device).label}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="start-picker">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path fill="currentColor" d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2h7A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
+                </svg>
+                <select
+                  aria-label="Folder"
+                  value={projectName}
+                  disabled={!selected || selected.projects.length === 0}
+                  onChange={(e) => {
+                    setProjectName(e.currentTarget.value);
+                    setError(null);
+                    setBlocked(null);
+                  }}
+                >
+                  {selected && selected.projects.length === 0 ? (
+                    <option value="">{selected.projectsLoading ? 'Loading folders…' : 'No folders'}</option>
+                  ) : null}
+                  {selected?.projects.map((p) => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
-            {resuming ? (
-              <section className="start-resume-section" aria-label="Sessions to resume">
-                <div className="start-resume-head">
-                  <span className="start-field-label">Recent sessions</span>
+            <form
+              className="composer-shell start-composer"
+              aria-label="New session"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitNew();
+              }}
+            >
+              <textarea
+                ref={composerRef}
+                className="composer-input start-composer-input"
+                aria-label="First message"
+                placeholder={online ? 'What should Copilot work on?' : `${selected ? deviceLabel(selected) : 'Device'} is offline`}
+                rows={3}
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.currentTarget.value);
+                  resizeComposer();
+                }}
+              />
+              <div className="composer-controls">
+                <div className="composer-controls-left">
                   <button
                     type="button"
-                    className="session-link-btn"
-                    onClick={() =>
-                      selected &&
-                      onRefreshSessions(
-                        selected.channelId,
-                        activeFolder === ALL_FOLDERS ? null : activeFolder,
-                      )
-                    }
-                    disabled={!selected?.connected || selected.sessionsLoading}
-                  >
-                    {selected?.sessionsLoading ? 'Loading…' : sessionsPulled ? 'Refresh' : 'Load'}
-                  </button>
-                </div>
-                <div className="session-filter-bar">
-                  <select
-                    className="session-filter-folder"
-                    aria-label="Folder"
-                    value={activeFolder}
-                    onChange={(e) => {
-                      folderTouchedRef.current = true;
-                      setSessionFolder(e.currentTarget.value);
+                    className={`start-perm-chip${mode === 'allow-all' ? ' auto' : ''}`}
+                    aria-label={`Permissions: ${mode === 'allow-all' ? 'Allow all' : 'Ask first'}`}
+                    onClick={() => {
+                      modeTouchedRef.current = true;
+                      setMode(mode === 'allow-all' ? 'default' : 'allow-all');
                     }}
                   >
-                    <option value={ALL_FOLDERS}>All folders ({storeSessions.length})</option>
-                    {folderChoices.map((folder) => (
-                      <option key={folder.path} value={folder.path} title={folder.path}>
-                        {folder.label} ({folder.count})
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="search"
-                    className="session-filter-search"
-                    placeholder="Search title, repo or branch"
-                    aria-label="Search recent sessions"
-                    value={sessionQuery}
-                    onChange={(e) => setSessionQuery(e.currentTarget.value)}
-                  />
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      {mode === 'allow-all'
+                        ? <path fill="currentColor" d="M13 2 4 14h6l-1 8 9-12h-6z" />
+                        : <path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z" />}
+                    </svg>
+                    {mode === 'allow-all' ? 'Allow all' : 'Ask first'}
+                  </button>
                 </div>
-                {storeSessions.length === 0 ? (
-                  <p className="session-join-hint">
-                    {selected?.sessionsLoading
-                      ? 'Loading sessions…'
-                      : sessionsPulled
-                        ? 'No resumable sessions found on this device.'
-                        : selected?.connected
-                          ? 'Loading sessions…'
-                          : 'Device is offline — reconnect it to see resumable sessions.'}
-                  </p>
-                ) : (
-                  <>
-                    {isFiltering({ query: sessionQuery, folder: activeFolder }) ? (
-                      <p className="device-card-sub session-filter-count">
-                        Showing {visibleSessions.length} of {storeSessions.length}
-                        <button type="button" className="session-link-btn" onClick={clearSessionFilters}>
-                          Clear
-                        </button>
-                      </p>
-                    ) : null}
-                    {visibleSessions.length === 0 ? (
-                      <p className="session-join-hint">No sessions match this filter.</p>
-                    ) : (
-                      <ul className="devices-list device-sessions-list" role="radiogroup" aria-label="Session to resume">
-                        {visibleSessions.map((s) => {
-                          const live = liveBySessionId.get(s.sessionId);
-                          const subtitle = [s.repository, s.branch].filter(Boolean).join(' · ') || s.cwd;
-                          const when = formatLastSeen(s.updatedAt ?? undefined, now);
-                          const label = s.title || s.cwd;
-                          const isChosen = s.sessionId === resumeSessionId;
-                          return (
-                            <li key={s.sessionId} className="device-card device-session-row">
-                              <button
-                                type="button"
-                                role="radio"
-                                aria-checked={isChosen}
-                                className={`device-session-open${isChosen ? ' selected' : ''}`}
-                                onClick={() => {
-                                  setResumeSessionId(s.sessionId);
-                                  setError(null);
-                                }}
-                              >
-                                <span className="device-session-main">
-                                  <span className="device-card-name">{label}</span>
-                                  {when ? <span className="device-session-age">{when}</span> : null}
-                                </span>
-                                <span className="device-card-sub device-session-status">
-                                  {live ? 'already on this phone' : s.running ? 'running · connect' : 'resumable'}
-                                  {subtitle ? ` · ${subtitle}` : ''}
-                                </span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </>
-                )}
-                {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
-                {permissionsControl}
-              </section>
-            ) : (
-              <section className="start-new-composer" aria-label="New session">
-                <textarea
-                  className="start-first-message"
-                  aria-label="First message"
-                  placeholder="What should Copilot work on?"
-                  rows={4}
-                  value={firstMessage}
-                  onChange={(e) => setFirstMessage(e.currentTarget.value)}
-                />
-                <div className="start-new-controls">
-                  {selected?.projectsLoading ? (
-                    <p className="session-join-hint start-loading">Loading projects from the device…</p>
-                  ) : selected && selected.projects.length === 0 ? (
-                    <p className="session-join-hint">No projects received yet. Refresh after the device is online.</p>
-                  ) : (
-                    <label className="start-project-field">
-                      <span className="start-field-label">Folder</span>
-                      <select
-                        value={projectName}
-                        disabled={!selected || selected.projects.length === 0}
-                        onChange={(e) => setProjectName(e.target.value)}
-                      >
-                        {selected?.projects.map((project) => (
-                          <option key={project.name} value={project.name}>
-                            {project.name}{project.isDefault ? ' (default)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {permissionsControl}
+                <div className="composer-controls-right">
+                  <button
+                    type="submit"
+                    className="send-btn"
+                    disabled={!canStart}
+                    aria-label={sendLabel}
+                    title={sendLabel}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path fill="currentColor" d="M12 5l6.5 6.5-1.4 1.4L13 8.8V19h-2V8.8l-4.1 4.1-1.4-1.4z" />
+                    </svg>
+                  </button>
                 </div>
-                {nameOpen ? (
-                  <label className="session-field start-name-field">
-                    <span>Session name (optional)</span>
-                    <input
-                      ref={nameInputRef}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      onFocus={() => setNameEditing(true)}
-                      onBlur={() => setNameEditing(false)}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' || ctaDisabled) return;
-                        e.preventDefault();
-                        setNameEditing(false);
-                        e.currentTarget.blur();
-                        void submitNew();
-                      }}
-                      enterKeyHint="go"
-                      placeholder="e.g. Mobile bug sweep"
-                    />
-                  </label>
-                ) : (
+              </div>
+            </form>
+
+            {error ? (
+              <div className="error-banner start-error">
+                <span>{error}</span>
+                {canTakeOver ? (
+                  <button type="button" className="session-link-btn" disabled={busy} onClick={() => void submitTakeover()}>
+                    Close it and open here
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
+
+            <section className="start-continue" aria-label="Continue a session">
+              <div className="start-continue-head">
+                <h2>Continue in {folderLabel}</h2>
+                {online && folderPath ? (
                   <button
                     type="button"
-                    className="session-link-btn start-name-toggle"
-                    aria-expanded={false}
-                    onClick={() => setNameOpen(true)}
+                    className="icon-btn start-search-btn"
+                    aria-label="Search sessions"
+                    aria-expanded={searchOpen}
+                    onClick={() => {
+                      if (searchOpen) setQuery('');
+                      setSearchOpen(!searchOpen);
+                    }}
                   >
-                    + Name (optional)
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path fill="currentColor" d="M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4.4 4.4-1.4 1.4-4.4-4.4A6.5 6.5 0 1 1 10.5 4zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" />
+                    </svg>
                   </button>
-                )}
-                {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
-              </section>
-            )}
-
-            {error ? <p className="error-banner">{error}</p> : null}
-
-            <div className="start-footer">
-              <button
-                type="button"
-                className="session-primary-action"
-                disabled={ctaDisabled}
-                title={selected && !selected.connected ? 'Device is offline — reconnect it to start a session.' : undefined}
-                onClick={() => void (resuming ? (forcing ? submitTakeover() : submitResume()) : submitNew())}
-              >
-                {ctaLabel}
-              </button>
-            </div>
+                ) : null}
+              </div>
+              {searchOpen && online && folderPath ? (
+                <input
+                  type="search"
+                  className="start-search"
+                  placeholder="Search by title or branch"
+                  aria-label="Search recent sessions"
+                  value={query}
+                  autoFocus={initialMode !== 'resume'}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                />
+              ) : null}
+              {listBody()}
+            </section>
           </>
         )}
       </div>

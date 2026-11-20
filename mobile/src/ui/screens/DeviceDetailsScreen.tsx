@@ -626,7 +626,7 @@ export function DeviceDetailsScreen({
               onClick={() => onStartOnDevice(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
-              <strong>Start Copilot</strong>
+              <strong>New session</strong>
             </button>
             <button
               type="button"
@@ -635,7 +635,7 @@ export function DeviceDetailsScreen({
               onClick={() => onResumeOnDevice(device.channelId)}
             >
               <span className="device-action-icon" aria-hidden="true"><ResumeGlyph /></span>
-              <strong>Resume Copilot</strong>
+              <strong>Continue session</strong>
             </button>
             <button
               type="button"

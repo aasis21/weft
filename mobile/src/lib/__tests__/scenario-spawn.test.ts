@@ -4,6 +4,7 @@ import { makeManager } from '@/test/helpers/makeManager';
 import { failNextPairing, pairingIdentities, registry } from '@/test/helpers/fakeWeftClient';
 import { loadPendingOperations } from '@/lib/pendingOperations';
 import * as B from '@/test/helpers/builders';
+import { firstMessageTitle } from '@/session/runtime/sessionRuntime';
 
 function listenerQr(channelId: string): string {
   return JSON.stringify({
@@ -14,6 +15,14 @@ function listenerQr(channelId: string): string {
     transport: { kind: 'local' },
   });
 }
+
+describe('firstMessageTitle', () => {
+  it('collapses whitespace and cuts a long first message on a word boundary', () => {
+    expect(firstMessageTitle('  Fix   the\n flaky test ')).toBe('Fix the flaky test');
+    expect(firstMessageTitle('Investigate why the nightly build fails on the Windows agents only')).toBe('Investigate why the nightly build fails…');
+    expect(firstMessageTitle('   ')).toBeUndefined();
+  });
+});
 
 describe('scenario: phone-launched sessions', () => {
   let h: ReturnType<typeof makeManager> | undefined;
@@ -128,8 +137,11 @@ describe('scenario: phone-launched sessions', () => {
       expect.objectContaining({ kind: 'user', text: 'Fix the flaky test', delivery: 'enqueue' }),
     ]);
     expect((await loadPendingOperations())[0]).toMatchObject({ initialPrompt: 'Fix the flaky test' });
+    expect(h!.byChannel(tempId)?.meta.title).toBe('Fix the flaky test');
 
     const spawn = listener.sentOfKind('control.spawn_session')[0]!;
+    // Launched under the first message so the laptop's title matches until Copilot names it.
+    expect(spawn).toMatchObject({ name: 'Fix the flaky test' });
     listener.emit(B.spawnPairing(spawn.requestId as string, {
       v: 1,
       channelId: 'spawned-write-first',
