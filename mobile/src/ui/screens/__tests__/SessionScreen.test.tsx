@@ -1,6 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
+import type { ListenerDeviceState } from '@/session/model';
+import type { LifecycleStatusMsg } from '@aasis21/weft-shared';
 
 const composerProps = vi.hoisted(() => ({ latest: null as null | { disabled: boolean; disabledReason?: string } }));
 const drawerProps = vi.hoisted(() => ({ latest: null as null | { onRemove: (id: string) => void } }));
@@ -124,6 +126,88 @@ function renderActive(active: ReturnType<typeof makeSession>, overrides: Partial
 }
 
 describe('SessionScreen composer liveness', () => {
+  const device: ListenerDeviceState = {
+    channelId: 'station-1',
+    deviceId: 'laptop-1',
+    name: 'Laptop',
+    pub: 'pub',
+    publicKeyB64: 'phone-pub',
+    privateKeyJwk: {},
+    transport: { kind: 'local' },
+    savedAt: 1,
+    projects: [],
+    projectsLoading: false,
+    connected: true,
+    defaultPermissionMode: 'allow-all',
+    events: [],
+  };
+  const status: LifecycleStatusMsg = {
+    operationId: 'resume-1',
+    fingerprint: 'resume-fingerprint',
+    state: 'launching',
+    revision: 1,
+  };
+  const closedSession = () => ({
+    ...makeSession('ended'),
+    meta: {
+      ...makeSession().meta,
+      kind: 'live',
+      channelId: 'session-a',
+      sessionId: 'saved-conversation',
+      spawnedFromDeviceId: 'laptop-1',
+    },
+  });
+
+  it('resumes a closed conversation through its own Station without replacing Reconnect', async () => {
+    const onOpenSession = vi.fn().mockResolvedValue(status);
+    const onReconnect = vi.fn();
+    renderActive(closedSession(), { devices: [device], onOpenSession, onReconnect });
+    fireEvent.click(screen.getByRole('button', { name: /reconnect/i }));
+    expect(onReconnect).toHaveBeenCalledWith('session-a');
+    fireEvent.click(screen.getByRole('button', { name: 'Resume on laptop' }));
+    await waitFor(() => expect(onOpenSession).toHaveBeenCalledWith({
+      deviceChannelId: 'station-1',
+      target: { kind: 'existing', storeAuthority: null, sessionId: 'saved-conversation' },
+      mode: 'allow-all',
+      title: 'Weft',
+      cwd: 'C:\\Users\\akash\\weft',
+    }));
+  });
+
+  it('requires an explicit laptop choice when the original Station is not known', async () => {
+    const onOpenSession = vi.fn().mockResolvedValue(status);
+    renderActive(closedSession(), { devices: [{ ...device, deviceId: 'other-laptop' }], onOpenSession });
+    expect(screen.getByRole('button', { name: 'Resume on laptop' })).toBeDisabled();
+    expect(onOpenSession).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Resume on device'), { target: { value: 'station-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Resume on laptop' }));
+    await waitFor(() => expect(onOpenSession).toHaveBeenCalledWith(expect.objectContaining({ deviceChannelId: 'station-1' })));
+  });
+
+  it('shows a resume failure and requires a separate takeover confirmation', async () => {
+    const blocked: LifecycleStatusMsg = {
+      ...status,
+      state: 'activating',
+      failure: { code: 'controller-conflict', actions: ['confirm-takeover', 'cancel'], message: 'Another phone controls this session.' },
+      challenge: {
+        challengeId: 'challenge-1', operationId: status.operationId, revision: 1,
+        storeAuthority: null, sessionId: 'saved-conversation', runtimeInstanceId: 'runtime-1',
+        generation: 1, pid: 42, processStartedAt: 1, responsive: true,
+      },
+    };
+    const onConfirmTakeover = vi.fn().mockResolvedValue(status);
+    renderActive(closedSession(), {
+      devices: [device],
+      onOpenSession: vi.fn().mockResolvedValue(blocked),
+      onConfirmTakeover,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Resume on laptop' }));
+    await waitFor(() => expect(screen.getByText('Another phone controls this session.')).toBeInTheDocument());
+    expect(onConfirmTakeover).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Close it and open here' }));
+    await waitFor(() => expect(onConfirmTakeover).toHaveBeenCalledWith('resume-1'));
+  });
+
   it('disables the composer while connecting and keeps it enabled when live', () => {
     const rendered = renderScreen('connecting');
     expect(composerProps.latest).toMatchObject({ disabled: true, disabledReason: 'offline' });

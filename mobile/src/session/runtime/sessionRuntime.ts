@@ -57,6 +57,7 @@ import type {
   DeviceSnapshotMsg,
   DeviceUtilityCode,
   SessionListMsg,
+  SessionListSort,
   SessionMode,
   SessionOffersMsg,
   SpawnMode,
@@ -2217,7 +2218,7 @@ export class SessionRuntime {
    *  bind, because the session store is large and rewritten every turn. The reply lands in
    *  onListenerMessage → deviceSessionsReceived. Best-effort: a connect/send failure just clears the
    *  loading flag (the section shows whatever was last pulled) without wedging the device. */
-  async refreshSessions(channelId: string, cwd?: string | null): Promise<void> {
+  async refreshSessions(channelId: string, cwd?: string | null, sort: SessionListSort = 'activity'): Promise<void> {
     this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: true }));
     // Comms are async: the SESSION_LIST reply arrives later via onListenerMessage (or never, if the
     // laptop is wedged). Arm a failsafe so the button can't stay stuck on "Loading…" — clearing the
@@ -2236,7 +2237,7 @@ export class SessionRuntime {
         this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
         return;
       }
-      const message = sessionListRequest(null, cwd ?? null);
+      const message = sessionListRequest(null, cwd ?? null, sort);
       this.recordDeviceEvent(channelId, 'out', message);
       await ctrl.client.send(message);
     } catch (err) {

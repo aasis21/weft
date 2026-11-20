@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, JSX, TouchEvent as ReactTouchEvent } from 'react';
-import type { PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { SESSION_FILES_CAPABILITY } from '@aasis21/weft-shared';
 import type { WorkspaceCommand, WorkspaceData } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
+import { lifecycleFailureMessage, requiresTakeoverConfirmation, type SessionOpenIntent } from '@/session/access/sessionAccess';
 import { ChatThread } from '@/ui/thread/ChatThread';
 import { Composer } from '@/ui/composer/Composer';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
@@ -19,6 +20,7 @@ import { getStableDeviceId } from '@/lib/weftClient';
 import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
 import { useBackHandler } from '@/ui/gestures/backNavigation';
 import { PullIndicator, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
+import { deviceLabel } from '@/ui/screens/deviceDisplay';
 
 const ExploreScreen = lazy(() =>
   import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
@@ -249,6 +251,9 @@ interface SessionScreenProps {
   onReloadHistory?(channelId: string): void;
   onArchiveSession?(channelId: string): void;
   onReconnect(channelId: string): void;
+  onOpenSession?(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
+  onConfirmTakeover?(operationId: string): Promise<LifecycleStatusMsg>;
+  sessionOperation?: LifecycleStatusMsg | null;
   /** Re-issue the spawn/resume behind a failed placeholder card. */
   onRetrySpawn?(channelId: string): void;
   onGoHome(): void;
@@ -288,12 +293,25 @@ export function SessionScreen({
   onReloadHistory,
   onArchiveSession,
   onReconnect,
+  onOpenSession,
+  onConfirmTakeover,
+  sessionOperation,
   onRetrySpawn,
   onGoHome,
   onLoadEarlier,
   onWorkspaceRequest,
 }: SessionScreenProps): JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeBlocked, setResumeBlocked] = useState<LifecycleStatusMsg | null>(null);
+  const [resumeDeviceId, setResumeDeviceId] = useState('');
+  useEffect(() => {
+    setResuming(false);
+    setResumeError(null);
+    setResumeBlocked(null);
+    setResumeDeviceId('');
+  }, [activeId]);
   const [debugOpen, setDebugOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceRoute, setWorkspaceRoute] = useState<{ initial: 'files' | 'changes'; file?: string } | null>(null);
@@ -399,6 +417,70 @@ export function SessionScreen({
   // tapping it needlessly closes a live client and redoes the ECDH handshake, dropping in-flight output
   // (#126). Offer it only for cold-idle (evicted, no socket), error, or ended.
   const canReconnect = meta.kind === 'live' && (status === 'ended' || status === 'error' || (status === 'idle' && cold));
+  const knownResumeDevice = devices?.find((device) =>
+    !!meta.spawnedFromDeviceId && (device.deviceId === meta.spawnedFromDeviceId || device.channelId === meta.spawnedFromDeviceId),
+  ) ?? devices?.find((device) =>
+    device.sessions?.some((session) => session.sessionId === meta.sessionId) ||
+    device.offers?.some((offer) => offer.channelId === activeId),
+  );
+  const resumeDevice = knownResumeDevice ?? devices?.find((device) => device.channelId === resumeDeviceId);
+  const canResume = canReconnect && !!meta.sessionId && meta.sessionId !== 'unknown-session' && !!devices?.length && !!onOpenSession;
+  const takeoverStatus = sessionOperation && requiresTakeoverConfirmation(sessionOperation) ? sessionOperation : resumeBlocked;
+  const resumeFailure = resumeError ?? (takeoverStatus ? lifecycleFailureMessage(takeoverStatus.failure) : null);
+  const resumeOnLaptop = async (takeover = false): Promise<void> => {
+    if (resuming) return;
+    if (takeover ? !takeoverStatus || !onConfirmTakeover : !resumeDevice || !meta.sessionId || !onOpenSession) return;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      let result: LifecycleStatusMsg;
+      if (takeover && takeoverStatus && onConfirmTakeover) {
+        result = await onConfirmTakeover(takeoverStatus.operationId);
+      } else if (resumeDevice && meta.sessionId && onOpenSession) {
+        result = await onOpenSession({
+          deviceChannelId: resumeDevice.channelId,
+          target: { kind: 'existing', storeAuthority: null, sessionId: meta.sessionId },
+          mode: resumeDevice.defaultPermissionMode ?? 'default',
+          title: meta.title,
+          cwd: meta.cwd,
+        });
+      } else {
+        return;
+      }
+      setResumeBlocked(requiresTakeoverConfirmation(result) ? result : null);
+      if (result.state === 'failed' || requiresTakeoverConfirmation(result)) {
+        setResumeError(lifecycleFailureMessage(result.failure));
+      }
+    } catch (error) {
+      setResumeError(error instanceof Error ? error.message : 'Could not resume the session on the laptop.');
+    } finally {
+      setResuming(false);
+    }
+  };
+  const recoveryActions = canReconnect ? (
+    <div className="session-recovery-actions">
+      <button type="button" className="reconnect-btn ghost" disabled={resuming} onClick={() => onReconnect(activeId)}>
+        ↻ Reconnect
+      </button>
+      {canResume && !knownResumeDevice ? (
+        <select
+          className="session-resume-device"
+          aria-label="Resume on device"
+          value={resumeDeviceId}
+          disabled={resuming}
+          onChange={(event) => setResumeDeviceId(event.currentTarget.value)}
+        >
+          <option value="">Choose laptop</option>
+          {devices?.map((device) => <option key={device.channelId} value={device.channelId}>{deviceLabel(device)}</option>)}
+        </select>
+      ) : null}
+      {canResume ? (
+        <button type="button" className="reconnect-btn" disabled={resuming || !resumeDevice} onClick={() => void resumeOnLaptop()}>
+          {resuming ? 'Resuming…' : 'Resume on laptop'}
+        </button>
+      ) : null}
+    </div>
+  ) : null;
   const offline = status === 'initializing' || status === 'connecting' || status === 'idle';
   const spawnLabel = (() => {
     const spawn = active.spawning;
@@ -911,22 +993,14 @@ export function SessionScreen({
         {ended ? (
           <div className="ended-banner">
             <span>Session ended{timeline.endedReason ? ` · ${timeline.endedReason}` : ''}.</span>
-            {canReconnect ? (
-              <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
-                ↻ Reconnect
-              </button>
-            ) : null}
+            {recoveryActions}
           </div>
         ) : null}
 
         {(active.error || canReconnect) && !ended ? (
           <div className="ended-banner" {...(active.error ? { role: 'alert' as const } : {})}>
             <span>{active.error ?? 'Session offline — reconnect to pick it back up.'}</span>
-            {canReconnect ? (
-              <button type="button" className="reconnect-btn" onClick={() => onReconnect(activeId)}>
-                ↻ Reconnect
-              </button>
-            ) : meta.kind === 'spawning' ? (
+            {canReconnect ? recoveryActions : meta.kind === 'spawning' ? (
               <>
                 {onRetrySpawn ? (
                   <button type="button" className="reconnect-btn" onClick={() => onRetrySpawn(activeId)}>
@@ -937,6 +1011,17 @@ export function SessionScreen({
                   Dismiss
                 </button>
               </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {resumeFailure ? (
+          <div className="ended-banner" role="alert">
+            <span>{resumeFailure}</span>
+            {takeoverStatus && onConfirmTakeover ? (
+              <button type="button" className="reconnect-btn" disabled={resuming} onClick={() => void resumeOnLaptop(true)}>
+                Close it and open here
+              </button>
             ) : null}
           </div>
         ) : null}

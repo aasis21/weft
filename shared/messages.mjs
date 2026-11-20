@@ -634,10 +634,11 @@ export const spawnSession = (requestId, projectName, mode = "default", name = nu
  *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. Optional `cwd` narrows the
  *  query to one folder *before* the cap applies — without it a busy folder's history is invisible
  *  behind whatever happens to be newest across the whole machine. */
-export const sessionListRequest = (limit = null, cwd = null) =>
+export const sessionListRequest = (limit = null, cwd = null, sort = "activity") =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST_REQUEST, {
     ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}),
     ...(typeof cwd === "string" && cwd ? { cwd } : {}),
+    ...(sort === "created" ? { sort } : {}),
   });
 /**
  * Listener -> phone: the machine's recent resumable sessions, newest-first. Each entry is
@@ -658,6 +659,7 @@ export const sessionList = (sessions, folders = null) =>
         repository: typeof s.repository === "string" && s.repository.length > 0 ? s.repository : null,
         branch: typeof s.branch === "string" && s.branch.length > 0 ? s.branch : null,
         updatedAt: Number.isFinite(s.updatedAt) ? s.updatedAt : null,
+        ...(s.createdAt !== undefined ? { createdAt: Number.isFinite(s.createdAt) ? s.createdAt : null } : {}),
         ...(s.running === true ? { running: true } : {}),
       })),
     // Whole-store per-folder totals, independent of the capped page above, so the phone's folder

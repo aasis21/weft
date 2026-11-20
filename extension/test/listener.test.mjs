@@ -999,8 +999,9 @@ test("SESSION_LIST_REQUEST replies with the store's resumable sessions (on-deman
   const cwdA = mkdtempSync(join(tmpdir(), "weft-resume-cwd-"));
   dirs.push(cwdA);
   const sessionsApi = {
-    listSessions: ({ limit } = {}) => {
+    listSessions: ({ limit, sort } = {}) => {
       sessionsApi.lastLimit = limit;
+      sessionsApi.lastSort = sort;
       return [{ sessionId: "sid-1", title: "Fix bug", cwd: cwdA, repository: "web", branch: "main", updatedAt: 5 }];
     },
     readSessionCwd: () => cwdA,
@@ -1010,12 +1011,13 @@ test("SESSION_LIST_REQUEST replies with the store's resumable sessions (on-deman
   // Not pushed on bind: the phone must ask. Nothing should have arrived before the request.
   assert.equal(messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST), undefined);
 
-  await phoneChannel.send(sessionListRequest(50));
+  await phoneChannel.send(sessionListRequest(50, null, "created"));
   const list = await waitFor(
     () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
     "session list",
   );
   assert.equal(sessionsApi.lastLimit, 50, "the requested limit is passed through to the store");
+  assert.equal(sessionsApi.lastSort, "created", "the requested sort is passed through to the store");
   assert.equal(list.msg.sessions.length, 1);
   assert.deepEqual(list.msg.sessions[0], {
     sessionId: "sid-1", title: "Fix bug", cwd: cwdA, repository: "web", branch: "main", updatedAt: 5,

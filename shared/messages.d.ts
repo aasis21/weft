@@ -488,6 +488,7 @@ export interface SpawnSessionMsg {
   mode: SpawnMode;
   name: string | null;
 }
+export type SessionListSort = 'activity' | 'created';
 /** One recent resumable CLI session the phone can offer in its "Resume a session" list. */
 export interface StoredSession {
   /** CLI session UUID — passed back to resumeSession() and used to dedupe already-live cards. */
@@ -502,6 +503,8 @@ export interface StoredSession {
   branch: string | null;
   /** Epoch ms of the session's last activity (store `updated_at`), or null when unparseable. */
   updatedAt: number | null;
+  /** Epoch ms of creation, absent on older stations. Null when unparseable. */
+  createdAt?: number | null;
   /** A verified live Weft runtime exists. Absent on older stations or when liveness is unknown. */
   running?: boolean;
 }
@@ -511,6 +514,8 @@ export interface SessionListRequestMsg {
   /** Optional folder to restrict the query to, applied before the page size so a busy folder's
    *  history isn't hidden behind newer sessions from elsewhere on the machine. */
   cwd?: string;
+  /** Newest first by activity (default) or creation; applied before the page limit. */
+  sort?: SessionListSort;
 }
 /** Whole-store session count for one working directory. */
 export interface SessionFolder {
@@ -992,7 +997,7 @@ export function spawnSession(
   mode?: SpawnMode,
   name?: string | null
 ): SpawnSessionMessage;
-export function sessionListRequest(limit?: number | null, cwd?: string | null): SessionListRequest;
+export function sessionListRequest(limit?: number | null, cwd?: string | null, sort?: SessionListSort): SessionListRequest;
 export function sessionList(sessions: StoredSession[], folders?: SessionFolder[] | null): SessionListMessage;
 export function resumeSession(
   requestId: string,

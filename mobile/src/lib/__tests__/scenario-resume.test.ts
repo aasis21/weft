@@ -34,9 +34,13 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(listener).toBeDefined();
 
     // On-demand pull only — nothing is requested until the phone asks.
-    await h!.manager.refreshSessions('listener-1');
+    await h!.manager.refreshSessions('listener-1', 'C:\\repo\\weft', 'created');
     await h!.flush();
     expect(listener!.sentOfKind('control.session_list_request')).toHaveLength(1);
+    expect(listener!.sentOfKind('control.session_list_request')[0]).toMatchObject({
+      cwd: 'C:\\repo\\weft',
+      sort: 'created',
+    });
     expect(h!.snapshot().devices[0]!.sessionsLoading).toBe(true);
 
     listener!.emit(

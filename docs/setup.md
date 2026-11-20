@@ -154,6 +154,14 @@ Open/Resume, and activation of dormant sessions. If the selected Copilot session
 already open, Station uses its user-local lifecycle endpoint to activate that exact
 session runtime, including a local Copilot app session; it does not launch a second `copilot --resume`.
 
+If a laptop session has closed, its phone chat offers **Resume on laptop** through a
+paired Station. Choose the laptop first if the chat's source device is unknown.
+This reopens the same saved conversation, reconnecting to
+an existing runtime first when possible. **Reconnect** only retries the old connection.
+Station must be running; a takeover still requires confirmation. The **Continue**
+list can sort newest-first by **Latest activity** or **Created**. Creation sorting
+requires an updated Station to supply creation dates and sort before the result limit.
+
 To pair only the current session, `/weft` shows a terminal QR in CLI or a canvas in
 the local Copilot app. You can also ask Copilot to open Weft pairing. Station is not required.
 After either path pairs, active prompts, events, approvals, streaming, and terminal data

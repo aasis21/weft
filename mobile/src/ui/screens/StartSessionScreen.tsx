@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import type { LifecycleStatusMsg, SpawnMode, StoredSession } from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, SessionListSort, SpawnMode, StoredSession } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import {
@@ -28,7 +28,7 @@ interface StartSessionScreenProps {
   onOpen(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
   onConfirmTakeover(operationId: string): Promise<LifecycleStatusMsg>;
   /** Pull the folder's recent CLI/app sessions from the device. */
-  onRefreshSessions(channelId: string, cwd?: string | null): void;
+  onRefreshSessions(channelId: string, cwd?: string | null, sort?: SessionListSort): void;
   onScanListener(): void;
   /** Jump to the full DevicesScreen list (manage every device, not just pick one to start). */
   onManageDevices?(): void;
@@ -78,6 +78,7 @@ export function StartSessionScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(initialMode === 'resume');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SessionListSort>('activity');
   /** The `device|folder|attempt` the current list was fetched for. The laptop caps its reply after
    *  filtering by folder, so every folder change re-asks rather than narrowing a page on hand; a
    *  reply always sets an array, so an empty answer is not mistaken for "ask again". */
@@ -139,17 +140,18 @@ export function StartSessionScreen({
       return;
     }
     if (selected.sessionsLoading) return;
-    const scope = `${selected.channelId}|${folderPath}|${selected.lastAttemptAt ?? 0}`;
+    const scope = `${selected.channelId}|${folderPath}|${sort}|${selected.lastAttemptAt ?? 0}`;
     if (fetchedScopeRef.current === scope) return;
     fetchedScopeRef.current = scope;
     setAwaitingReply(true);
-    onRefreshSessions(selected.channelId, folderPath);
+    onRefreshSessions(selected.channelId, folderPath, sort);
   }, [
     selected?.channelId,
     selected?.connected,
     selected?.sessionsLoading,
     selected?.lastAttemptAt,
     folderPath,
+    sort,
     onRefreshSessions,
   ]);
 
@@ -157,18 +159,18 @@ export function StartSessionScreen({
     if (!selected?.connected || !folderPath) return undefined;
     const refreshOnReturn = (): void => {
       if (document.visibilityState === 'visible' && !selected.sessionsLoading) {
-        onRefreshSessions(selected.channelId, folderPath);
+        onRefreshSessions(selected.channelId, folderPath, sort);
       }
     };
     document.addEventListener('visibilitychange', refreshOnReturn);
     return () => document.removeEventListener('visibilitychange', refreshOnReturn);
-  }, [selected?.channelId, selected?.connected, selected?.sessionsLoading, folderPath, onRefreshSessions]);
+  }, [selected?.channelId, selected?.connected, selected?.sessionsLoading, folderPath, sort, onRefreshSessions]);
 
   useLeftEdgeSwipe(!drawerOpen, () => setDrawerOpen(true));
   const continueBoxRef = useRef<HTMLDivElement>(null);
   const pull = usePullToRefresh(continueBoxRef, () => {
     if (!selected) return;
-    if (selected.connected && folderPath) onRefreshSessions(selected.channelId, folderPath);
+    if (selected.connected && folderPath) onRefreshSessions(selected.channelId, folderPath, sort);
     else onConnectDevice(selected.channelId);
   }, !!selected);
 
@@ -184,6 +186,9 @@ export function StartSessionScreen({
   const folderSessions: StoredSession[] = folderPath
     ? filterStoredSessions(storeSessions, { query, folder: folderPath }, [folderPath])
     : [];
+  const sessionTime = (session: StoredSession): number | null | undefined =>
+    sort === 'created' ? session.createdAt : session.updatedAt;
+  folderSessions.sort((a, b) => (sessionTime(b) ?? 0) - (sessionTime(a) ?? 0));
   const liveBySessionId = new Map<string, SessionView>();
   for (const s of sessions) {
     if (s.meta.sessionId) liveBySessionId.set(s.meta.sessionId, s);
@@ -297,7 +302,7 @@ export function StartSessionScreen({
       <ul className="start-continue-list" aria-label="Recent sessions">
         {folderSessions.map((s) => {
           const live = liveBySessionId.get(s.sessionId);
-          const when = formatLastSeen(s.updatedAt ?? undefined, now);
+          const when = formatLastSeen(sessionTime(s) ?? undefined, now) ?? 'Unknown date';
           const detail = [s.branch, live ? 'open on this phone' : null].filter(Boolean).join(' · ');
           const opening = openingId === s.sessionId;
           return (
@@ -311,7 +316,7 @@ export function StartSessionScreen({
                 <span className="start-continue-main">
                   <span className="start-continue-title">{s.title || 'Untitled session'}</span>
                   <span className="start-continue-meta">
-                    {s.running || live ? <span className="start-live-dot" aria-label="Running" /> : null}
+                    {s.running || live?.status === 'live' ? <span className="start-live-dot" aria-label="Running" /> : null}
                     {opening ? 'Opening…' : when}
                   </span>
                 </span>
@@ -428,6 +433,20 @@ export function StartSessionScreen({
                   </button>
                 ) : null}
               </div>
+              <label className="start-sort">
+                Sort by
+                <select
+                  aria-label="Sort sessions"
+                  value={sort}
+                  onChange={(event) => setSort(event.currentTarget.value === 'created' ? 'created' : 'activity')}
+                >
+                  <option value="activity">Latest activity</option>
+                  <option value="created">Created</option>
+                </select>
+              </label>
+              {sort === 'created' && folderSessions.some((session) => session.createdAt === undefined) ? (
+                <p className="start-hint">Update Weft on this laptop to load creation dates and sort its full history.</p>
+              ) : null}
               {searchOpen && online && folderPath ? (
                 <input
                   type="search"

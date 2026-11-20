@@ -193,7 +193,7 @@ describe('StartSessionScreen', () => {
     const onRefreshSessions = vi.fn();
     renderScreen({ devices: [{ ...resumeDevice('C:\\CLP\\ModernOrder'), sessions: undefined }], onRefreshSessions });
     expect(onRefreshSessions).toHaveBeenCalledTimes(1);
-    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', 'C:\\CLP\\ModernOrder');
+    expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', 'C:\\CLP\\ModernOrder', 'activity');
     expect(screen.getByRole('list', { name: /loading sessions/i })).toBeInTheDocument();
   });
 
@@ -236,7 +236,7 @@ describe('StartSessionScreen', () => {
     expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries']);
 
     fireEvent.change(folderPicker(), { target: { value: 'Other' } });
-    expect(onRefreshSessions).toHaveBeenLastCalledWith('chan-1', 'C:\\CLP\\Other');
+    expect(onRefreshSessions).toHaveBeenLastCalledWith('chan-1', 'C:\\CLP\\Other', 'activity');
     expect(rowTitles()).toEqual([]);
     // Placeholders, not "No sessions", until the laptop answers for the new folder.
     expect(screen.getByRole('list', { name: /loading sessions/i })).toBeInTheDocument();
@@ -248,6 +248,19 @@ describe('StartSessionScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: /search sessions/i }));
     fireEvent.change(screen.getByLabelText(/search recent sessions/i), { target: { value: 'retry' } });
     expect(rowTitles()).toEqual(['Add retries']);
+  });
+
+  it('sorts by latest activity or creation and requests the corresponding folder page', () => {
+    const sessions = [
+      storedSession({ sessionId: 'old', title: 'Older creation, recent activity', createdAt: 100, updatedAt: 400 }),
+      storedSession({ sessionId: 'new', title: 'Newest creation', createdAt: 300, updatedAt: 300 }),
+    ];
+    const { props } = renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder', sessions)] });
+    expect(rowTitles()).toEqual(['Older creation, recent activity', 'Newest creation']);
+    fireEvent.change(screen.getByLabelText('Sort sessions'), { target: { value: 'created' } });
+    expect(rowTitles()).toEqual(['Newest creation', 'Older creation, recent activity']);
+    expect(props.onRefreshSessions).toHaveBeenLastCalledWith('chan-1', 'C:\\CLP\\ModernOrder', 'created');
+    expect(sessions.map((session) => session.sessionId)).toEqual(['old', 'new']);
   });
 
   it('opens with search showing when sent from "Continue session"', () => {

@@ -171,23 +171,24 @@ function dirExists(dir) {
  * happened to survive a global newest-50 cut. Returns [] on any read failure (older Node without
  * node:sqlite, missing/locked DB, …) so the caller degrades to an empty list.
  */
-export async function listSessions({ limit, cwd, strict = false } = {}, dbPath = DB_PATH) {
+export async function listSessions({ limit, cwd, sort = "activity", strict = false } = {}, dbPath = DB_PATH) {
   const pageSize = clampSessionLimit(limit);
   const folder = typeof cwd === "string" && cwd.trim() ? cwd.trim() : null;
+  const orderColumn = sort === "created" ? "created_at" : "updated_at";
   try {
     const db = await openDb(dbPath);
     try {
       const rows = folder
         ? db
             .prepare(
-              "SELECT id, cwd, repository, branch, summary, updated_at FROM sessions " +
-                "WHERE cwd = ? ORDER BY updated_at DESC LIMIT ?",
+              "SELECT id, cwd, repository, branch, summary, created_at, updated_at FROM sessions " +
+                `WHERE cwd = ? ORDER BY ${orderColumn} DESC, id LIMIT ?`,
             )
             .all(folder, pageSize)
         : db
             .prepare(
-              "SELECT id, cwd, repository, branch, summary, updated_at FROM sessions " +
-                "WHERE cwd IS NOT NULL ORDER BY updated_at DESC LIMIT ?",
+              "SELECT id, cwd, repository, branch, summary, created_at, updated_at FROM sessions " +
+                `WHERE cwd IS NOT NULL ORDER BY ${orderColumn} DESC, id LIMIT ?`,
             )
             .all(pageSize);
       const sessions = [];
@@ -201,6 +202,7 @@ export async function listSessions({ limit, cwd, strict = false } = {}, dbPath =
           repository: (r.repository || "").trim() || null,
           branch: (r.branch || "").trim() || null,
           updatedAt: parseTs(r.updated_at),
+          createdAt: parseTs(r.created_at) || null,
         });
       }
       return sessions;
@@ -271,7 +273,7 @@ export async function readSession(sessionId, dbPath = DB_PATH) {
     const db = await openDb(dbPath);
     try {
       const row = db
-        .prepare("SELECT id, cwd, repository, branch, summary, updated_at FROM sessions WHERE id = ?")
+        .prepare("SELECT id, cwd, repository, branch, summary, created_at, updated_at FROM sessions WHERE id = ?")
         .get(sessionId);
       if (!row?.id || !row.cwd) return null;
       return {
@@ -281,6 +283,7 @@ export async function readSession(sessionId, dbPath = DB_PATH) {
         repository: (row.repository || "").trim() || null,
         branch: (row.branch || "").trim() || null,
         updatedAt: parseTs(row.updated_at),
+        createdAt: parseTs(row.created_at) || null,
       };
     } finally {
       db.close();

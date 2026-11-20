@@ -31,7 +31,7 @@ before(async () => {
   dbPath = join(dir, "session-store.db");
   const db = new DatabaseSync(dbPath); // writable for setup
   db.exec(
-    "CREATE TABLE sessions (id TEXT PRIMARY KEY, summary TEXT, cwd TEXT, repository TEXT, branch TEXT, updated_at TEXT);" +
+    "CREATE TABLE sessions (id TEXT PRIMARY KEY, summary TEXT, cwd TEXT, repository TEXT, branch TEXT, created_at TEXT, updated_at TEXT);" +
       "CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, turn_index INTEGER, " +
       "user_message TEXT, assistant_response TEXT, timestamp TEXT);"
   );
@@ -75,6 +75,7 @@ test("readSession returns catalog metadata for one session", async () => {
     repository: "weft",
     branch: "main",
     updatedAt: Date.parse(iso(5)),
+    createdAt: null,
   });
   assert.equal(await readSession("missing", dbPath), null);
 });
@@ -237,7 +238,7 @@ before(async () => {
     "INSERT INTO sessions (id, cwd, repository, branch, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   // Newest updated_at first once sorted: B (t=3) then A (t=1). "gone" (t=2) is filtered by cwd.
-  ins.run("sid-a", liveCwdA, "repo-a", "main", "Fix the bug", iso(0), iso(1));
+  ins.run("sid-a", liveCwdA, "repo-a", "main", "Fix the bug", iso(2), iso(1));
   ins.run("sid-gone", deletedCwd, "repo-x", "feat", "Deleted worktree", iso(0), iso(2));
   ins.run("sid-b", liveCwdB, null, null, "", iso(0), iso(3));
   // A row with NULL cwd must be skipped (WHERE cwd IS NOT NULL + defensive filter).
@@ -266,7 +267,16 @@ test("listSessions returns live-cwd sessions newest-first, filtering deleted/NUL
     repository: "repo-a",
     branch: "main",
     updatedAt: Date.parse(iso(1)),
+    createdAt: Date.parse(iso(2)),
   });
+});
+
+test("listSessions applies creation sorting before the page limit", async () => {
+  const sessions = await listSessions({ sort: "created", limit: 1 }, sdbPath);
+  assert.equal(sessions[0].sessionId, "sid-a");
+  assert.equal(sessions[0].createdAt, Date.parse(iso(2)));
+  const scoped = await listSessions({ sort: "created", cwd: liveCwdB }, sdbPath);
+  assert.deepEqual(scoped.map((session) => session.sessionId), ["sid-b"]);
 });
 
 test("listSessions clamps the limit and degrades to [] on a missing db", async () => {

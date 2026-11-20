@@ -517,7 +517,7 @@ export default function App(): JSX.Element {
             }
             return status;
           }}
-          onRefreshSessions={(id, cwd) => void sessionRuntime.refreshSessions(id, cwd)}
+          onRefreshSessions={(id, cwd, sort) => void sessionRuntime.refreshSessions(id, cwd, sort)}
           onScanListener={() => openJoin(false)}
           onManageDevices={openDevices}
           onCancel={() => {
@@ -611,6 +611,9 @@ export default function App(): JSX.Element {
       onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
       onArchiveSession={(id) => sessionRuntime.archive(id)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
+      onOpenSession={(intent) => sessionAccess.open(intent)}
+      onConfirmTakeover={(operationId) => sessionAccess.confirmTakeover(operationId)}
+      sessionOperation={active.spawning ? sessionRuntime.getLifecycleStatus(active.spawning.requestId) : null}
       onRetrySpawn={(id) => {
         const operationId = snapshot.sessions.find((session) => session.meta.channelId === id)
           ?.spawning?.requestId;
