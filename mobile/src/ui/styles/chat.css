@@ -2194,11 +2194,18 @@
 
 /* ---- New session: device + folder pickers, a chat-style composer, then the folder's recent
    sessions. One page, no tabs: send starts a new session, tapping a row continues one. */
+/* Fixed frame like the chat page: only the session list scrolls, the composer stays at the bottom. */
+.weft-session.start-session-v3 { overflow: hidden; }
+
 .weft-session .start-page {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
+
+.weft-session .start-page > * { flex: 0 0 auto; }
 
 .weft-session .start-pickers {
   display: grid;
@@ -2251,8 +2258,8 @@
 .weft-session .start-composer { margin: 0; }
 
 .weft-session .start-composer-input {
-  min-height: 72px;
-  max-height: 220px;
+  min-height: 48px;
+  max-height: 40dvh;
   font-size: 16px;
 }
 
@@ -2287,11 +2294,31 @@
   gap: 6px 12px;
 }
 
-.weft-session .start-continue {
+.weft-session .start-page > .start-continue {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
+  min-height: 0;
+}
+
+.weft-session .start-continue-box {
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 8px;
+  border: 1px solid var(--bg-rule);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+}
+
+.weft-session .start-continue-box > .start-hint {
+  display: grid;
+  place-items: center;
+  min-height: 88px;
+  margin: 0;
+  text-align: center;
 }
 
 .weft-session .start-continue-head {
@@ -2408,14 +2435,25 @@
 }
 
 .weft-session .start-continue-skeleton {
-  height: 52px;
-  margin: 4px 0;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  display: grid;
+  grid-template-columns: 1fr 36px;
+  gap: 8px 16px;
+  padding: 13px 6px;
 }
 
+.weft-session .start-continue-skeleton > span {
+  height: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.weft-session .start-continue-skeleton .sk-title { width: 72%; height: 14px; }
+.weft-session .start-continue-skeleton:nth-child(2) .sk-title { width: 54%; }
+.weft-session .start-continue-skeleton:nth-child(3n) .sk-title { width: 64%; }
+.weft-session .start-continue-skeleton .sk-detail { grid-column: 1; width: 30%; }
+
 @media (prefers-reduced-motion: no-preference) {
-  .weft-session .start-continue-skeleton { animation: start-skeleton 1.2s ease-in-out infinite; }
+  .weft-session .start-continue-skeleton > span { animation: start-skeleton 1.2s ease-in-out infinite; }
 }
 
 @keyframes start-skeleton {

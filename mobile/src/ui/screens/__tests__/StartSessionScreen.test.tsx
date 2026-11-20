@@ -238,6 +238,9 @@ describe('StartSessionScreen', () => {
     fireEvent.change(folderPicker(), { target: { value: 'Other' } });
     expect(onRefreshSessions).toHaveBeenLastCalledWith('chan-1', 'C:\\CLP\\Other');
     expect(rowTitles()).toEqual([]);
+    // Placeholders, not "No sessions", until the laptop answers for the new folder.
+    expect(screen.getByRole('list', { name: /loading sessions/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no sessions in/i)).toBeNull();
   });
 
   it('filters the folder\'s sessions by search', () => {

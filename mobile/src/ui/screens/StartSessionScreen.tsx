@@ -40,7 +40,8 @@ interface StartSessionScreenProps {
   onGoHome(): void;
 }
 
-const MAX_COMPOSER_HEIGHT = 220;
+/** The composer grows with its text up to this share of the screen; the session list gives way. */
+const MAX_COMPOSER_SHARE = 0.4;
 
 export function StartSessionScreen({
   hasSessions,
@@ -80,6 +81,9 @@ export function StartSessionScreen({
    *  filtering by folder, so every folder change re-asks rather than narrowing a page on hand; a
    *  reply always sets an array, so an empty answer is not mistaken for "ask again". */
   const fetchedScopeRef = useRef<string>('');
+  /** Set while a fetch for the current device and folder is out. The store list carries no folder
+   *  tag, so until the reply lands an empty match means "not loaded yet", not "no sessions". */
+  const [awaitingReply, setAwaitingReply] = useState(false);
   const now = useNowTick();
 
   const sortedDevices = sortDevices(devices);
@@ -112,6 +116,20 @@ export function StartSessionScreen({
       selected.projects.some((p) => p.name === current) ? current : fallback?.name ?? '');
   }, [selected?.channelId, selected?.projects, selected?.lastProjectName]);
 
+  // Declared before the fetch so a device switch clears a stale wait before the new one starts.
+  const repliedSessionsRef = useRef(selected?.sessions);
+  useEffect(() => {
+    if (repliedSessionsRef.current === selected?.sessions) return;
+    repliedSessionsRef.current = selected?.sessions;
+    setAwaitingReply(false);
+  }, [selected?.sessions]);
+
+  useEffect(() => {
+    if (!selected?.sessionsLoading) return undefined;
+    // A reply clears loading; covers the laptop answering with the same list instance.
+    return () => setAwaitingReply(false);
+  }, [selected?.sessionsLoading]);
+
   // Past sessions are limited to registered folders: the list always follows the folder a new
   // session would start in, and loads on its own when the page opens or the device/folder changes.
   useEffect(() => {
@@ -123,6 +141,7 @@ export function StartSessionScreen({
     const scope = `${selected.channelId}|${folderPath}|${selected.lastAttemptAt ?? 0}`;
     if (fetchedScopeRef.current === scope) return;
     fetchedScopeRef.current = scope;
+    setAwaitingReply(true);
     onRefreshSessions(selected.channelId, folderPath);
   }, [
     selected?.channelId,
@@ -148,7 +167,7 @@ export function StartSessionScreen({
     const el = composerRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * MAX_COMPOSER_SHARE))}px`;
   };
 
   const storeSessions = selected?.sessions ?? [];
@@ -245,10 +264,16 @@ export function StartSessionScreen({
   const listBody = (): JSX.Element => {
     if (!online) return <p className="start-hint">Sessions appear when {selected ? deviceLabel(selected) : 'the device'} is online.</p>;
     if (!folderPath) return <p className="start-hint">No folders on this device yet.</p>;
-    if (selected?.sessionsLoading || !sessionsPulled) {
+    if (selected?.sessionsLoading || !sessionsPulled || (awaitingReply && folderSessions.length === 0)) {
       return (
         <ul className="start-continue-list" aria-label="Loading sessions" aria-busy="true">
-          {[0, 1, 2].map((i) => <li key={i} className="start-continue-skeleton" />)}
+          {[0, 1, 2, 3, 4].map((i) => (
+            <li key={i} className="start-continue-skeleton">
+              <span className="sk-title" />
+              <span className="sk-age" />
+              <span className="sk-detail" />
+            </li>
+          ))}
         </ul>
       );
     }
@@ -374,6 +399,39 @@ export function StartSessionScreen({
               </label>
             </div>
 
+            <section className="start-continue" aria-label="Continue a session">
+              <div className="start-continue-head">
+                <h2>Continue in {folderLabel}</h2>
+                {online && folderPath ? (
+                  <button
+                    type="button"
+                    className="icon-btn start-search-btn"
+                    aria-label="Search sessions"
+                    aria-expanded={searchOpen}
+                    onClick={() => {
+                      if (searchOpen) setQuery('');
+                      setSearchOpen(!searchOpen);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path fill="currentColor" d="M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4.4 4.4-1.4 1.4-4.4-4.4A6.5 6.5 0 1 1 10.5 4zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+              {searchOpen && online && folderPath ? (
+                <input
+                  type="search"
+                  className="start-search"
+                  placeholder="Search by title or branch"
+                  aria-label="Search recent sessions"
+                  value={query}
+                  autoFocus={initialMode !== 'resume'}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                />
+              ) : null}
+              <div className="start-continue-box">{listBody()}</div>
+            </section>
             <form
               className="composer-shell start-composer"
               aria-label="New session"
@@ -387,7 +445,7 @@ export function StartSessionScreen({
                 className="composer-input start-composer-input"
                 aria-label="First message"
                 placeholder={online ? 'What should Copilot work on?' : `${selected ? deviceLabel(selected) : 'Device'} is offline`}
-                rows={3}
+                rows={2}
                 value={message}
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);
@@ -441,39 +499,6 @@ export function StartSessionScreen({
             ) : null}
             {selected?.error ? <p className="error-banner">{selected.error}</p> : null}
 
-            <section className="start-continue" aria-label="Continue a session">
-              <div className="start-continue-head">
-                <h2>Continue in {folderLabel}</h2>
-                {online && folderPath ? (
-                  <button
-                    type="button"
-                    className="icon-btn start-search-btn"
-                    aria-label="Search sessions"
-                    aria-expanded={searchOpen}
-                    onClick={() => {
-                      if (searchOpen) setQuery('');
-                      setSearchOpen(!searchOpen);
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path fill="currentColor" d="M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4.4 4.4-1.4 1.4-4.4-4.4A6.5 6.5 0 1 1 10.5 4zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" />
-                    </svg>
-                  </button>
-                ) : null}
-              </div>
-              {searchOpen && online && folderPath ? (
-                <input
-                  type="search"
-                  className="start-search"
-                  placeholder="Search by title or branch"
-                  aria-label="Search recent sessions"
-                  value={query}
-                  autoFocus={initialMode !== 'resume'}
-                  onChange={(e) => setQuery(e.currentTarget.value)}
-                />
-              ) : null}
-              {listBody()}
-            </section>
           </>
         )}
       </div>
