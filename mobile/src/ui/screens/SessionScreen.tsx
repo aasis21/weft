@@ -837,6 +837,7 @@ export function SessionScreen({
         onGoHome={onGoHome}
         onOpenDebug={() => setDebugOpen(true)}
         desktopDocked={isDesktopWide}
+        onSwitchSession={onSelectSession}
       />
 
       {debugOpen ? (

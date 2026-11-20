@@ -4,6 +4,7 @@ import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
 import { deriveStatus, type ComposerActivity } from './sessionStatus';
 import { FolderGlyph, ChangesGlyph } from '@/ui/workspace/fileGlyphs';
+import { ChatSwitcher, noteChatVisit, useTitleGestures } from './chatSwitcher';
 
 /** Viewfinder-with-QR mark: the header action opens the camera to scan a pairing code. */
 function ScanGlyph(): JSX.Element {
@@ -60,6 +61,8 @@ interface StatusBarProps {
    *  hamburger that opens it would be redundant (and confusing — nothing "opens").
    *  Show a static Weft mark instead, linking to About Weft like a typical app logo. */
   desktopDocked?: boolean;
+  /** Switch to another chat from the title gestures (swipe, long-press card, double-tap). */
+  onSwitchSession?(channelId: string): void;
 }
 
 export function StatusBar({
@@ -84,6 +87,7 @@ export function StatusBar({
   desktopDocked = false,
   onOpenFiles,
   onOpenChanges,
+  onSwitchSession,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -108,6 +112,16 @@ export function StatusBar({
     { busy, ...(activity ? { activity } : {}) },
   );
   const lineClass = derived.tone;
+  const statusIdRef = useRef<HTMLDivElement | null>(null);
+  const gestures = useTitleGestures({
+    enabled: !renaming,
+    sessions: snapshot.sessions,
+    activeId: snapshot.activeId,
+    ...(onSwitchSession ? { onSwitch: onSwitchSession } : {}),
+  });
+  useEffect(() => {
+    if (snapshot.activeId) noteChatVisit(snapshot.activeId);
+  }, [snapshot.activeId]);
   const statusLabel = derived.label;
 
   const beginRename = (): void => {
@@ -189,33 +203,60 @@ export function StatusBar({
         </button>
       )}
 
-      <div className="status-id">
-        {renaming ? (
-          <input
-            className="status-rename-input"
-            type="text"
-            value={renameDraft}
-            autoFocus
-            aria-label="Rename session"
-            onChange={(e) => setRenameDraft(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') cancelRename();
-            }}
-            onBlur={commitRename}
-          />
-        ) : (
-          <span className="status-title" title={cwd ?? undefined}>
-            {pinned ? <span className="pin-mark" title="Pinned" aria-label="Pinned">📌</span> : null}
-            {title}
+      <div
+        ref={statusIdRef}
+        className={`status-id${onSwitchSession && !renaming ? ' switchable' : ''}`}
+        {...(onSwitchSession && !renaming ? gestures.handlers : {})}
+      >
+        <div
+          key={snapshot.activeId ?? 'none'}
+          className={`status-track${gestures.dragX ? ' dragging' : ''}${gestures.enter ? ` enter-${gestures.enter}` : ''}`}
+          style={gestures.dragX ? { transform: `translateX(${gestures.dragX}px)` } : undefined}
+          onAnimationEnd={(e) => { if (e.target === e.currentTarget) gestures.clearEnter(); }}
+        >
+          {renaming ? (
+            <input
+              className="status-rename-input"
+              type="text"
+              value={renameDraft}
+              autoFocus
+              aria-label="Rename session"
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') cancelRename();
+              }}
+              onBlur={commitRename}
+            />
+          ) : (
+            <span className="status-title" title={cwd ?? undefined}>
+              {pinned ? <span className="pin-mark" title="Pinned" aria-label="Pinned">📌</span> : null}
+              {title}
+            </span>
+          )}
+          <span className={`status-line ${lineClass}`}>
+            <span className="status-dot" aria-hidden="true" />
+            {statusLabel}
           </span>
-        )}
-        <span className={`status-line ${lineClass}`}>
-          <span className="status-dot" aria-hidden="true" />
-          {statusLabel}
-        </span>
+          {gestures.peek ? (
+            <span className={`status-peek ${gestures.dragX < 0 ? 'next' : 'prev'}`} aria-hidden="true">
+              {gestures.peek.meta.title}
+            </span>
+          ) : null}
+        </div>
       </div>
+      {gestures.switcherOpen ? (
+        <ChatSwitcher
+          choices={gestures.choices}
+          devices={snapshot.devices}
+          highlightId={gestures.highlightId}
+          anchor={statusIdRef.current?.closest('header') ?? null}
+          onPick={gestures.pick}
+          onAllChats={onOpenDrawer}
+          onClose={gestures.closeSwitcher}
+        />
+      ) : null}
 
       <div className="status-icons">
         {onOpenExplore ? (

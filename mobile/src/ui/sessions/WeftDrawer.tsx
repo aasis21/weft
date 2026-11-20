@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { deriveStatus, isWorking } from './sessionStatus';
+import { fmtRelative, groupDrawerSessions, lastActivity } from './chatSwitcher';
 import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/screens/deviceDisplay';
 import { DeviceAvatar, PlayGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftMark } from '@/ui/brand/WeftMark';
@@ -37,25 +38,6 @@ interface WeftDrawerProps {
    *  no slide-in animation) instead of as a mobile overlay. onClose still fires — the
    *  caller decides what it means (e.g. collapse the rail vs. dismiss the overlay). */
   docked?: boolean;
-}
-
-function fmtRelative(ts: number | null): string {
-  if (!ts) return '';
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 5) return 'now';
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
-
-function lastActivity(session: SessionView): number | null {
-  // Phone-domain only. `lastEventAt` is stamped on the phone as events arrive; timeline `item.ts`
-  // is the LAPTOP's clock, and feeding it to a `Date.now() - ts` age would misreport "N ago" (even
-  // negative "in the future") under cross-clock skew. Fall back to scan/add time (also phone-domain).
-  return session.lastEventAt ?? session.meta.scannedAt ?? session.meta.addedAt ?? null;
 }
 
 function turnCount(session: SessionView): number {
@@ -160,35 +142,9 @@ export function WeftDrawer({
     return () => document.removeEventListener('click', handleDocClick);
   }, [swipedId]);
 
-  const filteredSessions = useMemo(() => {
-    // Filter search box removed for now (#see chat request) — sidebar just shows all sessions.
-    // Order: pinned first (their whole point is to stay reachable), then stably by when each
-    // session's QR was last scanned. Deliberately NOT by last activity, so incoming
-    // events/heartbeats never reshuffle the list under the user. A re-scan bumps scannedAt so
-    // that card jumps to the top. Fall back to addedAt for legacy/demo cards without a scan time.
-    const scannedAt = (s: SessionView): number => s.meta.scannedAt ?? s.meta.addedAt ?? 0;
-    return [...sessions].sort((a, b) => {
-      const pinDelta = Number(b.pinned ?? false) - Number(a.pinned ?? false);
-      if (pinDelta !== 0) return pinDelta;
-      return scannedAt(b) - scannedAt(a);
-    });
-  }, [sessions]);
-
-  // #163: split the (already stably-sorted) list using the shared status derivation, so the
-  // sidebar mirrors the detail-header pill exactly. Three buckets so "something broke" (Offline,
-  // an error the user may want to act on) is never mixed in with the calm "Archived" cooldown.
-  const { activeGroup, offlineGroup, archivedGroup } = useMemo(() => {
-    const activeGroup: SessionView[] = [];
-    const offlineGroup: SessionView[] = [];
-    const archivedGroup: SessionView[] = [];
-    for (const s of filteredSessions) {
-      const derived = deriveStatus(s, { busy: isWorking(s.timeline) });
-      if (derived.active) activeGroup.push(s);
-      else if (derived.tone === 'error') offlineGroup.push(s);
-      else archivedGroup.push(s);
-    }
-    return { activeGroup, offlineGroup, archivedGroup };
-  }, [filteredSessions]);
+  // #163: the shared order and status buckets, so the sidebar mirrors the header pill exactly
+  // and the header's title swipe walks chats in the same order.
+  const { activeGroup, offlineGroup, archivedGroup } = useMemo(() => groupDrawerSessions(sessions), [sessions]);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 

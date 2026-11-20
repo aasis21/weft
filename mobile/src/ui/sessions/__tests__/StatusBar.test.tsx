@@ -1,8 +1,10 @@
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+import { noteChatVisit } from '@/ui/sessions/chatSwitcher';
+import { emptyTimeline } from '@/lib/timeline';
 
 const mockEmptySnapshot = { ready: true, activeId: null as string | null, sessions: [] as unknown[], devices: [] as unknown[] };
 let mockSnapshot: typeof mockEmptySnapshot = mockEmptySnapshot;
@@ -247,5 +249,98 @@ describe('StatusBar', () => {
     await user.click(screen.getAllByRole('button', { name: 'Session menu' })[1] as HTMLElement);
     await user.click(screen.getByRole('menuitem', { name: /Load recent turns/ }));
     expect(onReloadHistory).toHaveBeenCalledTimes(1);
+  });
+
+  describe('title gestures', () => {
+    const chat = (id: string, title: string, scannedAt: number) => ({
+      meta: { channelId: id, title, scannedAt, cwd: `C:\\code\\${id}` },
+      status: 'live',
+      cold: false,
+      timeline: emptyTimeline(),
+      events: [],
+    });
+    const useChats = (activeId: string) => {
+      mockSnapshot = {
+        ready: true,
+        activeId,
+        // Drawer order is newest scan first: a, b, c, d, e, f.
+        sessions: [chat('f', 'Fox', 1), chat('e', 'Echo', 2), chat('d', 'Delta', 3), chat('c', 'Charlie', 4), chat('b', 'Bravo', 5), chat('a', 'Alpha', 6)],
+        devices: [],
+      };
+    };
+    const title = () => document.querySelector('.status-id') as HTMLElement;
+    const pointer = (type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y = 20) =>
+      fireEvent[type](title(), { clientX: x, clientY: y, pointerId: 1, pointerType: 'touch', button: 0 });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      localStorage.clear();
+    });
+
+    it('swipes the title left to the next chat and right to the previous one', () => {
+      useChats('c');
+      const onSwitchSession = vi.fn();
+      renderStatusBar({ title: 'Charlie', onSwitchSession });
+
+      pointer('pointerDown', 200);
+      pointer('pointerMove', 150);
+      expect(document.querySelector('.status-peek.next')).toHaveTextContent('Delta');
+      pointer('pointerMove', 100);
+      pointer('pointerUp', 100);
+      expect(onSwitchSession).toHaveBeenLastCalledWith('d');
+
+      pointer('pointerDown', 100);
+      pointer('pointerMove', 200);
+      pointer('pointerUp', 200);
+      expect(onSwitchSession).toHaveBeenLastCalledWith('b');
+    });
+
+    it('ignores swipes that start in the drawer edge zone and short drags', () => {
+      useChats('c');
+      const onSwitchSession = vi.fn();
+      renderStatusBar({ title: 'Charlie', onSwitchSession });
+
+      pointer('pointerDown', 20);
+      pointer('pointerMove', 200);
+      pointer('pointerUp', 200);
+      pointer('pointerDown', 200);
+      pointer('pointerMove', 180);
+      pointer('pointerUp', 180);
+      expect(onSwitchSession).not.toHaveBeenCalled();
+    });
+
+    it('long-press opens a card of up to four recent chats without the current one', async () => {
+      vi.useFakeTimers();
+      useChats('a');
+      noteChatVisit('e');
+      noteChatVisit('a');
+      const onSwitchSession = vi.fn();
+      renderStatusBar({ title: 'Alpha', onSwitchSession });
+
+      pointer('pointerDown', 200);
+      act(() => { vi.advanceTimersByTime(500); });
+      pointer('pointerUp', 200);
+
+      const card = screen.getByRole('dialog', { name: 'Switch chat' });
+      const rows = within(card).getAllByRole('button').filter((b) => b.hasAttribute('data-switch-id'));
+      expect(rows.map((r) => r.dataset.switchId)).toEqual(['e', 'b', 'c', 'd']);
+      fireEvent.click(rows[1]!);
+      expect(onSwitchSession).toHaveBeenCalledWith('b');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('double-tap jumps back to the last visited chat', () => {
+      useChats('a');
+      noteChatVisit('d');
+      noteChatVisit('a');
+      const onSwitchSession = vi.fn();
+      renderStatusBar({ title: 'Alpha', onSwitchSession });
+
+      pointer('pointerDown', 200);
+      pointer('pointerUp', 200);
+      pointer('pointerDown', 200);
+      pointer('pointerUp', 200);
+      expect(onSwitchSession).toHaveBeenCalledWith('d');
+    });
   });
 });
