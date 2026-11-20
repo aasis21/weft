@@ -12,6 +12,7 @@ import { attachmentSrc } from '@/lib/imageAttachments';
 import { useAgentStatus } from '@/ui/useAgentStatus';
 import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
 import '@/ui/styles/thread-extras.css';
 
 interface ChatThreadProps {
@@ -525,6 +526,8 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
       if (liveTimerRef.current !== null) window.clearTimeout(liveTimerRef.current);
     };
   }, [last?.id, last?.kind, streaming]);
+
+  useBackHandler(menu !== null, () => setMenu(null));
 
   useEffect(() => {
     if (!menu) return undefined;

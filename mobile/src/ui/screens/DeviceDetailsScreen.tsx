@@ -28,6 +28,7 @@ import { deriveStatus } from '@/ui/sessions/sessionStatus';
 import { DEVICE_CAPABILITY, transportIdentity, type DeviceSystemSnapshot } from '@aasis21/weft-shared';
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { useLeftEdgeSwipe } from '@/ui/gestures/touchGestures';
 import { DeviceClipboardSheet, DeviceKeepAwakeSheet, keepAwakeRemaining } from './DeviceUtilitySheets';
 
 interface DeviceDetailsScreenProps {
@@ -181,6 +182,7 @@ export function DeviceDetailsScreen({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [utility, setUtility] = useState<{ kind: 'clipboard' | 'keep-awake'; channelId: string } | null>(null);
+  useLeftEdgeSwipe(!drawerOpen && !settingsOpen && utility === null, () => setDrawerOpen(true));
   // Forget is destructive and irreversible from here, so the menu item flips into a confirm state
   // in place rather than firing on first tap.
   const [confirmForget, setConfirmForget] = useState(false);

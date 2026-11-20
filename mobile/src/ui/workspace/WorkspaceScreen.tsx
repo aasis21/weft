@@ -8,6 +8,7 @@ import { htmlPreview } from './htmlPreview';
 import { diffRows } from './diffRows';
 import { FolderGlyph, FileGlyph, FolderChevron } from './fileGlyphs';
 import './workspace.css';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
 
 interface Props {
   initial: 'files' | 'changes';
@@ -204,6 +205,11 @@ export function WorkspaceScreen({ initial, initialFile, connected, request, onBa
     closeSnapshot(file.data.previewId); setFile(null);
     window.requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = listScroll.current; });
   };
+  useBackHandler(true, () => {
+    const nested = !!file && !initialFile;
+    back();
+    return nested ? 'stay' : undefined;
+  });
   const srcdoc = useMemo(() => file?.data.format === 'html' && !file.source ? htmlPreview(file.text) : undefined, [file]);
   const openChange = (entry: WorkspaceEntry): void => {
     if (entry.status === '?') void openFile(entry.path);

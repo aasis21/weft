@@ -6,6 +6,7 @@ import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import type { StartMode } from '@/ui/screens/StartSessionScreen';
 import type { WorkspaceCommand } from '@aasis21/weft-shared';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
 import { sessionAccess, sessionRuntime } from '@/session/runtime/instance';
 import {
   lifecycleFailureMessage,
@@ -242,6 +243,20 @@ export default function App(): JSX.Element {
         : -1,
     );
   }, []);
+
+  // System Back leaves these pages for the chat; with no session there is nothing beneath them.
+  const canLeavePage = snapshot.sessions.length > 0;
+  useBackHandler(adding && canLeavePage, () => {
+    setError(null);
+    setAddManual(false);
+    setAdding(false);
+  });
+  useBackHandler(showLanding && canLeavePage, () => setShowLanding(false));
+  useBackHandler(starting && canLeavePage, () => {
+    setStarting(false);
+    setStartDeviceId(undefined);
+    setError(null);
+  });
 
   const handleVoiceModeChange = useCallback((channelId: string, active: boolean): void => {
     void sessionRuntime.setVoiceMode(active, channelId);

@@ -12,6 +12,7 @@ import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/scr
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { useNowTick } from '@/ui/hooks/useNowTick';
 import { filterStoredSessions } from '@/ui/screens/sessionFilter';
+import { PullIndicator, swipeDownToHideKeyboard, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
 
 /** Where the screen was opened from. Both lead to the same page: a composer for a new session and
  *  the folder's recent sessions below it. `resume` opens with session search ready. */
@@ -162,6 +163,14 @@ export function StartSessionScreen({
     document.addEventListener('visibilitychange', refreshOnReturn);
     return () => document.removeEventListener('visibilitychange', refreshOnReturn);
   }, [selected?.channelId, selected?.connected, selected?.sessionsLoading, folderPath, onRefreshSessions]);
+
+  useLeftEdgeSwipe(!drawerOpen, () => setDrawerOpen(true));
+  const continueBoxRef = useRef<HTMLDivElement>(null);
+  const pull = usePullToRefresh(continueBoxRef, () => {
+    if (!selected) return;
+    if (selected.connected && folderPath) onRefreshSessions(selected.channelId, folderPath);
+    else onConnectDevice(selected.channelId);
+  }, !!selected);
 
   const resizeComposer = (): void => {
     const el = composerRef.current;
@@ -430,7 +439,10 @@ export function StartSessionScreen({
                   onChange={(e) => setQuery(e.currentTarget.value)}
                 />
               ) : null}
-              <div className="start-continue-box">{listBody()}</div>
+              <div className="start-continue-box" ref={continueBoxRef}>
+                <PullIndicator state={pull} />
+                {listBody()}
+              </div>
             </section>
             <form
               className="composer-shell start-composer"
@@ -446,6 +458,7 @@ export function StartSessionScreen({
                 aria-label="First message"
                 placeholder={online ? 'What should Copilot work on?' : `${selected ? deviceLabel(selected) : 'Device'} is offline`}
                 rows={2}
+                {...swipeDownToHideKeyboard()}
                 value={message}
                 onChange={(e) => {
                   setMessage(e.currentTarget.value);

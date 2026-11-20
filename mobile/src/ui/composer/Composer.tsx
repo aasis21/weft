@@ -19,6 +19,7 @@ import type { VoiceState } from '@/ui/voice/useVoxEngine';
 import type { AssistantItem } from '@/lib/timeline';
 import { ACCEPTED_IMAGE_TYPES, attachmentSrc, fileToAttachment } from '@/lib/imageAttachments';
 import { isDesktopInput } from '@/lib/platform';
+import { swipeDownToHideKeyboard } from '@/ui/gestures/touchGestures';
 import {
   getCommandArgumentStage,
   getCommandArgumentSuggestions,
@@ -917,6 +918,7 @@ export function Composer({
             onKeyDown={onKeyDown}
             onChange={(event) => onTextChange(event.target.value)}
             onPaste={onPaste}
+            {...swipeDownToHideKeyboard()}
             placeholder={
               disabled ? disabledPlaceholder : busy ? 'Steer the current turn…' : 'Message your Copilot session…'
             }

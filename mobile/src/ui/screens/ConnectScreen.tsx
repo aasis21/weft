@@ -8,6 +8,7 @@ import { runConnectivityProbe } from '@/lib/wsProbe';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
+import { useLeftEdgeSwipe } from '@/ui/gestures/touchGestures';
 
 interface ConnectScreenProps {
   /** Native first run: no prior sessions to go back to. */
@@ -67,6 +68,7 @@ export function ConnectScreen({
   // Bumped after a failed pair so the inline web scanner remounts and resumes scanning.
   const [scanNonce, setScanNonce] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  useLeftEdgeSwipe(!!sessions && !drawerOpen, () => setDrawerOpen(true));
   const autoScanned = useRef(false);
 
   useEffect(() => {

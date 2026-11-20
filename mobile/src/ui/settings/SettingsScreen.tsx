@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type JSX } from 'rea
 import { sessionRuntime } from '@/session/runtime/instance';
 import { deviceLabel, deviceStatus, sortDevices } from '@/ui/screens/deviceDisplay';
 import { VoiceControls } from '@/ui/settings/VoiceControls';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
 import {
   applyTheme,
   getSettings,
@@ -56,6 +57,7 @@ export function SettingsScreen({ onClose, laptopVersion, onOpenDrawer }: Setting
   const triggerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  useBackHandler(true, () => onCloseRef.current());
 
   // Read the devices straight off the runtime rather than threading a prop through all four call
   // sites: Settings opens from a session, a device, the devices list and the drawer, and only one

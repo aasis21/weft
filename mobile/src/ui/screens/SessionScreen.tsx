@@ -17,6 +17,8 @@ import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
 import type { VoiceState } from '@/ui/voice/useVoxEngine';
 import { getStableDeviceId } from '@/lib/weftClient';
 import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
+import { PullIndicator, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
 
 const ExploreScreen = lazy(() =>
   import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
@@ -635,6 +637,17 @@ export function SessionScreen({
     timeline.approvals.length > 0 ||
     timeline.elicitations.length > 0;
 
+  useBackHandler(debugOpen, () => setDebugOpen(false));
+  useBackHandler(voiceOpen, collapseVoice);
+  useBackHandler(voxOpen && !voiceOpen, exitVox);
+  useBackHandler(confirmRemoveId !== null, cancelRemove);
+  useLeftEdgeSwipe(!isDesktopWide && !exploreOpen && !conflictingOverlayOpen, () => setDrawerOpen(true));
+  const threadScrollRef = useRef<HTMLElement>(null);
+  const pull = usePullToRefresh(threadScrollRef, () => {
+    if (status === 'live') onReloadHistory?.(activeId);
+    else onReconnect(activeId);
+  }, !isDesktopWide && meta.kind !== 'demo');
+
   useEffect(() => {
     // Inline approvals/forms are part of the watched conversation, not navigation away from it.
     const hidden = exploreOpen || workspaceRoute !== null || settingsOpen || debugOpen ||
@@ -871,7 +884,8 @@ export function SessionScreen({
         />
       ) : null}
 
-      <main className="thread-scroll">
+      <main className="thread-scroll" ref={threadScrollRef}>
+        <PullIndicator state={pull} />
         <ChatThread
           onOpenFile={workspaceSupported ? (href) => setWorkspaceRoute({ initial: 'files', file: href }) : undefined}
           items={timeline.items}

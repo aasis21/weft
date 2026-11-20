@@ -6,6 +6,8 @@ import { deviceLabel, deviceStatus, formatLastSeen, sortDevices } from '@/ui/scr
 import { DeviceAvatar, PlayGlyph } from '@/ui/screens/deviceGlyphs';
 import { WeftMark } from '@/ui/brand/WeftMark';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
+import { useSwipeToClose } from '@/ui/gestures/touchGestures';
 
 interface WeftDrawerProps {
   sessions: SessionView[];
@@ -102,6 +104,8 @@ export function WeftDrawer({
   const [collapsedArchived, setCollapsedArchived] = useState(true);
   const now = useNowTick();
   onCloseRef.current = onClose;
+  useBackHandler(!docked, () => onCloseRef.current());
+  const swipeToClose = useSwipeToClose(drawerRef, !docked, () => onCloseRef.current());
 
   const beginRename = (id: string, current: string): void => {
     setEditingId(id);
@@ -584,6 +588,7 @@ export function WeftDrawer({
         aria-label="Weft"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        {...(docked ? {} : swipeToClose)}
       >
         <div className="drawer-head">
           <WeftMark className="drawer-mark" size={22} />
@@ -675,7 +680,7 @@ export function WeftDrawer({
           </button>
         </div>
       </aside>
-      {docked ? null : <div className="drawer-scrim" aria-hidden="true" onClick={onClose} />}
+      {docked ? null : <div className="drawer-scrim" aria-hidden="true" onClick={onClose} {...swipeToClose} />}
     </>
   );
 }

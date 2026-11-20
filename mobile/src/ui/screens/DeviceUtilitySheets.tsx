@@ -10,6 +10,7 @@ import {
 } from '@aasis21/weft-shared';
 import type { ListenerDeviceState } from '@/session/model';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { useBackHandler } from '@/ui/gestures/backNavigation';
 
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -51,6 +52,7 @@ function DeviceUtilitySheet({ title, onClose, children }: {
   const closeRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  useBackHandler(true, () => onCloseRef.current());
 
   useLayoutEffect(() => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;

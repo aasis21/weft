@@ -7,6 +7,7 @@ import { DeviceAvatar, MoreHorizontalGlyph, PlayGlyph, PlusGlyph, RefreshGlyph, 
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { useNowTick } from '@/ui/hooks/useNowTick';
+import { PullIndicator, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
 
 interface DevicesScreenProps {
   sessions: SessionView[];
@@ -64,6 +65,10 @@ export function DevicesScreen({
   const menuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const now = useNowTick();
   const sortedDevices = sortDevices(devices);
+  const mainRef = useRef<HTMLElement>(null);
+  useLeftEdgeSwipe(!drawerOpen && !settingsOpen, () => setDrawerOpen(true));
+  const pull = usePullToRefresh(mainRef, () => sortedDevices.forEach((device) => onRefreshProjects(device.channelId)),
+    sortedDevices.length > 0);
   const onlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone !== 'offline');
   const offlineDevices = sortedDevices.filter((d) => deviceStatus(d).tone === 'offline');
   const onlineCount = onlineDevices.length;
@@ -255,7 +260,7 @@ export function DevicesScreen({
   };
 
   return (
-    <main className="weft-session join-session devices-screen">
+    <main className="weft-session join-session devices-screen" ref={mainRef}>
       <header className="status-bar">
         <button
           className="icon-btn drawer-btn"
@@ -298,6 +303,7 @@ export function DevicesScreen({
           </button>
         </span>
       </header>
+      <PullIndicator state={pull} />
 
       <div className="session-join-inner">
         <p className="session-join-hint">

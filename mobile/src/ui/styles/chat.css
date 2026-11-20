@@ -4076,3 +4076,30 @@
   word-break: break-word;
   overflow-x: auto;
 }
+
+/* Pull to refresh (ui/gestures/touchGestures.tsx). */
+.pull-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  color: var(--muted, #8b949e);
+  font-size: 13px;
+}
+.pull-indicator.refreshing { transition: height 160ms ease-out; }
+.pull-arrow { display: inline-block; transition: transform 160ms ease-out; }
+.pull-arrow.ready { transform: rotate(180deg); }
+.pull-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pull-spin 700ms linear infinite;
+}
+@keyframes pull-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .pull-spinner { animation: none; }
+}
