@@ -1,0 +1,73 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Build Android debug APK
+        run: |
+          npm ci --workspaces --include-workspace-root
+          npm run check-version
+          npm run build:android -w @aasis21/weft-mobile
+
+      - name: Verify and name the APK
+        id: apk
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          build_dir="mobile/android/app/build/outputs/apk/debug"
+          metadata="$build_dir/output-metadata.json"
+          jq -e --arg version "$version" \
+            '.applicationId == "dev.aasis21.weft" and .elements[0].versionName == $version' \
+            "$metadata" > /dev/null
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$build_dir/app-debug.apk"
+          apk="$RUNNER_TEMP/weft-$version-debug.apk"
+          cp "$build_dir/app-debug.apk" "$apk"
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          sha256sum "$apk" | cut -d ' ' -f 1 | sed 's/^/sha256=/' >> "$GITHUB_OUTPUT"
+
+      - name: Upload downloadable APK
+        id: upload
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          path: ${{ steps.apk.outputs.path }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Write download instructions
+        env:
+          APK_URL: ${{ steps.upload.outputs.artifact-url }}
+          APK_SHA256: ${{ steps.apk.outputs.sha256 }}
+        run: |
+          {
+            echo "### [Download the Weft debug APK]($APK_URL)"
+            echo "SHA-256: \`$APK_SHA256\`"
+            echo
+            echo 'This build is for testing. Sign in to GitHub to download it within 30 days.'
+            echo 'A build signed with a different key cannot update your existing install.'
+          } >> "$GITHUB_STEP_SUMMARY"

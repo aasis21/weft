@@ -9,9 +9,13 @@ Install it with the browser's **Install app** or **Add to Home Screen** action. 
 updates are delivered by the browser; close and reopen the installed PWA after a new
 release if the old build remains active.
 
-Weft does not currently publish an Android APK. Native Android builds are for local
-development until a signed Android release pipeline is available. Do not install debug,
-unversioned, or third-party APKs presented as official Weft releases.
+Weft does not publish a production Android APK. For testing, a repository maintainer
+can run [Actions → Build Android APK](https://github.com/aasis21/weft/actions/workflows/android-apk.yml)
+by choosing **Run workflow**. This workflow does not run on pushes or pull requests.
+When it succeeds, sign in to GitHub and download the `.apk` from the run summary.
+The debug-signed artifact expires after 30 days and is not a production release.
+If Android rejects an update signed with a different key, installing it requires
+uninstalling the old app first, which removes its Android app data and pairing.
 
 ## Laptop extension and CLI
 

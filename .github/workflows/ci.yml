@@ -9,33 +9,6 @@ jobs:
   native-runtime:
     uses: ./.github/workflows/native-runtime.yml
 
-  android-debug:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          cache: npm
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
-
-      - name: Build and verify the local-testing APK
-        run: |
-          npm ci --workspaces --include-workspace-root
-          npm run build:android -w @aasis21/weft-mobile
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify mobile/android/app/build/outputs/apk/debug/app-debug.apk
-
   build-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
