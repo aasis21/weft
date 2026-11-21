@@ -55,9 +55,7 @@ export function ConnectScreen({
   onGoHome,
 }: ConnectScreenProps): JSX.Element {
   const native = isNativeRuntime();
-  // Manual/paste pairing is a keyboard-and-mouse convenience (copy a JSON blob from a
-  // terminal) — on a touch phone it's just a confusing dead-end box, so keep it desktop-only
-  // for now and rely on the camera scanner everywhere else.
+  const [useInAppCamera, setUseInAppCamera] = useState(false);
   const desktop = isDesktopInput();
   const { busy, run, errorDetail } = usePairing(onError);
   const [manual, setManual] = useState('');
@@ -111,7 +109,8 @@ export function ConnectScreen({
     (): Promise<void> =>
       run(async () => {
         const raw = await scanNativeQr();
-        await onPair(raw);
+        if (raw === null) setUseInAppCamera(true);
+        else await onPair(raw);
       }),
     [onPair, run],
   );
@@ -120,12 +119,12 @@ export function ConnectScreen({
     void pair(raw);
   }, [pair]);
 
-  // On native there is no in-page camera, so open the ML Kit sheet once on mount.
+  // Try the native scanner once on mount before falling back to the in-app camera.
   useEffect(() => {
-    if (!native || autoScanned.current) return;
+    if (!native || showManual || autoScanned.current) return;
     autoScanned.current = true;
     void nativeScan();
-  }, [native, nativeScan]);
+  }, [native, nativeScan, showManual]);
 
   const backLabel = 'Back';
   const inApp = hasSessions && !firstRun;
@@ -134,6 +133,24 @@ export function ConnectScreen({
   const tagline = 'One scan links your laptop — it pairs a new device or joins a session automatically.';
   const secondaryCls = inApp ? 'session-secondary-action' : 'secondary-action';
   const linkCls = inApp ? 'session-link-btn' : 'link-btn';
+  const manualEntry = (
+    <>
+      <textarea
+        className={inApp ? 'session-manual-input' : undefined}
+        aria-label="Pairing code"
+        value={manual}
+        onChange={(event) => setManual(event.target.value)}
+        autoCapitalize="off"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        placeholder="Paste the private pairing code"
+      />
+      <button type="button" className={secondaryCls} disabled={busy || !manual.trim()} onClick={() => void pair(manual.trim())}>
+        Pair from pasted code
+      </button>
+    </>
+  );
 
   return (
     <main className={inApp ? 'weft-session join-session' : 'join-shell'}>
@@ -179,36 +196,59 @@ export function ConnectScreen({
           </header>
         )}
 
-      <div className={inApp ? 'session-join-scanner' : 'join-scanner'}>
-        {native ? (
-          <div className="native-scan">
-            <div className="scanner-reticle" aria-hidden="true">
-              <span className="scanner-line" />
+      {native ? (
+        <button
+          type="button"
+          className={secondaryCls}
+          disabled={busy}
+          aria-expanded={showManual}
+          onClick={() => {
+            setShowManual(!showManual);
+            setManual('');
+            onError(null);
+          }}
+        >
+          {showManual ? 'Use QR scanner' : 'Paste pairing code'}
+        </button>
+      ) : null}
+
+      {native && showManual ? (
+        <div className="join-fallback">
+          <p className="join-hint">In your laptop's Weft Control Center, open Pairing and choose Copy pairing code.</p>
+          {manualEntry}
+        </div>
+      ) : (
+        <div className={inApp ? 'session-join-scanner' : 'join-scanner'}>
+          {native && !useInAppCamera ? (
+            <div className="native-scan">
+              <div className="scanner-reticle" aria-hidden="true">
+                <span className="scanner-line" />
+              </div>
+              <button
+                type="button"
+                className={inApp ? 'session-primary-action' : 'primary-action'}
+                disabled={busy}
+                onClick={() => void nativeScan()}
+              >
+                {busy ? 'Scanning…' : 'Scan QR'}
+              </button>
             </div>
-            <button
-              type="button"
-              className={inApp ? 'session-primary-action' : 'primary-action'}
-              disabled={busy}
-              onClick={() => void nativeScan()}
-            >
-              {busy ? 'Scanning…' : 'Scan QR'}
-            </button>
-          </div>
-        ) : busy ? (
-          <div className="scanner-connecting" role="status" aria-live="polite">
-            <div className="connecting-spinner" aria-hidden="true" />
-            <p>QR found — connecting to your laptop…</p>
-          </div>
-        ) : (
-          <WebQrScanner
-            key={scanNonce}
-            variant="inline"
-            onResult={handleScannerResult}
-            onCancel={() => undefined}
-            onPasteCode={desktop ? () => setShowManual(true) : undefined}
-          />
-        )}
-      </div>
+          ) : busy ? (
+            <div className="scanner-connecting" role="status" aria-live="polite">
+              <div className="connecting-spinner" aria-hidden="true" />
+              <p>QR found — connecting to your laptop…</p>
+            </div>
+          ) : (
+            <WebQrScanner
+              key={scanNonce}
+              variant="inline"
+              onResult={handleScannerResult}
+              onCancel={() => undefined}
+              onPasteCode={desktop ? () => setShowManual(true) : undefined}
+            />
+          )}
+        </div>
+      )}
 
       {error ? (
         <div className="error-banner-wrap">
@@ -240,7 +280,7 @@ export function ConnectScreen({
             </details>
           ) : null}
 
-          {desktop ? (
+          {desktop && !native ? (
             <>
               <button
                 type="button"
@@ -250,25 +290,7 @@ export function ConnectScreen({
               >
                 {showManual ? 'Hide manual entry' : 'Enter pairing code manually'}
               </button>
-              {showManual ? (
-                <>
-                  <textarea
-                    className={inApp ? 'session-manual-input' : undefined}
-                    aria-label="Manual pairing JSON"
-                    value={manual}
-                    onChange={(event) => setManual(event.target.value)}
-                    placeholder='{"v":1,"channelId":"...","pub":"..."}'
-                  />
-                  <button
-                    type="button"
-                    className={secondaryCls}
-                    disabled={busy || !manual.trim()}
-                    onClick={() => void pair(manual)}
-                  >
-                    Pair from pasted code
-                  </button>
-                </>
-              ) : null}
+              {showManual ? manualEntry : null}
             </>
           ) : null}
 

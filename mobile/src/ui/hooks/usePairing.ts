@@ -4,6 +4,7 @@ import { describeError } from '@/lib/debugSettings';
 
 interface ScannerApi {
   isSupported?: () => Promise<{ supported: boolean }>;
+  isGoogleBarcodeScannerModuleAvailable?: () => Promise<{ available: boolean }>;
   requestPermissions?: () => Promise<{ camera: string }>;
   scan: () => Promise<{ barcodes: Array<{ rawValue?: string; displayValue?: string }> }>;
 }
@@ -45,18 +46,24 @@ export const isNativeRuntime = (): boolean => Capacitor.isNativePlatform();
 
 /**
  * Drive the native ML Kit barcode scanner (Android/iOS) and resolve with the raw QR
- * payload string — the same shape the in-browser scanner and paste box produce.
+ * payload string, or null if Android needs the in-app camera instead.
  */
-export async function scanNativeQr(): Promise<string> {
+export async function scanNativeQr(): Promise<string | null> {
   const module = await import('@capacitor-mlkit/barcode-scanning');
   const scanner = module.BarcodeScanner as unknown as ScannerApi;
   const support = await scanner.isSupported?.();
   if (support && !support.supported) {
     throw new Error('Barcode scanning is not supported on this device.');
   }
-  const permission = await scanner.requestPermissions?.();
-  if (permission && permission.camera !== 'granted' && permission.camera !== 'limited') {
-    throw new Error(CAMERA_PERMISSION_DENIED_MESSAGE);
+  if (Capacitor.getPlatform() === 'android') {
+    // Sideloads may not have the Play Services module. Its scan UI needs no app camera permission.
+    const status = await scanner.isGoogleBarcodeScannerModuleAvailable?.().catch(() => null);
+    if (!status?.available) return null;
+  } else {
+    const permission = await scanner.requestPermissions?.();
+    if (permission && permission.camera !== 'granted' && permission.camera !== 'limited') {
+      throw new Error(CAMERA_PERMISSION_DENIED_MESSAGE);
+    }
   }
   const result = await withTimeout(scanner.scan(), SCAN_TIMEOUT_MS, SCAN_TIMEOUT_MESSAGE);
   const raw = result.barcodes[0]?.rawValue ?? result.barcodes[0]?.displayValue;
@@ -88,8 +95,9 @@ export function usePairing(onError: (message: string | null) => void): {
       try {
         await task();
       } catch (err) {
-        onError(pairingErrorMessage(err));
-        setErrorDetail(describeError(err));
+        const message = pairingErrorMessage(err);
+        onError(message);
+        setErrorDetail(describeError(err instanceof SyntaxError ? message : err));
       } finally {
         busyRef.current = false;
         setBusy(false);

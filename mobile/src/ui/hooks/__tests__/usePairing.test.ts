@@ -1,9 +1,11 @@
+import { Capacitor } from '@capacitor/core';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { scanNativeQr, usePairing } from '@/ui/hooks/usePairing';
 
 const scannerMock = vi.hoisted(() => ({
   isSupported: vi.fn(),
+  isGoogleBarcodeScannerModuleAvailable: vi.fn(),
   requestPermissions: vi.fn(),
   scan: vi.fn(),
 }));
@@ -86,5 +88,19 @@ describe('scanNativeQr', () => {
     scannerMock.scan.mockResolvedValue({ barcodes: [{ rawValue: 'payload' }] });
 
     await expect(scanNativeQr()).resolves.toBe('payload');
+  });
+
+  it('uses the installed Android Google scanner without requesting app camera permission', async () => {
+    const platform = vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
+    try {
+      scannerMock.isSupported.mockResolvedValue({ supported: true });
+      scannerMock.isGoogleBarcodeScannerModuleAvailable.mockResolvedValue({ available: true });
+      scannerMock.scan.mockResolvedValue({ barcodes: [{ rawValue: 'payload' }] });
+
+      await expect(scanNativeQr()).resolves.toBe('payload');
+      expect(scannerMock.requestPermissions).not.toHaveBeenCalled();
+    } finally {
+      platform.mockRestore();
+    }
   });
 });

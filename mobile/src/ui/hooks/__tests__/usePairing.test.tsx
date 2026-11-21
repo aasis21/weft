@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { pairingErrorMessage, usePairing } from '../usePairing';
 
@@ -43,6 +43,16 @@ describe('usePairing', () => {
         "That doesn't look like a valid Weft pairing code — re-copy it from the terminal.",
       ),
     );
+  });
+
+  it('does not include malformed pairing code contents in debug details', async () => {
+    const { result } = renderHook(() => usePairing(vi.fn()));
+    await act(() => result.current.run(async () => {
+      throw new SyntaxError('Unexpected token in {"token":"synthetic-pairing-grant"}');
+    }));
+
+    expect(result.current.errorDetail).toContain('valid Weft pairing code');
+    expect(result.current.errorDetail).not.toContain('synthetic-pairing-grant');
   });
 
   it('maps pairing validation and no-ack errors while preserving unknown messages', async () => {

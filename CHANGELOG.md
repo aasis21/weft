@@ -10,6 +10,10 @@ with the Weft extension and mobile app.
 - On busy Windows machines, Weft batches its runtime discovery checks and gives
   PowerShell more time to verify process identity, so Android and web sessions
   do not get stuck waiting when Copilot has already started.
+- Build an Android debug APK from source with `npm run build:android -w @aasis21/weft-mobile`.
+  The Android app supports pasting a pairing code and falls back to its in-app
+  camera when the Google Barcode Scanner module is unavailable. The hosted PWA
+  remains the supported phone distribution.
 
 ## 0.2.51
 

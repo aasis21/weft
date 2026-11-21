@@ -125,12 +125,15 @@ export function WebQrScanner({
           audio: false,
         });
       } catch {
-        fail('Camera blocked. Allow camera access, or use the paste box instead.');
+        if (!stopped) fail('Camera blocked. Allow camera access, or use the paste box instead.');
         return;
       }
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || !canvas || stopped) return;
+      if (!video || !canvas || stopped) {
+        stopStream();
+        return;
+      }
       video.srcObject = stream;
 
       const startScanning = async (): Promise<void> => {
@@ -148,6 +151,7 @@ export function WebQrScanner({
           if (stopped) return;
           try {
             const raw = await detect(video, canvas);
+            if (stopped) return;
             if (raw) {
               stopped = true;
               if (!resultDeliveredRef.current) {

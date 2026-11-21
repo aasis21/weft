@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +18,13 @@ vi.mock('@/ui/pairing/WebQrScanner', () => ({
 // to lock in that the option disappears there.
 const platformState = vi.hoisted(() => ({ desktop: true }));
 vi.mock('@/lib/platform', () => ({ isDesktopInput: () => platformState.desktop }));
+
+const androidScanner = vi.hoisted(() => ({
+  isSupported: vi.fn(),
+  isGoogleBarcodeScannerModuleAvailable: vi.fn(),
+  scan: vi.fn(),
+}));
+vi.mock('@capacitor-mlkit/barcode-scanning', () => ({ BarcodeScanner: androidScanner }));
 
 describe('LandingScreen', () => {
   beforeEach(() => {
@@ -90,6 +98,24 @@ describe('ConnectScreen', () => {
     expect(onPair).toHaveBeenCalledWith('scanner-payload');
   });
 
+  it('uses the in-app camera on Android when the Google scanner module is missing', async () => {
+    const platform = vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
+    const native = vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    try {
+      androidScanner.isSupported.mockResolvedValue({ supported: true });
+      androidScanner.isGoogleBarcodeScannerModuleAvailable.mockResolvedValue({ available: false });
+      const onPair = vi.fn().mockResolvedValue(undefined);
+      render(<ConnectScreen firstRun hasSessions={false} error={null} onError={vi.fn()} onPair={onPair} />);
+
+      await userEvent.click(await screen.findByTestId('mock-scanner'));
+      expect(androidScanner.scan).not.toHaveBeenCalled();
+      expect(onPair).toHaveBeenCalledWith('scanner-payload');
+    } finally {
+      platform.mockRestore();
+      native.mockRestore();
+    }
+  });
+
   it('accepts manual pairing JSON and submits it', async () => {
     const user = userEvent.setup();
     const onPair = vi.fn().mockResolvedValue(undefined);
@@ -107,7 +133,7 @@ describe('ConnectScreen', () => {
 
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(screen.getByText('Bad code')).toHaveClass('error-banner');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Manual pairing JSON' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Pairing code' }), {
       target: { value: '{"v":1,"channelId":"abc"}' },
     });
     await user.click(screen.getByRole('button', { name: 'Pair from pasted code' }));
@@ -118,7 +144,31 @@ describe('ConnectScreen', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('hides manual/paste entry entirely on touch devices, both on Landing and Join', async () => {
+  it('pauses the camera and pairs from a pasted code in the native Android app', async () => {
+    platformState.desktop = false;
+    vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    androidScanner.isSupported.mockResolvedValue({ supported: true });
+    androidScanner.isGoogleBarcodeScannerModuleAvailable.mockResolvedValue({ available: false });
+    const onPair = vi.fn().mockResolvedValue(undefined);
+    render(<ConnectScreen firstRun hasSessions={false} error={null} onError={vi.fn()} onPair={onPair} />);
+    await screen.findByTestId('mock-scanner');
+    await userEvent.click(screen.getByRole('button', { name: 'Paste pairing code' }));
+    expect(screen.queryByTestId('mock-scanner')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Pairing code' }), {
+      target: { value: ' {"v":2,"channelId":"test"} ' },
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Pair from pasted code' }));
+    expect(onPair).toHaveBeenCalledWith('{"v":2,"channelId":"test"}');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Use QR scanner' }));
+    expect(screen.getByTestId('mock-scanner')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Paste pairing code' }));
+    expect(screen.getByRole('textbox', { name: 'Pairing code' })).toHaveValue('');
+  });
+
+  it('keeps manual/paste entry hidden in touch-only browsers, both on Landing and Join', async () => {
     platformState.desktop = false;
     const { unmount } = render(
       <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
@@ -131,6 +181,6 @@ describe('ConnectScreen', () => {
     render(
       <ConnectScreen hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn().mockResolvedValue(undefined)} />,
     );
-    expect(screen.queryByRole('button', { name: 'Enter code manually' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Enter pairing code manually' })).not.toBeInTheDocument();
   });
 });
