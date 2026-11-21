@@ -48,7 +48,7 @@ export function createLocalTransport(opts: {
 }): Transport;
 
 /** Phase 2 (p2-relay): pass a SupabaseClient from @supabase/supabase-js. */
-export function createSupabaseTransport(opts: { client: unknown; channelId: string }): Transport;
+export function createSupabaseTransport(opts: { client: unknown; channelId: string; initialReconnectGraceMs?: number }): Transport;
 
 /**
  * Pass an already-constructed, already-authenticated WebSocket (the `ws` package, or the

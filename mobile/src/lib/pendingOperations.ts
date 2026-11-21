@@ -1,5 +1,6 @@
 import type { LifecycleStatusMsg, PairingPayload, SpawnMode } from '@aasis21/weft-shared';
 import { preferencesStorage } from '@/services/persistence/preferencesStorage';
+import { saveCriticalPreference } from './storageJanitor';
 
 const PENDING_OPERATIONS_KEY = 'weft.pendingOperations.v1';
 let mutationQueue: Promise<void> = Promise.resolve();
@@ -73,7 +74,7 @@ async function read(): Promise<PendingOperation[]> {
 
 async function write(operations: PendingOperation[]): Promise<void> {
   const value = JSON.stringify({ operations });
-  await preferencesStorage.setItem(PENDING_OPERATIONS_KEY, value);
+  await saveCriticalPreference(PENDING_OPERATIONS_KEY, value);
 }
 
 export async function loadPendingOperations(): Promise<PendingOperation[]> {

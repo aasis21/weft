@@ -5,6 +5,7 @@ import { isNativeRuntime, scanNativeQr, usePairing } from '@/ui/hooks/usePairing
 import { isDesktopInput } from '@/lib/platform';
 import { isDebugModeEnabled, setDebugModeEnabled } from '@/lib/debugSettings';
 import { runConnectivityProbe } from '@/lib/wsProbe';
+import { supabaseProbeEndpoint } from '@/lib/weftClient';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
@@ -68,6 +69,7 @@ export function ConnectScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   useLeftEdgeSwipe(!!sessions && !drawerOpen, () => setDrawerOpen(true));
   const autoScanned = useRef(false);
+  const probeEndpoint = useRef<string | null>(null);
 
   useEffect(() => {
     void isDebugModeEnabled().then(setDebugMode);
@@ -77,7 +79,7 @@ export function ConnectScreen({
     setProbeRunning(true);
     setProbeResult(null);
     try {
-      setProbeResult(await runConnectivityProbe());
+      setProbeResult(await runConnectivityProbe(probeEndpoint.current));
     } finally {
       setProbeRunning(false);
     }
@@ -89,12 +91,23 @@ export function ConnectScreen({
     void setDebugModeEnabled(next);
   };
 
+  const pairAndRememberFailure = useCallback(async (raw: string): Promise<void> => {
+    probeEndpoint.current = null;
+    setProbeResult(null);
+    try {
+      await onPair(raw);
+    } catch (error) {
+      probeEndpoint.current = supabaseProbeEndpoint(raw);
+      throw error;
+    }
+  }, [onPair]);
+
   const pair = useCallback(
     async (raw: string): Promise<void> => {
       let failed = false;
       await run(async () => {
         try {
-          await onPair(raw);
+          await pairAndRememberFailure(raw);
         } catch (err) {
           failed = true;
           throw err;
@@ -102,7 +115,7 @@ export function ConnectScreen({
       });
       if (failed) setScanNonce((n) => n + 1);
     },
-    [onPair, run],
+    [pairAndRememberFailure, run],
   );
 
   const nativeScan = useCallback(
@@ -110,9 +123,9 @@ export function ConnectScreen({
       run(async () => {
         const raw = await scanNativeQr();
         if (raw === null) setUseInAppCamera(true);
-        else await onPair(raw);
+        else await pairAndRememberFailure(raw);
       }),
-    [onPair, run],
+    [pairAndRememberFailure, run],
   );
 
   const handleScannerResult = useCallback((raw: string): void => {

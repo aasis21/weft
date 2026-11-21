@@ -51,7 +51,13 @@ export function createPreferencesStorage(options: PreferencesStorageOptions = {}
       }
       const localStorage = getLocalStorage();
       if (localStorage) {
-        localStorage.setItem(key, value);
+        try {
+          localStorage.setItem(key, value);
+        } catch (error) {
+          if (!wrotePreferences) throw error;
+        }
+        // A successful fallback must not be hidden by an older Preferences value.
+        if (!wrotePreferences) await Preferences.remove({ key }).catch(() => {});
         return;
       }
       if (!wrotePreferences) throw new Error('No Preferences or localStorage backend is available.');

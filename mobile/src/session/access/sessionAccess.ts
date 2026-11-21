@@ -12,6 +12,7 @@ import {
   type TakeoverChallenge,
 } from '@aasis21/weft-shared';
 import { loadPendingOperations } from '@/lib/pendingOperations';
+import { saveCriticalPreference } from '@/lib/storageJanitor';
 import {
   preferencesStorage,
   type PersistStorage,
@@ -294,7 +295,7 @@ export class RuntimeSessionAccess implements SessionAccess {
     private readonly runtime: SessionAccessRuntime,
     options: SessionAccessOptions = {},
   ) {
-    this.storage = options.storage ?? preferencesStorage;
+    this.storage = options.storage ?? { ...preferencesStorage, setItem: saveCriticalPreference };
     this.clock = options.clock ?? Date.now;
     this.randomId = options.randomId ?? (() => crypto.randomUUID());
     this.unsubscribe = runtime.subscribe(() => this.reconcileRuntime());
@@ -611,6 +612,8 @@ export class RuntimeSessionAccess implements SessionAccess {
       );
       if (spawning) {
         record.runtimeCardId = spawning.meta.channelId;
+        // A placeholder can lag the Station snapshot while its state is being saved.
+        if (lifecycleStatus) continue;
         if (spawning.error) {
           const failure = legacyFailure(new Error(spawning.error));
           changed = this.update(record, {

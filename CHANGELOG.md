@@ -5,6 +5,13 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.66
+
+- Recover session access on a full browser store by evicting only cached transcripts
+  and diagnostic logs, without clearing pairing information or pending operations.
+- Give Android's Supabase socket time to reconnect after an initial transport error.
+  The connectivity test now checks the configured Supabase relay as well as a public echo server.
+
 ## 0.2.65
 
 - On busy Windows machines, Weft batches its runtime discovery checks and gives

@@ -1,15 +1,33 @@
+import { Preferences } from '@capacitor/preferences';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   estimateUsageChars,
-  freeSpaceUntilFitsSync,
+  saveCriticalPreference,
   sweepStorage,
   usageSnapshot,
 } from '@/lib/storageJanitor';
+import { loadPendingOperations, upsertPendingOperation, type PendingOperation } from '@/lib/pendingOperations';
 import { loadSessions, upsertSession, type StoredSession } from '@/lib/sessions';
 import type { StoredPairing } from '@/lib/storage';
 
 const TRANSCRIPT = (ch: string) => `weft.transcript.v1.${ch}`;
 const EVENTLOG = (ch: string) => `weft.eventlog.v1.${ch}`;
+const PREF = (key: string) => `CapacitorStorage.${key}`;
+
+function simulateBrowserQuota(cap: number): void {
+  vi.spyOn(Preferences, 'get').mockImplementation(async ({ key }) => ({ value: localStorage.getItem(PREF(key)) }));
+  vi.spyOn(Preferences, 'set').mockImplementation(async ({ key, value }) => localStorage.setItem(PREF(key), value));
+  const real = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    let total = key.length + value.length;
+    for (let i = 0; i < this.length; i++) {
+      const existing = this.key(i);
+      if (existing && existing !== key) total += existing.length + (this.getItem(existing)?.length ?? 0);
+    }
+    if (total > cap) throw new DOMException('quota', 'QuotaExceededError');
+    real.call(this, key, value);
+  });
+}
 
 /** Write a transcript-shaped envelope of roughly `size` chars for a channel, stamped `savedAt`. */
 function putTranscript(ch: string, savedAt: number, size = 200): void {
@@ -124,38 +142,49 @@ describe('storageJanitor.sweepStorage', () => {
   });
 });
 
-describe('storageJanitor.freeSpaceUntilFitsSync', () => {
-  it('evicts prunable entries until a quota-limited setItem succeeds', () => {
+describe('storageJanitor.saveCriticalPreference', () => {
+  it('evicts only enough prunable entries for a quota-limited write to succeed', async () => {
     putTranscript('orphan-1', 100, 2000);
     putTranscript('orphan-2', 200, 2000);
     putTranscript('orphan-3', 300, 2000);
 
     // Simulate a real ~2500-char cap: a write throws while the OTHER keys already exceed it, and only
     // starts fitting once enough prunable weight is evicted.
-    const real = Storage.prototype.setItem;
-    const CAP = 2500;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, v: string) {
-      let other = 0;
-      for (let i = 0; i < this.length; i++) {
-        const kk = this.key(i);
-        if (!kk || kk === k) continue;
-        other += kk.length + (this.getItem(kk)?.length ?? 0);
-      }
-      if (other + k.length + v.length > CAP) throw new DOMException('quota', 'QuotaExceededError');
-      return real.call(this, k, v);
-    });
-
-    const ok = freeSpaceUntilFitsSync('weft.sessions.v1', 'the-list', {
+    simulateBrowserQuota(2500);
+    await saveCriticalPreference('weft.sessions.v1', 'the-list', {
       validChannelIds: [],
       protectChannelIds: [],
     });
 
-    expect(ok).toBe(true);
     expect(localStorage.getItem('weft.sessions.v1')).toBe('the-list');
     // Two oldest orphans were sacrificed to make room; the newest survives.
     expect(localStorage.getItem(TRANSCRIPT('orphan-1'))).toBeNull();
     expect(localStorage.getItem(TRANSCRIPT('orphan-2'))).toBeNull();
     expect(localStorage.getItem(TRANSCRIPT('orphan-3'))).toBeTruthy();
+  });
+
+  it('keeps pending operations and pairing under quota pressure from both browser cache copies', async () => {
+    const key = EVENTLOG('old-channel');
+    putEventLog('old-channel', 100, 2_000);
+    localStorage.setItem(PREF(key), localStorage.getItem(key)!);
+    localStorage.setItem(PREF('weft.pairing.v1'), 'saved-pairing');
+    localStorage.setItem(PREF(TRANSCRIPT('active')), JSON.stringify({ savedAt: 200, data: { pad: 'z'.repeat(300) } }));
+    const operation: PendingOperation = {
+      requestId: 'open-1', tempId: 'temp-1', kind: 'resume', deviceId: 'station-1',
+      spawnedFromDeviceId: 'station-1', projectName: 'weft', mode: 'default', createdAt: 100,
+      stage: 'delivered',
+    };
+    simulateBrowserQuota(5_300);
+
+    await upsertPendingOperation(operation);
+    expect(localStorage.getItem(PREF(key))).not.toBeNull();
+    await upsertPendingOperation({ ...operation, stage: 'launched', initialPrompt: 'x'.repeat(1_000) });
+
+    expect(await loadPendingOperations()).toEqual([{ ...operation, stage: 'launched', initialPrompt: 'x'.repeat(1_000) }]);
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(localStorage.getItem(PREF(key))).toBeNull();
+    expect(localStorage.getItem(PREF('weft.pairing.v1'))).toBe('saved-pairing');
+    expect(localStorage.getItem(PREF(TRANSCRIPT('active')))).not.toBeNull();
   });
 });
 
@@ -165,18 +194,7 @@ describe('sessions.ts quota-safe write', () => {
     // frees the orphan, and the retry lands — so the list survives the refresh.
     putTranscript('orphan', 100, 5000);
 
-    const real = Storage.prototype.setItem;
-    const CAP = 4000;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, v: string) {
-      let other = 0;
-      for (let i = 0; i < this.length; i++) {
-        const kk = this.key(i);
-        if (!kk || kk === k) continue;
-        other += kk.length + (this.getItem(kk)?.length ?? 0);
-      }
-      if (other + k.length + v.length > CAP) throw new DOMException('quota', 'QuotaExceededError');
-      return real.call(this, k, v);
-    });
+    simulateBrowserQuota(4000);
 
     await upsertSession(session('ch1'));
 

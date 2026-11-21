@@ -315,6 +315,18 @@ function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
   return client;
 }
 
+/** The same socket endpoint as the real transport. Contains the public API key; do not render it. */
+export function supabaseProbeEndpoint(raw: string): string | null {
+  try {
+    const { transport } = parsePairingPayload(raw);
+    if (transport.kind !== 'supabase') return null;
+    const endpoint = new URL(getSupabaseClient(transport.url, transport.anonKey).realtime.endpointURL());
+    return endpoint.protocol === 'wss:' && !endpoint.username && !endpoint.password ? endpoint.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build a live Transport from a pairing's transport descriptor (see TransportDescriptor). The
  * laptop resolves this from its own env at pairing time and stamps it into the QR/pairing
@@ -331,7 +343,11 @@ function createTransportFromDescriptor(descriptor: TransportDescriptor, channelI
   if (descriptor.kind === 'local') return createLocalTransport({ channelId });
   if (descriptor.kind === 'supabase') {
     const client = getSupabaseClient(descriptor.url, descriptor.anonKey);
-    return createSupabaseTransport({ client, channelId });
+    return createSupabaseTransport({
+      client,
+      channelId,
+      ...(Capacitor.getPlatform() === 'android' ? { initialReconnectGraceMs: 4_000 } : {}),
+    });
   }
   if (descriptor.kind === 'devtunnel') {
     // Symmetric with the supabase branch above: the descriptor carries only the relay's base
