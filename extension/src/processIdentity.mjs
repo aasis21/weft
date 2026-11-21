@@ -34,7 +34,8 @@ export async function getProcessStartTime(
   const { stdout } = await exec(command, args, {
     encoding: "utf8",
     windowsHide: true,
-    timeout: 5_000,
+    // Windows PowerShell startup can take several seconds on a busy host.
+    timeout: platform === "win32" ? 15_000 : 5_000,
   });
   const value = platform === "win32" ? Number(stdout.trim()) : Date.parse(stdout.trim());
   if (!Number.isSafeInteger(value) || value <= 0) {

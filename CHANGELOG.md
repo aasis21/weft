@@ -5,6 +5,12 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.65
+
+- On busy Windows machines, Weft batches its runtime discovery checks and gives
+  PowerShell more time to verify process identity, so Android and web sessions
+  do not get stuck waiting when Copilot has already started.
+
 ## 0.2.51
 
 - The composer's mode chip is now a **model dropdown**. It shows the current model and reasoning
