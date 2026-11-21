@@ -27,9 +27,8 @@ jobs:
           cache: gradle
 
       - uses: android-actions/setup-android@v3
-
-      - name: Install Android 35 SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Build and verify the local-testing APK
         run: |
