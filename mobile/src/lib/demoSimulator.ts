@@ -28,7 +28,7 @@ import {
   WORKSPACE_CAPABILITY,
   SESSION_FILES_CAPABILITY,
 } from '@aasis21/weft-shared';
-import type { ApprovalDecision, CurrentSessionModel, ElicitationResponse, ModeChange, ModelSet, PromptMessage, SessionModelOption } from '@aasis21/weft-shared';
+import type { ApprovalDecision, CurrentSessionModel, ElicitationResponse, ModeChange, ModelSet, PromptMessage, SessionApprovals, SessionModelOption } from '@aasis21/weft-shared';
 import { pairSession } from './weftClient';
 import type { WeftClient } from './weftClient';
 import { startDemoStation } from './demoStation';
@@ -89,6 +89,8 @@ export async function startDemoSession(): Promise<DemoSession> {
 
   const timers: number[] = [];
   let demoModel: CurrentSessionModel = { modelId: 'claude-sonnet-5', name: 'Claude Sonnet 5', reasoningEffort: 'medium' };
+  let demoApprovals: SessionApprovals = { mode: 'manual', available: ['manual', 'assisted', 'allow-all'] };
+  const approvalLabel: Record<string, string> = { manual: 'Ask each time', assisted: 'AI review', 'allow-all': 'Allow all' };
   // Tracks which scripted tool is mid-run so a phone "interrupt" can end the right card.
   let runningToolId: string | null = null;
   const push = (delay: number, action: () => void | Promise<void>): void => {
@@ -133,11 +135,17 @@ export async function startDemoSession(): Promise<DemoSession> {
       }
       if (message.eventSubtype === SUBTYPE.CONTROL.MODEL_SET) {
         const change = (message as ModelSet).msg;
+        if (change.approvalMode) {
+          demoApprovals = { ...demoApprovals, mode: change.approvalMode };
+          void extension.send(modelState({ current: demoModel, models: DEMO_MODELS, approvals: demoApprovals }));
+          void extension.send(logLine('info', `▷ Approvals set to ${approvalLabel[change.approvalMode]} from your phone.`));
+          return;
+        }
         const target = DEMO_MODELS.find((model) => model.id === (change.modelId ?? demoModel.modelId));
         if (target) {
           const effort = change.reasoningEffort ?? (target.efforts.includes(demoModel.reasoningEffort ?? '') ? demoModel.reasoningEffort : target.defaultEffort);
           demoModel = { modelId: target.id, name: target.name, reasoningEffort: effort };
-          void extension.send(modelState({ current: demoModel, models: DEMO_MODELS }));
+          void extension.send(modelState({ current: demoModel, models: DEMO_MODELS, approvals: demoApprovals }));
           void extension.send(logLine('info', `▷ Switched to ${[target.name, effort ? describeReasoningEffort(effort) : null].filter(Boolean).join(' · ')} from your phone.`));
         }
         return;
@@ -158,7 +166,7 @@ export async function startDemoSession(): Promise<DemoSession> {
 
   const heartbeatTimer = window.setInterval(() => void extension.send(heartbeat()), 2_500);
   push(100, () => extension.send(channelUp('/home/user/my-project', 'Demo session', [WORKSPACE_CAPABILITY, SESSION_FILES_CAPABILITY])));
-  push(150, () => extension.send(modelState({ current: demoModel, models: DEMO_MODELS })));
+  push(150, () => extension.send(modelState({ current: demoModel, models: DEMO_MODELS, approvals: demoApprovals })));
   // Backfilled pre-join history (what happened before this phone "joined") — rendered
   // above the live stream under an "Earlier in this session" divider.
   push(250, () =>

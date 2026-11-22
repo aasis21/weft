@@ -224,6 +224,42 @@ test("phone sees the live model list and switches model or effort through the se
   });
 });
 
+test("phone sees and changes tool approvals within the session's policy", async () => {
+  await withRelay(async ({ session, channel }) => {
+    const calls = [];
+    let mode = "manual";
+    let caps = { assistedApproval: true, bypassPermissions: false };
+    session.rpc.model = { async getCurrent() { return { modelId: "m" }; }, async list() { return { list: [{ id: "m", name: "M" }] }; } };
+    session.rpc.permissions = {
+      async getMode() { return { mode }; },
+      async getCapabilities() { return caps; },
+      async setMode(params) { calls.push(params); mode = params.mode; return { success: true, mode }; },
+    };
+    const latest = () => channel.sent.filter((message) => message.eventSubtype === SUBTYPE.CONTROL.MODEL_STATE).at(-1)?.msg;
+    channel.emit(EVENT_TYPE.CONTROL, stateRequest());
+    await flush();
+    assert.deepEqual(latest().approvals, { mode: "manual", available: ["manual", "assisted"] },
+      "allow-all is not offered while policy forbids it");
+
+    channel.emit(EVENT_TYPE.CONTROL, modelSet({ approvalMode: "allow-all" }));
+    await flush();
+    channel.emit(EVENT_TYPE.CONTROL, modelSet({ approvalMode: "assisted" }));
+    await flush();
+    assert.deepEqual(calls, [{ mode: "assisted" }], "a mode the policy forbids never reaches the runtime");
+    assert.deepEqual(latest().approvals, { mode: "assisted", available: ["manual", "assisted"] });
+    const lines = channel.sent.filter((message) => message.eventSubtype === SUBTYPE.STREAM.LOG).map((message) => message.msg.message);
+    assert.ok(lines.includes("Allow all isn't available for this session."));
+    assert.ok(lines.includes("▷ Approvals set to AI review from your phone."));
+
+    mode = "allow-all";
+    caps = { assistedApproval: true, bypassPermissions: true };
+    session.emitEvent({ type: "session.permissions_changed", data: {} });
+    await flush();
+    assert.deepEqual(latest().approvals, { mode: "allow-all", available: ["manual", "assisted", "allow-all"] },
+      "/allow-all typed at the laptop reaches the phone");
+  });
+});
+
 test("attention expires after sleep, respects cooldown, and fences an older watch", () => {
   let clock = 0;
   const lease = createAttentionLease({ now: () => clock });

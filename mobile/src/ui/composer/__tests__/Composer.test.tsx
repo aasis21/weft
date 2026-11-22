@@ -1,6 +1,6 @@
 import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { ModelStateMsg, PromptAttachment, SessionMode } from '@aasis21/weft-shared';
 import { Composer } from '@/ui/composer/Composer';
@@ -193,6 +193,140 @@ describe('Composer', () => {
     expect(screen.getByText('Applies from your next message.')).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: /GPT-6\.1 Sol/ }));
     expect(screen.getByText('Applies from your next message.')).toBeInTheDocument();
+  });
+
+  it('shows no mode description and hides Approvals when the laptop does not report them', async () => {
+    const user = userEvent.setup();
+    renderComposer({ model: liveModels, onModelChange: vi.fn(), mode: 'autopilot' as SessionMode });
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    const sheet = screen.getByRole('dialog', { name: 'Session controls' });
+    expect(within(sheet).getByRole('radio', { name: 'Autopilot' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(sheet).queryByText(/Asks before|plan with you|Keeps working/)).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole('radiogroup', { name: 'Approvals' })).not.toBeInTheDocument();
+  });
+
+  it('offers only the available approval modes and switches without closing the sheet', async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderComposer({ model: { ...liveModels, approvals: { mode: 'manual', available: ['manual', 'assisted'] } }, onModelChange });
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    const approvals = within(screen.getByRole('dialog', { name: 'Session controls' })).getByRole('radiogroup', { name: 'Approvals' });
+    expect(within(approvals).getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Ask each time', 'AI review']);
+    expect(within(approvals).getByRole('radio', { name: 'Ask each time' })).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(within(approvals).getByRole('radio', { name: 'Ask each time' }));
+    expect(onModelChange).not.toHaveBeenCalled();
+    await user.click(within(approvals).getByRole('radio', { name: 'AI review' }));
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenLastCalledWith({ approvalMode: 'assisted' });
+    expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+  });
+
+  it('asks for confirmation before allowing every tool', async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderComposer({
+      model: { ...liveModels, approvals: { mode: 'assisted', available: ['manual', 'assisted', 'allow-all'] } },
+      onModelChange,
+    });
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    const sheet = screen.getByRole('dialog', { name: 'Session controls' });
+    const allowAll = within(within(sheet).getByRole('radiogroup', { name: 'Approvals' })).getByRole('radio', { name: 'Allow all' });
+
+    await user.click(allowAll);
+    const confirm = within(sheet).getByRole('alertdialog');
+    expect(confirm).toHaveTextContent('Approve every tool, path and URL without asking?');
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(within(sheet).queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(onModelChange).not.toHaveBeenCalled();
+
+    await user.click(allowAll);
+    await user.click(within(within(sheet).getByRole('alertdialog')).getByRole('button', { name: 'Allow all' }));
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenLastCalledWith({ approvalMode: 'allow-all' });
+    expect(within(sheet).queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+  });
+
+  describe('sheet gestures', () => {
+    /** jsdom has no layout or real timing, so drags are driven by clientY and a controlled clock. */
+    let clock: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      clock = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    });
+    afterEach(() => {
+      clock.mockRestore();
+    });
+
+    const openSheet = () => {
+      renderComposer({ model: liveModels, onModelChange: vi.fn() });
+      fireEvent.click(screen.getByRole('button', { name: /^Session controls:/ }));
+      const sheet = screen.getByRole('dialog', { name: 'Session controls' });
+      return { sheet, grip: sheet.querySelector('.controls-grip') as HTMLElement };
+    };
+
+    it('follows the finger and closes when the grip is dragged down past the threshold', () => {
+      const { sheet, grip } = openSheet();
+      fireEvent.pointerDown(grip, { pointerId: 1, clientY: 100 });
+      clock.mockReturnValue(1200);
+      fireEvent.pointerMove(grip, { pointerId: 1, clientY: 150 });
+      expect(sheet.style.transform).toBe('translate(-50%, 50px)');
+      clock.mockReturnValue(1400);
+      fireEvent.pointerMove(grip, { pointerId: 1, clientY: 190 });
+      clock.mockReturnValue(1600);
+      fireEvent.pointerUp(grip, { pointerId: 1, clientY: 190 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+    });
+
+    it('snaps back after a short, slow drag', () => {
+      const { sheet, grip } = openSheet();
+      fireEvent.pointerDown(grip, { pointerId: 1, clientY: 100 });
+      clock.mockReturnValue(1200);
+      fireEvent.pointerMove(grip, { pointerId: 1, clientY: 140 });
+      clock.mockReturnValue(1400);
+      fireEvent.pointerUp(grip, { pointerId: 1, clientY: 140 });
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBe(sheet);
+      expect(sheet.style.transform).toBe('');
+      expect(sheet).toHaveClass('is-snapping');
+    });
+
+    it('closes on a fast downward flick even when it is short', () => {
+      const { grip } = openSheet();
+      fireEvent.pointerDown(grip, { pointerId: 1, clientY: 100 });
+      clock.mockReturnValue(1040);
+      fireEvent.pointerMove(grip, { pointerId: 1, clientY: 140 });
+      fireEvent.pointerUp(grip, { pointerId: 1, clientY: 140 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+    });
+
+    it('does not drag from inside the model list', () => {
+      const { sheet } = openSheet();
+      const row = within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ });
+      fireEvent.pointerDown(row, { pointerId: 1, clientY: 100 });
+      clock.mockReturnValue(1200);
+      fireEvent.pointerMove(row, { pointerId: 1, clientY: 300 });
+      fireEvent.pointerUp(row, { pointerId: 1, clientY: 300 });
+      expect(sheet.style.transform).toBe('');
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+    });
+
+    it('opens on a swipe up from the pill, while a tap still toggles it', () => {
+      renderComposer({ model: liveModels, onModelChange: vi.fn() });
+      const pill = screen.getByRole('button', { name: /^Session controls:/ });
+      fireEvent.pointerDown(pill, { pointerId: 1, clientX: 50, clientY: 500 });
+      fireEvent.pointerMove(pill, { pointerId: 1, clientX: 52, clientY: 480 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+      fireEvent.pointerMove(pill, { pointerId: 1, clientX: 55, clientY: 450 });
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+      // The click the browser fires at the end of the swipe must not toggle it shut again.
+      fireEvent.pointerUp(pill, { pointerId: 1, clientX: 55, clientY: 450 });
+      fireEvent.click(pill);
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+
+      clock.mockReturnValue(3000);
+      fireEvent.click(pill);
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+    });
   });
 
   it('shows distinct disabled placeholder copy for ended and reconnecting sessions', () => {

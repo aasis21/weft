@@ -527,13 +527,14 @@ export const modeChange = (mode) => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL
  * switch to. `current` is `{ modelId, name, reasoningEffort }` or null; each model is
  * `{ id, name, efforts, defaultEffort }` where `efforts` lists its supported reasoning efforts.
  */
-export const modelState = ({ current = null, models = [] } = {}) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODEL_STATE, { current, models });
+export const modelState = ({ current = null, models = [], approvals = null } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODEL_STATE, { current, models, ...(approvals ? { approvals } : {}) });
 /** Phone -> ext: switch the model and/or reasoning effort. Omit `modelId` to change only the effort. */
-export const modelSet = ({ modelId = null, reasoningEffort = null } = {}) =>
+export const modelSet = ({ modelId = null, reasoningEffort = null, approvalMode = null } = {}) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.MODEL_SET, {
     ...(modelId ? { modelId } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(approvalMode ? { approvalMode } : {}),
   });
 /** Phone -> ext request to stop the current turn (best-effort; safe when nothing is running). */
 export const interrupt = () => envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.INTERRUPT, {});

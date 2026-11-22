@@ -3214,7 +3214,7 @@ export class SessionRuntime {
   }
 
   /** Switch the model and/or reasoning effort on the laptop session (CONTROL.MODEL_SET). */
-  async sendModelChange(channelId: string, change: { modelId?: string; reasoningEffort?: string }): Promise<void> {
+  async sendModelChange(channelId: string, change: { modelId?: string; reasoningEffort?: string; approvalMode?: 'manual' | 'assisted' | 'allow-all' }): Promise<void> {
     if (!this.session(channelId)) return;
     try {
       await this.send(channelId, modelSet(change));

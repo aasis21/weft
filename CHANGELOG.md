@@ -5,6 +5,15 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.73
+
+- Session controls add **Approvals**: Ask each time, AI review or Allow all, limited to what the
+  session's policy allows. Allow all asks for confirmation; changes made at the laptop (for example
+  `/allow-all`) show up on the phone.
+- The panel has a fixed height: header, Mode and Approvals stay put while the model list scrolls.
+  Swipe up on the pill to open it and drag the header down to close it.
+- Mode descriptions are gone; Autopilot keeps its amber highlight.
+
 ## 0.2.72
 
 - Choose effort inside the model: tap a model in Session controls to pick its effort level, with a

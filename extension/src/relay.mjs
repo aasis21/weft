@@ -1006,7 +1006,8 @@ async function handleSessionEvent(event, sendSafe, promptOrigin, elicitations, e
       await sendSafe(modeChange(data.newMode ?? data.mode));
       break;
     case "session.model_change":
-      // Changed at the laptop, from the phone, or by the runtime (e.g. Auto routing).
+    case "session.permissions_changed":
+      // Changed at the laptop, from the phone, or by the runtime (e.g. Auto routing or /allow-all).
       if (currentModelState) await sendSafe(await currentModelState());
       break;
   }
@@ -1181,7 +1182,9 @@ async function readModelState(session) {
     }];
   }).slice(0, MAX_REPORTED_MODELS);
   const modelId = typeof current?.modelId === "string" && current.modelId ? current.modelId : null;
+  const approvals = await readApprovals(session);
   return {
+    ...(approvals ? { approvals } : {}),
     current: modelId ? {
       modelId,
       name: models.find((model) => model.id === modelId)?.name ?? modelId,
@@ -1189,6 +1192,26 @@ async function readModelState(session) {
     } : null,
     models,
   };
+}
+
+const APPROVAL_LABELS = Object.freeze({ manual: "Ask each time", assisted: "AI review", "allow-all": "Allow all" });
+
+/**
+ * The session's tool-approval mode and the modes its managed policy allows right now
+ * (permissions.getMode / getCapabilities). Null on CLIs without the permissions RPC.
+ */
+async function readApprovals(session) {
+  const api = session?.rpc?.permissions;
+  const [current, caps] = await Promise.all([
+    callIfAvailable(api?.getMode?.bind(api)),
+    callIfAvailable(api?.getCapabilities?.bind(api)),
+  ]);
+  const mode = current?.mode;
+  if (!Object.hasOwn(APPROVAL_LABELS, mode)) return null;
+  const available = ["manual"];
+  if (caps?.assistedApproval || mode === "assisted") available.push("assisted");
+  if (caps?.bypassPermissions || mode === "allow-all") available.push("allow-all");
+  return { mode, available };
 }
 
 /**
@@ -1208,8 +1231,21 @@ async function applyModelChange(session, request, logger, sendSafe) {
     await sendSafe(logLine(level, text));
   };
   const modelApi = session.rpc?.model;
+  const approvalMode = typeof request?.approvalMode === "string" ? request.approvalMode : null;
   try {
-    if (!modelId && !effort) {
+    if (approvalMode) {
+      const label = APPROVAL_LABELS[approvalMode];
+      if (!label || !before.approvals?.available.includes(approvalMode)) {
+        await report("warning", `${label ?? approvalMode} isn't available for this session.`);
+      } else if (typeof session.rpc?.permissions?.setMode !== "function") {
+        await report("warning", "This Copilot version can't change approvals from the phone.");
+      } else {
+        const result = await session.rpc.permissions.setMode({ mode: approvalMode });
+        await report(result?.success === false ? "warning" : "info", result?.success === false
+          ? `Couldn't switch approvals to ${label}${result.reason === "managed_policy" ? ": blocked by your organization's policy" : ""}.`
+          : `▷ Approvals set to ${label} from your phone.`);
+      }
+    } else if (!modelId && !effort) {
       await report("warning", "Model change ignored: nothing to change.");
     } else if (before.models.length && !target) {
       await report("warning", `${modelId ?? "That model"} isn't available for this session.`);

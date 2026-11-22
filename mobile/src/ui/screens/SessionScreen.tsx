@@ -225,7 +225,7 @@ interface SessionScreenProps {
   onInterrupt(): void;
   onModeChange(mode: SessionMode): void;
   /** Switch the model and/or reasoning effort of the laptop session. */
-  onModelChange?(change: { modelId?: string; reasoningEffort?: string }): void;
+  onModelChange?(change: { modelId?: string; reasoningEffort?: string; approvalMode?: 'manual' | 'assisted' | 'allow-all' }): void;
   /** Run a whitelisted CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
   onCommand(name: string, input?: string): void;
   onRetry(itemId: string): void;
