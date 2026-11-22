@@ -5,6 +5,11 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.67
+
+- Keep the Android composer above the on-screen keyboard while typing multiline
+  messages. Enter still inserts a newline.
+
 ## 0.2.66
 
 - Recover session access on a full browser store by evicting only cached transcripts
