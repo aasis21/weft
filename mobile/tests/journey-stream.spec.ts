@@ -47,7 +47,8 @@ test.describe('Journey: live streaming turn', () => {
 
     // Once the turn goes idle the stop action disappears and the live status settles.
     await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0, { timeout: 15_000 });
-    await expect(page.locator('.status-line.live')).toHaveText('Live');
+    // The status line also names the session folder.
+    await expect(page.locator('.status-line.live')).toHaveText('Live · my-project');
   });
 
   test('legacy backfill is not mixed into the current live transcript', async ({ page }) => {
