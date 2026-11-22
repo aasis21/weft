@@ -5,6 +5,11 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.70
+
+- Each release is now one GitHub release (`v0.2.70`) with the signed Android APK, laptop
+  payloads and these notes. The APK keeps the same signing key, so it updates in place.
+
 ## 0.2.69
 
 - One tap on the composer pill opens Session controls: Mode (Interactive, Plan, Autopilot),
