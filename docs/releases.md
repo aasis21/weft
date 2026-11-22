@@ -9,7 +9,9 @@ Install it with the browser's **Install app** or **Add to Home Screen** action. 
 updates are delivered by the browser; close and reopen the installed PWA after a new
 release if the old build remains active.
 
-Download the signed Android APK from the **Assets** section of the latest
+Download the signed Android APK directly from
+<https://github.com/aasis21/weft/releases/latest/download/weft-android.apk> (always the newest
+build; the landing page links it on Android), or from the **Assets** section of the latest
 [GitHub release](https://github.com/aasis21/weft/releases/latest) (`v<VERSION>`; builds up to
 0.2.69 were published as `android-test-v*` prereleases). Open the APK and choose **Update**.
 Every build shares one stable signing key and has an increasing version code, so updates keep

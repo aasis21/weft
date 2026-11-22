@@ -5,6 +5,15 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.72
+
+- Choose effort inside the model: tap a model in Session controls to pick its effort level, with a
+  short description of each. Models without effort levels switch on tap.
+- Get the Android app straight from the landing page on Android, with a new *Get Weft on your
+  phone* section and a QR on laptops. The download link always serves the newest signed APK.
+- About Weft is now a compact screen with this phone's and your laptops' versions, an update
+  notice inside the Android app, and links; the full product page is one tap away.
+
 ## 0.2.71
 
 - Session controls show each model's effort levels again. Current Copilot CLIs report them under

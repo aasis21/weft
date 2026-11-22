@@ -323,6 +323,16 @@ jobs:
           path: assets
           merge-multiple: true
 
+      - name: Add the stable Android download name
+        shell: bash
+        env:
+          VERSION: ${{ needs.test.outputs.version }}
+        # releases/latest/download/weft-android.apk always serves the newest APK (linked from the site).
+        run: |
+          if [[ -f "assets/weft-$VERSION-android.apk" ]]; then
+            cp "assets/weft-$VERSION-android.apk" assets/weft-android.apk
+          fi
+
       - name: Attest release assets
         uses: actions/attest-build-provenance@v3
         with:

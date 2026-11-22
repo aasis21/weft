@@ -93,7 +93,7 @@ describe('Composer', () => {
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
   });
 
-  it('opens one sheet for mode, effort and model, rebuilding effort for the picked model', async () => {
+  it('opens one sheet for mode and model, drilling into a model to pick its effort', async () => {
     const user = userEvent.setup();
     const onModelChange = vi.fn();
     const onModeChange = vi.fn();
@@ -103,25 +103,38 @@ describe('Composer', () => {
     const sheet = screen.getByRole('dialog', { name: 'Session controls' });
     const group = (name: string) => within(sheet).getByRole('radiogroup', { name: new RegExp(`^${name}\\b`) });
     expect(within(group('Mode')).getByRole('radio', { name: 'Plan' })).toHaveAttribute('aria-checked', 'true');
-    expect(within(group('Effort')).getAllByRole('radio').map((r) => r.getAttribute('aria-label')))
-      .toEqual(['Low', 'Medium, model default', 'High', 'Extra high']);
+    expect(within(sheet).queryByRole('radiogroup', { name: /Effort/ })).not.toBeInTheDocument();
+    const opus = within(group('Model')).getByRole('radio', { name: /^Claude Opus 5\.5/ });
+    expect(opus).toHaveAttribute('aria-checked', 'true');
+    expect(opus).toHaveTextContent('High');
+    expect(opus).toHaveTextContent('›');
+    expect(within(group('Model')).getByRole('radio', { name: /^Auto/ })).not.toHaveTextContent('›');
 
     await user.click(within(group('Mode')).getByRole('radio', { name: 'Autopilot' }));
     expect(onModeChange).toHaveBeenCalledWith('autopilot');
 
     await user.click(within(group('Model')).getByRole('radio', { name: /GPT-6\.1 Sol/ }));
-    expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'high' });
-    // Sheet stays open and the effort row now shows GPT-6.1 Sol's levels, without Extra high.
-    expect(within(group('Effort')).getAllByRole('radio')).toHaveLength(3);
-    expect(within(sheet).getByText('Kept High.')).toBeInTheDocument();
+    expect(onModelChange).not.toHaveBeenCalled();
+    const efforts = within(sheet).getByRole('radiogroup', { name: 'Effort for GPT-6.1 Sol' });
+    const levels = within(efforts).getAllByRole('radio');
+    expect(levels).toHaveLength(3);
+    expect(levels[0]).toHaveFocus();
+    // The current effort (High) is kept as the pre-selection because GPT-6.1 Sol supports it.
+    expect(within(efforts).getByRole('radio', { name: /^High/ })).toHaveAttribute('aria-checked', 'true');
+    expect(within(efforts).getByRole('radio', { name: /^Medium, model default/ })).toHaveTextContent('· default');
 
-    await user.click(within(group('Effort')).getByRole('radio', { name: /^Low/ }));
-    expect(onModelChange).toHaveBeenLastCalledWith({ reasoningEffort: 'low' });
-    await user.click(within(sheet).getByRole('button', { name: 'Done' }));
+    await user.click(within(efforts).getByRole('radio', { name: /^Low/ }));
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'low' });
     expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+
+    // Reopening starts back on the main page.
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    expect(within(screen.getByRole('dialog', { name: 'Session controls' })).getByRole('radiogroup', { name: 'Mode' }))
+      .toBeInTheDocument();
   });
 
-  it('falls back to the model default effort and hides effort for models without one', async () => {
+  it('pre-selects the model default when the current effort is unsupported, and Back changes nothing', async () => {
     const user = userEvent.setup();
     const onModelChange = vi.fn();
     renderComposer({
@@ -132,18 +145,53 @@ describe('Composer', () => {
     await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
     const sheet = screen.getByRole('dialog', { name: 'Session controls' });
     await user.click(within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ }));
-    expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'medium' });
-    expect(within(sheet).getByText('Switched to Medium (model default).')).toBeInTheDocument();
+    const efforts = within(sheet).getByRole('radiogroup', { name: 'Effort for GPT-6.1 Sol' });
+    expect(within(efforts).getAllByRole('radio').filter((r) => r.getAttribute('aria-checked') === 'true')
+      .map((r) => r.getAttribute('aria-label'))).toEqual([expect.stringMatching(/^Medium, model default/)]);
 
+    await user.click(within(sheet).getByRole('button', { name: 'Back' }));
+    expect(onModelChange).not.toHaveBeenCalled();
+    expect(within(sheet).queryByRole('radiogroup', { name: /^Effort for/ })).not.toBeInTheDocument();
+    expect(within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ })).toHaveFocus();
+  });
+
+  it('changes only the effort when picking a level for the current model', async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderComposer({ model: liveModels, onModelChange });
+
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    const sheet = screen.getByRole('dialog', { name: 'Session controls' });
+    await user.click(within(sheet).getByRole('radio', { name: /^Claude Opus 5\.5/ }));
+    const efforts = within(sheet).getByRole('radiogroup', { name: 'Effort for Claude Opus 5.5' });
+    expect(within(efforts).getAllByRole('radio')).toHaveLength(4);
+    expect(within(efforts).getByRole('radio', { name: /^High/ })).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(within(efforts).getByRole('radio', { name: /^Low/ }));
+    expect(onModelChange).toHaveBeenCalledTimes(1);
+    expect(onModelChange).toHaveBeenLastCalledWith({ reasoningEffort: 'low' });
+    expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+  });
+
+  it('switches immediately to a model without effort levels and closes the sheet', async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderComposer({ model: liveModels, onModelChange });
+
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    const sheet = screen.getByRole('dialog', { name: 'Session controls' });
     await user.click(within(within(sheet).getByRole('radiogroup', { name: 'Model' })).getByRole('radio', { name: /^Auto/ }));
+    expect(onModelChange).toHaveBeenCalledTimes(1);
     expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'auto' });
-    expect(within(sheet).getByText('This model has no effort setting.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
   });
 
   it('tells you changes apply from the next message while Copilot is working', async () => {
     const user = userEvent.setup();
     renderComposer({ model: liveModels, onModelChange: vi.fn(), busy: true });
     await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    expect(screen.getByText('Applies from your next message.')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /GPT-6\.1 Sol/ }));
     expect(screen.getByText('Applies from your next message.')).toBeInTheDocument();
   });
 

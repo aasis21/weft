@@ -2027,3 +2027,73 @@ pre {
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }
+/* ---- Get Weft on your phone: direct APK download, browser option, laptop QR ---- */
+.get-android { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.get-android-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
+.get-android-meta { color: var(--muted); font-size: 12px; text-align: center; font-family: var(--mono); }
+.landing-cta .get-android { flex: 1 1 100%; }
+.get-app { display: flex; flex-direction: column; gap: 18px; }
+.get-app-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.get-app-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+.get-app-card-android {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%), var(--panel);
+}
+.get-app-card h3 { margin: 0; font-size: 17px; }
+.get-app-card p { margin: 0; color: var(--muted); line-height: 1.5; }
+.get-app-card a:not(.primary-action) { color: var(--accent-bright); }
+.get-app-card .get-app-fine { font-size: 12.5px; }
+.phone-qr {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  max-width: 420px;
+}
+.phone-qr svg { flex: 0 0 auto; border-radius: 8px; background: #fff; }
+.phone-qr div { display: flex; flex-direction: column; gap: 4px; }
+.phone-qr span { color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+/* ---- About (compact, for people already using Weft) ---- */
+.about-inner { display: flex; flex-direction: column; gap: 18px; }
+.about-brand { display: flex; align-items: center; gap: 12px; color: var(--accent, #2f81f7); }
+.about-brand div { display: flex; flex-direction: column; }
+.about-brand strong { color: var(--fg, var(--ink)); font-size: 20px; }
+.about-brand span { color: var(--fg-dim, var(--muted)); font-size: 13px; }
+.about-versions { display: flex; flex-direction: column; margin: 0; border: 1px solid var(--bg-rule, var(--line)); border-radius: 14px; overflow: hidden; }
+.about-versions div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+.about-versions div + div { border-top: 1px solid var(--bg-rule, var(--line)); }
+.about-versions dt { color: var(--fg-dim, var(--muted)); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.about-versions dd { margin: 0; font-family: var(--mono); font-size: 13px; text-align: right; }
+.about-update { display: block; color: var(--accent, #2f81f7); font-family: inherit; font-size: 12px; }
+.about-download { display: flex; align-items: center; justify-content: center; margin-top: 0; text-decoration: none; }
+.about-links { display: flex; flex-direction: column; border: 1px solid var(--bg-rule, var(--line)); border-radius: 14px; overflow: hidden; }
+.about-links a,
+.about-links button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg, var(--ink));
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.about-links > * + * { border-top: 1px solid var(--bg-rule, var(--line)); }
+.about-links span { color: var(--fg-faint, var(--muted)); }

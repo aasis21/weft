@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import type { PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
+import { AboutScreen } from '@/ui/screens/AboutScreen';
 import type { StartMode } from '@/ui/screens/StartSessionScreen';
 import type { WorkspaceCommand } from '@aasis21/weft-shared';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
@@ -64,6 +65,11 @@ export default function App(): JSX.Element {
   /** null until the local first-run flag has been read. */
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [showLanding, setShowLanding] = useState(false);
+  /** From About, the full product page; About itself is the compact screen. */
+  const [showProduct, setShowProduct] = useState(false);
+  useEffect(() => {
+    if (!showLanding) setShowProduct(false);
+  }, [showLanding]);
   const [error, setError] = useState<string | null>(null);
   const onChatVisibilityChange = useCallback((id: string | null): void => {
     sessionRuntime.setChatVisible(id);
@@ -358,8 +364,21 @@ export default function App(): JSX.Element {
     );
   }
 
-  // Explicit "Home" tap from the session screen: show the landing page even though
-  // sessions exist, with links back into them.
+  // Explicit "About Weft" from the drawer: the compact About screen, with the full product page
+  // one tap away.
+  if (showLanding && hasSessions && active && !showProduct) {
+    return (
+      <AboutScreen
+        devices={snapshot.devices}
+        onBack={() => {
+          setError(null);
+          setShowLanding(false);
+        }}
+        onOpenProduct={() => setShowProduct(true)}
+      />
+    );
+  }
+
   if (showLanding && hasSessions && active) {
     return (
       <LandingScreen

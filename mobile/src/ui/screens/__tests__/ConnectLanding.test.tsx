@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
 import { LandingScreen } from '@/ui/screens/LandingScreen';
 
@@ -72,6 +72,36 @@ describe('LandingScreen', () => {
     await user.click(screen.getByRole('button', { name: '← Back to your sessions' }));
     await user.click(screen.getAllByRole('button', { name: 'Open your sessions' })[0]);
     expect(onOpenSessions).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('LandingScreen phone download', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('leads with the direct APK download in an Android browser', () => {
+    platformState.desktop = false;
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Linux; Android 15) Mobile');
+    render(<LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />);
+    const links = screen.getAllByRole('link', { name: 'Get the Android app' });
+    expect(links[0]).toHaveAttribute('href', 'https://github.com/aasis21/weft/releases/latest/download/weft-android.apk');
+    expect(links[0]).toHaveClass('primary-action');
+    expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]).toHaveClass('secondary-action');
+    expect(screen.getByRole('heading', { name: 'Get Weft on your phone.' })).toBeInTheDocument();
+  });
+
+  it('offers only the browser option on iPhone, and nothing inside the Android app', () => {
+    platformState.desktop = false;
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Mobile');
+    const { unmount } = render(
+      <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
+    );
+    expect(screen.queryByRole('link', { name: 'Get the Android app' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Any phone browser' })).toBeInTheDocument();
+    unmount();
+
+    vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
+    render(<LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />);
+    expect(screen.queryByRole('heading', { name: 'Get Weft on your phone.' })).not.toBeInTheDocument();
   });
 });
 
