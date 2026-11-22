@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run the full suite on demand (Actions → CI → Run workflow) instead of on a busy laptop.
+  workflow_dispatch:
 
 jobs:
   native-runtime:
