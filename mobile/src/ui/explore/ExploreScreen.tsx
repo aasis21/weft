@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { WeftMenuIcon } from '@/ui/brand/WeftMark';
 import type {
   CSSProperties,
   JSX,
@@ -508,7 +509,7 @@ export function ExploreScreen({
               aria-label={(active.unreadCount ?? 0) > 0 ? `Open sessions, ${active.unreadCount} unread` : 'Open sessions'}
               onClick={onOpenSessions}
             >
-              <span className="hamburger" aria-hidden="true"><span /><span /><span /></span>
+              <WeftMenuIcon />
             </button>
           )}
           <div className="explore-heading">

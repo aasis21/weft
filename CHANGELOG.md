@@ -5,6 +5,22 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.68
+
+- New first-run Connect screen on Android and mobile web: explains Weft Station
+  (recommended) and `/weft` side by side, with **Scan laptop QR** and **Paste code**.
+  The camera opens only when you ask, shows **Opening camera…** instead of an empty
+  viewfinder, and pairing shows progress with **Try again** on failure. From a live chat,
+  `/weft` instructions lead. **Send setup link** shares the laptop install page.
+- Weft no longer asks for notification permission at launch; a one-time
+  **Get approval alerts** card appears after the first real pairing.
+- Woven Weft menu icon, a narrower mobile drawer, and its close button now sit in the
+  WEFT header below the status bar. Drawer actions read **Start session** and **Scan QR**.
+- Control Center no longer gets stuck on **Status unavailable** on a busy Windows laptop:
+  slow Task Scheduler and session checks are time-limited and shared between refreshes,
+  a Station record left by an exited worker shows as stopped, and the page shows
+  **Refreshing…** while a slow check finishes.
+
 ## 0.2.67
 
 - Keep the Android composer above the on-screen keyboard while typing multiline

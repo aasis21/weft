@@ -138,7 +138,7 @@ configured yet.
 - **Local dev server:** `cd mobile && npm run dev` serves the demo on your development
   computer. For a physical phone, use an HTTPS-served development deployment:
   an ordinary HTTP LAN address is not a secure context for camera and Web Crypto
-  APIs. Manual paste is available in desktop browsers and the native Android app.
+  APIs. Manual paste (**Paste code**) is available in every browser and the native Android app.
 
 To build a debug-signed APK locally, run from the repository root after `npm ci`:
 
@@ -148,12 +148,12 @@ adb install -r mobile/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Use an emulator or enable USB debugging on your Android device before running `adb`.
-Open Weft, allow camera access if prompted, and scan a fresh QR from your laptop.
+Open Weft. The first screen explains the two ways to get a code (Weft Station or
+`/weft` in one Copilot session); the camera opens only when you choose **Scan laptop QR**.
 Weft uses its in-app camera if the Google Barcode Scanner module is unavailable.
-For an emulator or an unavailable camera, choose **Paste pairing code** instead.
+For an emulator or an unavailable camera, choose **Paste code** instead.
 Copy the code from the laptop's **Pairing** tab in Weft Control Center, paste it
-into the app, and choose **Pair from pasted code**. Don't share the code in logs
-or chat.
+into the app, and choose **Pair**. Don't share the code in logs or chat.
 This APK is for local testing, not a signed production release.
 
 **3. Pair and drive it.** Run `weft start`. On Windows and macOS you can close its
@@ -161,8 +161,8 @@ terminal once startup succeeds; Station continues in a manually started per-user
 background workload. Use `weft status` and `weft stop` to manage it. For
 terminal-owned operation, use `weft start --foreground`; other platforms retain
 foreground mode.
-Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
-code. The phone can then start or resume Copilot sessions in registered projects.
+Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, then
+**Scan laptop QR**, and scan the code. The phone can then start or resume Copilot sessions in registered projects.
 For a source-built phone UI, use your HTTPS development deployment instead.
 
 Device Station must remain running for phone-driven project/session discovery, Start,
@@ -371,6 +371,8 @@ and preserves `~/.weft/` configuration, registered projects, and persistent pair
 material. Restart Station and restart or reload the Copilot session after updating. PWA updates arrive through
 the browser; close and reopen the installed PWA if a newly published version is not visible.
 
+Weft does not ask for notification permission at launch. After the first real pairing it
+shows a one-time **Get approval alerts** card; choose **Allow** or **Not now**.
 Notification behavior depends on the browser and operating system. Exercise permission
 prompts and background behavior on a real device; do not treat the local demo as proof of
 notification delivery. The session thread remains the place to review pending approvals.

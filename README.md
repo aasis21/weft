@@ -81,7 +81,7 @@ weft
 Review **Setup**, then explicitly choose **Start Station** on **Control**.
 For terminal-only startup, run `weft start` instead.
 Then open **[useweft.netlify.app](https://useweft.netlify.app)** on your phone, choose
-**Scan QR to pair**, and scan the dashboard or terminal QR. On Windows and macOS,
+**Scan QR to pair**, then **Scan laptop QR**, and scan the dashboard or terminal QR. On Windows and macOS,
 Station runs in the background and you can close this terminal. Use `weft status`
 and `weft stop` to manage it. Startup is manual, not automatic at boot/sign-in.
 Use `weft start --foreground` for terminal-owned diagnostics; other platforms

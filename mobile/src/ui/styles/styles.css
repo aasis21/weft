@@ -1592,11 +1592,6 @@ pre {
   padding: max(24px, env(safe-area-inset-top)) 18px max(24px, env(safe-area-inset-bottom));
 }
 
-.join-head {
-  display: flex;
-  flex-direction: column;
-}
-
 .pair-back {
   align-self: flex-start;
   margin-bottom: 12px;
@@ -1606,10 +1601,6 @@ pre {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.06);
   font-weight: 800;
-}
-
-.join-head h2 {
-  margin-bottom: 6px;
 }
 
 .join-hint {
@@ -1644,13 +1635,6 @@ pre {
 }
 
 /* ---- Numbered steps (Join / Scan page) ----------------------------------- */
-.join-tagline {
-  margin: 6px 0 2px;
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--muted, #8b93a7);
-  max-width: 34ch;
-}
 .join-steps {
   display: flex;
   flex-direction: column;
@@ -1757,22 +1741,8 @@ pre {
   line-height: 1;
 }
 
-.native-scan {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-  padding: 28px 18px;
-}
-
-.native-scan .primary-action {
-  width: auto;
-  margin-top: 0;
-  padding: 0 28px;
-}
-
 /* ---- Inline QR scanner (embedded in the Join page) ------------------------ */
+/* Compact "Opening camera…" status until video is actually playing — never an empty viewfinder. */
 .scanner-inline {
   position: relative;
   display: flex;
@@ -1780,10 +1750,14 @@ pre {
   align-items: center;
   justify-content: center;
   gap: 14px;
-  aspect-ratio: 1 / 1;
-  max-height: 58vh;
+  min-height: 132px;
   padding: 18px;
   overflow: hidden;
+}
+
+.scanner-inline.is-live {
+  aspect-ratio: 1 / 1;
+  max-height: 58vh;
 }
 
 .scanner-inline .scanner-video {
@@ -1792,7 +1766,17 @@ pre {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+}
+
+.scanner-inline.is-live .scanner-video {
   opacity: 0.6;
+}
+
+.scanner-inline .scanner-wait {
+  width: 26px;
+  height: 26px;
+  border-width: 2px;
 }
 
 .scanner-inline .scanner-reticle {
@@ -1802,29 +1786,15 @@ pre {
   box-shadow: 0 0 0 100vmax rgba(4, 10, 16, 0.5);
 }
 
-/* Caption pinned to the bottom of the viewport so it never overlaps the scan window. */
-.scanner-inline .scanner-status {
+/* Live: caption pinned to the bottom of the viewport so it never overlaps the scan window. */
+.scanner-inline.is-live .scanner-status {
   position: absolute;
   bottom: 14px;
   z-index: 2;
   max-width: calc(100% - 28px);
   background: rgba(0, 0, 0, 0.66);
+  color: #fff;
   backdrop-filter: blur(3px);
-}
-
-/* ---- Post-scan "connecting" state: replaces the frozen camera preview so the
-   pairing handshake never looks like a stuck QR scanner. ---------------------- */
-.scanner-connecting {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  aspect-ratio: 1 / 1;
-  max-height: 58vh;
-  padding: 18px;
-  text-align: center;
-  color: var(--ink);
 }
 
 .connecting-spinner {
@@ -1865,4 +1835,195 @@ pre {
 .scanner-actions .link-btn {
   min-height: 44px;
   padding: 10px 12px;
+}
+
+/* ---- Connect: welcome + two ways to get a code + scan/paste ---------------- */
+.connect-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.connect-hero,
+.connect-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connect-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.connect-hero h2 {
+  margin: 0;
+  font-family: var(--display, inherit);
+  font-size: clamp(27px, 8vw, 34px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  max-width: 14ch;
+}
+.connect-head h2 {
+  margin: 0;
+  font-size: 22px;
+}
+.connect-lede {
+  margin: 0;
+  color: var(--muted, var(--fg-dim));
+  font-size: 14.5px;
+  line-height: 1.5;
+  max-width: 40ch;
+}
+.connect-ways {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.connect-ways-label {
+  margin: 4px 0 -2px;
+  color: var(--fg-faint, var(--muted));
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.connect-way {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 15px;
+  border: 1px solid var(--line, var(--bg-rule));
+  border-radius: 16px;
+  background: var(--panel, var(--bg-elev));
+}
+.connect-way-station {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 13%, transparent), transparent 62%),
+    var(--panel, var(--bg-elev));
+}
+.connect-way-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.connect-way h3 {
+  margin: 0;
+  font-size: 15.5px;
+}
+.connect-way p {
+  margin: 0;
+  color: var(--muted, var(--fg-dim));
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.connect-way code {
+  padding: 1px 6px;
+  border: 1px solid var(--line, var(--bg-rule));
+  border-radius: 6px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+.connect-way .join-steps li { align-items: flex-start; color: var(--ink, var(--fg)); font-size: 13.5px; }
+.connect-way .join-steps .step-num { margin-top: 1px; box-shadow: none; filter: none; }
+.connect-way-tag {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.connect-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.connect-actions > button { margin-top: 0; }
+.connect-scan-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+.connect-scan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connect-alt {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.connect-alt button,
+.connect-got-it,
+.connect-setup button {
+  min-height: 44px;
+}
+.connect-got-it { align-self: center; }
+.connect-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 16px;
+  border: 1px solid var(--line, var(--bg-rule));
+  border-radius: 16px;
+  background: var(--panel, var(--bg-elev));
+  list-style: none;
+}
+.connect-progress li {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--muted, var(--fg-dim));
+  font-size: 14px;
+}
+.connect-progress li.is-active { color: var(--ink, var(--fg)); font-weight: 600; }
+.connect-progress-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+}
+.is-done .connect-progress-dot { background: var(--accent); }
+.is-active .connect-progress-dot { animation: connect-pulse 1.1s ease-in-out infinite; }
+@keyframes connect-pulse {
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-active .connect-progress-dot { animation: none; }
+}
+.connect-help .connect-ways { padding-top: 8px; }
+.connect-setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  color: var(--muted, var(--fg-dim));
+  font-size: 13px;
+}
+.connect-setup .link-btn,
+.connect-setup .session-link-btn {
+  align-self: auto;
+  padding: 4px 2px;
+}
+.connect-setup-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--ink, var(--fg));
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
 }

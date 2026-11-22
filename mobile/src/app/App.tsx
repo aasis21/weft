@@ -7,6 +7,7 @@ import type { StartMode } from '@/ui/screens/StartSessionScreen';
 import type { WorkspaceCommand } from '@aasis21/weft-shared';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { useBackHandler } from '@/ui/gestures/backNavigation';
+import { isFlagDone, markFlagDone, ONBOARDING_KEY } from '@/lib/firstRun';
 import { sessionAccess, sessionRuntime } from '@/session/runtime/instance';
 import {
   lifecycleFailureMessage,
@@ -59,6 +60,9 @@ export default function App(): JSX.Element {
   const [exploreOpen, setExploreOpen] = useState(false);
   const [exploreEntry, setExploreEntry] = useState<'home' | 'direct-discover'>('home');
   const [addManual, setAddManual] = useState(false);
+  const [addFromChat, setAddFromChat] = useState(false);
+  /** null until the local first-run flag has been read. */
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [showLanding, setShowLanding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const onChatVisibilityChange = useCallback((id: string | null): void => {
@@ -80,6 +84,12 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     void sessionRuntime.init().then(() => sessionAccess.init());
+    void isFlagDone(ONBOARDING_KEY).then(setOnboardingDone);
+  }, []);
+
+  const completeOnboarding = useCallback((): void => {
+    setOnboardingDone(true);
+    void markFlagDone(ONBOARDING_KEY);
   }, []);
 
   // Devices / Device details have no dedicated in-page back button — the phone's own Back
@@ -116,6 +126,7 @@ export default function App(): JSX.Element {
     window.history.replaceState(null, '');
     setError(null);
     setAddManual(manual);
+    setAddFromChat(false);
     setStarting(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
@@ -196,12 +207,13 @@ export default function App(): JSX.Element {
 
   const handlePair = useCallback(async (raw: string): Promise<void> => {
     const route = await sessionRuntime.addByQr(raw);
+    completeOnboarding();
     setAdding(false);
     setShowLanding(false);
     if (route.startsWith('listener:')) {
       openDeviceDetails(route.slice('listener:'.length));
     }
-  }, [openDeviceDetails]);
+  }, [completeOnboarding, openDeviceDetails]);
 
   const closeDeviceScreens = useCallback((): void => {
     setTerminalChannelId(undefined);
@@ -272,6 +284,11 @@ export default function App(): JSX.Element {
   const activeId = snapshot.activeId;
   const active = snapshot.sessions.find((s) => s.meta.channelId === activeId) ?? snapshot.sessions[0] ?? null;
   const hasSessions = snapshot.sessions.length > 0;
+  // Existing users (any real session or paired laptop) never see the welcome, even before the flag is written.
+  // The demo's in-page laptop rides a local transport; it never counts as a real pairing.
+  const hasRealPairing = snapshot.devices.some((d) => d.transport.kind !== 'local') ||
+    snapshot.sessions.some((s) => s.meta.kind !== 'demo');
+  const showIntro = onboardingDone === false && !hasRealPairing;
 
   // Desktop multi-tab convenience: reflect the active session name and total unread count
   // in the browser tab title, so a backgrounded Weft tab is distinguishable at a glance.
@@ -285,7 +302,7 @@ export default function App(): JSX.Element {
     };
   }, [active, snapshot.sessions]);
 
-  if (!snapshot.ready) {
+  if (!snapshot.ready || onboardingDone === null) {
     return (
       <main className="boot">
         <div className="boot-mark" aria-hidden="true">W</div>
@@ -300,6 +317,9 @@ export default function App(): JSX.Element {
       <ConnectScreen
         hasSessions={hasSessions}
         initialManual={addManual}
+        fromChat={addFromChat}
+        showIntro={showIntro}
+        onIntroDone={completeOnboarding}
         error={error}
         onError={setError}
         onPair={handlePair}
@@ -552,6 +572,8 @@ export default function App(): JSX.Element {
       <ConnectScreen
         firstRun
         hasSessions={false}
+        showIntro={showIntro}
+        onIntroDone={completeOnboarding}
         error={error}
         onError={setError}
         onPair={handlePair}
@@ -591,6 +613,7 @@ export default function App(): JSX.Element {
       onSelectSession={(id) => sessionRuntime.setActive(id)}
       onAddSession={() => {
         setAddManual(false);
+        setAddFromChat(true);
         setAdding(true);
       }}
       onOpenExplore={openExplore}

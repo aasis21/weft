@@ -320,6 +320,10 @@ function controlCenterClient() {
   async function refreshState() {
     if (stateRequest) return stateRequest;
     $("refresh").disabled = true;
+    // Keep the last live values on screen while a slow status check finishes; only a failed check marks them stale.
+    const slowTimer = setTimeout(() => {
+      if (state && !stale) statusBadge($("freshness"), "Refreshing…", "warning live");
+    }, 3000);
     stateRequest = (async () => {
       try {
         // Windows status checks can be slow on a busy laptop; a slow first answer is not a failure.
@@ -337,6 +341,7 @@ function controlCenterClient() {
         text("connection-message", error.message + " Previous values, if present, are not live.");
         renderState();
       } finally {
+        clearTimeout(slowTimer);
         stateRequest = null;
         $("refresh").disabled = false;
       }

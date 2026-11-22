@@ -12,6 +12,7 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+import { AlertsOptIn } from '@/ui/pairing/AlertsOptIn';
 import { isWorking, type ComposerActivity } from '@/ui/sessions/sessionStatus';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
@@ -921,7 +922,7 @@ export function SessionScreen({
         desktopDocked={isDesktopWide}
         onSwitchSession={onSelectSession}
       />
-
+      {meta.kind === 'demo' ? null : <AlertsOptIn />}
       {debugOpen ? (
         <DebugPanel
           events={active.events}

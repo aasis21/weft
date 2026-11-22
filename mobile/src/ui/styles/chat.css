@@ -206,16 +206,10 @@
   margin-left: auto;
 }
 
-.drawer-btn .hamburger {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 18px;
-}
-.drawer-btn .hamburger span {
-  height: 2px;
-  border-radius: 2px;
-  background: currentColor;
+.drawer-btn .weft-menu-icon {
+  display: block;
+  width: 24px;
+  height: 24px;
 }
 .drawer-btn { position: relative; }
 .drawer-btn .decision-waiting-dot {
@@ -1575,7 +1569,7 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
-  width: min(86vw, 360px);
+  width: min(82vw, 340px);
   padding: 10px 10px max(12px, env(safe-area-inset-bottom));
   padding-top: max(12px, env(safe-area-inset-top));
   border-right: 1px solid var(--bg-rule);
@@ -1625,29 +1619,37 @@
   font-size: 14px;
 }
 .drawer-rail-expand:hover { color: var(--fg); background: var(--bg); }
-.drawer-head { display: flex; align-items: center; gap: 6px; padding: 4px 4px 10px; }
+.drawer-head { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 0 6px 4px; }
 /* The mark carries the accent so the wordmark can stay quiet at faint grey — together they read as
    a lockup rather than two competing labels. */
 .drawer-mark { flex: 0 0 auto; color: var(--accent); }
 .drawer-title { flex: 1; color: var(--fg-faint); font-size: 12px; letter-spacing: 0.14em; }
-/* Floating corner close/collapse control (#199): kept out of the header row's normal flow so
-   the SESSIONS title line stays uncluttered; overlaps the top-right corner of the drawer instead. */
+/* Overlay close sits in the header row, so it inherits the drawer's safe-area top padding and never
+   lands under the Android status bar. */
 .drawer-close {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-faint);
+  font-size: 15px;
+  cursor: pointer;
+}
+/* Desktop docked collapse control (#199): floats in the corner, out of the header flow. */
+.drawer-collapse {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 1;
   width: 30px;
   height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
   border-radius: 8px;
-  background: transparent;
-  color: var(--fg-faint);
   font-size: 14px;
-  cursor: pointer;
 }
 .drawer-close:hover { background: var(--bg-elev); color: var(--fg); }
 .drawer-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -2022,7 +2024,7 @@
 /* Compact footer (5 stacked rows -> 2): two primaries share one row, the nav items
    collapse into a single icon strip, reclaiming vertical space for the session list. */
 .drawer-actions { display: flex; gap: 6px; }
-.drawer-add-split { flex: 1; text-align: center; }
+.drawer-add-split { flex: 1; min-width: 0; padding-inline: 6px; text-align: center; white-space: nowrap; font-size: clamp(12.5px, 3.9vw, 14.5px); }
 .drawer-nav { display: flex; gap: 6px; margin-top: 6px; }
 .drawer-nav-item {
   flex: 1;
@@ -4341,3 +4343,30 @@
   font-size: 12px;
   color: var(--fg-faint);
 }
+
+/* ---- In-context approval-alerts opt-in (shown once after a real pairing) ---- */
+.alerts-optin {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 11px;
+  align-items: start;
+  margin: 10px 12px 0;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
+}
+.session-join-inner > .alerts-optin { margin: 0; }
+.alerts-optin-icon { margin-top: 2px; color: var(--accent); }
+.alerts-optin-copy { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--fg-dim); line-height: 1.4; }
+.alerts-optin-copy strong { color: var(--fg); font-size: 14px; }
+.alerts-optin-actions { grid-column: 2; display: flex; gap: 8px; margin-top: 6px; }
+.alerts-optin-actions button {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.alerts-optin-allow { border: none; background: var(--accent); color: #fff; }
+.alerts-optin-later { border: 1px solid var(--bg-rule); background: transparent; color: var(--fg-dim); }

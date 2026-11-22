@@ -355,6 +355,75 @@ test("concurrent status polling shares one verified discovery and releases it fo
   await manager.state();
   assert.equal(calls, 2);
 });
+
+test("a hung Task Scheduler probe is bounded, shared by overlapping polls, and its late result is reused", async (t) => {
+  const baseDir = await home(t);
+  let taskCalls = 0;
+  let release, released = false;
+  const manager = createManagement({ baseDir, platform: "win32", statusProbeTimeoutMs: 50,
+    discover: async () => ({ status: "none", runtimes: [] }),
+    background: {
+      command: async () => null,
+      task: (_operation, { role }) => {
+        taskCalls++;
+        if (role === "relay" || released) return Promise.resolve({ state: role === "relay" ? "Disabled" : "Running", taskName: `Weft-${role}` });
+        return new Promise((resolve) => { release = () => { released = true; resolve({ state: "Running", taskName: "Weft-station" }); }; });
+      },
+    },
+  });
+  const started = Date.now();
+  const first = await manager.state();
+  assert.ok(Date.now() - started < 2_000, "status must not wait for a hung probe");
+  assert.equal(first.station.state, "unknown");
+  assert.equal(first.station.checking, true);
+  assert.equal(first.relay.state, "stopped");
+  const second = await manager.state();
+  assert.equal(second.station.state, "unknown");
+  assert.equal(taskCalls, 3, "the second poll joins the in-flight station probe instead of starting another");
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  const third = await manager.state();
+  assert.equal(third.station.state, "unresponsive");
+  assert.equal(third.station.checking, undefined);
+});
+
+test("a registry record from an exited worker is reported as stopped without contacting it", async (t) => {
+  const baseDir = await home(t);
+  await writeFile(join(baseDir, "background-station.json"), JSON.stringify({ role: "station", pid: 2147483647 }));
+  const contacted = [];
+  const manager = createManagement({ baseDir, platform: "win32", statusProbeTimeoutMs: 50,
+    discover: async () => ({ status: "none", runtimes: [] }),
+    background: {
+      command: async (role) => { contacted.push(role); return null; },
+      task: (_operation, { role }) => role === "station" ? new Promise(() => {}) : Promise.resolve({ state: "Disabled", taskName: "Weft-relay" }),
+    },
+  });
+  const state = await manager.state();
+  assert.deepEqual(contacted, ["relay"]);
+  assert.equal(state.station.state, "stopped");
+  assert.equal(state.station.staleWorker, true);
+  assert.equal(state.station.checking, true);
+  assert.equal(state.station.connected, false);
+});
+
+test("slow session discovery is bounded and later polls reuse its verified result", async (t) => {
+  const baseDir = await home(t);
+  let calls = 0;
+  let release;
+  const manager = createManagement({ baseDir, platform: "linux", statusProbeTimeoutMs: 50,
+    discover: () => { calls++; return new Promise((resolve) => { release = resolve; }); },
+    runtimeClient: () => ({ command: async () => ({ ok: true, result: { state: "dormant", title: "Verified" } }) }),
+  });
+  const first = await manager.state();
+  assert.deepEqual(first.sessions, []);
+  assert.ok(first.warnings.some((warning) => /still running/.test(warning)));
+  await manager.state();
+  assert.equal(calls, 1);
+  release({ status: "single", runtimes: [{ runtimeInstanceId: "runtime-1", sessionId: "s1", pid: 1 }] });
+  await new Promise((resolve) => setImmediate(resolve));
+  const next = await manager.state();
+  assert.equal(next.sessions[0]?.title, "Verified");
+});
 test("shortcut targets the installed CLI, quotes paths, and guards unrelated links", () => {
   const script = shortcutScript({ installDir: "C:\\Weft's Install", directory: "C:\\Test Desktop" });
   assert.match(script, /Weft''s Install/);

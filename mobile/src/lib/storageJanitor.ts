@@ -27,6 +27,8 @@ const PRECIOUS_KEYS: ReadonlySet<string> = new Set([
   'weft.settings.v1',
   'weft.deviceId.v1',
   'weft.debugMode.v1',
+  'weft.onboarding.v1',
+  'weft.alertsPrompt.v1',
 ]);
 
 const TRANSCRIPT_PREFIX = 'weft.transcript.v1.';

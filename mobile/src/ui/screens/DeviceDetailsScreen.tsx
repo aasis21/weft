@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { WeftMenuIcon } from '@/ui/brand/WeftMark';
 import type { JSX, TouchEvent as ReactTouchEvent } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
@@ -29,6 +30,7 @@ import { DEVICE_CAPABILITY, transportIdentity, type DeviceSystemSnapshot } from 
 import { App as CapacitorApp } from '@capacitor/app';
 import { useNowTick } from '@/ui/hooks/useNowTick';
 import { PullIndicator, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
+import { AlertsOptIn } from '@/ui/pairing/AlertsOptIn';
 import { DeviceClipboardSheet, DeviceKeepAwakeSheet, keepAwakeRemaining } from './DeviceUtilitySheets';
 
 interface DeviceDetailsScreenProps {
@@ -437,11 +439,7 @@ export function DeviceDetailsScreen({
           onClick={() => setDrawerOpen(true)}
           aria-label="Open sessions"
         >
-          <span className="hamburger" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <WeftMenuIcon />
         </button>
         <DeviceAvatar tone={status.tone} />
         <div className="status-id">
@@ -545,6 +543,7 @@ export function DeviceDetailsScreen({
       <div className="page-scroll" ref={scrollRef}>
       <PullIndicator state={pull} />
       <div className="session-join-inner">
+        {device.transport.kind === 'local' ? null : <AlertsOptIn />}
         {device.error ? <p className="error-banner">{device.error}</p> : null}
 
         <section className="device-monitor-summary device-panel" aria-label="Device health">

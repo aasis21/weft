@@ -118,7 +118,6 @@ import type { TimelineState } from '@/lib/timeline';
 import { startDemoSession } from '@/lib/demoSimulator';
 import type { DemoSession } from '@/lib/demoSimulator';
 import {
-  ensureNotificationPermission,
   notifyApprovalRequest,
   notifyElicitationRequest,
   notifySessionEnded,
@@ -819,7 +818,6 @@ export class SessionRuntime {
   async init(): Promise<void> {
     if (this.initStarted) return;
     this.initStarted = true;
-    void ensureNotificationPermission();
     this.startWatchdog();
     this.installResumeTriggers();
 

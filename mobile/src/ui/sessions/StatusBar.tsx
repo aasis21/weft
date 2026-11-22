@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { WeftMenuIcon } from '@/ui/brand/WeftMark';
 import type { JSX, KeyboardEvent } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
@@ -194,11 +195,7 @@ export function StatusBar({
           onClick={onOpenDrawer}
           aria-label={drawerLabel}
         >
-          <span className="hamburger" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <WeftMenuIcon />
           {othersAwaitingDecision > 0 ? <span className="decision-waiting-dot" aria-hidden="true" /> : null}
         </button>
       )}

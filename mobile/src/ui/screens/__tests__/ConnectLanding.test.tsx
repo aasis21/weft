@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectScreen } from '@/ui/screens/ConnectScreen';
@@ -78,109 +78,133 @@ describe('LandingScreen', () => {
 describe('ConnectScreen', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    platformState.desktop = true;
+    vi.restoreAllMocks();
+    platformState.desktop = false;
   });
 
-  it('renders scanner region and pairs scanner results', async () => {
+  it('never opens the camera until the user taps Scan laptop QR', async () => {
     const user = userEvent.setup();
     const onPair = vi.fn().mockResolvedValue(undefined);
-    render(
-      <ConnectScreen
-        hasSessions={false}
-        error={null}
-        onError={vi.fn()}
-        onPair={onPair}
-      />,
-    );
+    render(<ConnectScreen hasSessions={false} error={null} onError={vi.fn()} onPair={onPair} />);
 
-    expect(screen.getByText('Scan to connect')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Connect to your laptop' })).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-scanner')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Scan laptop QR' }));
     await user.click(screen.getByTestId('mock-scanner'));
     expect(onPair).toHaveBeenCalledWith('scanner-payload');
   });
 
-  it('uses the in-app camera on Android when the Google scanner module is missing', async () => {
-    const platform = vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
-    const native = vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
-    try {
-      androidScanner.isSupported.mockResolvedValue({ supported: true });
-      androidScanner.isGoogleBarcodeScannerModuleAvailable.mockResolvedValue({ available: false });
-      const onPair = vi.fn().mockResolvedValue(undefined);
-      render(<ConnectScreen firstRun hasSessions={false} error={null} onError={vi.fn()} onPair={onPair} />);
-
-      await userEvent.click(await screen.findByTestId('mock-scanner'));
-      expect(androidScanner.scan).not.toHaveBeenCalled();
-      expect(onPair).toHaveBeenCalledWith('scanner-payload');
-    } finally {
-      platform.mockRestore();
-      native.mockRestore();
-    }
-  });
-
-  it('accepts manual pairing JSON and submits it', async () => {
-    const user = userEvent.setup();
-    const onPair = vi.fn().mockResolvedValue(undefined);
-    const onCancel = vi.fn();
-    render(
-      <ConnectScreen
-        hasSessions
-        initialManual
-        error="Bad code"
-        onError={vi.fn()}
-        onPair={onPair}
-        onCancel={onCancel}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
-    expect(screen.getByText('Bad code')).toHaveClass('error-banner');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Pairing code' }), {
-      target: { value: '{"v":1,"channelId":"abc"}' },
-    });
-    await user.click(screen.getByRole('button', { name: 'Pair from pasted code' }));
-    expect(onPair).toHaveBeenCalledWith('{"v":1,"channelId":"abc"}');
-    expect(screen.queryByRole('button', { name: 'Demo / Simulator' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('pauses the camera and pairs from a pasted code in the native Android app', async () => {
-    platformState.desktop = false;
+  it('does not launch the Android scanner on mount, and falls back to the in-app camera when tapped', async () => {
     vi.spyOn(Capacitor, 'getPlatform').mockReturnValue('android');
     vi.spyOn(Capacitor, 'isNativePlatform').mockReturnValue(true);
     androidScanner.isSupported.mockResolvedValue({ supported: true });
     androidScanner.isGoogleBarcodeScannerModuleAvailable.mockResolvedValue({ available: false });
     const onPair = vi.fn().mockResolvedValue(undefined);
     render(<ConnectScreen firstRun hasSessions={false} error={null} onError={vi.fn()} onPair={onPair} />);
-    await screen.findByTestId('mock-scanner');
-    await userEvent.click(screen.getByRole('button', { name: 'Paste pairing code' }));
-    expect(screen.queryByTestId('mock-scanner')).not.toBeInTheDocument();
 
+    await Promise.resolve();
+    expect(androidScanner.isSupported).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Scan laptop QR' }));
+    await userEvent.click(await screen.findByTestId('mock-scanner'));
+    expect(androidScanner.scan).not.toHaveBeenCalled();
+    expect(onPair).toHaveBeenCalledWith('scanner-payload');
+  });
+
+  it('pairs a pasted code on touch devices and can switch back to scanning', async () => {
+    const user = userEvent.setup();
+    const onPair = vi.fn().mockResolvedValue(undefined);
+    render(<ConnectScreen hasSessions={false} error={null} onError={vi.fn()} onPair={onPair} />);
+
+    await user.click(screen.getByRole('button', { name: 'Paste code' }));
+    expect(screen.getByRole('button', { name: 'Pair' })).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: 'Pairing code' }), {
       target: { value: ' {"v":2,"channelId":"test"} ' },
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Pair from pasted code' }));
+    await user.click(screen.getByRole('button', { name: 'Pair' }));
     expect(onPair).toHaveBeenCalledWith('{"v":2,"channelId":"test"}');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Use QR scanner' }));
-    expect(screen.getByTestId('mock-scanner')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Paste pairing code' }));
-    expect(screen.getByRole('textbox', { name: 'Pairing code' })).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Scan QR instead' }));
+    expect(screen.getByRole('button', { name: 'Scan laptop QR' })).toBeInTheDocument();
   });
 
-  it('keeps manual/paste entry hidden in touch-only browsers, both on Landing and Join', async () => {
-    platformState.desktop = false;
-    const { unmount } = render(
+  it('shows pairing progress, then Try again re-opens the method that failed', async () => {
+    const user = userEvent.setup();
+    let fail!: (error: Error) => void;
+    const onPair = vi.fn()
+      .mockReturnValueOnce(new Promise<void>((_, reject) => { fail = reject; }))
+      .mockResolvedValueOnce(undefined);
+    const onError = vi.fn();
+    const { rerender } = render(<ConnectScreen hasSessions={false} error={null} onError={onError} onPair={onPair} />);
+
+    await user.click(screen.getByRole('button', { name: 'Scan laptop QR' }));
+    await user.click(screen.getByTestId('mock-scanner'));
+    expect(screen.getByRole('status', { name: 'Pairing progress' })).toHaveTextContent('Connecting to your laptop…');
+    expect(screen.queryByTestId('mock-scanner')).not.toBeInTheDocument();
+
+    await act(async () => fail(new Error('Laptop unreachable')));
+    expect(onError).toHaveBeenLastCalledWith('Laptop unreachable');
+    rerender(<ConnectScreen hasSessions={false} error="Laptop unreachable" onError={onError} onPair={onPair} />);
+    expect(screen.queryByTestId('mock-scanner')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await user.click(screen.getByTestId('mock-scanner'));
+    expect(onPair).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens the paste box directly and keeps Close for the in-app variant', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    render(
+      <ConnectScreen hasSessions initialManual error="Bad code" onError={vi.fn()} onPair={vi.fn()} onCancel={onCancel} />,
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Pairing code' })).toBeInTheDocument();
+    expect(screen.getByText('Bad code')).toHaveClass('error-banner');
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('welcomes first-time users with Station first, and Got it collapses the guide', async () => {
+    const user = userEvent.setup();
+    const onIntroDone = vi.fn();
+    render(
+      <ConnectScreen firstRun showIntro onIntroDone={onIntroDone} hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn()} />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Your Copilot session, off the desk.' })).toBeInTheDocument();
+    const ways = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(ways).toEqual(['Weft Station', 'Just this chat']);
+    expect(screen.getByRole('button', { name: 'Scan laptop QR' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(onIntroDone).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: 'Connect to your laptop' })).toBeInTheDocument();
+    expect(screen.getByText('Need a pairing code?')).toBeInTheDocument();
+  });
+
+  it('leads with /weft when opened from a live chat', () => {
+    render(<ConnectScreen hasSessions fromChat showIntro error={null} onError={vi.fn()} onPair={vi.fn()} />);
+    const ways = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(ways).toEqual(['Just this chat', 'Weft Station']);
+  });
+
+  it('copies the setup link when the share sheet is unavailable', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<ConnectScreen hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Send setup link' }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('https://aasis21.github.io/weft/#install-laptop'));
+    expect(screen.getByText('Setup link copied. Send it to your laptop.')).toBeInTheDocument();
+  });
+
+  it('keeps the desktop-only paste shortcut off the touch landing page', () => {
+    render(
       <LandingScreen onBeginPair={vi.fn()} onStartDemo={vi.fn().mockResolvedValue(undefined)} error={null} onError={vi.fn()} />,
     );
     expect(screen.queryByRole('button', { name: 'Paste a code' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Set up your laptop' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Scan QR to pair' })[0]).toHaveClass('primary-action');
-    unmount();
-
-    render(
-      <ConnectScreen hasSessions={false} error={null} onError={vi.fn()} onPair={vi.fn().mockResolvedValue(undefined)} />,
-    );
-    expect(screen.queryByRole('button', { name: 'Enter pairing code manually' })).not.toBeInTheDocument();
   });
 });
