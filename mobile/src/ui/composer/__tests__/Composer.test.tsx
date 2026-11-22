@@ -59,7 +59,6 @@ function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
     disabled: false,
     busy: false,
     mode: 'interactive' as SessionMode,
-    cwd: 'C:\\Users\\akash\\weft',
     onPrompt: vi.fn(),
     onInterrupt: vi.fn(),
     onModeChange: vi.fn(),
@@ -87,31 +86,65 @@ describe('Composer', () => {
 
     expect(screen.getByRole('textbox', { name: 'Message your Copilot session' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Attach image' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Model:/ })).toHaveClass('model-pill');
+    expect(screen.getByRole('button', { name: /^Session controls:/ })).toHaveClass('model-pill');
     expect(screen.queryByRole('button', { name: 'Interactive' })).not.toBeInTheDocument();
-    expect(container.querySelector('.mode-tag')).not.toBeInTheDocument();
-    expect(screen.getByText('📁 weft')).toHaveClass('cwd-chip');
+    expect(container.querySelector('.cwd-chip')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Vox' })).toBeEnabled();
     expect(container.querySelector('.composer-controls')).toBeInTheDocument();
   });
 
-  it('switches model and effort from the dropdown, keeping a supported effort', async () => {
+  it('opens one sheet for mode, effort and model, rebuilding effort for the picked model', async () => {
     const user = userEvent.setup();
     const onModelChange = vi.fn();
-    renderComposer({ model: liveModels, onModelChange, mode: 'plan' as SessionMode });
+    const onModeChange = vi.fn();
+    renderComposer({ model: liveModels, onModelChange, onModeChange, mode: 'plan' as SessionMode });
 
-    expect(screen.getByText('Plan')).toHaveClass('mode-tag');
-    await user.click(screen.getByRole('button', { name: 'Model: Claude Opus 5.5 · High' }));
-    const menu = screen.getByRole('menu', { name: 'Model and effort' });
-    expect(within(menu).getAllByRole('menuitemradio').map((item) => item.textContent?.replace('✓', '')))
-      .toEqual(['Auto', 'Claude Opus 5.5', 'GPT-6.1 Sol', 'Low', 'Medium', 'High', 'Extra high']);
-    expect(within(menu).getByRole('menuitemradio', { name: /Claude Opus 5\.5/ })).toHaveAttribute('aria-checked', 'true');
-    await user.click(within(menu).getByRole('menuitemradio', { name: /GPT-6\.1 Sol/ }));
+    await user.click(screen.getByRole('button', { name: 'Session controls: Plan · Opus 5.5 · High' }));
+    const sheet = screen.getByRole('dialog', { name: 'Session controls' });
+    const group = (name: string) => within(sheet).getByRole('radiogroup', { name: new RegExp(`^${name}\\b`) });
+    expect(within(group('Mode')).getByRole('radio', { name: 'Plan' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(group('Effort')).getAllByRole('radio').map((r) => r.getAttribute('aria-label')))
+      .toEqual(['Low', 'Medium, model default', 'High', 'Extra high']);
+
+    await user.click(within(group('Mode')).getByRole('radio', { name: 'Autopilot' }));
+    expect(onModeChange).toHaveBeenCalledWith('autopilot');
+
+    await user.click(within(group('Model')).getByRole('radio', { name: /GPT-6\.1 Sol/ }));
     expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'high' });
+    // Sheet stays open and the effort row now shows GPT-6.1 Sol's levels, without Extra high.
+    expect(within(group('Effort')).getAllByRole('radio')).toHaveLength(3);
+    expect(within(sheet).getByText('Kept High.')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^Model:/ }));
-    await user.click(screen.getByRole('menuitemradio', { name: /Extra high/ }));
-    expect(onModelChange).toHaveBeenLastCalledWith({ reasoningEffort: 'xhigh' });
+    await user.click(within(group('Effort')).getByRole('radio', { name: /^Low/ }));
+    expect(onModelChange).toHaveBeenLastCalledWith({ reasoningEffort: 'low' });
+    await user.click(within(sheet).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to the model default effort and hides effort for models without one', async () => {
+    const user = userEvent.setup();
+    const onModelChange = vi.fn();
+    renderComposer({
+      model: { ...liveModels, current: { ...liveModels.current!, reasoningEffort: 'xhigh' } },
+      onModelChange,
+    });
+
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    const sheet = screen.getByRole('dialog', { name: 'Session controls' });
+    await user.click(within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ }));
+    expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'gpt-6.1-sol', reasoningEffort: 'medium' });
+    expect(within(sheet).getByText('Switched to Medium (model default).')).toBeInTheDocument();
+
+    await user.click(within(within(sheet).getByRole('radiogroup', { name: 'Model' })).getByRole('radio', { name: /^Auto/ }));
+    expect(onModelChange).toHaveBeenLastCalledWith({ modelId: 'auto' });
+    expect(within(sheet).getByText('This model has no effort setting.')).toBeInTheDocument();
+  });
+
+  it('tells you changes apply from the next message while Copilot is working', async () => {
+    const user = userEvent.setup();
+    renderComposer({ model: liveModels, onModelChange: vi.fn(), busy: true });
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    expect(screen.getByText('Applies from your next message.')).toBeInTheDocument();
   });
 
   it('shows distinct disabled placeholder copy for ended and reconnecting sessions', () => {

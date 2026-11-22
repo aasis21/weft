@@ -1179,7 +1179,6 @@ export function SessionScreen({
           busy={agentBusy}
           mode={timeline.mode}
           {...(active.model ? { model: active.model } : {})}
-          cwd={meta.cwd}
           onPrompt={sendPrompt}
           onInterrupt={onInterrupt}
           onModeChange={onModeChange}

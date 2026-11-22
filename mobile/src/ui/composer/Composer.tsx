@@ -60,7 +60,6 @@ interface ComposerProps {
   mode: SessionMode;
   /** Current model and effort, and the models the laptop session can switch to. */
   model?: ModelStateMsg;
-  cwd: string | null;
   onPrompt(text: string, attachments?: PromptAttachment[], delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
@@ -128,6 +127,23 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 const MODE_COMMANDS = new Set(['interactive', 'plan', 'autopilot']);
+const SESSION_MODES: SessionMode[] = ['interactive', 'plan', 'autopilot'];
+const MODE_HINT: Record<string, string> = {
+  interactive: 'Asks before each action.',
+  plan: 'Agrees a plan with you before making changes.',
+  autopilot: '⚠ Keeps working without asking you.',
+};
+const PILL_MODE: Record<string, string> = { plan: 'Plan', autopilot: 'Auto' };
+const SHORT_EFFORT: Record<string, string> = { none: 'Off', minimal: 'Min', medium: 'Med', xhigh: 'X-High' };
+
+function shortEffort(value: string): string {
+  return SHORT_EFFORT[value] ?? describeReasoningEffort(value);
+}
+
+/** The vendor word is redundant in the tight pill ("Claude Opus 5.5" -> "Opus 5.5"). */
+function shortModelName(name: string): string {
+  return name.replace(/^Claude\s+/i, '');
+}
 
 // Real CLI commands (executed on the laptop), built from the shared whitelist so the palette and the
 // extension's guard can never drift. Session controls (mode, model, effort) are added per render
@@ -214,12 +230,6 @@ function nowMs(): number {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
-function basename(path: string | null): string | null {
-  if (!path) return null;
-  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
 function commandQuery(value: string): string | null {
   if (!value.startsWith('/')) return null;
   const firstToken = value.split(/\s/, 1)[0] ?? '';
@@ -267,7 +277,6 @@ export function Composer({
   busy,
   mode,
   model,
-  cwd,
   onPrompt,
   onInterrupt,
   onModeChange,
@@ -278,6 +287,11 @@ export function Composer({
 }: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  /** Choice made in the sheet, shown until the laptop reports the session's new model state. */
+  const [picked, setPicked] = useState<{ modelId?: string; effort?: string | null; note?: string } | null>(null);
+  useEffect(() => {
+    setPicked(null);
+  }, [model?.current?.modelId, model?.current?.reasoningEffort]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -428,11 +442,17 @@ export function Composer({
   const chooseModel = (modelId: string): void => {
     const target = model?.models.find((item) => item.id === modelId);
     const currentEffort = model?.current?.reasoningEffort ?? null;
-    const effort = target && currentEffort && target.efforts.includes(currentEffort) ? currentEffort : target?.defaultEffort ?? null;
+    const kept = !!(target && currentEffort && target.efforts.includes(currentEffort));
+    const effort = kept ? currentEffort : target?.defaultEffort ?? null;
+    const note = !target?.efforts.length || !effort ? undefined
+      : kept ? `Kept ${describeReasoningEffort(effort)}.`
+      : `Switched to ${describeReasoningEffort(effort)} (model default).`;
+    setPicked({ modelId, effort, ...(note ? { note } : {}) });
     onModelChange?.(effort ? { modelId, reasoningEffort: effort } : { modelId });
   };
 
   const chooseEffort = (reasoningEffort: string): void => {
+    setPicked((prev) => ({ ...(prev?.modelId ? { modelId: prev.modelId } : {}), effort: reasoningEffort }));
     onModelChange?.({ reasoningEffort });
   };
 
@@ -747,7 +767,7 @@ export function Composer({
   };
 
   const focusMenuItem = (direction: 1 | -1): void => {
-    const items = Array.from(modelWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+    const items = Array.from(modelWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     if (!items.length) return;
     const active = document.activeElement;
     const index = active instanceof HTMLButtonElement ? items.indexOf(active) : -1;
@@ -768,12 +788,16 @@ export function Composer({
     }
   };
 
-  const folder = basename(cwd);
   const emptyPrompt = text.trim() === '' && attachments.length === 0;
-  const currentEffort = model?.current?.reasoningEffort ? describeReasoningEffort(model.current.reasoningEffort) : null;
-  const modelPillLabel = model?.current
-    ? [model.current.name, currentEffort].filter(Boolean).join(' · ')
-    : 'Model';
+  const selectedModelId = picked?.modelId ?? model?.current?.modelId ?? null;
+  const selectedModel = model?.models.find((item) => item.id === selectedModelId);
+  const selectedEffort = picked && 'effort' in picked ? picked.effort ?? null : model?.current?.reasoningEffort ?? null;
+  const effortNote = picked?.note ?? null;
+  const pillLabel = [
+    PILL_MODE[mode],
+    model?.current ? shortModelName(model.current.name) : 'Model',
+    model?.current?.reasoningEffort ? shortEffort(model.current.reasoningEffort) : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <form
@@ -965,72 +989,98 @@ export function Composer({
               <button
                 ref={modelButtonRef}
                 type="button"
-                className="mode-pill model-pill"
-                aria-haspopup="menu"
+                className={`mode-pill model-pill mode-${mode}`}
+                aria-haspopup="dialog"
                 aria-expanded={menuOpen}
-                aria-label={`Model: ${modelPillLabel}`}
+                aria-label={`Session controls: ${pillLabel}`}
                 disabled={disabled || !onModelChange}
                 onClick={() => setMenuOpen((v) => !v)}
                 onKeyDown={onModelButtonKeyDown}
               >
                 <span className="pill-dot" aria-hidden="true" />
-                <span className="model-pill-name">{modelPillLabel}</span>
+                <span className="model-pill-name">{pillLabel}</span>
                 <span className="pill-caret" aria-hidden="true">▾</span>
               </button>
               {menuOpen ? (
-                <div className="mode-menu model-menu" role="menu" aria-label="Model and effort" onKeyDown={onModelMenuKeyDown}>
-                  <div className="model-menu-heading" role="presentation">Model</div>
-                  {liveModelOptions.map((option) => {
-                    const selected = option.value === model?.current?.modelId;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={selected}
-                        className={`mode-menu-item${selected ? ' active' : ''}`}
-                        onClick={() => {
-                          setMenuOpen(false);
-                          if (!selected) chooseModel(option.value);
-                        }}
-                      >
-                        <span className="mode-check">{selected ? '✓' : ''}</span>
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                  {liveEffortOptions.length ? (
-                    <>
-                      <div className="model-menu-heading" role="presentation">Effort</div>
-                      {liveEffortOptions.map((option) => {
-                        const selected = option.value === model?.current?.reasoningEffort;
+                <>
+                  <div className="controls-scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />
+                  <div className="controls-sheet" role="dialog" aria-label="Session controls" onKeyDown={onModelMenuKeyDown}>
+                    <span className="controls-handle" aria-hidden="true" />
+                    <div className="controls-head">
+                      <strong>Session controls</strong>
+                      <button type="button" className="controls-done" onClick={() => setMenuOpen(false)}>Done</button>
+                    </div>
+                    {busy ? <p className="controls-note">Applies from your next message.</p> : null}
+
+                    <div className="controls-label" id="controls-mode">Mode</div>
+                    <div className={`controls-seg mode-seg seg-${mode}`} role="radiogroup" aria-labelledby="controls-mode">
+                      {SESSION_MODES.map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="radio"
+                          aria-checked={mode === value}
+                          className={mode === value ? 'active' : undefined}
+                          onClick={() => { if (value !== mode) void onModeChange(value); }}
+                        >
+                          {MODE_LABEL[value]}
+                        </button>
+                      ))}
+                    </div>
+                    <p className={`controls-hint${mode === 'autopilot' ? ' is-warning' : ''}`}>{MODE_HINT[mode] ?? ''}</p>
+
+                    <div className="controls-label" id="controls-effort">
+                      Effort{selectedModel ? <span className="controls-label-model"> · {selectedModel.name}</span> : null}
+                    </div>
+                    {selectedModel?.efforts.length ? (
+                      <>
+                        <div className="controls-seg" role="radiogroup" aria-labelledby="controls-effort">
+                          {selectedModel.efforts.map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              role="radio"
+                              aria-checked={selectedEffort === value}
+                              aria-label={value === selectedModel.defaultEffort
+                                ? `${describeReasoningEffort(value)}, model default` : describeReasoningEffort(value)}
+                              className={selectedEffort === value ? 'active' : undefined}
+                              onClick={() => { if (value !== selectedEffort) chooseEffort(value); }}
+                            >
+                              {shortEffort(value)}
+                              {value === selectedModel.defaultEffort ? <span className="seg-default" aria-hidden="true">•</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                        {effortNote ? <p className="controls-hint">{effortNote}</p> : null}
+                      </>
+                    ) : (
+                      <p className="controls-hint">{selectedModel ? 'This model has no effort setting.' : 'Waiting for the laptop’s models…'}</p>
+                    )}
+
+                    <div className="controls-label" id="controls-model">Model</div>
+                    <div className="controls-models" role="radiogroup" aria-labelledby="controls-model">
+                      {liveModelOptions.map((option) => {
+                        const selected = option.value === selectedModelId;
                         return (
                           <button
-                            key={`effort-${option.value}`}
+                            key={option.value}
                             type="button"
-                            role="menuitemradio"
+                            role="radio"
                             aria-checked={selected}
-                            className={`mode-menu-item${selected ? ' active' : ''}`}
-                            onClick={() => {
-                              setMenuOpen(false);
-                              if (!selected) chooseEffort(option.value);
-                            }}
+                            className={`controls-model${selected ? ' active' : ''}`}
+                            onClick={() => { if (!selected) chooseModel(option.value); }}
                           >
-                            <span className="mode-check">{selected ? '✓' : ''}</span>
-                            {option.label}
+                            <span className="mode-check" aria-hidden="true">{selected ? '✓' : ''}</span>
+                            <span className="controls-model-name">{option.label}</span>
+                            {option.value === 'auto' ? <span className="controls-model-hint">Recommended</span> : null}
                           </button>
                         );
                       })}
-                    </>
-                  ) : null}
-                </div>
+                    </div>
+                  </div>
+                </>
               ) : null}
-            </div>
-            {mode !== 'interactive' ? (
-              <span className="mode-tag" title="Type /interactive to switch back">{MODE_LABEL[mode] ?? mode}</span>
-            ) : null}
-            {folder ? <span className="cwd-chip" title={cwd ?? undefined}>📁 {folder}</span> : null}
-              </>
+            </div>              </>
             )}
           </div>
 

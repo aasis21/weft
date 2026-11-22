@@ -5,6 +5,14 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.69
+
+- One tap on the composer pill opens Session controls: Mode (Interactive, Plan, Autopilot),
+  Effort, and Model in one bottom sheet. Effort levels rebuild for the chosen model, keeping
+  yours when supported or switching to the model default; models without effort hide it.
+- The pill reads like `Opus 5.5 · Med` and shows Plan or Auto in colour when not interactive.
+- The session folder moved from the composer to the header status line.
+
 ## 0.2.68
 
 - New first-run Connect screen on Android and mobile web: explains Weft Station

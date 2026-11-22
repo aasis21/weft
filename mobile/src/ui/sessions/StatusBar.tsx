@@ -66,6 +66,13 @@ interface StatusBarProps {
   onSwitchSession?(channelId: string): void;
 }
 
+/** Last path segment, for showing a session's folder compactly. */
+function folderName(path: string | null): string | null {
+  if (!path) return null;
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
 export function StatusBar({
   title,
   cwd,
@@ -235,6 +242,7 @@ export function StatusBar({
           <span className={`status-line ${lineClass}`}>
             <span className="status-dot" aria-hidden="true" />
             {statusLabel}
+            {folderName(cwd) ? <span className="status-folder" title={cwd ?? undefined}> · {folderName(cwd)}</span> : null}
           </span>
           {gestures.peek ? (
             <span className={`status-peek ${gestures.dragX < 0 ? 'next' : 'prev'}`} aria-hidden="true">
