@@ -88,9 +88,31 @@ async function loadNative(): Promise<LocalNotificationsApi | null> {
   return nativePlugin;
 }
 
+export type AlertPermission = 'granted' | 'denied' | 'prompt' | 'unsupported';
+
+/** Read the current permission without prompting. */
+export async function notificationPermission(): Promise<AlertPermission> {
+  if (permissionState !== 'unknown') return permissionState;
+  try {
+    if (isNative()) {
+      const plugin = await loadNative();
+      if (!plugin) return 'unsupported';
+      const { display } = await plugin.checkPermissions();
+      if (display === 'granted' || display === 'denied') permissionState = display;
+      return display === 'granted' || display === 'denied' ? display : 'prompt';
+    }
+    if (typeof Notification === 'undefined') return 'unsupported';
+    if (Notification.permission === 'default') return 'prompt';
+    permissionState = Notification.permission;
+    return permissionState;
+  } catch {
+    return 'unsupported';
+  }
+}
+
 /**
- * Ask for notification permission. Idempotent and safe to call eagerly on connect.
- * Returns true if alerts can be shown.
+ * Ask for notification permission. Only call this from an explicit user action (the alerts
+ * opt-in); alerts themselves never prompt. Returns true if alerts can be shown.
  */
 export async function ensureNotificationPermission(): Promise<boolean> {
   if (permissionState === 'granted') return true;
@@ -137,7 +159,7 @@ function buzz(): void {
 export async function notifyApprovalRequest(req: ApprovalRequestMsg): Promise<void> {
   buzz();
   if (!appIsHidden()) return;
-  if (!(await ensureNotificationPermission())) return;
+  if ((await notificationPermission()) !== 'granted') return;
   const { title, body } = approvalNotification(req);
   try {
     if (isNative()) {
@@ -177,7 +199,7 @@ export async function notifyApprovalRequest(req: ApprovalRequestMsg): Promise<vo
 export async function notifyElicitationRequest(req: ElicitationRequestMsg): Promise<void> {
   buzz();
   if (!appIsHidden()) return;
-  if (!(await ensureNotificationPermission())) return;
+  if ((await notificationPermission()) !== 'granted') return;
   const title = 'Copilot has a question';
   const body = 'Open Weft to answer.';
   try {
@@ -211,8 +233,9 @@ export async function notifyElicitationRequest(req: ElicitationRequestMsg): Prom
 }
 
 /** Lower-priority heads-up that the bound session ended while you were away. */
-export async function notifySessionEnded(reason?: string): Promise<void> {  if (!appIsHidden()) return;
-  if (!(await ensureNotificationPermission())) return;
+export async function notifySessionEnded(reason?: string): Promise<void> {
+  if (!appIsHidden()) return;
+  if ((await notificationPermission()) !== 'granted') return;
   const title = 'Weft session ended';
   const body = reason?.trim() || 'Your Copilot session disconnected.';
   try {

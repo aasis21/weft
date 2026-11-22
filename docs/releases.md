@@ -9,9 +9,24 @@ Install it with the browser's **Install app** or **Add to Home Screen** action. 
 updates are delivered by the browser; close and reopen the installed PWA after a new
 release if the old build remains active.
 
-Weft does not currently publish an Android APK. Native Android builds are for local
-development until a signed Android release pipeline is available. Do not install debug,
-unversioned, or third-party APKs presented as official Weft releases.
+Download the signed Android APK directly from
+<https://github.com/aasis21/weft/releases/latest/download/weft-android.apk> (always the newest
+build; the landing page links it on Android), or from the **Assets** section of the latest
+[GitHub release](https://github.com/aasis21/weft/releases/latest) (`v<VERSION>`; builds up to
+0.2.69 were published as `android-test-v*` prereleases). Open the APK and choose **Update**.
+Every build shares one stable signing key and has an increasing version code, so updates keep
+local app data and pairing. The first switch from an `android-debug-v*` APK requires
+uninstalling the old app once because its signing key is different. That clears only the native
+app data.
+
+Maintainers ship with the manual
+[Release](https://github.com/aasis21/weft/actions/workflows/release.yml) workflow on `main`
+(`where=production`). It builds the APK without signing credentials, then verifies and signs it in a
+separate `android-release` environment limited to `main`. The environment needs
+`WEFT_ANDROID_KEYSTORE_B64` (the established PKCS#12 file encoded as base64) and
+`WEFT_ANDROID_KEYSTORE_PASSWORD`. The key alias is `weft-android-test`. Keep a secure backup;
+never commit either secret value or replace the key between releases. Bump `VERSION` before
+starting a new release; a full release refuses to reuse an existing `v<VERSION>` tag.
 
 ## Laptop extension and CLI
 

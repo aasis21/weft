@@ -74,7 +74,7 @@ describe('LandingScreen install command tabs accessibility', () => {
     expect(items[1]).toHaveTextContent('Open Weft on your laptop');
     expect(items[1]).toHaveTextContent('Run weft to open Control Center');
     expect(items[1]).toHaveTextContent('For terminal-only operation, use weft start');
-    expect(items[2]).toHaveTextContent('Scan with your phone');
+    expect(items[2]).toHaveTextContent('Scan with the app or browser');
     expect(within(steps).queryByText(/\/weft/)).not.toBeInTheDocument();
     const setup = screen.getByRole('region', { name: 'How it works' });
     expect(setup).toHaveTextContent(/signed-in Copilot CLI for Device Station launches/);

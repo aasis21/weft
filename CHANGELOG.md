@@ -5,6 +5,81 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.73
+
+- Session controls add **Approvals**: Ask each time, AI review or Allow all, limited to what the
+  session's policy allows. Allow all asks for confirmation; changes made at the laptop (for example
+  `/allow-all`) show up on the phone.
+- The panel has a fixed height: header, Mode and Approvals stay put while the model list scrolls.
+  Swipe up on the pill to open it and drag the header down to close it.
+- Mode descriptions are gone; Autopilot keeps its amber highlight.
+
+## 0.2.72
+
+- Choose effort inside the model: tap a model in Session controls to pick its effort level, with a
+  short description of each. Models without effort levels switch on tap.
+- Get the Android app straight from the landing page on Android, with a new *Get Weft on your
+  phone* section and a QR on laptops. The download link always serves the newest signed APK.
+- About Weft is now a compact screen with this phone's and your laptops' versions, an update
+  notice inside the Android app, and links; the full product page is one tap away.
+
+## 0.2.71
+
+- Session controls show each model's effort levels again. Current Copilot CLIs report them under
+  the model's capabilities; Weft now reads both the new and the old field.
+- Picking a model scrolls to its effort levels and highlights them, so effort is the next step.
+
+## 0.2.70
+
+- Each release is now one GitHub release (`v0.2.70`) with the signed Android APK, laptop
+  payloads and these notes. The APK keeps the same signing key, so it updates in place.
+
+## 0.2.69
+
+- One tap on the composer pill opens Session controls: Mode (Interactive, Plan, Autopilot),
+  Effort, and Model in one bottom sheet. Effort levels rebuild for the chosen model, keeping
+  yours when supported or switching to the model default; models without effort hide it.
+- The pill reads like `Opus 5.5 · Med` and shows Plan or Auto in colour when not interactive.
+- The session folder moved from the composer to the header status line.
+
+## 0.2.68
+
+- New first-run Connect screen on Android and mobile web: explains Weft Station
+  (recommended) and `/weft` side by side, with **Scan laptop QR** and **Paste code**.
+  The camera opens only when you ask, shows **Opening camera…** instead of an empty
+  viewfinder, and pairing shows progress with **Try again** on failure. From a live chat,
+  `/weft` instructions lead. **Send setup link** shares the laptop install page.
+- Weft no longer asks for notification permission at launch; a one-time
+  **Get approval alerts** card appears after the first real pairing.
+- Woven Weft menu icon, a narrower mobile drawer, and its close button now sit in the
+  WEFT header below the status bar. Drawer actions read **Start session** and **Scan QR**.
+- Control Center no longer gets stuck on **Status unavailable** on a busy Windows laptop:
+  slow Task Scheduler and session checks are time-limited and shared between refreshes,
+  a Station record left by an exited worker shows as stopped, and the page shows
+  **Refreshing…** while a slow check finishes.
+
+## 0.2.67
+
+- Keep the Android composer above the on-screen keyboard while typing multiline
+  messages. Enter still inserts a newline.
+
+## 0.2.66
+
+- Recover session access on a full browser store by evicting only cached transcripts
+  and diagnostic logs, without clearing pairing information or pending operations.
+- Give Android's Supabase socket time to reconnect after an initial transport error.
+  The connectivity test now checks the configured Supabase relay as well as a public echo server.
+
+## 0.2.65
+
+- On busy Windows machines, Weft batches its runtime discovery checks and gives
+  PowerShell more time to verify process identity, so Android and web sessions
+  do not get stuck waiting when Copilot has already started.
+- Build an Android debug APK from source with `npm run build:android -w @aasis21/weft-mobile`.
+  The Android app supports pasting a pairing code and falls back to its in-app
+  camera when the Google Barcode Scanner module is unavailable. The hosted PWA
+  remains the supported phone distribution.
+
 ## 0.2.51
 
 - The composer's mode chip is now a **model dropdown**. It shows the current model and reasoning

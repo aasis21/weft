@@ -752,8 +752,12 @@ export type ModeChange = Envelope<"control", "mode", ModeChangeMsg>;
 /** A model the session can switch to, with the reasoning efforts it supports (may be empty). */
 export interface SessionModelOption { id: string; name: string; efforts: string[]; defaultEffort: string | null }
 export interface CurrentSessionModel { modelId: string; name: string; reasoningEffort: string | null }
-export interface ModelStateMsg { current: CurrentSessionModel | null; models: SessionModelOption[] }
-export interface ModelSetMsg { modelId?: string; reasoningEffort?: string }
+/** Tool approval mode: manual = ask each time, assisted = AI review, allow-all = approve everything. */
+export type ApprovalMode = "manual" | "assisted" | "allow-all";
+/** The session's approval mode and the modes its policy currently allows. Absent on older laptops. */
+export interface SessionApprovals { mode: ApprovalMode; available: ApprovalMode[] }
+export interface ModelStateMsg { current: CurrentSessionModel | null; models: SessionModelOption[]; approvals?: SessionApprovals }
+export interface ModelSetMsg { modelId?: string; reasoningEffort?: string; approvalMode?: ApprovalMode }
 export type ModelState = Envelope<"control", "model_state", ModelStateMsg>;
 export type ModelSet = Envelope<"control", "model_set", ModelSetMsg>;
 export type InterruptMessage = Envelope<"control", "interrupt", InterruptMsg>;
@@ -963,8 +967,8 @@ export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function channelDown(reason?: string): ChannelDown;
 export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
 export function modeChange(mode: SessionMode): ModeChange;
-export function modelState(state?: { current?: CurrentSessionModel | null; models?: SessionModelOption[] }): ModelState;
-export function modelSet(change: { modelId?: string | null; reasoningEffort?: string | null }): ModelSet;
+export function modelState(state?: { current?: CurrentSessionModel | null; models?: SessionModelOption[]; approvals?: SessionApprovals | null }): ModelState;
+export function modelSet(change: { modelId?: string | null; reasoningEffort?: string | null; approvalMode?: ApprovalMode | null }): ModelSet;
 export function interrupt(): InterruptMessage;
 export function historyRequest(
   before?: number | null,

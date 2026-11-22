@@ -1,4 +1,5 @@
-import { Preferences } from '@capacitor/preferences';
+import { Capacitor } from '@capacitor/core';
+import { preferencesStorage } from '@/services/persistence/preferencesStorage';
 import { compactTranscript } from './transcripts';
 
 // Storage auto-clean ("janitor").
@@ -21,13 +22,18 @@ const PRECIOUS_KEYS: ReadonlySet<string> = new Set([
   'weft.sessions.v1',
   'weft.pairing.v1',
   'weft.devices.v1',
+  'weft.pendingOperations.v1',
+  'weft.sessionAccess.v1',
   'weft.settings.v1',
   'weft.deviceId.v1',
   'weft.debugMode.v1',
+  'weft.onboarding.v1',
+  'weft.alertsPrompt.v1',
 ]);
 
 const TRANSCRIPT_PREFIX = 'weft.transcript.v1.';
 const EVENTLOG_PREFIX = 'weft.eventlog.v1.';
+const PREFERENCES_PREFIX = 'CapacitorStorage.';
 
 /** Soft target for total localStorage usage, measured in UTF-16 code units (what the browser caps).
  *  Chrome's ~5 MB per-origin limit is ~2.6M code units; we trim to well under half that so a burst of
@@ -80,22 +86,25 @@ function parseSavedAt(value: string | null): number {
 
 /** Snapshot every prunable (transcript / event-log) entry currently in localStorage. */
 function listPrunable(store: Storage): PrunableEntry[] {
-  const out: PrunableEntry[] = [];
+  const entries = new Map<string, PrunableEntry>();
   for (let i = 0; i < store.length; i++) {
-    const key = store.key(i);
-    if (!key || PRECIOUS_KEYS.has(key)) continue;
+    const storedKey = store.key(i);
+    if (!storedKey) continue;
+    const key = storedKey.startsWith(PREFERENCES_PREFIX) ? storedKey.slice(PREFERENCES_PREFIX.length) : storedKey;
+    if (PRECIOUS_KEYS.has(key)) continue;
     const meta = classify(key);
     if (!meta) continue;
-    const value = store.getItem(key);
-    out.push({
+    const value = store.getItem(storedKey);
+    const prior = entries.get(key);
+    entries.set(key, {
       key,
       kind: meta.kind,
       channelId: meta.channelId,
-      savedAt: parseSavedAt(value),
-      chars: key.length + (value?.length ?? 0),
+      savedAt: Math.max(prior?.savedAt ?? 0, parseSavedAt(value)),
+      chars: (prior?.chars ?? 0) + storedKey.length + (value?.length ?? 0),
     });
   }
-  return out;
+  return [...entries.values()];
 }
 
 /** Total localStorage weight (UTF-16 code units across all keys + values). */
@@ -154,43 +163,47 @@ function orderedEvictionCandidates(
 function removeSync(store: Storage, key: string): void {
   try {
     store.removeItem(key);
+    store.removeItem(PREFERENCES_PREFIX + key);
   } catch {
     /* ignore */
   }
-  // Keep the native Preferences copy in sync too (best-effort, async).
-  void Preferences.remove({ key }).catch(() => {});
 }
 
-/**
- * EMERGENCY (synchronous): free just enough room so a critical `localStorage.setItem(key, value)`
- * succeeds, then return whether it did. Evicts prunable entries one at a time (worst-first) and
- * retries the write after each removal, so it removes the minimum necessary. Used by the session-list
- * writer to guarantee the list + pairing are never dropped on a QuotaExceededError.
- */
-export function freeSpaceUntilFitsSync(
-  targetKey: string,
-  targetValue: string,
-  opts: { validChannelIds: Iterable<string>; protectChannelIds?: Iterable<string> },
-): boolean {
-  const store = ls();
-  if (!store) return false;
-  const valid = new Set(opts.validChannelIds);
-  const protectedCh = new Set(opts.protectChannelIds ?? []);
-  const candidates = orderedEvictionCandidates(listPrunable(store), valid, protectedCh);
-  const trySet = (): boolean => {
-    try {
-      store.setItem(targetKey, targetValue);
-      return true;
-    } catch {
-      return false;
+function isQuotaError(err: unknown): boolean {
+  const e = err as { name?: string; code?: number } | null;
+  return !!e && typeof e === 'object' && (
+    e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014
+  );
+}
+
+/** Retry the actual durable write, not just its raw localStorage copy. */
+export async function saveCriticalPreference(
+  key: string,
+  value: string,
+  opts?: { validChannelIds: Iterable<string>; protectChannelIds?: Iterable<string> },
+): Promise<void> {
+  try {
+    await preferencesStorage.setItem(key, value);
+  } catch (error) {
+    if (!isQuotaError(error) || Capacitor.isNativePlatform()) throw error;
+    const store = ls();
+    if (!store) throw error;
+    const entries = listPrunable(store);
+    const valid = new Set(opts?.validChannelIds ?? entries.map((entry) => entry.channelId));
+    const candidates = orderedEvictionCandidates(entries, valid, new Set(opts?.protectChannelIds));
+    let lastError = error;
+    for (const entry of candidates) {
+      removeSync(store, entry.key);
+      try {
+        await preferencesStorage.setItem(key, value);
+        return;
+      } catch (retryError) {
+        if (!isQuotaError(retryError)) throw retryError;
+        lastError = retryError;
+      }
     }
-  };
-  if (trySet()) return true;
-  for (const entry of candidates) {
-    removeSync(store, entry.key);
-    if (trySet()) return true;
+    throw lastError;
   }
-  return trySet();
 }
 
 /**
@@ -249,10 +262,12 @@ export async function sweepStorage(opts: {
     for (const entry of ordered) {
       if (total <= budget) break;
       if (entry.kind !== 'transcript' || !isCold(entry)) continue;
-      const freed = await compactTranscript(entry.channelId, {
+      const before = estimateUsageChars();
+      await compactTranscript(entry.channelId, {
         maxItems: COMPACT_MAX_ITEMS,
         maxHistory: 0,
       });
+      const freed = before - estimateUsageChars();
       if (freed > 0) {
         total -= freed;
         freedChars += freed;

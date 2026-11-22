@@ -39,9 +39,11 @@ test.describe('Journey: session management', () => {
 
   test('the drawer Scan action navigates to the connect screen', async ({ page }) => {
     await page.locator('.drawer-btn').click();
-    await page.locator('.drawer-actions .drawer-add-split', { hasText: 'Scan' }).click();
+    await page.locator('.drawer-actions .drawer-add-split', { hasText: 'Scan QR' }).click();
     await expect(page.locator('.join-session')).toBeVisible();
-    await expect(page.locator('.status-title')).toHaveText('Scan to connect');
+    await expect(page.locator('.status-title')).toHaveText('Connect');
+    // Opened from a live chat: the single-session (/weft) way leads.
+    await expect(page.locator('.connect-way h3').first()).toHaveText('Just this chat');
   });
 
   test('deleting a drawer session is a two-step inline confirmation', async ({ page }) => {

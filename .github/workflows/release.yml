@@ -1,85 +1,368 @@
-name: Publish Release
+name: Release
 
+# Manual only: Actions -> Release -> Run workflow, or
+#   gh workflow run Release -f where=production -f what=all
+#
+# where=production  full tests once, then the live web app (useweft), the signed Android APK and
+#                   one GitHub release `v<VERSION>` with the APK, laptop payloads and CHANGELOG notes.
+# where=test        full tests once, then useweft-test.netlify.app only. Any branch.
+# what              all | web | android (android needs where=production).
+# platform_check    auto runs the Platform check only when terminal, install or macOS code
+#                   changed since the last `v*` release; always/skip override it.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      where:
+        description: "production = live site + APK + GitHub release; test = useweft-test only"
+        type: choice
+        options: [production, test]
+        default: production
+      what:
+        description: "What to ship"
+        type: choice
+        options: [all, web, android]
+        default: all
+      platform_check:
+        description: "auto = only when terminal/install/macOS code changed"
+        type: choice
+        options: [auto, always, skip]
+        default: auto
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.where }}
+  cancel-in-progress: false
 
 jobs:
-  native-runtime:
-    uses: ./.github/workflows/native-runtime.yml
-
-  release:
-    needs: native-runtime
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      platform: ${{ steps.platform.outputs.run }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Check release inputs
+        id: version
+        shell: bash
+        env:
+          WHERE: ${{ inputs.where }}
+          WHAT: ${{ inputs.what }}
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$WHERE" == production && "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Production releases run from main."; exit 1
+          fi
+          if [[ "$WHERE" == test && "$WHAT" == android ]]; then
+            echo "::error::Android builds are published only by production releases."; exit 1
+          fi
+          if [[ "$WHERE" == production && "$WHAT" == all ]] && git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
+            echo "::error::v$version is already released. Bump VERSION first."; exit 1
+          fi
+
+      - name: Install
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Verify workspace versions
+        run: npm run check-version
+
+      - name: Test all workspaces
+        run: npm test
+
+      - name: Type-check mobile tests
+        run: npm run test:types -w @aasis21/weft-mobile
+
+      - name: Extension relay loop (harness smoke)
+        run: npm run harness -w @aasis21/weft-extension -- --auto
+
+      - name: Build production workspaces
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run Playwright journeys
+        run: npm run test:e2e -w @aasis21/weft-mobile
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Decide whether the Platform check is needed
+        id: platform
+        shell: bash
+        env:
+          MODE: ${{ inputs.platform_check }}
+          WHERE: ${{ inputs.where }}
+        run: |
+          run=false
+          if [[ "$MODE" == always ]]; then
+            run=true
+          elif [[ "$MODE" == auto && "$WHERE" == production ]]; then
+            previous="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+            if [[ -z "$previous" ]]; then
+              run=true
+            elif git diff --name-only "$previous" HEAD | grep -Eq \
+              '^(extension/src/(terminal|spawn|device|backgroundLifecycle|processIdentity|relayServerProcess)|extension/bin/|scripts/(native-|install-|stage-release|generate-release|verify-release|release-layout|package-native)|mobile/public/install\.|package-lock\.json|extension/package\.json|\.github/workflows/platform-check\.yml)'; then
+              run=true
+            fi
+            echo "Compared with ${previous:-no previous release}."
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "Platform check: $run"
+
+  platform:
+    needs: test
+    if: needs.test.outputs.platform == 'true'
+    uses: ./.github/workflows/platform-check.yml
+
+  web:
+    needs: [test, platform]
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.platform.result != 'failure' && inputs.what != 'android' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.where }}
+    concurrency: netlify-${{ inputs.where }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
         with:
-          # The launch gate exercises the optional node:sqlite integration.
           node-version: "24"
           cache: npm
 
-      - name: Install dependencies
+      - name: Install
         run: npm ci --workspaces --include-workspace-root
 
-      - name: Verify tag and manifests
-        shell: bash
+      - name: Install Netlify CLI
+        run: npm install --global netlify-cli@26.2.0
+
+      - name: Publish site
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: bash ./ship.sh --site "$NETLIFY_SITE_ID"
+
+  apk:
+    needs: [test, platform]
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.platform.result != 'failure' && inputs.where == 'production' && inputs.what != 'web' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha256: ${{ steps.apk.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Build unsigned Android release APK
         run: |
-          version="$(tr -d '\r\n' < VERSION)"
-          test "${GITHUB_REF_NAME}" = "v${version}" || {
-            echo "Tag ${GITHUB_REF_NAME} does not match VERSION v${version}" >&2
+          npm ci --workspaces --include-workspace-root
+          npm run build:android:release -w @aasis21/weft-mobile
+
+      - name: Check APK metadata
+        id: apk
+        shell: bash
+        env:
+          VERSION: ${{ needs.test.outputs.version }}
+        run: |
+          build_dir="mobile/android/app/build/outputs/apk/release"
+          jq -e --arg version "$VERSION" \
+            '.applicationId == "dev.aasis21.weft" and
+             .elements[0].versionName == $version and
+             .elements[0].versionCode == ($version | split(".") | map(tonumber) | reduce .[] as $part (0; . * 1000 + $part))' \
+            "$build_dir/output-metadata.json" > /dev/null
+          apk="$RUNNER_TEMP/weft-$VERSION-unsigned.apk"
+          cp "$build_dir/app-release-unsigned.apk" "$apk"
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
+          sha256sum "$apk" | cut -d ' ' -f 1 | sed 's/^/sha256=/' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: weft-unsigned
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    needs: [test, apk]
+    if: ${{ !cancelled() && needs.apk.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: android-release
+    concurrency: android-release
+    steps:
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools build-tools;35.0.0'
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: weft-unsigned
+          path: ${{ runner.temp }}/unsigned
+
+      - name: Sign and verify APK
+        id: signed
+        shell: bash
+        env:
+          WEFT_ANDROID_KEYSTORE_B64: ${{ secrets.WEFT_ANDROID_KEYSTORE_B64 }}
+          WEFT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.WEFT_ANDROID_KEYSTORE_PASSWORD }}
+          VERSION: ${{ needs.test.outputs.version }}
+          UNSIGNED_SHA256: ${{ needs.apk.outputs.sha256 }}
+        run: |
+          if [[ -z "$WEFT_ANDROID_KEYSTORE_B64" || -z "$WEFT_ANDROID_KEYSTORE_PASSWORD" ]]; then
+            echo "::error::Set the two signing secrets in the android-release environment."
             exit 1
-          }
-          npm run check-version
+          fi
+          [[ "$VERSION" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]
+          [[ "$UNSIGNED_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          unsigned="$RUNNER_TEMP/unsigned/weft-$VERSION-unsigned.apk"
+          printf '%s  %s\n' "$UNSIGNED_SHA256" "$unsigned" | sha256sum --check
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          "$tools/zipalign" -c -P 16 4 "$unsigned"
 
-      - name: Install browser test runtimes
-        run: npx playwright install --with-deps chromium webkit
+          umask 077
+          keystore="$(mktemp "$RUNNER_TEMP/weft-keystore.XXXXXX")"
+          trap 'rm -f -- "$keystore"' EXIT
+          printf '%s' "$WEFT_ANDROID_KEYSTORE_B64" | base64 --decode > "$keystore"
+          unset WEFT_ANDROID_KEYSTORE_B64
+          mkdir -p "$RUNNER_TEMP/signed"
+          apk="$RUNNER_TEMP/signed/weft-$VERSION-android.apk"
+          "$tools/apksigner" sign --ks "$keystore" --ks-type PKCS12 \
+            --ks-key-alias weft-android-test --ks-pass env:WEFT_ANDROID_KEYSTORE_PASSWORD \
+            --out "$apk" "$unsigned"
+          unset WEFT_ANDROID_KEYSTORE_PASSWORD
+          cert="$("$tools/apksigner" verify --print-certs "$apk" | awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ {print $NF}')"
+          if [[ "$cert" != '63345b162ae008cc4587326e2bb2eee043813913929553886346dbb94ab5ec68' ]]; then
+            echo "::error::The APK was not signed with Weft's established Android key."
+            exit 1
+          fi
+          echo "path=$apk" >> "$GITHUB_OUTPUT"
 
-      - name: Run launch gate
-        run: |
-          npm test
-          npm run test:e2e -w @aasis21/weft-mobile
-          npm audit --omit=dev --audit-level=high
+      - uses: actions/upload-artifact@v7
+        with:
+          name: weft-android
+          path: ${{ steps.signed.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Build release payloads
+  package:
+    needs: [test, platform]
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.platform.result != 'failure' && inputs.where == 'production' && inputs.what == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Build laptop release payloads
         shell: bash
+        env:
+          VERSION: ${{ needs.test.outputs.version }}
         run: |
+          npm ci --workspaces --include-workspace-root
           npm run build -w @aasis21/weft-extension
           mkdir -p release
           node scripts/stage-release-payload.mjs extension/dist release skill/weft-how-to-use/SKILL.md
           cp mobile/public/install.ps1 release/
           cp mobile/public/install.sh release/
           node scripts/generate-release-manifest.mjs release
-          version="$(tr -d '\r\n' < VERSION)"
-          tar -C release -czf "weft-${version}.tar.gz" .
-          (cd release && zip -q -r "../weft-${version}.zip" .)
+          mkdir -p out
+          tar -C release -czf "out/weft-$VERSION.tar.gz" .
+          (cd release && zip -q -r "../out/weft-$VERSION.zip" .)
+          cp release/release-manifest.json out/
 
-      - name: Attest release archives
+      - uses: actions/upload-artifact@v7
+        with:
+          name: weft-payload
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [test, web, sign, package]
+    if: ${{ !cancelled() && inputs.where == 'production' && needs.test.result == 'success' && needs.web.result != 'failure' && needs.sign.result != 'failure' && needs.package.result != 'failure' && (needs.sign.result == 'success' || needs.package.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Add the stable Android download name
+        shell: bash
+        env:
+          VERSION: ${{ needs.test.outputs.version }}
+        # releases/latest/download/weft-android.apk always serves the newest APK (linked from the site).
+        run: |
+          if [[ -f "assets/weft-$VERSION-android.apk" ]]; then
+            cp "assets/weft-$VERSION-android.apk" assets/weft-android.apk
+          fi
+
+      - name: Attest release assets
         uses: actions/attest-build-provenance@v3
         with:
-          subject-path: |
-            weft-*.tar.gz
-            weft-*.zip
-            release/release-manifest.json
+          subject-path: assets/*
 
-      - name: Publish immutable GitHub release
+      - name: Publish GitHub release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
+          VERSION: ${{ needs.test.outputs.version }}
         run: |
-          version="$(tr -d '\r\n' < VERSION)"
-          gh release create "${GITHUB_REF_NAME}" \
-            "weft-${version}.tar.gz" \
-            "weft-${version}.zip" \
-            release/release-manifest.json \
-            --generate-notes \
-            --verify-tag \
-            --title "Weft ${version}"
+          tag="v$VERSION"
+          notes="$RUNNER_TEMP/notes.md"
+          awk -v v="$VERSION" '$0 == "## " v {on=1; next} /^## / && on {exit} on' CHANGELOG.md > "$notes"
+          {
+            echo
+            echo '**Android:** open the `.apk` below and tap **Install** or **Update**. Updates keep app data and pairing.'
+            echo '**Laptop:** run `weft update`.'
+          } >> "$notes"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" assets/* --clobber
+          else
+            gh release create "$tag" assets/* --target "$GITHUB_SHA" --latest \
+              --title "Weft $VERSION" --notes-file "$notes"
+          fi
+          apk="$(ls assets/*.apk 2>/dev/null | head -1 || true)"
+          {
+            echo "### Weft $VERSION released"
+            echo "- Release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag"
+            if [[ -n "$apk" ]]; then
+              echo "- [Download the Android APK]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag/$(basename "$apk"))"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

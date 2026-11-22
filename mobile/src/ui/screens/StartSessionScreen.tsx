@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX, KeyboardEvent } from 'react';
+import { WeftMenuIcon } from '@/ui/brand/WeftMark';
 import type { LifecycleStatusMsg, SessionListSort, SpawnMode, StoredSession } from '@aasis21/weft-shared';
 import type { DeviceSessionListCache, ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
@@ -409,11 +410,7 @@ export function StartSessionScreen({
           onClick={() => setDrawerOpen(true)}
           aria-label="Open sessions"
         >
-          <span className="hamburger" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <WeftMenuIcon />
         </button>
         <div className="status-id">
           <span className="status-title">Weft</span>

@@ -118,7 +118,6 @@ import type { TimelineState } from '@/lib/timeline';
 import { startDemoSession } from '@/lib/demoSimulator';
 import type { DemoSession } from '@/lib/demoSimulator';
 import {
-  ensureNotificationPermission,
   notifyApprovalRequest,
   notifyElicitationRequest,
   notifySessionEnded,
@@ -834,7 +833,6 @@ export class SessionRuntime {
   async init(): Promise<void> {
     if (this.initStarted) return;
     this.initStarted = true;
-    void ensureNotificationPermission();
     this.startWatchdog();
     this.installResumeTriggers();
 
@@ -3315,7 +3313,7 @@ export class SessionRuntime {
   }
 
   /** Switch the model and/or reasoning effort on the laptop session (CONTROL.MODEL_SET). */
-  async sendModelChange(channelId: string, change: { modelId?: string; reasoningEffort?: string }): Promise<void> {
+  async sendModelChange(channelId: string, change: { modelId?: string; reasoningEffort?: string; approvalMode?: 'manual' | 'assisted' | 'allow-all' }): Promise<void> {
     if (!this.session(channelId)) return;
     try {
       await this.send(channelId, modelSet(change));

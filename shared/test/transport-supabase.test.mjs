@@ -219,6 +219,37 @@ test("onStatus does not fire disconnected for a pre-subscribe failure", async ()
   assert.deepEqual(seen, []);
 });
 
+test("an initial socket error can recover on the same subscription during the opt-in grace window", async () => {
+  const client = createFakeSupabaseClient();
+  const transport = createSupabaseTransport({ client, channelId: "retry", initialReconnectGraceMs: 500 });
+  const channel = client.channels[0];
+  channel.subscribe = (cb) => {
+    channel.statusCb = cb;
+    cb("CHANNEL_ERROR", new Error("channel error: transport failure", { cause: { type: "error" } }));
+  };
+  const connected = transport.connect();
+  await nextTick();
+  channel.statusCb("SUBSCRIBED");
+  await connected;
+  await transport.publish("prompt", envelope);
+  assert.equal(client.channels.length, 1);
+  assert.equal(channel.sends.length, 1);
+  await transport.close();
+});
+
+test("the reconnect grace window remains bounded and does not defer server rejections", async () => {
+  const client = createFakeSupabaseClient();
+  const first = createSupabaseTransport({ client, channelId: "bounded-retry", initialReconnectGraceMs: 10 });
+  client.channels[0].subscribe = (cb) => {
+    cb("CHANNEL_ERROR", new Error("socket failure", { cause: { type: "error" } }));
+  };
+  await assert.rejects(first.connect(), /socket failure/);
+  const second = createSupabaseTransport({ client, channelId: "rejected", initialReconnectGraceMs: 500 });
+  client.channels[1].subscribe = (cb) => { cb("CHANNEL_ERROR", new Error("denied by server")); };
+  await assert.rejects(second.connect(), /denied by server/);
+  await Promise.all([first.close(), second.close()]);
+});
+
 test("onStatus unsubscribe stops further status delivery", async () => {
   const client = createFakeSupabaseClient();
   const transport = createSupabaseTransport({ client, channelId: "pair-unsub" });

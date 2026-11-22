@@ -25,10 +25,10 @@ function fail(message) {
 }
 
 /**
- * @param {{ client: unknown, channelId: string }} opts
+ * @param {{ client: unknown, channelId: string, initialReconnectGraceMs?: number }} opts
  *   client — a SupabaseClient (from @supabase/supabase-js), created by the caller.
  */
-export function createSupabaseTransport({ client, channelId } = {}) {
+export function createSupabaseTransport({ client, channelId, initialReconnectGraceMs = 0 } = {}) {
   if (!client || typeof client.channel !== "function") {
     throw fail("client with channel() is required");
   }
@@ -42,6 +42,7 @@ export function createSupabaseTransport({ client, channelId } = {}) {
   let closed = false;
   let subscribed = false;
   let connectPromise;
+  let cancelConnect;
 
   // Handlers observing live connection-state changes (see onStatus). Supabase Realtime keeps
   // invoking the subscribe() status callback for the channel's lifetime — SUBSCRIBED on
@@ -92,12 +93,21 @@ export function createSupabaseTransport({ client, channelId } = {}) {
     if (connectPromise) return connectPromise;
 
     const promise = new Promise((resolve, reject) => {
+      let retryTimer;
+      const settle = (error) => {
+        if (!cancelConnect) return;
+        clearTimeout(retryTimer);
+        cancelConnect = undefined;
+        if (error) reject(error);
+        else resolve();
+      };
+      cancelConnect = () => settle(fail("connect: transport is closed"));
       channel.subscribe((status, err) => {
         if (closed) return;
         if (status === STATUS_SUBSCRIBED) {
           subscribed = true;
           emitStatus("connected");
-          resolve();
+          settle();
           return;
         }
         if (
@@ -111,7 +121,15 @@ export function createSupabaseTransport({ client, channelId } = {}) {
           const detail = err
             ? `: ${err instanceof Error ? err.message : String(err)}`
             : "";
-          reject(fail(`subscribe failed with status ${status}${detail} (channel ${name})`));
+          const error = fail(`subscribe failed with status ${status}${detail}`);
+          // Phoenix reconnects its socket after a transport error. Leave the initial join
+          // pending briefly so Android can recover without rescanning; do not retry RLS errors.
+          if (!subscribed && initialReconnectGraceMs > 0 &&
+              status === STATUS_CHANNEL_ERROR && err?.cause?.type === "error") {
+            retryTimer ??= setTimeout(() => settle(error), initialReconnectGraceMs);
+            return;
+          }
+          settle(error);
         }
       });
     });
@@ -194,6 +212,7 @@ export function createSupabaseTransport({ client, channelId } = {}) {
     async close() {
       if (closed) return;
       closed = true;
+      cancelConnect?.();
       eventHandlers.clear();
       statusHandlers.clear();
       await removeChannel();

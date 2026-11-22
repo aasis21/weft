@@ -102,7 +102,7 @@ for (const layout of layouts) {
     test('pairing and demo remain reachable', async ({ page }) => {
       await page.goto('/');
       await page.locator('.landing-hero').getByRole('button', { name: 'Scan QR to pair' }).click();
-      await expect(page.getByRole('heading', { name: 'Scan to connect' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Your Copilot session, off the desk.' })).toBeVisible();
       await page.getByRole('button', { name: '← Back', exact: true }).click();
       await page.locator('.landing-hero').getByRole('button', { name: 'Try the demo' }).click();
       await expect(page.locator('.weft-session')).toBeVisible();

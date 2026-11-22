@@ -33,7 +33,10 @@ test.describe('Journey: connect & navigate', () => {
 
     // Navigated Landing → Join.
     await expect(page.locator('.join-shell')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Scan to connect' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your Copilot session, off the desk.' })).toBeVisible();
+    // No camera until the user asks for it.
+    await expect(page.getByRole('group', { name: 'Scan pairing QR' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Scan laptop QR' }).click();
     await expect(page.getByRole('group', { name: 'Scan pairing QR' })).toBeVisible();
     await expect(page.getByLabel('Manual pairing JSON')).toHaveCount(0);
   });

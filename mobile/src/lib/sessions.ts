@@ -1,7 +1,7 @@
 import type { StoredPairing } from './storage';
 import { loadStoredPairing } from './storage';
 import { preferencesStorage } from '@/services/persistence/preferencesStorage';
-import { freeSpaceUntilFitsSync } from './storageJanitor';
+import { saveCriticalPreference } from './storageJanitor';
 import { clearTranscript } from './transcripts';
 import { clearEventLog } from './eventLog';
 
@@ -111,45 +111,11 @@ async function read(): Promise<StoredSession[]> {
   return (await readStore()).sessions;
 }
 
-/** True for a localStorage/Preferences QuotaExceededError across browser engines. DOMException is not
- *  reliably an Error subclass in every engine, so match structurally by name/code rather than type. */
-function isQuotaError(err: unknown): boolean {
-  const e = err as { name?: string; code?: number } | null;
-  if (!e || typeof e !== 'object') return false;
-  return (
-    e.name === 'QuotaExceededError' ||
-    e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || // Firefox
-    e.code === 22 ||
-    e.code === 1014
-  );
-}
-
 async function writeStore(store: SessionsStore): Promise<void> {
-  const value = JSON.stringify(store);
-  // Mirror to localStorage FIRST and never let a Preferences backend failure skip it. Previously this
-  // did `await Preferences.set(...)` with no guard, so if the Preferences plugin threw (web/private
-  // mode, quota, missing web impl) the mirror below was never reached and the joined channel IDs were
-  // silently lost across a refresh (#186). Both stores are attempted; the read path already prefers
-  // whichever has data.
-  try {
-    await preferencesStorage.setItem(SESSIONS_KEY, value);
-    return;
-  } catch (err) {
-    // A QuotaExceededError here used to silently drop the session list, making freshly-created chats
-    // vanish on refresh (they only lived in the in-memory store). The session list + pairing are the
-    // connection — they must never be lost. Free space by evicting the heavy, regenerable transcript
-    // and debug-log stores (worst-first: orphans → oldest cold; the active session's transcript is
-    // protected), then retry. Transcripts re-hydrate from the laptop on reconnect, so this is safe.
-    if (isQuotaError(err)) {
-      freeSpaceUntilFitsSync(SESSIONS_KEY, value, {
-        validChannelIds: store.sessions.map((s) => s.pairing.channelId),
-        protectChannelIds: store.lastActiveId ? [store.lastActiveId] : [],
-      });
-      await preferencesStorage.setItem(SESSIONS_KEY, value);
-      return;
-    }
-    throw err;
-  }
+  await saveCriticalPreference(SESSIONS_KEY, JSON.stringify(store), {
+    validChannelIds: store.sessions.map((s) => s.pairing.channelId),
+    protectChannelIds: store.lastActiveId ? [store.lastActiveId] : [],
+  });
 }
 
 async function write(list: StoredSession[]): Promise<void> {

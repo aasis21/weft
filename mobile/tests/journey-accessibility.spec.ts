@@ -109,7 +109,8 @@ test.describe('Journey: accessibility', () => {
     await expect(panel).toHaveAttribute('aria-labelledby', await nextTab.getAttribute('id') ?? '');
 
     await page.locator('.landing-hero').getByRole('button', { name: 'Scan QR to pair' }).click();
-    await expect(page.getByRole('heading', { name: 'Scan to connect', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your Copilot session, off the desk.', level: 2 })).toBeVisible();
+    await page.getByRole('button', { name: 'Scan laptop QR' }).click();
     await expect(page.getByRole('group', { name: 'Scan pairing QR' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Back' })).toBeVisible();
   });

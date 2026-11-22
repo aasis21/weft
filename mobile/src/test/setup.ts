@@ -49,6 +49,7 @@ vi.mock('@capacitor/local-notifications', () => ({
 //     without exercising the OS/Notification path. Tests import the module to read the spies. -------
 vi.mock('../lib/notifications', () => ({
   ensureNotificationPermission: vi.fn().mockResolvedValue(true),
+  notificationPermission: vi.fn().mockResolvedValue('granted'),
   notifyApprovalRequest: vi.fn().mockResolvedValue(undefined),
   notifyElicitationRequest: vi.fn().mockResolvedValue(undefined),
   notifySessionEnded: vi.fn().mockResolvedValue(undefined),

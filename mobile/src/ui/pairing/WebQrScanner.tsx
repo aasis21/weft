@@ -74,7 +74,8 @@ export function WebQrScanner({
   const onResultRef = useRef(onResult);
   const resultDeliveredRef = useRef(false);
   const retryPlayRef = useRef<(() => void) | null>(null);
-  const [status, setStatus] = useState('Requesting camera…');
+  const [status, setStatus] = useState('Opening camera…');
+  const [live, setLive] = useState(false);
   const [fatal, setFatal] = useState(false);
   const [needsPlayGesture, setNeedsPlayGesture] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -90,7 +91,8 @@ export function WebQrScanner({
   const retryCamera = useCallback((): void => {
     resultDeliveredRef.current = false;
     setFatal(false);
-    setStatus('Requesting camera…');
+    setLive(false);
+    setStatus('Opening camera…');
     setNeedsPlayGesture(false);
     setAttempt((n) => n + 1);
   }, []);
@@ -111,12 +113,13 @@ export function WebQrScanner({
       stopStream();
       setStatus(message);
       setFatal(true);
+      setLive(false);
       setNeedsPlayGesture(false);
     };
 
     void (async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        fail('This browser has no camera access — use the paste box instead.');
+        fail('This browser has no camera access. Paste the code instead.');
         return;
       }
       try {
@@ -125,7 +128,7 @@ export function WebQrScanner({
           audio: false,
         });
       } catch {
-        if (!stopped) fail('Camera blocked. Allow camera access, or use the paste box instead.');
+        if (!stopped) fail('Camera blocked. Allow camera access, or paste the code instead.');
         return;
       }
       const video = videoRef.current;
@@ -143,10 +146,11 @@ export function WebQrScanner({
         try {
           detect = await makeDetector();
         } catch {
-          fail('Could not start the QR decoder — use the paste box instead.');
+          fail('Could not start the QR decoder. Paste the code instead.');
           return;
         }
-        setStatus('Point at the laptop QR code');
+        setLive(true);
+        setStatus('Point at the QR on your laptop');
         const tick = async (): Promise<void> => {
           if (stopped) return;
           try {
@@ -179,7 +183,7 @@ export function WebQrScanner({
             setNeedsPlayGesture(true);
             return;
           }
-          fail('Could not start the camera preview — use the paste box instead.');
+          fail('Could not start the camera. Paste the code instead.');
           return;
         }
         setNeedsPlayGesture(false);
@@ -202,17 +206,20 @@ export function WebQrScanner({
 
   return (
     <div
-      className={variant === 'inline' ? 'scanner-inline' : 'scanner-overlay'}
+      className={`${variant === 'inline' ? 'scanner-inline' : 'scanner-overlay'}${live ? ' is-live' : ''}`}
       role={variant === 'overlay' ? 'dialog' : 'group'}
       aria-modal={variant === 'overlay' ? true : undefined}
       aria-label="Scan pairing QR"
     >
       <video ref={videoRef} className="scanner-video" muted playsInline />
       <canvas ref={canvasRef} hidden />
-      <div className="scanner-reticle" aria-hidden="true">
-        <span className="scanner-line" />
-      </div>
-      <p className={`scanner-status${fatal ? ' is-error' : ''}`}>{status}</p>
+      {live ? (
+        <div className="scanner-reticle" aria-hidden="true">
+          <span className="scanner-line" />
+        </div>
+      ) : null}
+      {!live && !fatal && !needsPlayGesture ? <div className="connecting-spinner scanner-wait" aria-hidden="true" /> : null}
+      <p className={`scanner-status${fatal ? ' is-error' : ''}`} role="status" aria-live="polite">{status}</p>
       {needsPlayGesture ? (
         <button className="secondary-action scanner-enable" type="button" onClick={retryPlay}>
           Tap to enable camera
@@ -223,16 +230,14 @@ export function WebQrScanner({
           <button
             className="secondary-action"
             type="button"
-            aria-label="Retry camera"
             onClick={retryCamera}
           >
-            Retry camera
+            Try camera again
           </button>
           {onPasteCode ? (
             <button
               className="link-btn"
               type="button"
-              aria-label="Paste code instead"
               onClick={onPasteCode}
             >
               Paste code instead

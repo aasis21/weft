@@ -62,6 +62,7 @@ describe('StatusBar', () => {
     const statusLine = screen.getByText('Connecting…').closest('.status-line');
     expect(statusLine).toHaveClass('connecting');
     expect(statusLine?.querySelector('.status-dot')).toBeInTheDocument();
+    expect(statusLine).toHaveTextContent('Connecting… · weft');
     expect(container.querySelector('.session-count')).not.toBeInTheDocument();
   });
 

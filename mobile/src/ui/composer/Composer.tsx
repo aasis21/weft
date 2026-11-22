@@ -1,8 +1,8 @@
 import '@/ui/styles/composer.css';
 
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent } from 'react';
-import type { ModelStateMsg, PhoneCommand, PhoneCommandOption, PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
+import type { ChangeEvent, ClipboardEvent, DragEvent, JSX, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { ApprovalMode, ModelStateMsg, PhoneCommand, PhoneCommandOption, PromptAttachment, PromptDelivery, SessionMode } from '@aasis21/weft-shared';
 import {
   FALLBACK_MODEL_OPTIONS,
   PHONE_COMMANDS,
@@ -60,12 +60,11 @@ interface ComposerProps {
   mode: SessionMode;
   /** Current model and effort, and the models the laptop session can switch to. */
   model?: ModelStateMsg;
-  cwd: string | null;
   onPrompt(text: string, attachments?: PromptAttachment[], delivery?: PromptDelivery): Promise<void> | void;
   onInterrupt(): void;
   onModeChange(mode: SessionMode): Promise<void> | void;
   /** Switch the model and/or reasoning effort (dropdown, /model, /effort). */
-  onModelChange?(change: { modelId?: string; reasoningEffort?: string }): void;
+  onModelChange?(change: { modelId?: string; reasoningEffort?: string; approvalMode?: 'manual' | 'assisted' | 'allow-all' }): void;
   /** Run a whitelisted Copilot CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
   onCommand(name: string, input?: string): void;
   onOpenVoiceMode(): void;
@@ -128,6 +127,42 @@ const MODE_LABEL: Record<string, string> = {
 };
 
 const MODE_COMMANDS = new Set(['interactive', 'plan', 'autopilot']);
+const SESSION_MODES: SessionMode[] = ['interactive', 'plan', 'autopilot'];
+const APPROVAL_MODES: ApprovalMode[] = ['manual', 'assisted', 'allow-all'];
+const APPROVAL_LABEL: Record<ApprovalMode, string> = {
+  manual: 'Ask each time',
+  assisted: 'AI review',
+  'allow-all': 'Allow all',
+};
+/** Upward travel on the pill that opens the sheet. */
+const PILL_SWIPE_PX = 40;
+/** Downward travel on the sheet's grip before it follows the finger. */
+const SHEET_DRAG_SLOP_PX = 4;
+/** Release past this distance, or faster than the flick speed, closes the sheet. */
+const SHEET_CLOSE_PX = 80;
+const SHEET_FLICK_PX_PER_MS = 0.5;
+/** A click arriving this soon after a gesture belongs to the gesture, not a tap. */
+const GESTURE_CLICK_GUARD_MS = 350;
+const PILL_MODE: Record<string, string> = { plan: 'Plan', autopilot: 'Auto' };
+const SHORT_EFFORT: Record<string, string> = { none: 'Off', minimal: 'Min', medium: 'Med', xhigh: 'X-High' };
+const EFFORT_HINT: Record<string, string> = {
+  none: 'No extra reasoning',
+  minimal: 'Quickest',
+  low: 'Fastest replies',
+  medium: 'Balanced',
+  high: 'More thorough',
+  xhigh: 'Deeper reasoning',
+  max: 'Slowest, most thorough',
+};
+
+function shortEffort(value: string): string {
+  return SHORT_EFFORT[value] ?? describeReasoningEffort(value);
+}
+
+/** The vendor word is redundant in the tight pill ("Claude Opus 5.5" -> "Opus 5.5"). */
+function shortModelName(name: string): string {
+  return name.replace(/^Claude\s+/i, '');
+}
 
 // Real CLI commands (executed on the laptop), built from the shared whitelist so the palette and the
 // extension's guard can never drift. Session controls (mode, model, effort) are added per render
@@ -214,12 +249,6 @@ function nowMs(): number {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
-function basename(path: string | null): string | null {
-  if (!path) return null;
-  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
 function commandQuery(value: string): string | null {
   if (!value.startsWith('/')) return null;
   const firstToken = value.split(/\s/, 1)[0] ?? '';
@@ -267,7 +296,6 @@ export function Composer({
   busy,
   mode,
   model,
-  cwd,
   onPrompt,
   onInterrupt,
   onModeChange,
@@ -278,6 +306,19 @@ export function Composer({
 }: ComposerProps): JSX.Element {
   const [text, setText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  /** Model whose effort page is showing in the sheet; null shows the main page. */
+  const [effortPageId, setEffortPageId] = useState<string | null>(null);
+  /** "Allow all" approvals waits for an explicit confirmation inside the sheet. */
+  const [confirmAllowAll, setConfirmAllowAll] = useState(false);
+  const confirmAllowAllRef = useRef(false);
+  confirmAllowAllRef.current = confirmAllowAll;
+  /** Live downward offset while the sheet follows a drag; null when not dragging. */
+  const [sheetDragY, setSheetDragY] = useState<number | null>(null);
+  const [sheetSnapping, setSheetSnapping] = useState(false);
+  const sheetDragRef = useRef<{ id: number; startY: number; lastY: number; lastT: number; velocity: number; moved: boolean } | null>(null);
+  const pillSwipeRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  const suppressPillClickUntilRef = useRef(0);
+  const suppressSheetClickUntilRef = useRef(0);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -288,6 +329,9 @@ export function Composer({
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const modelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  /** Model row to refocus when returning from its effort page. */
+  const returnFocusModelRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingPickRef = useRef<'library' | 'camera' | null>(null);
   const speechCommittedRef = useRef('');
@@ -337,12 +381,24 @@ export function Composer({
   }, [sessionId]);
 
   useEffect(() => {
-    if (!menuOpen) return undefined;
+    if (!menuOpen) {
+      setEffortPageId(null);
+      setConfirmAllowAll(false);
+      setSheetDragY(null);
+      setSheetSnapping(false);
+      sheetDragRef.current = null;
+      returnFocusModelRef.current = null;
+      return undefined;
+    }
     const onDocMouseDown = (event: MouseEvent): void => {
       if (modelWrapRef.current && !modelWrapRef.current.contains(event.target as Node)) setMenuOpen(false);
     };
     const onDocKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key === 'Escape') {
+        if (confirmAllowAllRef.current) {
+          setConfirmAllowAll(false);
+          return;
+        }
         setMenuOpen(false);
         modelButtonRef.current?.focus();
       }
@@ -424,16 +480,34 @@ export function Composer({
     saveAttachments(sessionId, []);
   };
 
-  /** Switch model, keeping the current effort when the new model supports it, else its default. */
+  /** /model: switch model, keeping the current effort when the new model supports it, else its default. */
   const chooseModel = (modelId: string): void => {
     const target = model?.models.find((item) => item.id === modelId);
     const currentEffort = model?.current?.reasoningEffort ?? null;
-    const effort = target && currentEffort && target.efforts.includes(currentEffort) ? currentEffort : target?.defaultEffort ?? null;
+    const effort = target && currentEffort && target.efforts.includes(currentEffort)
+      ? currentEffort
+      : target?.defaultEffort ?? null;
     onModelChange?.(effort ? { modelId, reasoningEffort: effort } : { modelId });
   };
 
-  const chooseEffort = (reasoningEffort: string): void => {
-    onModelChange?.({ reasoningEffort });
+  /** Sheet: a model with effort levels opens its effort page; one without switches right away. */
+  const pickSheetModel = (modelId: string, hasLevels: boolean): void => {
+    if (hasLevels) {
+      returnFocusModelRef.current = modelId;
+      setEffortPageId(modelId);
+      return;
+    }
+    if (modelId !== model?.current?.modelId) onModelChange?.({ modelId });
+    setMenuOpen(false);
+  };
+
+  const pickSheetEffort = (modelId: string, reasoningEffort: string): void => {
+    if (modelId === model?.current?.modelId) {
+      if (reasoningEffort !== model.current.reasoningEffort) onModelChange?.({ reasoningEffort });
+    } else {
+      onModelChange?.({ modelId, reasoningEffort });
+    }
+    setMenuOpen(false);
   };
 
   /** Mode, model and effort are applied by Weft itself, never sent as CLI commands. */
@@ -443,7 +517,7 @@ export function Composer({
     } else if (name === 'model' && input) {
       if (input !== model?.current?.modelId) chooseModel(input);
     } else if (name === 'effort' && input) {
-      chooseEffort(input);
+      onModelChange?.({ reasoningEffort: input });
     }
   };
 
@@ -747,7 +821,7 @@ export function Composer({
   };
 
   const focusMenuItem = (direction: 1 | -1): void => {
-    const items = Array.from(modelWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? []);
+    const items = Array.from(modelWrapRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     if (!items.length) return;
     const active = document.activeElement;
     const index = active instanceof HTMLButtonElement ? items.indexOf(active) : -1;
@@ -768,12 +842,155 @@ export function Composer({
     }
   };
 
-  const folder = basename(cwd);
+  const pickApprovalMode = (approvalMode: ApprovalMode): void => {
+    if (approvalMode === model?.approvals?.mode) {
+      setConfirmAllowAll(false);
+      return;
+    }
+    if (approvalMode === 'allow-all') {
+      setConfirmAllowAll(true);
+      return;
+    }
+    setConfirmAllowAll(false);
+    onModelChange?.({ approvalMode });
+  };
+
+  const confirmApprovalAllowAll = (): void => {
+    setConfirmAllowAll(false);
+    onModelChange?.({ approvalMode: 'allow-all' });
+  };
+
+  /** A swipe up on the pill opens the sheet; a plain tap still toggles it via onClick. */
+  const onPillPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    pillSwipeRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  };
+
+  const trackPillSwipe = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const start = pillSwipeRef.current;
+    if (!start || start.id !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (dy > -PILL_SWIPE_PX || Math.abs(dy) <= Math.abs(dx) * 1.5) return;
+    pillSwipeRef.current = null;
+    suppressPillClickUntilRef.current = performance.now() + GESTURE_CLICK_GUARD_MS;
+    setMenuOpen(true);
+  };
+
+  const endPillSwipe = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    trackPillSwipe(event);
+    pillSwipeRef.current = null;
+  };
+
+  const onPillClick = (): void => {
+    if (performance.now() < suppressPillClickUntilRef.current) {
+      suppressPillClickUntilRef.current = 0;
+      return;
+    }
+    setMenuOpen((v) => !v);
+  };
+
+  /** The sheet's grip (handle + header) drags it down; it follows the finger and closes past a threshold or on a flick. */
+  const onGripPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    sheetDragRef.current = {
+      id: event.pointerId,
+      startY: event.clientY,
+      lastY: event.clientY,
+      lastT: performance.now(),
+      velocity: 0,
+      moved: false,
+    };
+  };
+
+  /** Updates the drag's velocity sample and returns its downward offset, or null for a foreign pointer. */
+  const trackSheetDrag = (event: ReactPointerEvent<HTMLDivElement>): number | null => {
+    const drag = sheetDragRef.current;
+    if (!drag || drag.id !== event.pointerId) return null;
+    const now = performance.now();
+    if (now > drag.lastT) {
+      drag.velocity = (event.clientY - drag.lastY) / (now - drag.lastT);
+      drag.lastY = event.clientY;
+      drag.lastT = now;
+    }
+    const offset = Math.max(0, event.clientY - drag.startY);
+    if (!drag.moved && offset >= SHEET_DRAG_SLOP_PX) {
+      drag.moved = true;
+      // Capture only once it is a drag, so taps on header buttons still click them.
+      try {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      } catch {
+        // The pointer may already be gone; the drag still works without capture.
+      }
+    }
+    return offset;
+  };
+
+  const onGripPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const offset = trackSheetDrag(event);
+    if (offset === null || !sheetDragRef.current?.moved) return;
+    setSheetSnapping(false);
+    setSheetDragY(offset);
+  };
+
+  const onGripPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const offset = trackSheetDrag(event);
+    const drag = sheetDragRef.current;
+    sheetDragRef.current = null;
+    if (offset === null || !drag?.moved) return;
+    suppressSheetClickUntilRef.current = performance.now() + GESTURE_CLICK_GUARD_MS;
+    if (offset > SHEET_CLOSE_PX || (drag.velocity > SHEET_FLICK_PX_PER_MS && offset >= SHEET_DRAG_SLOP_PX)) {
+      setMenuOpen(false);
+      return;
+    }
+    setSheetDragY(null);
+    setSheetSnapping(true);
+  };
+
+  const onGripPointerCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (sheetDragRef.current?.id !== event.pointerId) return;
+    const moved = sheetDragRef.current.moved;
+    sheetDragRef.current = null;
+    if (!moved) return;
+    setSheetDragY(null);
+    setSheetSnapping(true);
+  };
+
+  const onSheetClickCapture = (event: ReactMouseEvent<HTMLDivElement>): void => {
+    if (performance.now() >= suppressSheetClickUntilRef.current) return;
+    suppressSheetClickUntilRef.current = 0;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   const emptyPrompt = text.trim() === '' && attachments.length === 0;
-  const currentEffort = model?.current?.reasoningEffort ? describeReasoningEffort(model.current.reasoningEffort) : null;
-  const modelPillLabel = model?.current
-    ? [model.current.name, currentEffort].filter(Boolean).join(' · ')
-    : 'Model';
+  const currentModelId = model?.current?.modelId ?? null;
+  const currentEffort = model?.current?.reasoningEffort ?? null;
+  const approvals = model?.approvals;
+  const effortPageModel = effortPageId ? model?.models.find((item) => item.id === effortPageId) ?? null : null;
+  /** Pre-selected level: the current effort when kept or supported, else the model default. */
+  const effortPageSelected = !effortPageModel ? null
+    : effortPageModel.id === currentModelId ? currentEffort
+    : currentEffort && effortPageModel.efforts.includes(currentEffort) ? currentEffort
+    : effortPageModel.defaultEffort ?? null;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const sheet = sheetRef.current;
+    if (effortPageId) {
+      sheet?.querySelector<HTMLButtonElement>('[role="radio"]')?.focus();
+    } else if (returnFocusModelRef.current) {
+      const id = returnFocusModelRef.current;
+      returnFocusModelRef.current = null;
+      Array.from(sheet?.querySelectorAll<HTMLButtonElement>('[data-model-id]') ?? [])
+        .find((row) => row.dataset.modelId === id)?.focus();
+    }
+  }, [effortPageId, menuOpen]);
+
+  const pillLabel = [
+    PILL_MODE[mode],
+    model?.current ? shortModelName(model.current.name) : 'Model',
+    model?.current?.reasoningEffort ? shortEffort(model.current.reasoningEffort) : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <form
@@ -965,72 +1182,195 @@ export function Composer({
               <button
                 ref={modelButtonRef}
                 type="button"
-                className="mode-pill model-pill"
-                aria-haspopup="menu"
+                className={`mode-pill model-pill mode-${mode}`}
+                aria-haspopup="dialog"
                 aria-expanded={menuOpen}
-                aria-label={`Model: ${modelPillLabel}`}
+                aria-label={`Session controls: ${pillLabel}`}
                 disabled={disabled || !onModelChange}
-                onClick={() => setMenuOpen((v) => !v)}
+                onClick={onPillClick}
+                onPointerDown={onPillPointerDown}
+                onPointerMove={trackPillSwipe}
+                onPointerUp={endPillSwipe}
+                onPointerCancel={() => { pillSwipeRef.current = null; }}
                 onKeyDown={onModelButtonKeyDown}
               >
                 <span className="pill-dot" aria-hidden="true" />
-                <span className="model-pill-name">{modelPillLabel}</span>
+                <span className="model-pill-name">{pillLabel}</span>
                 <span className="pill-caret" aria-hidden="true">▾</span>
               </button>
               {menuOpen ? (
-                <div className="mode-menu model-menu" role="menu" aria-label="Model and effort" onKeyDown={onModelMenuKeyDown}>
-                  <div className="model-menu-heading" role="presentation">Model</div>
-                  {liveModelOptions.map((option) => {
-                    const selected = option.value === model?.current?.modelId;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={selected}
-                        className={`mode-menu-item${selected ? ' active' : ''}`}
-                        onClick={() => {
-                          setMenuOpen(false);
-                          if (!selected) chooseModel(option.value);
-                        }}
-                      >
-                        <span className="mode-check">{selected ? '✓' : ''}</span>
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                  {liveEffortOptions.length ? (
-                    <>
-                      <div className="model-menu-heading" role="presentation">Effort</div>
-                      {liveEffortOptions.map((option) => {
-                        const selected = option.value === model?.current?.reasoningEffort;
-                        return (
+                <>
+                  <div className="controls-scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />
+                  <div
+                    ref={sheetRef}
+                    className={`controls-sheet${sheetDragY !== null ? ' is-dragging' : ''}${sheetSnapping ? ' is-snapping' : ''}`}
+                    role="dialog"
+                    aria-label="Session controls"
+                    style={sheetDragY !== null ? { transform: `translate(-50%, ${sheetDragY}px)` } : undefined}
+                    onKeyDown={onModelMenuKeyDown}
+                    onClickCapture={onSheetClickCapture}
+                    onTransitionEnd={() => setSheetSnapping(false)}
+                  >
+                    <div
+                      className="controls-grip"
+                      onPointerDown={onGripPointerDown}
+                      onPointerMove={onGripPointerMove}
+                      onPointerUp={onGripPointerUp}
+                      onPointerCancel={onGripPointerCancel}
+                    >
+                      <span className="controls-handle" aria-hidden="true" />
+                      {effortPageModel ? (
+                        <div className="controls-head">
                           <button
-                            key={`effort-${option.value}`}
                             type="button"
-                            role="menuitemradio"
-                            aria-checked={selected}
-                            className={`mode-menu-item${selected ? ' active' : ''}`}
-                            onClick={() => {
-                              setMenuOpen(false);
-                              if (!selected) chooseEffort(option.value);
-                            }}
+                            className="controls-back"
+                            aria-label="Back"
+                            onClick={() => setEffortPageId(null)}
                           >
-                            <span className="mode-check">{selected ? '✓' : ''}</span>
-                            {option.label}
+                            ‹
                           </button>
-                        );
-                      })}
-                    </>
-                  ) : null}
-                </div>
+                          <strong className="controls-title">{effortPageModel.name}</strong>
+                          <button type="button" className="controls-done" onClick={() => setMenuOpen(false)}>Done</button>
+                        </div>
+                      ) : (
+                        <div className="controls-head">
+                          <strong className="controls-title">Session controls</strong>
+                          <button type="button" className="controls-done" onClick={() => setMenuOpen(false)}>Done</button>
+                        </div>
+                      )}
+                    </div>
+                    {busy ? <p className="controls-note">Applies from your next message.</p> : null}
+                    {effortPageModel ? (
+                      <div key={`effort-${effortPageModel.id}`} className="controls-page is-effort">
+                        <div className="controls-label">Effort</div>
+                        <div className="controls-scroll">
+                          <div
+                            className="controls-efforts"
+                            role="radiogroup"
+                            aria-label={`Effort for ${effortPageModel.name}`}
+                          >
+                            {effortPageModel.efforts.map((value) => {
+                              const selected = value === effortPageSelected;
+                              const isDefault = value === effortPageModel.defaultEffort;
+                              const hint = EFFORT_HINT[value];
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={selected}
+                                  aria-label={`${describeReasoningEffort(value)}${isDefault ? ', model default' : ''}${hint ? `, ${hint}` : ''}`}
+                                  className={`controls-effort-row${selected ? ' active' : ''}`}
+                                  onClick={() => pickSheetEffort(effortPageModel.id, value)}
+                                >
+                                  <span className="mode-check" aria-hidden="true">{selected ? '✓' : ''}</span>
+                                  <span className="controls-effort-text" aria-hidden="true">
+                                    <span className="controls-effort-label">
+                                      {describeReasoningEffort(value)}
+                                      {isDefault ? <span className="controls-effort-default"> · default</span> : null}
+                                    </span>
+                                    {hint ? <span className="controls-effort-hint">{hint}</span> : null}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key="main" className="controls-page is-main">
+                        <div className="controls-label" id="controls-mode">Mode</div>
+                        <div className={`controls-seg mode-seg seg-${mode}`} role="radiogroup" aria-labelledby="controls-mode">
+                          {SESSION_MODES.map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              role="radio"
+                              aria-checked={mode === value}
+                              className={mode === value ? 'active' : undefined}
+                              onClick={() => { if (value !== mode) void onModeChange(value); }}
+                            >
+                              {MODE_LABEL[value]}
+                            </button>
+                          ))}
+                        </div>
+
+                        {approvals ? (
+                          <>
+                            <div className="controls-label" id="controls-approvals">Approvals</div>
+                            <div
+                              className={`controls-seg approvals-seg seg-${approvals.mode}`}
+                              role="radiogroup"
+                              aria-label="Approvals"
+                            >
+                              {APPROVAL_MODES.filter((value) => approvals.available.includes(value)).map((value) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={approvals.mode === value}
+                                  className={approvals.mode === value ? 'active' : undefined}
+                                  onClick={() => pickApprovalMode(value)}
+                                >
+                                  {APPROVAL_LABEL[value]}
+                                </button>
+                              ))}
+                            </div>
+                            {confirmAllowAll ? (
+                              <div
+                                className="controls-confirm"
+                                role="alertdialog"
+                                aria-label="Allow all approvals"
+                                aria-describedby="controls-confirm-text"
+                              >
+                                <p id="controls-confirm-text">Approve every tool, path and URL without asking?</p>
+                                <div className="controls-confirm-actions">
+                                  <button type="button" className="controls-confirm-cancel" autoFocus onClick={() => setConfirmAllowAll(false)}>
+                                    Cancel
+                                  </button>
+                                  <button type="button" className="controls-confirm-allow" onClick={confirmApprovalAllowAll}>
+                                    Allow all
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+
+                        <div className="controls-label" id="controls-model">Model</div>
+                        <div className="controls-scroll">
+                          <div className="controls-models" role="radiogroup" aria-labelledby="controls-model">
+                            {liveModelOptions.map((option) => {
+                              const selected = option.value === currentModelId;
+                              const hasLevels = !!model?.models.find((item) => item.id === option.value)?.efforts.length;
+                              const effortLabel = selected && currentEffort ? describeReasoningEffort(currentEffort) : null;
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={selected}
+                                  aria-label={`${option.label}${effortLabel ? `, ${effortLabel} effort` : ''}${hasLevels ? ', choose effort' : ''}`}
+                                  data-model-id={option.value}
+                                  className={`controls-model${selected ? ' active' : ''}`}
+                                  onClick={() => pickSheetModel(option.value, hasLevels)}
+                                >
+                                  <span className="mode-check" aria-hidden="true">{selected ? '✓' : ''}</span>
+                                  <span className="controls-model-name">{option.label}</span>
+                                  {option.value === 'auto' ? <span className="controls-model-hint">Recommended</span> : null}
+                                  {effortLabel ? <span className="controls-model-effort">{effortLabel}</span> : null}
+                                  {hasLevels ? <span className="controls-chevron" aria-hidden="true">›</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
               ) : null}
-            </div>
-            {mode !== 'interactive' ? (
-              <span className="mode-tag" title="Type /interactive to switch back">{MODE_LABEL[mode] ?? mode}</span>
-            ) : null}
-            {folder ? <span className="cwd-chip" title={cwd ?? undefined}>📁 {folder}</span> : null}
-              </>
+            </div>              </>
             )}
           </div>
 

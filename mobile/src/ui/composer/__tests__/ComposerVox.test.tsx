@@ -24,7 +24,6 @@ function renderComposer(props: Partial<ComponentProps<typeof Composer>> = {}) {
     disabled: false,
     busy: false,
     mode: 'interactive' as SessionMode,
-    cwd: null,
     onPrompt: vi.fn(),
     onInterrupt: vi.fn(),
     onModeChange: vi.fn(),
@@ -104,7 +103,6 @@ describe('Composer Vox mode', () => {
         disabled={false}
         busy={false}
         mode={'interactive' as SessionMode}
-        cwd={null}
         onPrompt={vi.fn()}
         onInterrupt={vi.fn()}
         onModeChange={vi.fn()}

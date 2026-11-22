@@ -36,6 +36,7 @@ mobile/public/native-runtime-*.json
 mobile/ios/
 *.jks
 *.keystore
+*.p12
 mobile/release/*.apk
 
 # logs & os

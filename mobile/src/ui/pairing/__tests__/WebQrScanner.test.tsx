@@ -94,6 +94,26 @@ describe('WebQrScanner', () => {
     expect(jsQR).toHaveBeenCalled();
   });
 
+  it('shows a compact opening state, and reveals the viewfinder only once video plays', async () => {
+    let grant!: (stream: Pick<MediaStream, 'getTracks'>) => void;
+    getUserMedia.mockReturnValue(new Promise((resolve) => { grant = resolve; }));
+    (globalThis as unknown as { BarcodeDetector: unknown }).BarcodeDetector = Object.assign(
+      vi.fn(() => ({ detect: vi.fn().mockResolvedValue([]) })),
+      { getSupportedFormats: vi.fn().mockResolvedValue(['qr_code']) },
+    );
+    const { container } = render(<WebQrScanner variant="inline" onResult={vi.fn()} onCancel={() => undefined} />);
+    const root = container.firstElementChild as HTMLElement;
+
+    expect(root).toHaveClass('scanner-inline');
+    expect(root).not.toHaveClass('is-live');
+    expect(screen.getByText('Opening camera…')).toBeInTheDocument();
+    expect(container.querySelector('.scanner-reticle')).toBeNull();
+
+    await act(async () => grant({ getTracks: () => [{ stop: stopTrack } as unknown as MediaStreamTrack] }));
+    await waitFor(() => expect(root).toHaveClass('is-live'));
+    expect(container.querySelector('.scanner-reticle')).not.toBeNull();
+  });
+
   it('offers retry and paste actions after a fatal inline camera error', async () => {
     getUserMedia.mockRejectedValue(new Error('blocked'));
     const onPasteCode = vi.fn();
@@ -107,11 +127,11 @@ describe('WebQrScanner', () => {
       />,
     );
 
-    expect(await screen.findByText('Camera blocked. Allow camera access, or use the paste box instead.')).toBeVisible();
+    expect(await screen.findByText('Camera blocked. Allow camera access, or paste the code instead.')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Paste code instead' }));
     expect(onPasteCode).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry camera' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Try camera again' }));
     await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
   });
 });

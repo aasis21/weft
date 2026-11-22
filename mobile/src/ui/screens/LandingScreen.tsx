@@ -4,6 +4,11 @@ import { usePairing } from '@/ui/hooks/usePairing';
 import { WeftMark } from '@/ui/brand/WeftMark';
 import { isDesktopInput } from '@/lib/platform';
 import { applyTheme, getTheme, setTheme, subscribeSettings, type ThemeSetting } from '@/lib/settings';
+import { QRCodeSVG } from 'qrcode.react';
+import {
+  ANDROID_APK_URL, WEB_APP_URL, canOfferAndroidApp, phonePlatform, useLatestRelease,
+  type LatestRelease, type PhonePlatform,
+} from '@/lib/getApp';
 
 interface LandingScreenProps {
   onBeginPair(manual?: boolean): void;
@@ -38,8 +43,8 @@ const STEPS = [
   },
   {
     n: 3,
-    title: 'Scan with your phone',
-    body: 'Open this site on your phone, choose Scan QR to pair, and point the camera at the code.',
+    title: 'Scan with the app or browser',
+    body: 'Open the Weft Android app, or this site in any phone browser. Choose Scan QR to pair and point the camera at the code.',
   },
 ];
 
@@ -213,6 +218,69 @@ function InstallCommand(): JSX.Element {
   );
 }
 
+const DOWNLOAD_ICON: JSX.Element = (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" />
+  </svg>
+);
+
+function releaseDetail(release: LatestRelease | null): string {
+  return ['v' + (release?.version ?? 'latest'), 'signed', release?.apkMb ? `${release.apkMb} MB` : null]
+    .filter(Boolean).join(' · ');
+}
+
+/** Direct APK download: GitHub redirects to the file, so the visitor never leaves this page. */
+function AndroidDownload({ className, release }: { className: string; release: LatestRelease | null }): JSX.Element {
+  return (
+    <div className="get-android">
+      <a className={`${className} get-android-btn`} href={ANDROID_APK_URL} rel="noopener">
+        {DOWNLOAD_ICON} Get the Android app
+      </a>
+      <span className="get-android-meta">{releaseDetail(release)}</span>
+    </div>
+  );
+}
+
+function GetAppSection({ platform, release }: { platform: PhonePlatform; release: LatestRelease | null }): JSX.Element {
+  return (
+    <section className="get-app" id="get-app" aria-labelledby="get-app-title">
+      <div className="product-section-heading">
+        <p className="product-kicker">On your phone</p>
+        <h2 id="get-app-title">Get Weft on your phone.</h2>
+        <p>Use the Android app or any phone browser. Both pair the same way and keep your history on the phone.</p>
+      </div>
+      <div className="get-app-cards">
+        {platform !== 'ios' ? (
+          <article className="get-app-card get-app-card-android">
+            <h3>Android app</h3>
+            <p>Native QR scanner and approval alerts. New versions install over the old one and keep your pairing.</p>
+            <AndroidDownload className="primary-action" release={release} />
+            <p className="get-app-fine">First install: allow your browser to install unknown apps when Android asks.</p>
+          </article>
+        ) : null}
+        <article className="get-app-card">
+          <h3>Any phone browser</h3>
+          <p>Works on iPhone and Android. Open <a href={WEB_APP_URL}>useweft.netlify.app</a>, then use the browser menu&apos;s
+            {platform === 'ios' ? ' Share → Add to Home Screen' : ' Add to Home screen'} for an app icon.</p>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+/** Laptop visitors get a QR that opens the phone download section. */
+function PhoneQr(): JSX.Element {
+  return (
+    <div className="phone-qr">
+      <QRCodeSVG value={`${WEB_APP_URL}/#get-app`} size={96} marginSize={2} title="Open Weft on your phone" />
+      <div>
+        <strong>Get Weft on your phone</strong>
+        <span>Scan with your phone camera for the Android app or the web app.</span>
+      </div>
+    </div>
+  );
+}
+
 function SessionPreview(): JSX.Element {
   return (
     <figure className="product-preview" aria-label="Illustrative Weft session preview">
@@ -298,11 +366,15 @@ export function LandingScreen({
   const { busy, run } = usePairing(onError);
   const showSessions = hasSessions && !!onOpenSessions;
   const desktop = isDesktopInput();
+  const platform = phonePlatform();
+  const offerApp = canOfferAndroidApp();
+  const androidBrowser = offerApp && platform === 'android';
+  const release = useLatestRelease();
 
   useEffect(() => {
     // The app mounts after the browser's initial fragment scroll.
     const section = window.location.hash.slice(1);
-    if (['product', 'get-started', 'features', 'privacy'].includes(section)) {
+    if (['product', 'get-app', 'get-started', 'features', 'privacy'].includes(section)) {
       document.getElementById(section)?.scrollIntoView();
     }
   }, []);
@@ -346,10 +418,11 @@ export function LandingScreen({
             {desktop && !showSessions ? (
               <a className="primary-action" href="#get-started">Set up your laptop</a>
             ) : null}
+            {androidBrowser && !showSessions ? <AndroidDownload className="primary-action" release={release} /> : null}
             {!desktop ? (
               <button
                 type="button"
-                className={showSessions ? 'secondary-action' : 'primary-action'}
+                className={showSessions || androidBrowser ? 'secondary-action' : 'primary-action'}
                 onClick={() => onBeginPair(false)}
               >
                 Scan QR to pair
@@ -382,6 +455,7 @@ export function LandingScreen({
                 ? 'Start here on your laptop. Then open useweft.netlify.app on your phone to scan.'
                 : 'Have a QR on your laptop? Scan it above. New here? Follow the setup below.'}
           </p>
+          {desktop && offerApp && !showSessions ? <PhoneQr /> : null}
           <ul className="product-proof" aria-label="At a glance">
             <li>End-to-end encrypted</li>
             <li>Open source</li>
@@ -391,6 +465,8 @@ export function LandingScreen({
         </div>
         <SessionPreview />
       </section>
+
+      {offerApp ? <GetAppSection platform={platform} release={release} /> : null}
 
       <section className="landing-steps" id="get-started" aria-label="How it works" tabIndex={-1}>
         <div className="product-section-heading">
@@ -482,7 +558,7 @@ export function LandingScreen({
             <p>Node.js 20+, access to Copilot, and a phone with a current browser.
               For Device Station launches, install a signed-in Copilot CLI and run <code>weft start</code>.
               In an existing local GitHub Copilot app session, open Weft pairing instead.
-              Scan the QR from your phone. No phone download or separate Weft account is needed.
+              Scan the QR with the Weft Android app or any phone browser. No separate Weft account is needed.
               Try the demo first without pairing or changing your files.</p>
           </details>
           <details>
@@ -549,7 +625,7 @@ export function LandingScreen({
         <a href="https://github.com/aasis21/weft/releases" target="_blank" rel="noreferrer">
           Releases
         </a>
-        <span>Apache-2.0 · PWA-first</span>
+        <span>Apache-2.0 · Web and Android</span>
       </footer>
     </main>
   );

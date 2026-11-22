@@ -145,6 +145,7 @@ describe('App Explore layering', () => {
     runtime.snapshot.devices = [{
       channelId: 'device-1',
       name: 'Laptop',
+      transport: { kind: 'local' },
       connected: true,
       isDefault: true,
       projectsLoading: false,
@@ -161,7 +162,7 @@ describe('App Explore layering', () => {
       expect(await screen.findByLabelText('First message')).toHaveValue('Keep this draft');
       fireEvent.click(screen.getByRole('button', { name: 'More' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'About Weft' }));
-      expect(screen.getByTestId('landing-screen')).toBeInTheDocument();
+      expect(await screen.findByText('About Weft')).toBeInTheDocument();
     } finally {
       runtime.snapshot.sessions = previousSessions;
       runtime.snapshot.devices = previousDevices;

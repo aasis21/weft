@@ -1,6 +1,6 @@
 {
   "name": "@aasis21/weft-mobile",
-  "version": "0.2.64",
+  "version": "0.2.74",
   "private": true,
   "type": "module",
   "description": "Weft mobile app (React + Vite + Capacitor, Android first).",
@@ -10,6 +10,7 @@
     "build": "tsc && vite build",
     "build:web": "npm run build",
     "build:android": "npm run build && cap sync android && node ../scripts/build-android.mjs",
+    "build:android:release": "npm run build && cap sync android && node ../scripts/build-android.mjs release",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

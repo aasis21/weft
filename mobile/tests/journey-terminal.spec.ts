@@ -106,14 +106,18 @@ for (const layout of [
       await page.mouse.wheel(0, -2000);
       await expect(page.getByRole('button', { name: 'Return to latest output' })).toBeVisible();
       const firstVisibleRow = await page.locator('.xterm-accessibility-tree').evaluate(async (tree) => {
-        let previous = '';
-        let settledFrames = 0;
-        for (let frame = 0; frame < 120; frame++) {
+        // xterm can pause ~0.5s mid-wheel-scroll before finishing, so require a full second of no
+        // change (not just a few frames) before treating the reading position as settled.
+        let previous = tree.firstElementChild?.textContent ?? '';
+        let stableSince = performance.now();
+        const deadline = stableSince + 15_000;
+        while (performance.now() < deadline) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           const current = tree.firstElementChild?.textContent ?? '';
-          settledFrames = current === previous ? settledFrames + 1 : 0;
-          if (settledFrames >= 6) return current;
-          previous = current;
+          if (current !== previous) {
+            previous = current;
+            stableSince = performance.now();
+          } else if (performance.now() - stableSince >= 1_000) return current;
         }
         throw new Error('Terminal wheel scrolling did not settle.');
       });

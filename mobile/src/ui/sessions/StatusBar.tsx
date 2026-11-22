@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { WeftMenuIcon } from '@/ui/brand/WeftMark';
 import type { JSX, KeyboardEvent } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
@@ -63,6 +64,13 @@ interface StatusBarProps {
   desktopDocked?: boolean;
   /** Switch to another chat from the title gestures (swipe, long-press card, double-tap). */
   onSwitchSession?(channelId: string): void;
+}
+
+/** Last path segment, for showing a session's folder compactly. */
+function folderName(path: string | null): string | null {
+  if (!path) return null;
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || path;
 }
 
 export function StatusBar({
@@ -194,11 +202,7 @@ export function StatusBar({
           onClick={onOpenDrawer}
           aria-label={drawerLabel}
         >
-          <span className="hamburger" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </span>
+          <WeftMenuIcon />
           {othersAwaitingDecision > 0 ? <span className="decision-waiting-dot" aria-hidden="true" /> : null}
         </button>
       )}
@@ -238,6 +242,7 @@ export function StatusBar({
           <span className={`status-line ${lineClass}`}>
             <span className="status-dot" aria-hidden="true" />
             {statusLabel}
+            {folderName(cwd) ? <span className="status-folder" title={cwd ?? undefined}> · {folderName(cwd)}</span> : null}
           </span>
           {gestures.peek ? (
             <span className={`status-peek ${gestures.dragX < 0 ? 'next' : 'prev'}`} aria-hidden="true">

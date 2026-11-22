@@ -132,12 +132,13 @@ configured yet.
   then choose **Install app** or **Add to Home Screen** in the browser. It can also run
   directly in the browser. Android Chrome uses `BarcodeDetector` for QR scanning; iOS
   Safari and Firefox use the in-page jsQR fallback.
-- **Android development shell:** Weft does not currently publish an APK. Debug,
-  unversioned, and third-party APKs are not supported release artifacts.
+- **Android test app:** Download the signed APK from the
+  [GitHub test prerelease](releases.md#phone-app) for updates that keep your
+  pairing and app data. The local debug APK below is for development only.
 - **Local dev server:** `cd mobile && npm run dev` serves the demo on your development
   computer. For a physical phone, use an HTTPS-served development deployment:
   an ordinary HTTP LAN address is not a secure context for camera and Web Crypto
-  APIs. Manual paste is available in desktop browsers and the native Android app.
+  APIs. Manual paste (**Paste code**) is available in every browser and the native Android app.
 
 To build a debug-signed APK locally, run from the repository root after `npm ci`:
 
@@ -147,12 +148,12 @@ adb install -r mobile/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Use an emulator or enable USB debugging on your Android device before running `adb`.
-Open Weft, allow camera access if prompted, and scan a fresh QR from your laptop.
+Open Weft. The first screen explains the two ways to get a code (Weft Station or
+`/weft` in one Copilot session); the camera opens only when you choose **Scan laptop QR**.
 Weft uses its in-app camera if the Google Barcode Scanner module is unavailable.
-For an emulator or an unavailable camera, choose **Paste pairing code** instead.
+For an emulator or an unavailable camera, choose **Paste code** instead.
 Copy the code from the laptop's **Pairing** tab in Weft Control Center, paste it
-into the app, and choose **Pair from pasted code**. Don't share the code in logs
-or chat.
+into the app, and choose **Pair**. Don't share the code in logs or chat.
 This APK is for local testing, not a signed production release.
 
 **3. Pair and drive it.** Run `weft start`. On Windows and macOS you can close its
@@ -160,8 +161,8 @@ terminal once startup succeeds; Station continues in a manually started per-user
 background workload. Use `weft status` and `weft stop` to manage it. For
 terminal-owned operation, use `weft start --foreground`; other platforms retain
 foreground mode.
-Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, and scan the
-code. The phone can then start or resume Copilot sessions in registered projects.
+Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, then
+**Scan laptop QR**, and scan the code. The phone can then start or resume Copilot sessions in registered projects.
 For a source-built phone UI, use your HTTPS development deployment instead.
 
 Device Station must remain running for phone-driven project/session discovery, Start,
@@ -321,40 +322,33 @@ explicitly through the documented source installer.
 ### Shipping it: environments
 
 `ship.sh` / `ship.ps1` deploy to Netlify from a laptop. GitHub Actions uses `ship.sh`
-with the target environment's site configuration. The test and production workflows
-have different triggers and publication rules:
+with the target environment's site configuration. Nothing runs automatically on push or merge;
+every workflow is started by hand.
 
-| Workflow | Environment | Netlify site | URL | Triggers |
-| --- | --- | --- | --- | --- |
-| `Deploy Netlify Production` | `production` | `useweft` | <https://useweft.netlify.app> | manual only |
-| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> | successful `main` CI + manual |
+| Workflow | Use it to | Options |
+| --- | --- | --- |
+| `CI` | test any branch | `suite`: `quick` (unit tests + type checks) or `full` (adds harness, builds, browser journeys, audit and the Platform check) |
+| `Release` | ship | `where`: `production` or `test`; `what`: `all`, `web` or `android`; `platform_check`: `auto`, `always` or `skip` |
+| `Platform check` | (called by the other two) | checks prebuilt terminal runtimes, macOS integrations and install/update on Windows and macOS, x64 and ARM, Node 20 and 24 |
 
-The test workflow runs after CI succeeds on `main` and checks out that CI run's commit.
-A successful deployment publishes that validated commit; a pending or failed deployment
-leaves the previous site in place. Production requires an explicit dispatch:
-
-```sh
-gh workflow run "Deploy Netlify Production" --repo aasis21/weft
-```
-
-**Deploying a feature branch.** The `test` environment has no deployment-branch policy, so the test
-workflow can be dispatched from any ref — pick the branch in the Actions UI, or:
+`Release` runs the full tests once, then publishes. `where=production` (from `main` only) publishes
+<https://useweft.netlify.app> through the `production` environment, builds and signs the Android APK in
+`android-release`, and creates one GitHub release `v<VERSION>` with the APK, laptop payloads,
+build provenance and the matching `CHANGELOG` section. `where=test` publishes
+<https://useweft-test.netlify.app> through the `test` environment, from any branch. With
+`platform_check=auto`, the Platform check runs only when terminal, install, update or macOS code
+changed since the previous `v*` release.
 
 ```sh
-gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=preview
+gh workflow run CI --repo aasis21/weft -f suite=full
+gh workflow run Release --repo aasis21/weft -f where=production -f what=all
+gh workflow run Release --repo aasis21/weft --ref users/<you>/<feature> -f where=test -f what=web
 ```
-
-`mode=preview` (the default for a manual run) is a Netlify *draft* deploy: it publishes to a unique
-throwaway URL and leaves `useweft-test.netlify.app` alone, so several branches can be in flight at
-once. `mode=live` overwrites the shared test site, as does the automatic deployment after
-successful `main` CI. The resulting URL is printed in the run's job summary.
 
 Each environment holds `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`. The installers are checked in
 with the production origin as their default, so at deploy time the ship scripts resolve the target
 site's real URL and rewrite the `mobile/dist` copies of `install.sh` / `install.ps1` (never the
-sources) — a test deploy therefore serves an installer that pulls *its own* bundles. (A preview
-deploy retargets to the test site's canonical URL, not the throwaway draft URL, since the draft URL
-is only known after the upload.)
+sources) — a test deploy therefore serves an installer that pulls *its own* bundles.
 
 ## Updating an installed laptop
 
@@ -370,6 +364,8 @@ and preserves `~/.weft/` configuration, registered projects, and persistent pair
 material. Restart Station and restart or reload the Copilot session after updating. PWA updates arrive through
 the browser; close and reopen the installed PWA if a newly published version is not visible.
 
+Weft does not ask for notification permission at launch. After the first real pairing it
+shows a one-time **Get approval alerts** card; choose **Allow** or **Not now**.
 Notification behavior depends on the browser and operating system. Exercise permission
 prompts and background behavior on a real device; do not treat the local demo as proof of
 notification delivery. The session thread remains the place to review pending approvals.

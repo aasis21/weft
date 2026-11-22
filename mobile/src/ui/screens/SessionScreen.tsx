@@ -12,6 +12,7 @@ import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
 import { ElicitationCard } from '@/ui/prompts/ElicitationCard';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
 import { StatusBar } from '@/ui/sessions/StatusBar';
+import { AlertsOptIn } from '@/ui/pairing/AlertsOptIn';
 import { isWorking, type ComposerActivity } from '@/ui/sessions/sessionStatus';
 import { SettingsScreen } from '@/ui/settings/SettingsScreen';
 import { VoiceModeOverlay } from '@/ui/voice/VoiceModeOverlay';
@@ -224,7 +225,7 @@ interface SessionScreenProps {
   onInterrupt(): void;
   onModeChange(mode: SessionMode): void;
   /** Switch the model and/or reasoning effort of the laptop session. */
-  onModelChange?(change: { modelId?: string; reasoningEffort?: string }): void;
+  onModelChange?(change: { modelId?: string; reasoningEffort?: string; approvalMode?: 'manual' | 'assisted' | 'allow-all' }): void;
   /** Run a whitelisted CLI slash command on the laptop session (see shared PHONE_COMMANDS). */
   onCommand(name: string, input?: string): void;
   onRetry(itemId: string): void;
@@ -921,7 +922,7 @@ export function SessionScreen({
         desktopDocked={isDesktopWide}
         onSwitchSession={onSelectSession}
       />
-
+      {meta.kind === 'demo' ? null : <AlertsOptIn />}
       {debugOpen ? (
         <DebugPanel
           events={active.events}
@@ -1178,7 +1179,6 @@ export function SessionScreen({
           busy={agentBusy}
           mode={timeline.mode}
           {...(active.model ? { model: active.model } : {})}
-          cwd={meta.cwd}
           onPrompt={sendPrompt}
           onInterrupt={onInterrupt}
           onModeChange={onModeChange}

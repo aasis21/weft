@@ -108,9 +108,30 @@ export function createManagement({
   discover = discoverRuntimeLifecycles, runtimeClient = createRuntimeLifecycleClient,
   relayHealth = healthyRegistryEntry, publicProbe = probePublicRelay,
   authentication = readDevTunnelAuthentication,
+  statusProbeTimeoutMs = 4_000,
 } = {}) {
   baseDir = resolve(baseDir);
   const options = { baseDir, cliPath };
+  // Task Scheduler (PowerShell) and session identity probes can take tens of seconds on a busy
+  // Windows host. Each probe kind runs at most once at a time; status polls join the in-flight
+  // probe but wait only a bounded time, and a late result still refreshes the last-known value.
+  const PROBE_PENDING = Symbol("probe-pending");
+  const probesInFlight = new Map();
+  const lastProbeResults = new Map();
+  function boundedProbe(key, run) {
+    let probe = probesInFlight.get(key);
+    if (!probe) {
+      probe = Promise.resolve().then(run)
+        .then((value) => { lastProbeResults.set(key, value); return value; })
+        .finally(() => { probesInFlight.delete(key); });
+      probe.catch(() => {});
+      probesInFlight.set(key, probe);
+    }
+    let timer;
+    const bound = new Promise((done) => { timer = setTimeout(() => done(PROBE_PENDING), statusProbeTimeoutMs); });
+    timer.unref?.();
+    return Promise.race([probe, bound]).finally(() => clearTimeout(timer));
+  }
   const settings = () => ({
     transport: loadTransportConfig(options),
     deviceName: loadDeviceName(options), permissionMode: loadDefaultPermissionMode(options),
@@ -228,7 +249,9 @@ export function createManagement({
   }
   async function roleStatus(role, result) {
     const controlRecord = readRegistry(`background-${role}.json`, options);
-    const workerStatus = await background.command(role, "status", null, options);
+    // A registry record left by a worker that already exited cannot answer; skip contacting it.
+    const workerExited = Number.isSafeInteger(controlRecord?.pid) && controlRecord.pid > 0 && !isPidAlive(controlRecord.pid);
+    const workerStatus = workerExited ? null : await background.command(role, "status", null, options);
     if (workerStatus) {
       const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
         connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
@@ -247,8 +270,22 @@ export function createManagement({
       attachCrashReport(role, result[role]);
       return;
     }
-    const task = await background.task("status", { ...options, role });
-    result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true };
+    const label = role === "station" ? "Station" : "The relay";
+    let task = await boundedProbe(`task:${role}`, () => background.task("status", { ...options, role }));
+    const checking = task === PROBE_PENDING;
+    if (checking) {
+      task = lastProbeResults.get(`task:${role}`);
+      if (!task) {
+        result[role] = workerExited
+          ? { state: "stopped", supported: true, checking: true, staleWorker: true,
+            error: `${label}'s last worker is no longer running. Background task status is still being checked.` }
+          : { state: "unknown", supported: true, checking: true,
+            error: `${label} status is still being checked. Refresh in a few seconds before starting or stopping it.` };
+        return;
+      }
+    }
+    result[role] = { state: task.state === "Running" ? "unresponsive" : "stopped", supported: true,
+      ...(checking ? { checking: true } : {}), ...(workerExited ? { staleWorker: true } : {}) };
     if (task.state === "Running") {
       // Between crashes the worker is down while the supervisor waits to restart it.
       attachCrashReport(role, result[role]);
@@ -444,7 +481,13 @@ export function createManagement({
       const warnings = [];
       const currentSettings = settings();
       const kind = currentSettings.transport?.kind ?? null;
-      const [work, runtime] = await Promise.all([workloads(), runtimes().catch((error) => {
+      const [work, runtime] = await Promise.all([workloads(), boundedProbe("sessions", runtimes).then((value) => {
+        if (value !== PROBE_PENDING) return value;
+        const last = lastProbeResults.get("sessions");
+        warnings.push(last ? "Copilot session status is still being checked; showing the last verified session list."
+          : "Copilot session discovery is still running. Refresh in a few seconds; no session was changed.");
+        return last ?? { discovery: { status: "checking", runtimes: [] }, list: [] };
+      }).catch((error) => {
         statusPartFailed("sessions", error);
         warnings.push("Copilot session discovery is temporarily unavailable. Refresh status; no session was changed.");
         return { discovery: { status: "unavailable", runtimes: [] }, list: [] };

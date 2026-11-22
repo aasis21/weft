@@ -549,15 +549,17 @@ export function WeftDrawer({
         <div className="drawer-head">
           <WeftMark className="drawer-mark" size={22} />
           <span className="drawer-title">WEFT</span>
+          {docked ? null : (
+            <button className="drawer-close" type="button" onClick={onClose} title="Close" aria-label="Close">
+              ✕
+            </button>
+          )}
         </div>
-        <button
-          className="drawer-close"
-          type="button"
-          onClick={onClose}
-          title={docked ? 'Collapse sidebar' : 'Close'}
-        >
-          {docked ? '⟨' : '✕'}
-        </button>
+        {docked ? (
+          <button className="drawer-close drawer-collapse" type="button" onClick={onClose} title="Collapse sidebar">
+            ⟨
+          </button>
+        ) : null}
 
         <div className="drawer-list">
           {devices && devices.length > 0 ? (
@@ -608,10 +610,10 @@ export function WeftDrawer({
 
         <div className="drawer-actions">
           <button className="drawer-add drawer-add-split" type="button" onClick={onStartSession}>
-            ＋ Start
+            ＋ Start session
           </button>
           <button className="drawer-add drawer-add-split" type="button" onClick={onAddSession}>
-            ⛶ Scan
+            ⛶ Scan QR
           </button>
         </div>
 

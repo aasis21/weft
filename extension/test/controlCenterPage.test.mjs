@@ -806,6 +806,7 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     await expect.poll(() => h.requests.length).toBeGreaterThan(before);
     await h.page.clock.fastForward(20000);
     await expect(h.page.locator("#connection-error")).toBeHidden();
+    await expect(h.page.locator("#freshness")).toHaveText("Refreshing…");
     await h.page.clock.fastForward(10001);
     await expect(h.page.locator("#connection-error")).toBeVisible();
     await expect(h.page.locator("#connection-message")).toContainText("30 seconds");

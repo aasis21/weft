@@ -160,6 +160,7 @@ function channelIdFromRaw(raw: string | PairingPayload): string {
 
 // --- the module mock installed for `@/lib/weftClient` in setup.ts ---------------------------------
 export const weftClientMock = {
+  supabaseProbeEndpoint: () => null,
   async createPhonePairingIdentity(): Promise<PhonePairingIdentity> {
     const id = nextIdentity++;
     return {
