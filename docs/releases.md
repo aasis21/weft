@@ -9,13 +9,22 @@ Install it with the browser's **Install app** or **Add to Home Screen** action. 
 updates are delivered by the browser; close and reopen the installed PWA after a new
 release if the old build remains active.
 
-Weft does not publish a production Android APK. For testing, a repository maintainer
-can run [Actions → Build Android APK](https://github.com/aasis21/weft/actions/workflows/android-apk.yml)
-by choosing **Run workflow**. This workflow does not run on pushes or pull requests.
-When it succeeds, sign in to GitHub and download the `.apk` from the run summary.
-The debug-signed artifact expires after 30 days and is not a production release.
-If Android rejects an update signed with a different key, installing it requires
-uninstalling the old app first, which removes its Android app data and pairing.
+Download the signed Android test APK from the **Assets** section of the latest
+`android-test-v*` [GitHub prerelease](https://github.com/aasis21/weft/releases).
+Open the APK and choose **Update**. The signed test builds share a stable signing
+key and have increasing version codes, so updates keep local app data and pairing.
+The first switch from an `android-debug-v*` APK requires uninstalling the old app
+once because its signing key is different. That clears only the native app data.
+
+Maintainers use the manual
+[Build Android APK](https://github.com/aasis21/weft/actions/workflows/android-apk.yml)
+workflow on `main`. It builds without signing credentials, then verifies, signs
+and publishes the APK in a separate `android-release` environment limited to `main`.
+The environment needs `WEFT_ANDROID_KEYSTORE_B64` (the established PKCS#12 file
+encoded as base64) and `WEFT_ANDROID_KEYSTORE_PASSWORD`. The key alias is
+`weft-android-test`. Keep a secure backup; never commit either secret value or
+replace the key between releases. Bump `VERSION` before starting a new release;
+the workflow will not overwrite an existing prerelease.
 
 ## Laptop extension and CLI
 

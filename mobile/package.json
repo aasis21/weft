@@ -10,6 +10,7 @@
     "build": "tsc && vite build",
     "build:web": "npm run build",
     "build:android": "npm run build && cap sync android && node ../scripts/build-android.mjs",
+    "build:android:release": "npm run build && cap sync android && node ../scripts/build-android.mjs release",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

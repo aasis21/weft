@@ -132,9 +132,9 @@ configured yet.
   then choose **Install app** or **Add to Home Screen** in the browser. It can also run
   directly in the browser. Android Chrome uses `BarcodeDetector` for QR scanning; iOS
   Safari and Firefox use the in-page jsQR fallback.
-- **Android development shell:** Build a local APK below or download a debug APK
-  from the [manual GitHub Actions build](releases.md#phone-app). Neither is a
-  supported production release.
+- **Android test app:** Download the signed APK from the
+  [GitHub test prerelease](releases.md#phone-app) for updates that keep your
+  pairing and app data. The local debug APK below is for development only.
 - **Local dev server:** `cd mobile && npm run dev` serves the demo on your development
   computer. For a physical phone, use an HTTPS-served development deployment:
   an ordinary HTTP LAN address is not a secure context for camera and Web Crypto
