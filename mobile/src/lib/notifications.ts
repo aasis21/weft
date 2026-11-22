@@ -68,8 +68,11 @@ export function approvalNotification(req: ApprovalRequestMsg): { title: string; 
 async function loadNative(): Promise<LocalNotificationsApi | null> {
   if (!isNative()) return null;
   if (nativePlugin) return nativePlugin;
-  const mod = await import('@capacitor/local-notifications');
-  nativePlugin = mod.LocalNotifications as unknown as LocalNotificationsApi;
+  const { LocalNotifications } = await import('@capacitor/local-notifications');
+  const { checkPermissions, requestPermissions, schedule, createChannel } =
+    LocalNotifications as unknown as LocalNotificationsApi;
+  // Returning the Capacitor proxy from an async function invokes its synthetic "then" method.
+  nativePlugin = { checkPermissions, requestPermissions, schedule, createChannel };
   if (!channelReady) {
     // Android 8+ needs a channel; MAX importance gives a heads-up banner + sound + buzz.
     await nativePlugin.createChannel?.({

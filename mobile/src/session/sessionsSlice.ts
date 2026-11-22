@@ -1,10 +1,11 @@
 import { createEntityAdapter, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { DEVICE_CAPABILITY, EVENT_TYPE, SUBTYPE, clipboardResult } from '@aasis21/weft-shared';
-import type { ClipboardResultMsg, DeviceSnapshotMsg, DeviceUtilityCode, EventEnvelope, HistoryMsg, KeepAwakeStatusMsg, SessionFolder, StoredSession } from '@aasis21/weft-shared';
+import type { ClipboardResultMsg, DeviceSnapshotMsg, DeviceUtilityCode, EventEnvelope, HistoryMsg, KeepAwakeStatusMsg, SessionFolder, SessionListSort, StoredSession } from '@aasis21/weft-shared';
 import { EVENT_LOG_CAP, redactClipboardEvent } from '@/lib/eventLog';
 import type {
   ApprovalRequestMsg,
   DebugEvent,
+  DeviceSessionListCache,
   ElicitationRequestMsg,
   ListenerDeviceState,
   NoticeItem,
@@ -14,6 +15,7 @@ import type {
   SessionStatus,
   UserItem,
 } from './model';
+import { sessionListScopeKey } from './model';
 import type { DeviceHealthCache } from '@/lib/devices';
 import {
   applyEnvelope,
@@ -388,15 +390,50 @@ const sessionsSlice = createSlice({
         device.offers = device.offers.filter((o) => o.channelId !== action.payload.offerChannelId);
       }
     },
-    // On-demand pull of the laptop's past CLI sessions (SESSION_LIST reply). Replaces the whole
-    // `sessions` list — the station always sends the full capped, newest-first, cwd-filtered set —
-    // and, like the other DEVICE-channel replies, doubles as a liveness signal.
+    deviceSessionListRefreshStarted(
+      state,
+      action: PayloadAction<{ channelId: string; cwd: string | null; sort: SessionListSort; requestId: string }>,
+    ) {
+      const { channelId, cwd, sort, requestId } = action.payload;
+      const device = state.devices.find((d) => d.channelId === channelId);
+      if (!device) return;
+      const key = sessionListScopeKey(cwd, sort);
+      const previous = device.sessionLists?.[key];
+      const next: DeviceSessionListCache = {
+        ...previous,
+        loading: true,
+        requestId,
+        error: undefined,
+      };
+      device.sessionLists = { ...device.sessionLists, [key]: next };
+      device.sessionsLoading = true;
+    },
+    // On-demand pull of the laptop's past CLI sessions. Keep each folder/sort result separately,
+    // replacing only the matching snapshot and leaving cached rows in place during refresh.
     deviceSessionsReceived(
       state,
-      action: PayloadAction<{ channelId: string; sessions: StoredSession[]; folders?: SessionFolder[] }>,
+      action: PayloadAction<{
+        channelId: string;
+        cwd: string | null;
+        sort: SessionListSort;
+        requestId: string;
+        receivedAt: number;
+        sessions: StoredSession[];
+        folders?: SessionFolder[];
+      }>,
     ) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) {
+        const key = sessionListScopeKey(action.payload.cwd, action.payload.sort);
+        const cached = device.sessionLists?.[key];
+        if (!cached || cached.requestId !== action.payload.requestId) return;
+        const updated: DeviceSessionListCache = {
+          sessions: action.payload.sessions,
+          receivedAt: action.payload.receivedAt,
+          loading: false,
+        };
+        const sessionLists = { ...device.sessionLists, [key]: updated };
+        device.sessionLists = sessionLists;
         device.sessions = action.payload.sessions;
         // Whole-store folder totals, kept separately because `sessions` is only the newest page and
         // now may be scoped to a single folder — counting it would understate every other folder.
@@ -406,6 +443,37 @@ const sessionsSlice = createSlice({
         device.connected = true;
         device.lastSeenAt = Date.now();
       }
+    },
+    deviceSessionListRefreshFailed(
+      state,
+      action: PayloadAction<{
+        channelId: string;
+        cwd: string | null;
+        sort: SessionListSort;
+        requestId: string;
+        error: DeviceSessionListCache['error'];
+      }>,
+    ) {
+      const { channelId, cwd, sort, requestId, error } = action.payload;
+      const device = state.devices.find((d) => d.channelId === channelId);
+      const cached = device?.sessionLists?.[sessionListScopeKey(cwd, sort)];
+      if (!device || !cached || cached.requestId !== requestId) return;
+      cached.loading = false;
+      cached.requestId = undefined;
+      cached.error = error;
+      device.sessionsLoading = false;
+    },
+    deviceSessionListRefreshCancelled(
+      state,
+      action: PayloadAction<{ channelId: string; cwd: string | null; sort: SessionListSort; requestId: string }>,
+    ) {
+      const { channelId, cwd, sort, requestId } = action.payload;
+      const device = state.devices.find((d) => d.channelId === channelId);
+      const cached = device?.sessionLists?.[sessionListScopeKey(cwd, sort)];
+      if (!device || !cached || cached.requestId !== requestId) return;
+      cached.loading = false;
+      cached.requestId = undefined;
+      device.sessionsLoading = false;
     },
     deviceSessionsLoadingSet(state, action: PayloadAction<{ channelId: string; loading: boolean }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
@@ -730,7 +798,10 @@ export const {
   deviceSnapshotReceived,
   deviceHealthCached,
   deviceSessionOffersReceived,
+  deviceSessionListRefreshStarted,
   deviceSessionsReceived,
+  deviceSessionListRefreshFailed,
+  deviceSessionListRefreshCancelled,
   deviceSessionsLoadingSet,
   deviceOfferRemoved,
   deviceReconciled,

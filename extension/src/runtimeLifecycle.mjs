@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createRuntimeIdentity } from "./runtimeIdentity.mjs";
+import { verifyProcessIdentities } from "./processIdentity.mjs";
 import {
   publishRuntimePresence,
   readRuntimeCapability,
@@ -34,6 +35,7 @@ export async function startRuntimeLifecycleHost(
     baseDir,
     cleanup: true,
     probe: null,
+    verifyBatch: discoveryOptions?.verify ? null : verifyProcessIdentities,
     ...discoveryOptions,
   });
   const endpoint = runtimeEndpointAddress(identity.runtimeInstanceId, { baseDir });

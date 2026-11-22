@@ -15,6 +15,7 @@ import type {
   SpawnMode,
   SessionOffer,
   SessionFolder,
+  SessionListSort,
   StoredSession,
   TransportDescriptor,
 } from '@aasis21/weft-shared';
@@ -172,6 +173,8 @@ export interface ListenerDeviceState extends RegisteredDevice {
    *  one spawns `copilot --resume=<id>` and pairs like the "Start session" flow. Runtime-only (not
    *  persisted) — the store is high-churn, so it's always re-pulled rather than cached across runs. */
   sessions?: StoredSession[];
+  /** Runtime-only snapshots keyed by folder + sort; keep cached results visible during refresh. */
+  sessionLists?: Record<string, DeviceSessionListCache>;
   /** Per-folder session totals across the WHOLE laptop store, sent alongside SESSION_LIST. Kept apart
    *  from `sessions` because that is only the newest page (and may be scoped to one folder), so
    *  counting it would understate every folder that fell off the end. Runtime-only. */
@@ -188,6 +191,18 @@ export interface ListenerDeviceState extends RegisteredDevice {
    *  Excludes DEVICE_HEARTBEAT (liveness is already surfaced via `connected`/`lastSeenAt`). Not
    *  persisted across app restarts; the channel itself is re-established on reconnect. */
   events: DebugEvent[];
+}
+
+export interface DeviceSessionListCache {
+  sessions?: StoredSession[];
+  receivedAt?: number;
+  requestId?: string;
+  loading: boolean;
+  error?: 'session-store-unavailable' | 'request-timeout' | 'request-failed';
+}
+
+export function sessionListScopeKey(cwd: string | null, sort: SessionListSort): string {
+  return JSON.stringify([cwd, sort]);
 }
 
 export interface SessionConnection {

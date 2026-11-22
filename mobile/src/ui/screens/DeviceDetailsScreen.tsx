@@ -15,7 +15,6 @@ import {
   PlayGlyph,
   PowerGlyph,
   RefreshGlyph,
-  ResumeGlyph,
   StarGlyph,
   TerminalGlyph,
   TrashGlyph,
@@ -48,9 +47,7 @@ interface DeviceDetailsScreenProps {
   onRefreshDeviceKeepAwake(channelId: string): void;
   onStartDeviceKeepAwake(channelId: string, durationMs: number): void;
   onStopDeviceKeepAwake(channelId: string): void;
-  /** Open the start screen on its Resume tab for this device. The resumable-session list lives
-   *  there, next to the folder picker and permission toggle it shares with starting a new one —
-   *  this screen is device administration, not a second place to launch sessions from. */
+  /** Open the shared start/continue screen for this device with session search ready. */
   onResumeOnDevice(channelId: string): void;
   onSetDefault(channelId: string): Promise<void>;
   onForget(channelId: string): Promise<void>;
@@ -190,6 +187,7 @@ export function DeviceDetailsScreen({
   const [confirmForget, setConfirmForget] = useState(false);
   // #ui: the inactive bucket starts collapsed so the list opens on what's still running.
   const [inactiveOpen, setInactiveOpen] = useState(false);
+  const [allActiveOpen, setAllActiveOpen] = useState(false);
   const [allAppsOpen, setAllAppsOpen] = useState(false);
   const [allProjectsOpen, setAllProjectsOpen] = useState(false);
   // #ui: swipe-to-reveal row actions, mirroring WeftDrawer's session rows. One row at a time.
@@ -211,6 +209,7 @@ export function DeviceDetailsScreen({
   }));
   const activeRows = rows.filter((r) => r.derived.active);
   const inactiveRows = rows.filter((r) => !r.derived.active);
+  const shownActiveRows = allActiveOpen ? activeRows : activeRows.slice(0, 3);
   // Sessions this laptop opened `/weft` in and is offering for one-tap adoption. Hide any whose
   // channel we already track (already joined) so a lingering offer can't show a duplicate row.
   const tracked = new Set(sessions.map((s) => s.meta.channelId));
@@ -629,19 +628,10 @@ export function DeviceDetailsScreen({
               type="button"
               className="device-quick-action primary"
               disabled={!online}
-              onClick={() => onStartOnDevice(device.channelId)}
-            >
-              <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
-              <strong>New session</strong>
-            </button>
-            <button
-              type="button"
-              className="device-quick-action primary"
-              disabled={!online}
               onClick={() => onResumeOnDevice(device.channelId)}
             >
-              <span className="device-action-icon" aria-hidden="true"><ResumeGlyph /></span>
-              <strong>Continue session</strong>
+              <span className="device-action-icon" aria-hidden="true"><PlayGlyph /></span>
+              <strong>Start or continue</strong>
             </button>
             <button
               type="button"
@@ -856,8 +846,19 @@ export function DeviceDetailsScreen({
               {rows.length === 0 ? 'No sessions started on this device yet.' : 'Nothing running right now.'}
             </p>
           ) : (
-            <ul className="device-sessions-list">{activeRows.map(renderSessionRow)}</ul>
+            <ul className="device-sessions-list">{shownActiveRows.map(renderSessionRow)}</ul>
           )}
+          {activeRows.length > 3 ? (
+            <button
+              type="button"
+              className={`device-group-toggle ${allActiveOpen ? 'open' : ''}`}
+              aria-expanded={allActiveOpen}
+              onClick={() => setAllActiveOpen((open) => !open)}
+            >
+              <ChevronGlyph />
+              {allActiveOpen ? 'Show fewer active sessions' : `Show all ${activeRows.length} active sessions`}
+            </button>
+          ) : null}
 
           {inactiveRows.length > 0 ? (
             <>

@@ -1011,11 +1011,14 @@ test("SESSION_LIST_REQUEST replies with the store's resumable sessions (on-deman
   // Not pushed on bind: the phone must ask. Nothing should have arrived before the request.
   assert.equal(messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST), undefined);
 
-  await phoneChannel.send(sessionListRequest(50, null, "created"));
+  await phoneChannel.send(sessionListRequest(50, null, "created", "req-list-1"));
   const list = await waitFor(
     () => messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
     "session list",
   );
+  assert.equal(list.msg.requestId, "req-list-1");
+  assert.equal(list.msg.cwd, null);
+  assert.equal(list.msg.sort, "created");
   assert.equal(sessionsApi.lastLimit, 50, "the requested limit is passed through to the store");
   assert.equal(sessionsApi.lastSort, "created", "the requested sort is passed through to the store");
   assert.equal(list.msg.sessions.length, 1);
@@ -1023,6 +1026,32 @@ test("SESSION_LIST_REQUEST replies with the store's resumable sessions (on-deman
     sessionId: "sid-1", title: "Fix bug", cwd: cwdA, repository: "web", branch: "main", updatedAt: 5,
   });
   await listener.stop();
+});
+
+test("SESSION_LIST_REQUEST reports a store failure instead of an empty successful list", async (t) => {
+  const { listener, phoneChannel, messages } = await pairedHarness({
+    projects: [],
+    sessionsApi: {
+      listSessions() {
+        throw new Error("session store is unavailable");
+      },
+      readSessionCwd: () => null,
+    },
+  });
+  t.after(() => listener.stop());
+
+  await phoneChannel.send(sessionListRequest(50, "C:\\repo\\weft", "activity", "req-list-error"));
+  const list = await waitFor(
+    () => messages.find((message) => message.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST),
+    "failed session-list response",
+  );
+  assert.deepEqual(list.msg, {
+    requestId: "req-list-error",
+    cwd: "C:\\repo\\weft",
+    sort: "activity",
+    errorCode: "session-store-unavailable",
+    sessions: [],
+  });
 });
 
 test("RESUME_SESSION spawns `copilot --resume=<id>` in the session's cwd and pairs", async () => {

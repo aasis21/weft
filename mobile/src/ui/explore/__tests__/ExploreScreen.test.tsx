@@ -72,6 +72,17 @@ afterEach(() => {
 });
 
 describe('Explore catalog', () => {
+  it('can open without an active session and returns to session navigation', () => {
+    const onOpenSessions = vi.fn();
+    render(
+      <ExploreScreen active={null} onOpenSessions={onOpenSessions} onOpenChat={vi.fn()} onGoHome={vi.fn()} />,
+    );
+    expect(screen.getByText('Explore')).toBeInTheDocument();
+    expect(document.querySelector('.live-copilot-dock')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open sessions' }));
+    expect(onOpenSessions).toHaveBeenCalledOnce();
+  });
+
   it('ships exactly 50 unique, bounded starter cards', () => {
     expect(DISCOVER_CARDS).toHaveLength(50);
     expect(new Set(DISCOVER_CARDS.map((card) => card.id)).size).toBe(50);

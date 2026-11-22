@@ -32,9 +32,9 @@ mobile/public/native-runtime-*.json
 .env.local
 *.local
 
-# capacitor / android
-mobile/android/
+# capacitor / mobile signing
 mobile/ios/
+*.jks
 *.keystore
 mobile/release/*.apk
 

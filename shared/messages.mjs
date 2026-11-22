@@ -634,11 +634,12 @@ export const spawnSession = (requestId, projectName, mode = "default", name = nu
  *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. Optional `cwd` narrows the
  *  query to one folder *before* the cap applies — without it a busy folder's history is invisible
  *  behind whatever happens to be newest across the whole machine. */
-export const sessionListRequest = (limit = null, cwd = null, sort = "activity") =>
+export const sessionListRequest = (limit = null, cwd = null, sort = "activity", requestId = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST_REQUEST, {
     ...(Number.isFinite(limit) && limit > 0 ? { limit: Math.floor(limit) } : {}),
     ...(typeof cwd === "string" && cwd ? { cwd } : {}),
     ...(sort === "created" ? { sort } : {}),
+    ...(typeof requestId === "string" && requestId ? { requestId } : {}),
   });
 /**
  * Listener -> phone: the machine's recent resumable sessions, newest-first. Each entry is
@@ -648,8 +649,16 @@ export const sessionListRequest = (limit = null, cwd = null, sort = "activity") 
  * `updatedAt` is epoch ms of the session's last activity (for "2h ago" sorting/labels). Malformed
  * entries (missing sessionId/cwd) are dropped so a corrupt row can never wedge the phone list.
  */
-export const sessionList = (sessions, folders = null) =>
+export const sessionList = (sessions, folders = null, scope = {}) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_LIST, {
+    ...(Object.keys(scope).length > 0
+      ? {
+          ...(typeof scope.requestId === "string" && scope.requestId ? { requestId: scope.requestId } : {}),
+          cwd: typeof scope.cwd === "string" ? scope.cwd : null,
+          sort: scope.sort === "created" ? "created" : "activity",
+          ...(scope.errorCode === "session-store-unavailable" ? { errorCode: scope.errorCode } : {}),
+        }
+      : {}),
     sessions: (Array.isArray(sessions) ? sessions : [])
       .filter((s) => s && typeof s.sessionId === "string" && s.sessionId && typeof s.cwd === "string" && s.cwd)
       .map((s) => ({

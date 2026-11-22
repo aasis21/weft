@@ -22,7 +22,9 @@ Supabase project or phone; it does not prove cross-device connectivity.
 
 - Node.js 20 or newer.
 - For the hosted web app and demo: a current browser.
-- Only for building the native Android shell: Android Studio + Android SDK.
+- Only for building the native Android app: JDK 21 (`JAVA_HOME`) and Android SDK
+  Platform 35 (`ANDROID_HOME`, or `mobile/android/local.properties`). Android Studio
+  can provide both. The Gradle wrapper handles Gradle itself.
 - The session extension uses `@github/copilot-sdk`, supplied by the CLI or Copilot app
   host at runtime. Device Station launches require an installed, signed-in CLI.
 
@@ -135,10 +137,23 @@ configured yet.
 - **Local dev server:** `cd mobile && npm run dev` serves the demo on your development
   computer. For a physical phone, use an HTTPS-served development deployment:
   an ordinary HTTP LAN address is not a secure context for camera and Web Crypto
-  APIs. Manual paste is available on keyboard-and-mouse devices, not touch-only phones.
+  APIs. Manual paste is available in desktop browsers and the native Android app.
 
-Developers who need to build the native shell from source can run `npx cap sync android`
-and use Android Studio, but that build is not a distributed release APK.
+To build a debug-signed APK locally, run from the repository root after `npm ci`:
+
+```sh
+npm run build:android -w @aasis21/weft-mobile
+adb install -r mobile/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Use an emulator or enable USB debugging on your Android device before running `adb`.
+Open Weft, allow camera access if prompted, and scan a fresh QR from your laptop.
+Weft uses its in-app camera if the Google Barcode Scanner module is unavailable.
+For an emulator or an unavailable camera, choose **Paste pairing code** instead.
+Copy the code from the laptop's **Pairing** tab in Weft Control Center, paste it
+into the app, and choose **Pair from pasted code**. Don't share the code in logs
+or chat.
+This APK is for local testing, not a signed production release.
 
 **3. Pair and drive it.** Run `weft start`. On Windows and macOS you can close its
 terminal once startup succeeds; Station continues in a manually started per-user

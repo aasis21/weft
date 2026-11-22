@@ -56,6 +56,8 @@ vi.mock('@/session/runtime/instance', () => {
       subscribe: () => () => {},
       getSnapshot: () => runtime.snapshot,
       init: () => Promise.resolve(),
+      connectDevice: noOp,
+      refreshSessions: noOp,
       remove: noOp,
       setActive: noOp,
       sendPrompt: noOp,
@@ -136,6 +138,36 @@ afterEach(() => {
 });
 
 describe('App Explore layering', () => {
+  it('opens Explore without a session and preserves the start draft when returning', async () => {
+    const previousSessions = runtime.snapshot.sessions;
+    const previousDevices = runtime.snapshot.devices;
+    runtime.snapshot.sessions = [];
+    runtime.snapshot.devices = [{
+      channelId: 'device-1',
+      name: 'Laptop',
+      connected: true,
+      isDefault: true,
+      projectsLoading: false,
+      projects: [{ name: 'repo', path: 'C:\\repo', isDefault: true }],
+      events: [],
+    }] as never[];
+    try {
+      render(<App />);
+      const input = await screen.findByLabelText('First message');
+      fireEvent.change(input, { target: { value: 'Keep this draft' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Open Explore' }));
+      expect(await screen.findByText('Explore')).toBeInTheDocument();
+      act(() => window.dispatchEvent(new PopStateEvent('popstate', { state: null })));
+      expect(await screen.findByLabelText('First message')).toHaveValue('Keep this draft');
+      fireEvent.click(screen.getByRole('button', { name: 'More' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'About Weft' }));
+      expect(screen.getByTestId('landing-screen')).toBeInTheDocument();
+    } finally {
+      runtime.snapshot.sessions = previousSessions;
+      runtime.snapshot.devices = previousDevices;
+    }
+  });
+
   it('keeps the active SessionScreen mounted and inert beneath Explore, then restores it on Back', async () => {
     render(<App />);
     const session = await screen.findByTestId('session-screen');

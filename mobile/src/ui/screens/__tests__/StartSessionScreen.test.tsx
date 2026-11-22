@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { LifecycleStatusMsg, StoredSession } from '@aasis21/weft-shared';
 import { StartSessionScreen } from '../StartSessionScreen';
-import type { ListenerDeviceState } from '@/session/model';
+import { sessionListScopeKey, type ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 
 function storedSession(partial: Partial<StoredSession> & { sessionId: string }): StoredSession {
@@ -58,14 +58,12 @@ function lifecycleStatus(
 
 function renderScreen(overrides: Partial<Props> = {}) {
   const props: Props = {
-    hasSessions: false,
     devices: [makeDevice()],
     onConnectDevice: vi.fn(),
     onOpen: vi.fn().mockResolvedValue(lifecycleStatus()),
     onConfirmTakeover: vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' })),
     onRefreshSessions: vi.fn(),
     onScanListener: vi.fn(),
-    onCancel: vi.fn(),
     sessions: [],
     activeId: null,
     onSelectSession: vi.fn(),
@@ -78,14 +76,30 @@ function renderScreen(overrides: Partial<Props> = {}) {
 }
 
 /** A device whose store list is loaded and whose configured default is `defaultPath`. */
-function resumeDevice(defaultPath: string, sessions: StoredSession[] | undefined = stored): ListenerDeviceState {
-  return makeDevice({
-    sessions,
+function resumeDevice(defaultPath: string, sessions: StoredSession[] | null = stored): ListenerDeviceState {
+  const device = makeDevice({
     projects: [
       { path: 'C:\\CLP\\Other', name: 'Other', isDefault: false },
       { path: defaultPath, name: 'Default', isDefault: true },
     ],
   });
+  return sessions === null
+    ? device
+    : {
+        ...device,
+        sessionLists: {
+          [sessionListScopeKey(defaultPath, 'activity')]: {
+            sessions,
+            receivedAt: Date.now(),
+            loading: false,
+          },
+          [sessionListScopeKey(defaultPath, 'created')]: {
+            sessions,
+            receivedAt: Date.now(),
+            loading: false,
+          },
+        },
+      };
 }
 
 function rowTitles(): string[] {
@@ -144,6 +158,49 @@ describe('StartSessionScreen', () => {
     expect((screen.getByLabelText(/^device$/i) as HTMLSelectElement).value).toBe('chan-2');
   });
 
+  it('keeps Weft navigation on the shared header and lets plus focus the existing draft', () => {
+    const onOpenExplore = vi.fn();
+    renderScreen({
+      initialMessage: 'Keep this draft',
+      onOpenExplore,
+      onManageDevices: vi.fn(),
+    });
+
+    expect(screen.getByText('Weft')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open sessions/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open explore/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /scan to connect/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /open explore/i }));
+    expect(onOpenExplore).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: /write a new session prompt/i }));
+    expect(composer()).toHaveValue('Keep this draft');
+    expect(composer()).toHaveFocus();
+    expect(screen.queryByRole('button', { name: /close/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /more/i }));
+    const devicesItem = screen.getByRole('menuitem', { name: /^devices$/i });
+    const settingsItem = screen.getByRole('menuitem', { name: /^settings$/i });
+    expect(devicesItem).toBeInTheDocument();
+    expect(settingsItem).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /about weft/i })).toBeInTheDocument();
+    devicesItem.focus();
+    fireEvent.keyDown(devicesItem, { key: 'ArrowDown' });
+    expect(settingsItem).toHaveFocus();
+    fireEvent.keyDown(settingsItem, { key: 'ArrowUp' });
+    expect(devicesItem).toHaveFocus();
+  });
+
+  it('offers a tap-to-fill starter prompt without pre-filling the composer', () => {
+    const onDraftChange = vi.fn();
+    renderScreen({ onDraftChange });
+
+    expect(composer()).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: /try: summarize this repository/i }));
+    expect(composer()).toHaveValue('Summarize this repository');
+    expect(onDraftChange).toHaveBeenLastCalledWith('Summarize this repository');
+    expect(composer()).toHaveFocus();
+  });
+
   it('labels send by whether there is a message, and keeps it inert while the device is offline', () => {
     renderScreen();
     expect(send()).toHaveAccessibleName('Start session');
@@ -191,10 +248,73 @@ describe('StartSessionScreen', () => {
 
   it('loads the folder\'s sessions on its own, scoped to the selected folder', () => {
     const onRefreshSessions = vi.fn();
-    renderScreen({ devices: [{ ...resumeDevice('C:\\CLP\\ModernOrder'), sessions: undefined }], onRefreshSessions });
+    renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder', null)], onRefreshSessions });
     expect(onRefreshSessions).toHaveBeenCalledTimes(1);
     expect(onRefreshSessions).toHaveBeenCalledWith('chan-1', 'C:\\CLP\\ModernOrder', 'activity');
     expect(screen.getByRole('list', { name: /loading sessions/i })).toBeInTheDocument();
+  });
+
+  it('keeps cached sessions visible and announces a slow refresh after one second', () => {
+    vi.useFakeTimers();
+    try {
+      const base = resumeDevice('C:\\CLP\\ModernOrder');
+      const key = sessionListScopeKey('C:\\CLP\\ModernOrder', 'activity');
+      const cached = base.sessionLists?.[key];
+      const view = renderScreen({
+        devices: [{
+          ...base,
+          sessionLists: {
+            ...base.sessionLists,
+            [key]: { ...cached, loading: true },
+          },
+        }],
+      });
+
+      expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries']);
+      expect(screen.queryByText('Updating…')).toBeNull();
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(screen.getByRole('status')).toHaveTextContent('Updating…');
+      expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries']);
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps cached results and exposes retry after a failed refresh', () => {
+    const onRefreshSessions = vi.fn();
+    const base = resumeDevice('C:\\CLP\\ModernOrder');
+    const key = sessionListScopeKey('C:\\CLP\\ModernOrder', 'activity');
+    const cached = base.sessionLists?.[key];
+    renderScreen({
+      devices: [{
+        ...base,
+        sessionLists: {
+          ...base.sessionLists,
+          [key]: { ...cached, error: 'request-failed', loading: false },
+        },
+      }],
+      onRefreshSessions,
+    });
+
+    expect(rowTitles()).toEqual(['Fix the auth bug', 'Add retries']);
+    expect(screen.getByRole('status')).toHaveTextContent('Showing saved results.');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRefreshSessions).toHaveBeenLastCalledWith('chan-1', 'C:\\CLP\\ModernOrder', 'activity');
+  });
+
+  it('shows a retryable failure instead of an empty-list message on the first failed fetch', () => {
+    const base = resumeDevice('C:\\CLP\\ModernOrder', null);
+    const key = sessionListScopeKey('C:\\CLP\\ModernOrder', 'activity');
+    renderScreen({
+      devices: [{
+        ...base,
+        sessionLists: { [key]: { loading: false, error: 'session-store-unavailable' } },
+      }],
+    });
+    expect(screen.getByText('Couldn’t load recent sessions.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText(/no sessions in default yet/i)).toBeNull();
   });
 
   it('does not fetch while the device is offline', () => {
@@ -206,7 +326,7 @@ describe('StartSessionScreen', () => {
 
   it('does not ask again when the folder genuinely has no sessions', () => {
     const onRefreshSessions = vi.fn();
-    const { rerender, props } = renderScreen({ devices: [{ ...resumeDevice('C:\\CLP\\Empty'), sessions: undefined }], onRefreshSessions });
+    const { rerender, props } = renderScreen({ devices: [resumeDevice('C:\\CLP\\Empty', null)], onRefreshSessions });
     rerender(<StartSessionScreen {...props} devices={[resumeDevice('C:\\CLP\\Empty', [])]} />);
     expect(onRefreshSessions).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/no sessions in default yet/i)).toBeInTheDocument();
@@ -225,7 +345,7 @@ describe('StartSessionScreen', () => {
     rerender(<StartSessionScreen {...props} devices={[{ ...base, lastAttemptAt: 99 }]} />);
     expect(onRefreshSessions).toHaveBeenCalledTimes(3);
 
-    document.dispatchEvent(new Event('visibilitychange'));
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
     expect(onRefreshSessions).toHaveBeenCalledTimes(4);
   });
 

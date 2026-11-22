@@ -28,6 +28,9 @@ const SessionScreen = lazy(() =>
 const TerminalScreen = lazy(() =>
   import('@/ui/screens/TerminalScreen').then((module) => ({ default: module.TerminalScreen })),
 );
+const ExploreScreen = lazy(() =>
+  import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
+);
 
 type ModalHistoryState = { weftView: 'devices' } |
   { weftView: 'device-details' | 'terminal'; channelId: string } |
@@ -51,6 +54,7 @@ export default function App(): JSX.Element {
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startDeviceId, setStartDeviceId] = useState<string | undefined>(undefined);
+  const [startDraft, setStartDraft] = useState('');
   /** "Continue session" on a device opens the start screen with its session search ready. */
   const [startMode, setStartMode] = useState<StartMode>('new');
   const [devicesOpen, setDevicesOpen] = useState(false);
@@ -130,6 +134,7 @@ export default function App(): JSX.Element {
     setAdding(false);
     setDevicesOpen(false);
     setDeviceDetailsChannelId(undefined);
+    setShowLanding(false);
     setStartDeviceId(channelId);
     setStartMode(mode);
     setStarting(true);
@@ -338,12 +343,11 @@ export default function App(): JSX.Element {
     );
   }
 
-  // Explicit "Home" tap from the session screen: show the landing page even though
-  // sessions exist, with links back into them.
-  if (showLanding && hasSessions && active) {
+  // An explicit About/Home tap opens the landing page even without an existing session.
+  if (showLanding) {
     return (
       <LandingScreen
-        hasSessions
+        hasSessions={hasSessions}
         onOpenSessions={() => {
           setError(null);
           setShowLanding(false);
@@ -482,15 +486,34 @@ export default function App(): JSX.Element {
   // the device-aware start flow so the paired device is visible and ready to launch a session on.
   const hasDevicesOnly = !hasSessions && snapshot.devices.length > 0;
 
-  if (starting || hasDevicesOnly) {
+  if (exploreOpen && !active) {
+    return (
+      <Suspense fallback={loadingScreen('Opening Explore…')}>
+        <ExploreScreen
+          active={null}
+          onOpenSessions={closeExplore}
+          onOpenChat={closeExplore}
+          onGoHome={() => {
+            setExploreOpen(false);
+            setShowLanding(true);
+            window.history.replaceState(null, '');
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  if (starting || (hasDevicesOnly && !showLanding)) {
     return (
       <Suspense fallback={loadingScreen('Loading session controls…')}>
         <StartSessionScreen
-          hasSessions={hasSessions}
           devices={snapshot.devices}
           initialChannelId={startDeviceId}
           initialMode={startMode}
+          initialMessage={startDraft}
+          onDraftChange={setStartDraft}
           onConnectDevice={(id) => void sessionRuntime.connectDevice(id)}
+          onOpenExplore={openExplore}
           onOpen={async (intent) => {
             const status = await sessionAccess.open(intent);
             if (
@@ -501,6 +524,7 @@ export default function App(): JSX.Element {
               setStarting(false);
               setStartDeviceId(undefined);
               setShowLanding(false);
+              if (intent.target.kind === 'new') setStartDraft('');
             }
             return status;
           }}
@@ -520,11 +544,6 @@ export default function App(): JSX.Element {
           onRefreshSessions={(id, cwd, sort) => void sessionRuntime.refreshSessions(id, cwd, sort)}
           onScanListener={() => openJoin(false)}
           onManageDevices={openDevices}
-          onCancel={() => {
-            setStarting(false);
-            setStartDeviceId(undefined);
-            setError(null);
-          }}
           sessions={snapshot.sessions}
           activeId={activeId}
           onSelectSession={(id) => {

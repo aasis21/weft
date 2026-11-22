@@ -157,8 +157,10 @@ import {
   deviceHealthCached,
   deviceSnapshotReceived,
   deviceSessionOffersReceived,
+  deviceSessionListRefreshStarted,
+  deviceSessionListRefreshFailed,
+  deviceSessionListRefreshCancelled,
   deviceSessionsReceived,
-  deviceSessionsLoadingSet,
   deviceOfferRemoved,
   deviceReconciled,
   deviceRemoved,
@@ -484,6 +486,19 @@ export class SessionRuntime {
   /** Per-device fail-safe timers for an outstanding `project_list_request` (see
    *  PROJECT_LIST_INFLIGHT_MS) — while an entry exists, refreshProjects skips sending a duplicate. */
   private readonly projectListInflight = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly sessionListInflight = new Map<string, {
+    requestId: string;
+    cwd: string | null;
+    sort: SessionListSort;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
+  private readonly sessionListQueued = new Map<string, {
+    requestId: string;
+    cwd: string | null;
+    sort: SessionListSort;
+  }>();
+  // After a timeout, a late legacy reply cannot safely be assigned to any later request.
+  private readonly ambiguousLegacySessionLists = new Set<string>();
   private readonly deviceMonitors = new Map<string, DeviceMonitorLease>();
   private readonly terminals = new Map<string, TerminalController>();
   private readonly demoDevices = new Map<string, string>();
@@ -2213,40 +2228,86 @@ export class SessionRuntime {
     return tempId;
   }
 
-  /** On-demand pull of the laptop's recent resumable CLI sessions (SESSION_LIST_REQUEST). Lazy — the
-   *  Device details "Resume a session" section calls this on mount and on manual refresh, never on
-   *  bind, because the session store is large and rewritten every turn. The reply lands in
-   *  onListenerMessage → deviceSessionsReceived. Best-effort: a connect/send failure just clears the
-   *  loading flag (the section shows whatever was last pulled) without wedging the device. */
+  /** Serialize requests per device for listeners that do not echo correlation metadata. */
   async refreshSessions(channelId: string, cwd?: string | null, sort: SessionListSort = 'activity'): Promise<void> {
-    this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: true }));
-    // Comms are async: the SESSION_LIST reply arrives later via onListenerMessage (or never, if the
-    // laptop is wedged). Arm a failsafe so the button can't stay stuck on "Loading…" — clearing the
-    // flag is idempotent, so if the reply lands first (deviceSessionsReceived also clears it) this is
-    // a harmless no-op.
-    const failSafe = setTimeout(
-      () => this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false })),
-      SESSION_LIST_INFLIGHT_MS,
-    );
-    (failSafe as { unref?: () => void }).unref?.();
-    try {
-      await this.connectDevice(channelId);
-      const ctrl = this.listenerController(channelId);
-      if (!ctrl?.client) {
-        clearTimeout(failSafe);
-        this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
-        return;
+    const request = { requestId: crypto.randomUUID(), cwd: cwd ?? null, sort };
+    const pending = this.sessionListInflight.get(channelId);
+    if (pending?.cwd === request.cwd && pending.sort === request.sort) return;
+    const queued = this.sessionListQueued.get(channelId);
+    if (queued?.cwd === request.cwd && queued.sort === request.sort) return;
+
+    this.store.dispatch(deviceSessionListRefreshStarted({ channelId, ...request }));
+    if (pending) {
+      if (queued) {
+        this.store.dispatch(deviceSessionListRefreshCancelled({ channelId, ...queued }));
       }
-      const message = sessionListRequest(null, cwd ?? null, sort);
-      this.recordDeviceEvent(channelId, 'out', message);
-      await ctrl.client.send(message);
-    } catch (err) {
-      clearTimeout(failSafe);
-      this.store.dispatch(deviceSessionsLoadingSet({ channelId, loading: false }));
-      this.store.dispatch(
-        deviceErrorSet({ channelId, error: errMessage(err, 'Could not request sessions.'), connected: false }),
-      );
+      this.sessionListQueued.set(channelId, request);
+      return;
     }
+    this.startSessionListRequest(channelId, request);
+  }
+
+  private startSessionListRequest(
+    channelId: string,
+    request: { requestId: string; cwd: string | null; sort: SessionListSort },
+  ): void {
+    let active!: {
+      requestId: string;
+      cwd: string | null;
+      sort: SessionListSort;
+      timeout: ReturnType<typeof setTimeout>;
+    };
+    const timeout = setTimeout(() => {
+      if (this.sessionListInflight.get(channelId) !== active) return;
+      this.ambiguousLegacySessionLists.add(channelId);
+      this.store.dispatch(deviceSessionListRefreshFailed({
+        channelId,
+        ...request,
+        error: 'request-timeout',
+      }));
+      this.finishSessionListRequest(channelId, active);
+    }, SESSION_LIST_INFLIGHT_MS);
+    (timeout as { unref?: () => void }).unref?.();
+    active = { ...request, timeout };
+    this.sessionListInflight.set(channelId, active);
+
+    void (async () => {
+      try {
+        await this.connectDevice(channelId);
+        if (this.sessionListInflight.get(channelId) !== active) return;
+        const ctrl = this.listenerController(channelId);
+        if (!ctrl?.client) throw new Error('The laptop is not connected.');
+        const message = sessionListRequest(null, request.cwd, request.sort, request.requestId);
+        this.recordDeviceEvent(channelId, 'out', message);
+        await ctrl.client.send(message);
+      } catch (err) {
+        if (this.sessionListInflight.get(channelId) !== active) return;
+        this.ambiguousLegacySessionLists.add(channelId);
+        this.store.dispatch(deviceSessionListRefreshFailed({
+          channelId,
+          ...request,
+          error: 'request-failed',
+        }));
+        this.store.dispatch(
+          deviceErrorSet({ channelId, error: errMessage(err, 'Could not request sessions.'), connected: false }),
+        );
+        this.finishSessionListRequest(channelId, active);
+      }
+    })();
+  }
+
+  private finishSessionListRequest(
+    channelId: string,
+    active: { requestId: string; cwd: string | null; sort: SessionListSort; timeout: ReturnType<typeof setTimeout> },
+  ): void {
+    if (this.sessionListInflight.get(channelId) !== active) return;
+    clearTimeout(active.timeout);
+    this.sessionListInflight.delete(channelId);
+    const queued = this.sessionListQueued.get(channelId);
+    if (!queued) return;
+    this.sessionListQueued.delete(channelId);
+    this.store.dispatch(deviceSessionListRefreshStarted({ channelId, ...queued }));
+    this.startSessionListRequest(channelId, queued);
   }
 
   /** Resume an existing CLI session from the laptop's store: spawn `copilot --resume=<id>` in that
@@ -2412,6 +2473,13 @@ export class SessionRuntime {
   }
 
   async forgetDevice(channelId: string): Promise<void> {
+    const sessionListRequest = this.sessionListInflight.get(channelId);
+    if (sessionListRequest) {
+      clearTimeout(sessionListRequest.timeout);
+      this.sessionListInflight.delete(channelId);
+    }
+    this.sessionListQueued.delete(channelId);
+    this.ambiguousLegacySessionLists.delete(channelId);
     this.terminals.get(channelId)?.dispose();
     this.terminals.delete(channelId);
     this.clearDeviceUtilities(channelId);
@@ -2612,10 +2680,41 @@ export class SessionRuntime {
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST) {
       const msg = message.msg as SessionListMsg;
+      const active = this.sessionListInflight.get(channelId);
+      if (!active) return;
+      if (!msg.requestId && this.ambiguousLegacySessionLists.has(channelId)) return;
+      const responseRequestId = msg.requestId ?? active.requestId;
+      const responseCwd = msg.cwd === undefined ? active.cwd : msg.cwd;
+      const responseSort = msg.sort ?? active.sort;
+      if (
+        responseRequestId !== active.requestId ||
+        responseCwd !== active.cwd ||
+        responseSort !== active.sort
+      ) return;
+      if (msg.errorCode === 'session-store-unavailable') {
+        this.store.dispatch(deviceSessionListRefreshFailed({
+          channelId,
+          requestId: active.requestId,
+          cwd: active.cwd,
+          sort: active.sort,
+          error: 'session-store-unavailable',
+        }));
+        this.finishSessionListRequest(channelId, active);
+        return;
+      }
       const sessions = (msg.sessions ?? []).filter(
         (s) => s && typeof s.sessionId === 'string' && s.sessionId && typeof s.cwd === 'string' && s.cwd,
       );
-      this.store.dispatch(deviceSessionsReceived({ channelId, sessions, folders: msg.folders }));
+      this.store.dispatch(deviceSessionsReceived({
+        channelId,
+        requestId: active.requestId,
+        cwd: active.cwd,
+        sort: active.sort,
+        receivedAt: this.clock(),
+        sessions,
+        folders: msg.folders,
+      }));
+      this.finishSessionListRequest(channelId, active);
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
@@ -3655,6 +3754,10 @@ export class SessionRuntime {
     this.foreground = false;
     this.updateWatches();
     this.disposed = true;
+    for (const request of this.sessionListInflight.values()) clearTimeout(request.timeout);
+    this.sessionListInflight.clear();
+    this.sessionListQueued.clear();
+    this.ambiguousLegacySessionLists.clear();
     if (this.watchTimer) clearInterval(this.watchTimer);
     for (const timer of this.watchCooldowns.values()) clearTimeout(timer);
     this.watchCooldowns.clear();

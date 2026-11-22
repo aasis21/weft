@@ -803,40 +803,42 @@ export function createListener({
   // Serve the phone's on-demand "Resume a session" list from the CLI session store. Unlike
   // sendProjectList()/sendSessionOffers(), this is NEVER pushed on bind or on a watch — the store is
   // large and rewritten on every turn of every session, so we read it only when the phone explicitly
-  // asks (SESSION_LIST_REQUEST). Best-effort: any read/send failure just sends (or skips) an empty
-  // list; the phone can pull again.
-  async function sendSessionList(limit, cwd, sort) {
+  // asks (SESSION_LIST_REQUEST). Keep a failed store read distinct from a genuinely empty list.
+  async function sendSessionList(limit, cwd, sort, requestId) {
     if (!channel || stopped) return;
     const replyChannel = channel;
     const startedAt = Date.now();
     appendStationLog("session.list.requested", { pid: process.pid });
     let sessions = [];
     let folders = null;
+    let errorCode;
     try {
       sessions = (await Promise.resolve(sessionsApi.listSessions({ limit, cwd, sort, strict: true }))) ?? [];
     } catch (error) {
       appendStationLog("session.list.store_failed", { code: error.cause?.code ?? error.code ?? error.name }, { level: "error" });
-      sessions = [];
+      errorCode = "session-store-unavailable";
     }
-    try {
-      sessions = await mergeSavedSessionsWithRuntimePresence(sessions, {
-        baseDir: connectionsHome,
-        sessionsApi,
-        storeAuthority: sessionCoordinator.storeAuthority,
-      });
-    } catch (error) {
-      appendStationLog("session.list.discovery_failed", { code: error.code ?? error.name }, { level: "warn" });
-      // Saved sessions remain available if runtime discovery is temporarily unavailable.
-    }
-    try {
-      folders = (await Promise.resolve(sessionsApi.listSessionFolders?.(undefined, { strict: true }))) ?? null;
-    } catch (error) {
-      appendStationLog("session.list.folders_failed", { code: error.cause?.code ?? error.code ?? error.name }, { level: "warn" });
-      folders = null;
+    if (!errorCode) {
+      try {
+        sessions = await mergeSavedSessionsWithRuntimePresence(sessions, {
+          baseDir: connectionsHome,
+          sessionsApi,
+          storeAuthority: sessionCoordinator.storeAuthority,
+        });
+      } catch (error) {
+        appendStationLog("session.list.discovery_failed", { code: error.code ?? error.name }, { level: "warn" });
+        // Saved sessions remain available if runtime discovery is temporarily unavailable.
+      }
+      try {
+        folders = (await Promise.resolve(sessionsApi.listSessionFolders?.(undefined, { strict: true }))) ?? null;
+      } catch (error) {
+        appendStationLog("session.list.folders_failed", { code: error.cause?.code ?? error.code ?? error.name }, { level: "warn" });
+        folders = null;
+      }
     }
     try {
       if (stopped || replyChannel !== channel) return;
-      await replyChannel.send(sessionList(sessions, folders));
+      await replyChannel.send(sessionList(sessions, folders, { requestId, cwd, sort, ...(errorCode ? { errorCode } : {}) }));
       appendStationLog("session.list.sent", { count: sessions.length, elapsedMs: Date.now() - startedAt });
     } catch (error) {
       appendStationLog("session.list.send_failed", { code: error.code ?? error.name, elapsedMs: Date.now() - startedAt }, { level: "error" });
@@ -1049,7 +1051,7 @@ export function createListener({
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.SESSION_LIST_REQUEST) {
-      await sendSessionList(envelope.msg?.limit, envelope.msg?.cwd, envelope.msg?.sort);
+      await sendSessionList(envelope.msg?.limit, envelope.msg?.cwd, envelope.msg?.sort, envelope.msg?.requestId);
       return;
     }
     if (envelope.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {

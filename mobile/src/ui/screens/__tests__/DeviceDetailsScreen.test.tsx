@@ -89,38 +89,31 @@ function renderDetails(overrides: Partial<ComponentProps<typeof DeviceDetailsScr
 }
 
 describe('DeviceDetailsScreen is device administration, not a second launcher', () => {
-  it('sends both ways into a session to the one screen that owns them', () => {
-    // The resumable list used to live here, with its own folder filter and its own unlabelled
-    // permission toggle — a parallel, subtly different copy of the start flow bolted onto a device
-    // admin page. Both routes now go to the same screen, which is where the shared steps live.
+  it('sends starting and continuing into the same shared session screen', () => {
     const onStartOnDevice = vi.fn();
     const onResumeOnDevice = vi.fn();
     renderDetails({ onStartOnDevice, onResumeOnDevice });
 
-    fireEvent.click(screen.getByRole('button', { name: /new session/i }));
-    expect(onStartOnDevice).toHaveBeenCalledWith('chan-1');
-
-    fireEvent.click(screen.getByRole('button', { name: /continue session/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start or continue/i }));
     expect(onResumeOnDevice).toHaveBeenCalledWith('chan-1');
+    expect(onStartOnDevice).not.toHaveBeenCalled();
   });
 
   it('presents five actions without pretending unsupported utilities work', () => {
     renderDetails();
 
-    expect(screen.getByRole('button', { name: /new session/i })).toHaveClass('primary');
-    expect(screen.getByRole('button', { name: /continue session/i })).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: /start or continue/i })).toHaveClass('primary');
     expect(screen.getByRole('button', { name: /open terminal/i })).toHaveClass('secondary');
     expect(screen.getByRole('button', { name: /clipboard/i })).toHaveClass('secondary');
     expect(screen.getByRole('button', { name: /keep awake/i })).toHaveClass('secondary');
-    expect(screen.getByRole('button', { name: /new session/i })).not.toBeDisabled();
-    expect(screen.getByRole('button', { name: /continue session/i })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /start or continue/i })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: /open terminal/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /clipboard/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /keep awake/i })).toBeDisabled();
     expect(screen.getAllByText('Checking support')).toHaveLength(3);
     expect(screen.queryByText('Terminal unavailable')).toBeNull();
     // Only the quick action: this screen no longer hosts its own launcher.
-    expect(screen.getAllByText('New session')).toHaveLength(1);
+    expect(screen.getAllByText('Start or continue')).toHaveLength(1);
     expect(screen.queryByText('Recent session')).toBeNull();
   });
 
@@ -132,8 +125,7 @@ describe('DeviceDetailsScreen is device administration, not a second launcher', 
 
   it('keeps the action layout visible but explains why laptop actions are disabled offline', () => {
     renderDetails({ device: makeDevice({ connected: false }) });
-    expect(screen.getByRole('button', { name: /new session/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /continue session/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start or continue/i })).toBeDisabled();
     expect(screen.getAllByText(/weft start/i).some((element) => element.textContent?.includes('weft start'))).toBe(true);
   });
 
@@ -202,6 +194,20 @@ describe('DeviceDetailsScreen session list separates what is running from what i
     const toggle = screen.getByRole('button', { name: /inactive copilot sessions \(1\)/i });
     fireEvent.click(toggle);
     expect(screen.getByText('Old thing')).toBeTruthy();
+  });
+
+  it('shows three active sessions by default and expands the overflow on demand', () => {
+    const sessions = Array.from({ length: 5 }, (_, index) =>
+      makeSession(`live-${index + 1}`, `Running ${index + 1}`, 'live'));
+    renderDetails({ sessions });
+
+    expect(document.querySelectorAll('.device-session-row')).toHaveLength(3);
+    const toggle = screen.getByRole('button', { name: 'Show all 5 active sessions' });
+    fireEvent.click(toggle);
+    expect(document.querySelectorAll('.device-session-row')).toHaveLength(5);
+    for (let index = 1; index <= 5; index += 1) {
+      expect(screen.getByText(`Running ${index}`)).toBeTruthy();
+    }
   });
 
   it('folds status, folder and age onto one line per row', () => {
@@ -775,12 +781,12 @@ describe('DeviceDetailsScreen monitoring', () => {
       expect(send).toHaveFocus();
       fireEvent.keyDown(document, { key: 'Tab' });
       expect(close).toHaveFocus();
-      expect(screen.queryByRole('button', { name: /New session/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Start or continue/ })).toBeNull();
       const header = document.querySelector('.status-bar') as HTMLElement;
       expect(header.inert).toBe(true);
       fireEvent.click(close);
       expect(header.inert).not.toBe(true);
-      expect(screen.getByRole('button', { name: /New session/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /Start or continue/ })).toBeTruthy();
     });
 
     it.each(['disconnect', 'device switch', 'capability removed', 'unmount'])('clears clipboard on %s', (reason) => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeManager } from '@/test/helpers/makeManager';
 import { registry } from '@/test/helpers/fakeWeftClient';
 import * as B from '@/test/helpers/builders';
+import { sessionListScopeKey } from '@/session/model';
 
 function listenerQr(channelId: string): string {
   return JSON.stringify({
@@ -11,6 +12,11 @@ function listenerQr(channelId: string): string {
     kind: 'listener',
     transport: { kind: 'local' },
   });
+}
+
+function requiredRequestId(message: { requestId?: unknown }): string {
+  if (typeof message.requestId !== 'string') throw new Error('Expected requestId on session-list request.');
+  return message.requestId;
 }
 
 describe('scenario: resume a CLI session from the phone', () => {
@@ -40,6 +46,7 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(listener!.sentOfKind('control.session_list_request')[0]).toMatchObject({
       cwd: 'C:\\repo\\weft',
       sort: 'created',
+      requestId: expect.any(String),
     });
     expect(h!.snapshot().devices[0]!.sessionsLoading).toBe(true);
 
@@ -61,6 +68,10 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(device.sessionsLoading).toBe(false);
     expect(device.sessions).toHaveLength(1);
     expect(device.sessions![0]).toMatchObject({ sessionId: 'sid-42', title: 'Fix the bug' });
+    expect(device.sessionLists?.[sessionListScopeKey('C:\\repo\\weft', 'created')]).toMatchObject({
+      sessions: [{ sessionId: 'sid-42', title: 'Fix the bug' }],
+      loading: false,
+    });
 
     // Resume it — spawns an Initializing card and sends RESUME_SESSION (not SPAWN_SESSION).
     const tempId = await h!.manager.resumeSession('listener-1', {
@@ -102,6 +113,115 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(deviceEvents.some((e) => e.eventSubtype === 'session_list_request')).toBe(true);
     expect(deviceEvents.some((e) => e.eventSubtype === 'session_list')).toBe(true);
     expect(deviceEvents.some((e) => e.eventSubtype === 'resume_session')).toBe(true);
+  });
+
+  it('serializes refreshes per device and keeps each folder/sort snapshot separate', async () => {
+    await h!.manager.addByQr(listenerQr('listener-scoped'));
+    await h!.flush();
+    const listener = registry.get('listener-scoped')!;
+
+    await h!.manager.refreshSessions('listener-scoped', 'C:\\repo\\one', 'activity');
+    await h!.flush();
+    const first = listener.sentOfKind('control.session_list_request')[0]!;
+    const firstRequestId = requiredRequestId(first);
+    await h!.manager.refreshSessions('listener-scoped', 'C:\\repo\\two', 'created');
+    await h!.flush();
+    expect(listener.sentOfKind('control.session_list_request')).toHaveLength(1);
+
+    listener.emit(B.sessionList([
+      {
+        sessionId: 'one',
+        title: 'First folder',
+        cwd: 'C:\\repo\\one',
+        repository: 'one',
+        branch: 'main',
+        updatedAt: 100,
+      },
+    ], null, { requestId: firstRequestId, cwd: 'C:\\repo\\one', sort: 'activity' }));
+    await h!.flush();
+
+    const requests = listener.sentOfKind('control.session_list_request');
+    expect(requests).toHaveLength(2);
+    const secondRequestId = requiredRequestId(requests[1]!);
+    expect(requests[1]).toMatchObject({
+      cwd: 'C:\\repo\\two',
+      sort: 'created',
+      requestId: expect.any(String),
+    });
+    listener.emit(B.sessionList([
+      {
+        sessionId: 'two',
+        title: 'Second folder',
+        cwd: 'C:\\repo\\two',
+        repository: 'two',
+        branch: 'main',
+        updatedAt: 200,
+      },
+    ], null, {
+      requestId: secondRequestId,
+      cwd: 'C:\\repo\\two',
+      sort: 'created',
+    }));
+    await h!.flush();
+
+    const lists = h!.snapshot().devices[0]!.sessionLists;
+    expect(lists?.[sessionListScopeKey('C:\\repo\\one', 'activity')]?.sessions?.[0]?.sessionId).toBe('one');
+    expect(lists?.[sessionListScopeKey('C:\\repo\\two', 'created')]?.sessions?.[0]?.sessionId).toBe('two');
+  });
+
+  it('keeps a failed store read distinct from an empty session list', async () => {
+    await h!.manager.addByQr(listenerQr('listener-store-error'));
+    await h!.flush();
+    const listener = registry.get('listener-store-error')!;
+
+    await h!.manager.refreshSessions('listener-store-error', 'C:\\repo\\gone', 'activity');
+    await h!.flush();
+    const request = listener.sentOfKind('control.session_list_request')[0]!;
+    listener.emit(B.sessionList([], null, {
+      requestId: requiredRequestId(request),
+      cwd: 'C:\\repo\\gone',
+      sort: 'activity',
+      errorCode: 'session-store-unavailable',
+    }));
+    await h!.flush();
+
+    const cache = h!.snapshot().devices[0]!.sessionLists?.[
+      sessionListScopeKey('C:\\repo\\gone', 'activity')
+    ];
+    expect(cache).toMatchObject({ error: 'session-store-unavailable', loading: false });
+    expect(cache?.sessions).toBeUndefined();
+  });
+
+  it('does not assign a late uncorrelated reply to a different scope after a timeout', async () => {
+    await h!.manager.addByQr(listenerQr('listener-timeout'));
+    await h!.flush();
+    const listener = registry.get('listener-timeout')!;
+    await h!.manager.refreshSessions('listener-timeout', 'C:\\repo\\one', 'activity');
+    await h!.flush();
+    await h!.manager.refreshSessions('listener-timeout', 'C:\\repo\\two', 'created');
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    await h!.flush();
+    const request = listener.sentOfKind('control.session_list_request')[1]!;
+    listener.emit(B.sessionList([{
+      sessionId: 'stale',
+      title: 'Old request',
+      cwd: 'C:\\repo\\one',
+      repository: 'one',
+      branch: null,
+      updatedAt: 1,
+    }]));
+    await h!.flush();
+    const key = sessionListScopeKey('C:\\repo\\two', 'created');
+    expect(h!.snapshot().devices[0]!.sessionLists?.[key]).toMatchObject({ loading: true });
+
+    listener.emit(B.sessionList([], null, {
+      requestId: requiredRequestId(request),
+      cwd: 'C:\\repo\\two',
+      sort: 'created',
+    }));
+    await h!.flush();
+    expect(h!.snapshot().devices[0]!.sessionLists?.[key]).toMatchObject({ loading: false, sessions: [] });
   });
 
   it('fails an initializing resume card if the laptop reports it cannot resume', async () => {

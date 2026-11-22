@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import jsQR from 'jsqr';
 import { WebQrScanner } from '../WebQrScanner';
@@ -43,6 +43,35 @@ describe('WebQrScanner', () => {
 
     await waitFor(() => expect(onResult).toHaveBeenCalledWith('pairing-raw'));
     expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a camera granted after the user leaves the scanner', async () => {
+    let grant!: (stream: Pick<MediaStream, 'getTracks'>) => void;
+    getUserMedia.mockReturnValue(new Promise((resolve) => { grant = resolve; }));
+    const { unmount } = render(
+      <WebQrScanner variant="inline" onResult={vi.fn()} onCancel={() => undefined} />,
+    );
+
+    unmount();
+    await act(async () => grant({ getTracks: () => [{ stop: stopTrack } as unknown as MediaStreamTrack] }));
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a decoded QR after the user leaves the scanner', async () => {
+    let finishDecode!: (codes: { rawValue: string }[]) => void;
+    const pending = new Promise<{ rawValue: string }[]>((resolve) => { finishDecode = resolve; });
+    const detect = vi.fn().mockReturnValue(pending);
+    (globalThis as unknown as { BarcodeDetector: unknown }).BarcodeDetector =
+      Object.assign(vi.fn(() => ({ detect })), { getSupportedFormats: vi.fn().mockResolvedValue(['qr_code']) });
+    const onResult = vi.fn();
+    const { unmount } = render(
+      <WebQrScanner variant="inline" onResult={onResult} onCancel={() => undefined} />,
+    );
+    await waitFor(() => expect(detect).toHaveBeenCalled());
+
+    unmount();
+    await act(async () => finishDecode([{ rawValue: 'late-qr' }]));
+    expect(onResult).not.toHaveBeenCalled();
   });
 
   it('falls back to jsQR when BarcodeDetector does not report QR support', async () => {

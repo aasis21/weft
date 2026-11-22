@@ -16,6 +16,19 @@ test("Windows and Unix process start times are normalized to epoch milliseconds"
   assert.equal(unix, Date.parse("Tue Nov 14 22:13:20 2023"));
 });
 
+test("a slow Windows process lookup can complete without accepting an unverified identity", async () => {
+  const startedAt = 1_700_000_000_123;
+  const exec = async (_command, _args, { timeout }) => {
+    if (timeout <= 7_500) throw new Error("PowerShell was killed before returning the process start time");
+    return { stdout: `${startedAt}\r\n` };
+  };
+  const result = await verifyProcessIdentity({ pid: 42, processStartedAt: startedAt }, {
+    isAlive: () => true,
+    getStartTime: (pid) => getProcessStartTime(pid, { platform: "win32", exec }),
+  });
+  assert.deepEqual(result, { live: true, actualStartedAt: startedAt });
+});
+
 test("process identity detects exit, PID reuse, and unverifiable ownership", async () => {
   assert.deepEqual(
     await verifyProcessIdentity(

@@ -41,7 +41,7 @@ function historyExploreView(state: ExploreHistoryState | null): ExploreView {
 }
 
 interface ExploreScreenProps {
-  active: SessionView;
+  active: SessionView | null;
   onOpenSessions(): void;
   onOpenChat(): void;
   onGoHome(): void;
@@ -410,21 +410,22 @@ export function ExploreScreen({
     () => initialView ?? historyExploreView(window.history.state as ExploreHistoryState | null),
   );
   const [now, setNow] = useState(Date.now());
-  const latestFinal = latestAssistant(active);
+  const latestFinal = active ? latestAssistant(active) : undefined;
   const latestFinalId =
     latestFinal?.kind === 'assistant' && latestFinal.final ? latestFinal.id : null;
-  const working = isWorking(active.timeline);
+  const working = active ? isWorking(active.timeline) : false;
+  const activeChannelId = active?.meta.channelId ?? null;
   const replyTrackerRef = useRef({
-    channelId: active.meta.channelId,
+    channelId: activeChannelId,
     wasWorking: working,
     baselineFinalId: latestFinalId,
   });
   const [replyReadyId, setReplyReadyId] = useState<string | null>(null);
   useEffect(() => {
     const tracker = replyTrackerRef.current;
-    if (tracker.channelId !== active.meta.channelId) {
+    if (tracker.channelId !== activeChannelId) {
       replyTrackerRef.current = {
-        channelId: active.meta.channelId,
+        channelId: activeChannelId,
         wasWorking: working,
         baselineFinalId: latestFinalId,
       };
@@ -443,19 +444,19 @@ export function ExploreScreen({
       setReplyReadyId(latestFinalId);
     }
     tracker.wasWorking = working;
-  }, [active.meta.channelId, latestFinalId, working]);
+  }, [activeChannelId, latestFinalId, working]);
   const replyCompletedInExplore =
-    replyTrackerRef.current.channelId === active.meta.channelId &&
+    replyTrackerRef.current.channelId === activeChannelId &&
     !working &&
     latestFinalId === replyReadyId;
-  const dock = deriveLiveDock(active, replyCompletedInExplore);
-  const dockActivity = deriveLiveDockActivity(active, dock);
+  const dock = active ? deriveLiveDock(active, replyCompletedInExplore) : null;
+  const dockActivity = active && dock ? deriveLiveDockActivity(active, dock) : [];
 
   useEffect(() => {
-    if (dock.tone !== 'working') return undefined;
+    if (dock?.tone !== 'working') return undefined;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [dock.tone]);
+  }, [dock?.tone]);
 
   useEffect(() => {
     const onPopState = (event: PopStateEvent): void => {
@@ -505,7 +506,7 @@ export function ExploreScreen({
             <button
               type="button"
               className="icon-btn drawer-btn"
-              aria-label={(active.unreadCount ?? 0) > 0 ? `Open sessions, ${active.unreadCount} unread` : 'Open sessions'}
+              aria-label={(active?.unreadCount ?? 0) > 0 ? `Open sessions, ${active?.unreadCount} unread` : 'Open sessions'}
               onClick={onOpenSessions}
             >
               <span className="hamburger" aria-hidden="true"><span /><span /><span /></span>
@@ -532,7 +533,7 @@ export function ExploreScreen({
             )}
           </div>
         )}
-        <LiveCopilotDock dock={dock} activity={dockActivity} now={now} onOpenChat={onOpenChat} />
+        {dock ? <LiveCopilotDock dock={dock} activity={dockActivity} now={now} onOpenChat={onOpenChat} /> : null}
       </div>
     </main>
   );

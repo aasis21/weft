@@ -509,6 +509,8 @@ export interface StoredSession {
   running?: boolean;
 }
 export interface SessionListRequestMsg {
+  /** Correlates this refresh and its folder/sort scope with the reply. */
+  requestId?: string;
   /** Optional page size; clamped by the listener to SESSION_LIST_MAX. */
   limit?: number;
   /** Optional folder to restrict the query to, applied before the page size so a busy folder's
@@ -524,6 +526,12 @@ export interface SessionFolder {
   updatedAt: number | null;
 }
 export interface SessionListMsg {
+  /** Echoed request scope; optional for older listeners. */
+  requestId?: string;
+  cwd?: string | null;
+  sort?: SessionListSort;
+  /** A failed store read is distinct from a successful empty result. */
+  errorCode?: 'session-store-unavailable';
   sessions: StoredSession[];
   /** Per-folder totals across the entire store, independent of the capped `sessions` page. Absent
    *  from listeners that predate it. */
@@ -997,8 +1005,17 @@ export function spawnSession(
   mode?: SpawnMode,
   name?: string | null
 ): SpawnSessionMessage;
-export function sessionListRequest(limit?: number | null, cwd?: string | null, sort?: SessionListSort): SessionListRequest;
-export function sessionList(sessions: StoredSession[], folders?: SessionFolder[] | null): SessionListMessage;
+export function sessionListRequest(
+  limit?: number | null,
+  cwd?: string | null,
+  sort?: SessionListSort,
+  requestId?: string | null
+): SessionListRequest;
+export function sessionList(
+  sessions: StoredSession[],
+  folders?: SessionFolder[] | null,
+  scope?: { requestId?: string | null; cwd?: string | null; sort?: SessionListSort; errorCode?: 'session-store-unavailable' }
+): SessionListMessage;
 export function resumeSession(
   requestId: string,
   sessionId: string,

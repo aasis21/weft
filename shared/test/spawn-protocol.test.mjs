@@ -187,6 +187,7 @@ test("sessionListRequest carries an optional clamped limit", () => {
   assert.equal("limit" in sessionListRequest(0).msg, false, "drops a non-positive limit");
   assert.equal("limit" in sessionListRequest(-5).msg, false);
   assert.equal(sessionListRequest(20, "/repo", "created").msg.sort, "created");
+  assert.equal(sessionListRequest(20, "/repo", "created", "list-1").msg.requestId, "list-1");
   assert.equal("sort" in bare.msg, false, "older stations retain activity sorting");
 });
 
@@ -212,6 +213,18 @@ test("sessionList filters malformed rows and normalizes fields", () => {
   assert.equal(sessionList([{ sessionId: "app-session", cwd: "/repo", running: true }]).msg.sessions[0].running, true);
   assert.equal(sessionList([{ sessionId: "unknown", cwd: "/repo", running: "true" }]).msg.sessions[0].running, undefined);
   assert.equal(sessionList([{ sessionId: "dated", cwd: "/repo", createdAt: 500 }]).msg.sessions[0].createdAt, 500);
+  assert.deepEqual(sessionList([], [{ cwd: "/repo", count: 2, updatedAt: 10 }], {
+    requestId: "list-2",
+    cwd: "/repo",
+    sort: "created",
+  }).msg, {
+    requestId: "list-2",
+    cwd: "/repo",
+    sort: "created",
+    sessions: [],
+    folders: [{ cwd: "/repo", count: 2, updatedAt: 10 }],
+  });
+  assert.equal(sessionList([], null, { errorCode: "session-store-unavailable" }).msg.errorCode, "session-store-unavailable");
 });
 
 test("resumeSession carries requestId, sessionId, and a defaulted mode", () => {

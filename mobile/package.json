@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:web": "npm run build",
+    "build:android": "npm run build && cap sync android && node ../scripts/build-android.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -16,7 +17,6 @@
     "coverage": "vitest run --coverage",
     "test:e2e": "npm run build && playwright test",
     "cap:sync": "npx cap sync",
-    "cap:add:android": "npx cap add android",
     "open:android": "npx cap open android"
   },
   "dependencies": {
