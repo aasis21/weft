@@ -1,4 +1,6 @@
-name: Native terminal distribution
+# Checks Weft on every OS and chip it supports: prebuilt terminal (node-pty) runtimes, macOS
+# host integrations, and install/update. Called by CI (full) and Release; never runs on its own.
+name: Platform check
 
 on:
   workflow_call:
@@ -7,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  native-runtime:
+  platform:
     strategy:
       fail-fast: false
       matrix:

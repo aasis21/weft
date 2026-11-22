@@ -322,40 +322,33 @@ explicitly through the documented source installer.
 ### Shipping it: environments
 
 `ship.sh` / `ship.ps1` deploy to Netlify from a laptop. GitHub Actions uses `ship.sh`
-with the target environment's site configuration. The test and production workflows
-have different triggers and publication rules:
+with the target environment's site configuration. Nothing runs automatically on push or merge;
+every workflow is started by hand.
 
-| Workflow | Environment | Netlify site | URL | Triggers |
-| --- | --- | --- | --- | --- |
-| `Deploy Netlify Production` | `production` | `useweft` | <https://useweft.netlify.app> | manual only |
-| `Deploy Netlify Test` | `test` | `useweft-test` | <https://useweft-test.netlify.app> | successful `main` CI + manual |
+| Workflow | Use it to | Options |
+| --- | --- | --- |
+| `CI` | test any branch | `suite`: `quick` (unit tests + type checks) or `full` (adds harness, builds, browser journeys, audit and the Platform check) |
+| `Release` | ship | `where`: `production` or `test`; `what`: `all`, `web` or `android`; `platform_check`: `auto`, `always` or `skip` |
+| `Platform check` | (called by the other two) | checks prebuilt terminal runtimes, macOS integrations and install/update on Windows and macOS, x64 and ARM, Node 20 and 24 |
 
-The test workflow runs after CI succeeds on `main` and checks out that CI run's commit.
-A successful deployment publishes that validated commit; a pending or failed deployment
-leaves the previous site in place. Production requires an explicit dispatch:
-
-```sh
-gh workflow run "Deploy Netlify Production" --repo aasis21/weft
-```
-
-**Deploying a feature branch.** The `test` environment has no deployment-branch policy, so the test
-workflow can be dispatched from any ref — pick the branch in the Actions UI, or:
+`Release` runs the full tests once, then publishes. `where=production` (from `main` only) publishes
+<https://useweft.netlify.app> through the `production` environment, builds and signs the Android APK in
+`android-release`, and creates one GitHub release `v<VERSION>` with the APK, laptop payloads,
+build provenance and the matching `CHANGELOG` section. `where=test` publishes
+<https://useweft-test.netlify.app> through the `test` environment, from any branch. With
+`platform_check=auto`, the Platform check runs only when terminal, install, update or macOS code
+changed since the previous `v*` release.
 
 ```sh
-gh workflow run "Deploy Netlify Test" --ref users/<you>/<feature> -f mode=preview
+gh workflow run CI --repo aasis21/weft -f suite=full
+gh workflow run Release --repo aasis21/weft -f where=production -f what=all
+gh workflow run Release --repo aasis21/weft --ref users/<you>/<feature> -f where=test -f what=web
 ```
-
-`mode=preview` (the default for a manual run) is a Netlify *draft* deploy: it publishes to a unique
-throwaway URL and leaves `useweft-test.netlify.app` alone, so several branches can be in flight at
-once. `mode=live` overwrites the shared test site, as does the automatic deployment after
-successful `main` CI. The resulting URL is printed in the run's job summary.
 
 Each environment holds `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`. The installers are checked in
 with the production origin as their default, so at deploy time the ship scripts resolve the target
 site's real URL and rewrite the `mobile/dist` copies of `install.sh` / `install.ps1` (never the
-sources) — a test deploy therefore serves an installer that pulls *its own* bundles. (A preview
-deploy retargets to the test site's canonical URL, not the throwaway draft URL, since the draft URL
-is only known after the upload.)
+sources) — a test deploy therefore serves an installer that pulls *its own* bundles.
 
 ## Updating an installed laptop
 

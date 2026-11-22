@@ -1,17 +1,27 @@
 name: CI
 
+# Manual only (Actions -> CI -> Run workflow, or `gh workflow run CI -f suite=full`), so pushes
+# and merges never spend Actions minutes on their own.
+#   quick: unit tests and type checks (a few minutes)
+#   full:  quick + harness, builds, browser journeys, audit and the Platform check
 on:
-  push:
-    branches: [main]
-  pull_request:
-  # Run the full suite on demand (Actions → CI → Run workflow) instead of on a busy laptop.
   workflow_dispatch:
+    inputs:
+      suite:
+        description: "quick = unit tests + type checks; full = everything, including browsers and the Platform check"
+        type: choice
+        options: [quick, full]
+        default: quick
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ inputs.suite }}
+  cancel-in-progress: true
 
 jobs:
-  native-runtime:
-    uses: ./.github/workflows/native-runtime.yml
-
-  build-test:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -35,19 +45,29 @@ jobs:
         run: npm run test:types -w @aasis21/weft-mobile
 
       - name: Extension relay loop (harness smoke)
+        if: inputs.suite == 'full'
         run: npm run harness -w @aasis21/weft-extension -- --auto
 
       - name: Dormant extension scale budget
+        if: inputs.suite == 'full'
         run: npm run test:dormant-scale -w @aasis21/weft-extension
 
       - name: Build production workspaces
+        if: inputs.suite == 'full'
         run: npm run build
 
       - name: Install Playwright browsers
+        if: inputs.suite == 'full'
         run: npx playwright install --with-deps chromium webkit
 
       - name: Run Playwright journeys
+        if: inputs.suite == 'full'
         run: npm run test:e2e -w @aasis21/weft-mobile
 
       - name: Audit production dependencies
+        if: inputs.suite == 'full'
         run: npm audit --omit=dev --audit-level=high
+
+  platform:
+    if: inputs.suite == 'full'
+    uses: ./.github/workflows/platform-check.yml
