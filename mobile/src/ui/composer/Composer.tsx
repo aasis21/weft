@@ -302,6 +302,9 @@ export function Composer({
   const attachButtonRef = useRef<HTMLButtonElement | null>(null);
   const modelWrapRef = useRef<HTMLDivElement | null>(null);
   const modelButtonRef = useRef<HTMLButtonElement | null>(null);
+  /** Effort section of the sheet; after a model pick we bring it into view so effort is the next step. */
+  const effortRef = useRef<HTMLDivElement | null>(null);
+  const [effortCue, setEffortCue] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingPickRef = useRef<'library' | 'camera' | null>(null);
   const speechCommittedRef = useRef('');
@@ -448,6 +451,11 @@ export function Composer({
       : kept ? `Kept ${describeReasoningEffort(effort)}.`
       : `Switched to ${describeReasoningEffort(effort)} (model default).`;
     setPicked({ modelId, effort, ...(note ? { note } : {}) });
+    if (target?.efforts.length) {
+      setEffortCue(true);
+      window.requestAnimationFrame(() => effortRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }));
+      window.setTimeout(() => setEffortCue(false), 1400);
+    }
     onModelChange?.(effort ? { modelId, reasoningEffort: effort } : { modelId });
   };
 
@@ -1029,6 +1037,7 @@ export function Composer({
                     </div>
                     <p className={`controls-hint${mode === 'autopilot' ? ' is-warning' : ''}`}>{MODE_HINT[mode] ?? ''}</p>
 
+                    <div ref={effortRef} className={`controls-effort${effortCue ? ' is-cued' : ''}`}>
                     <div className="controls-label" id="controls-effort">
                       Effort{selectedModel ? <span className="controls-label-model"> · {selectedModel.name}</span> : null}
                     </div>
@@ -1056,6 +1065,7 @@ export function Composer({
                     ) : (
                       <p className="controls-hint">{selectedModel ? 'This model has no effort setting.' : 'Waiting for the laptop’s models…'}</p>
                     )}
+                    </div>
 
                     <div className="controls-label" id="controls-model">Model</div>
                     <div className="controls-models" role="radiogroup" aria-labelledby="controls-model">

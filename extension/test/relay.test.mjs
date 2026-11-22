@@ -173,7 +173,8 @@ test("phone sees the live model list and switches model or effort through the se
       async list() {
         return { list: [
           { id: "claude-opus-5.5", name: "Claude Opus 5.5", supportedReasoningEfforts: ["low", "medium", "high", "xhigh"], defaultReasoningEffort: "medium" },
-          { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium" },
+          // Current CLIs pass the Copilot API shape through: levels live under capabilities.supports.
+          { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", capabilities: { supports: { reasoning_effort: ["low", "medium", "high"] } } },
           { id: "blocked", name: "Blocked", policy: { state: "disabled" } },
         ] };
       },

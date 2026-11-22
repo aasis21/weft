@@ -1169,11 +1169,14 @@ async function readModelState(session) {
   ]);
   const models = (Array.isArray(listed?.list) ? listed.list : []).flatMap((model) => {
     if (!model || typeof model.id !== "string" || !model.id || model.policy?.state === "disabled") return [];
+    // Older CLIs report `supportedReasoningEfforts`; current ones pass the Copilot API shape through,
+    // where the levels live in `capabilities.supports.reasoning_effort`.
+    const efforts = [model.supportedReasoningEfforts, model.capabilities?.supports?.reasoning_effort]
+      .find((value) => Array.isArray(value) && value.length) ?? [];
     return [{
       id: model.id,
       name: typeof model.name === "string" && model.name ? model.name : model.id,
-      efforts: Array.isArray(model.supportedReasoningEfforts)
-        ? model.supportedReasoningEfforts.filter((effort) => typeof effort === "string" && effort) : [],
+      efforts: efforts.filter((effort) => typeof effort === "string" && effort),
       defaultEffort: typeof model.defaultReasoningEffort === "string" ? model.defaultReasoningEffort : null,
     }];
   }).slice(0, MAX_REPORTED_MODELS);

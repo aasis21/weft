@@ -5,6 +5,12 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.71
+
+- Session controls show each model's effort levels again. Current Copilot CLIs report them under
+  the model's capabilities; Weft now reads both the new and the old field.
+- Picking a model scrolls to its effort levels and highlights them, so effort is the next step.
+
 ## 0.2.70
 
 - Each release is now one GitHub release (`v0.2.70`) with the signed Android APK, laptop

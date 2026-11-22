@@ -4465,3 +4465,5 @@
 .controls-model.active { color: var(--accent); }
 .controls-model-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .controls-model-hint { color: var(--fg-faint); font-size: 12px; }
+.controls-effort { display: flex; flex-direction: column; gap: 8px; margin: 0 -6px; padding: 0 6px 4px; border-radius: 12px; scroll-margin-top: 12px; transition: background-color 500ms ease; }
+.controls-effort.is-cued { background: var(--accent-soft); }
