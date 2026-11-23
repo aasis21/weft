@@ -43,6 +43,13 @@ test("background tasks are user-scoped, manual, limited, and safely quoted", () 
   assert.match(status, /lastResult=\$lastTaskResult/);
 });
 
+test("background supervisors hide their PowerShell windows for station and relay", () => {
+  for (const role of ["station", "relay"]) {
+    const script = backgroundTaskScript("start", { ...options, role });
+    assert.match(script, /\$actionArguments='[^'\r\n]*-WindowStyle Hidden\b/, role);
+  }
+});
+
 test("task definition and worker status share one installation identity", () => {
   const installId = backgroundInstallId({ cliPath: options.cliPath, version: "0.2.75", platform: "win32" });
   assert.match(installId, /^[0-9a-f]{16}$/);

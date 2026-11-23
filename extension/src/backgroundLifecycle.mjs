@@ -164,7 +164,7 @@ export function backgroundTaskScript(operation, {
   if (!["start", "disable", "stop", "status"].includes(operation)) throw new Error("Invalid background task operation.");
   const taskName = backgroundTaskName(role, { baseDir });
   const supervisorScript = backgroundSupervisorScript({ role, baseDir, cliPath, nodePath });
-  const supervisorArguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand " +
+  const supervisorArguments = "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " +
     Buffer.from(supervisorScript, "utf16le").toString("base64");
   const powerShellExecutable = win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   // Every operation first finds the task and refuses to touch one owned by another Windows user.
