@@ -31,6 +31,13 @@ async function noHorizontalScroll(page: import('@playwright/test').Page): Promis
 }
 
 test.describe('Journey: production smoke & layout', () => {
+  // The landing page asks GitHub for the latest release; keep the journey off the shared-IP
+  // rate limit so a 403 from GitHub is never reported as a Weft console error.
+  test.beforeEach(async ({ page }) => {
+    await page.route('https://api.github.com/repos/aasis21/weft/releases/latest', (route) =>
+      route.fulfill({ json: { tag_name: 'v0.0.0', assets: [] } }));
+  });
+
   test('the onboarding Landing boots clean with no console errors or overflow', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('/');

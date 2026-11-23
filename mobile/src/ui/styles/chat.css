@@ -3236,7 +3236,7 @@
 }
 .weft-session .device-action-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
   overflow: hidden;
   border-radius: 10px;
@@ -3261,13 +3261,12 @@
 }
 .weft-session .device-quick-action:first-child { border-left: 0; }
 .weft-session .device-quick-action.primary {
-  grid-column: span 3;
+  grid-column: 1 / -1;
 }
 .weft-session .device-quick-action.secondary {
-  grid-column: span 2;
   border-top: 1px solid var(--bg-rule);
 }
-.weft-session .device-quick-action.secondary:nth-child(3) { border-left: 0; }
+.weft-session .device-quick-action.primary + .secondary { border-left: 0; }
 .weft-session .device-quick-action:not(:disabled):active {
   background: color-mix(in srgb, var(--accent) 9%, var(--bg));
 }
