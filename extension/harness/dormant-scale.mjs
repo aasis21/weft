@@ -152,6 +152,26 @@ async function warmRuntime(baseDir, count) {
   await settle();
 }
 
+/**
+ * V8's first Maglev and TurboFan compilations page in the compilers' machine code from the Node
+ * binary (several MB of file-backed RSS on Linux). That is a one-time process cost, not dormant
+ * session memory, so trigger both tiers before the baseline and let the background compile finish.
+ */
+async function primeOptimizingCompilers() {
+  const step = (value, index) => {
+    const record = { value, label: `item-${index & 7}` };
+    return (record.value * 31 + record.label.length + index) % 1_000_003;
+  };
+  let value = 1;
+  for (let chunk = 0; chunk < 40; chunk++) {
+    for (let index = 0; index < 250_000; index++) value = step(value, index);
+    // Background compiles finish while the loop yields.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return value;
+}
+
 async function runWorker(count) {
   assert.equal(typeof globalThis.gc, "function", "run the dormant scale harness with --expose-gc");
   const baseDir = mkdtempSync(join(tmpdir(), `weft-dormant-scale-${count}-`));
@@ -169,6 +189,7 @@ async function runWorker(count) {
     // Node and libuv grow their allocators in page-sized chunks while endpoints are first
     // created. Warm the same endpoint count and close it before taking the baseline so RSS
     // measures retained dormant-session overhead, not one-time allocator expansion.
+    await primeOptimizingCompilers();
     await warmRuntime(baseDir, count);
     const baselineResources = resourceCounts();
     const baselineHandles = osHandleCount();
