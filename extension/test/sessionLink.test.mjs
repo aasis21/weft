@@ -386,7 +386,9 @@ async function phoneConnect({ payload, keys, deviceId = "phone-1", replyLinkRead
   channel.onEvent(EVENT_TYPE.CONTROL, (message) => {
     control.push(message);
     if (replyLinkReady && message.eventSubtype === SUBTYPE.CONTROL.LINK_READY) {
-      void channel.send(linkReady({ linkGeneration: message.msg.linkGeneration }));
+      // Local delivery is async, so a link_ready queued before cleanup can land after the phone
+      // closed its transport; that reply has nowhere to go.
+      channel.send(linkReady({ linkGeneration: message.msg.linkGeneration })).catch(() => {});
     }
   });
   // Like the app: its first message after the ACK; the session answers with link_ready at once.
