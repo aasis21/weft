@@ -514,6 +514,8 @@ export interface ProjectListMsg {
   capabilities?: string[];
   /** Permission mode this device prefers for new/resumed sessions. Older listeners omit it. */
   defaultPermissionMode?: SpawnMode;
+  /** The Weft version this Station runs, so the phone never shows the version it paired with. */
+  appVersion?: string;
 }
 export type SessionListSort = 'activity' | 'created';
 /** One recent resumable CLI session the phone can offer in its "Resume a session" list. */
@@ -568,6 +570,8 @@ export type ForgetDeviceMsg = Record<string, never>;
 /** Liveness beat for the DEVICE channel; deviceId mirrors ProjectListMsg.deviceId. */
 export interface DeviceHeartbeatMsg {
   deviceId: string | null;
+  /** The Weft version this Station runs. */
+  appVersion?: string;
 }
 export interface DeviceMonitorStartMsg {
   monitorId: string;
@@ -992,7 +996,8 @@ export function projectList(
   deviceName?: string | null,
   deviceId?: string | null,
   capabilities?: string[] | null,
-  defaultPermissionMode?: SpawnMode
+  defaultPermissionMode?: SpawnMode,
+  appVersion?: string | null
 ): ProjectListMessage;
 export function sessionListRequest(
   limit?: number | null,
@@ -1057,7 +1062,7 @@ export function updateRequired(notice: {
   side: "laptop" | "phone";
 }): UpdateRequiredMessage;
 export function forgetDevice(): ForgetDevice;
-export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
+export function deviceHeartbeat(deviceId?: string | null, appVersion?: string | null): DeviceHeartbeat;
 export function deviceMonitorStart(
   monitorId: string,
   intervalMs?: number | null,

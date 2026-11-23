@@ -58,4 +58,20 @@ describe('scenario: device (listener) heartbeat watchdog', () => {
     await vi.advanceTimersByTimeAsync(181_000);
     expect(h!.snapshot().devices[0]).toMatchObject({ connected: false });
   });
+
+  it('shows the version Station runs now, not the one it ran when the phone paired', async () => {
+    await h!.init();
+    await h!.manager.addByQr(listenerQr('listener-1'));
+    await h!.flush();
+    const listener = registry.get('listener-1')!;
+
+    listener.emit(B.projectList([], 'Akash Laptop', 'device-1', null, 'default', '0.2.76'));
+    await h!.flush();
+    expect(h!.snapshot().devices[0]).toMatchObject({ appVersion: '0.2.76' });
+
+    // A Station restarted on a newer version reports it on its next heartbeat.
+    listener.emit(B.deviceHeartbeat('device-1', '0.2.77'));
+    await h!.flush();
+    expect(h!.snapshot().devices[0]).toMatchObject({ appVersion: '0.2.77' });
+  });
 });

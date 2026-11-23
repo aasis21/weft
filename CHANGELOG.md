@@ -5,6 +5,14 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.77
+
+- **The phone shows the laptop's current Weft version.** About and Settings used the version Station
+  ran when the phone first paired, so an updated laptop kept showing an old number (for example
+  0.2.68 on a 0.2.76 laptop). Station now reports its version on every connect and heartbeat, and
+  the phone keeps it current.
+- Update output now reads "1 session needs…" instead of "1 session need…".
+
 ## 0.2.76
 
 - **Updates reload open sessions without cutting a turn off.** After `weft update` restarts

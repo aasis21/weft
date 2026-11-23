@@ -901,7 +901,7 @@ export function createStation({
       // chaining and surface as an unhandled rejection that kills the process (Node's default
       // --unhandled-rejections=throw behavior).
       try {
-        Promise.resolve(channel?.send(deviceHeartbeat(listenerDeviceId)))
+        Promise.resolve(channel?.send(deviceHeartbeat(listenerDeviceId, resolveVersion())))
           .then(() => {
             try {
               onHeartbeat?.();
@@ -1126,6 +1126,7 @@ export function createStation({
         DEVICE_CAPABILITY.SESSION_ACTIVATION_V1,
       ],
       loadDefaultPermissionMode(),
+      resolveVersion(),
     ));
   }
 

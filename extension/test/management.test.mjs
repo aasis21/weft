@@ -123,7 +123,7 @@ test("reloading Weft in open sessions is confirmed, waits for running turns and 
     [clicked.reloaded, clicked.waiting, clicked.current, clicked.manual, clicked.unsupported, clicked.failed],
     [2, 1, 1, 0, 1, 1],
   );
-  assert.match(clicked.message, /reload when the current turn ends/);
+  assert.match(clicked.message, /1 session reloads when the current turn ends/);
   assert.match(clicked.message, /\/extensions reload/);
   assert.ok(asked.every(([, command, whenIdle]) => command === "reloadExtension" && whenIdle === true));
   assert.ok(!asked.some(([id]) => id === "current"), "a session already on the installed version is left alone");

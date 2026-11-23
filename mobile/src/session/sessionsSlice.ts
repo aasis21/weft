@@ -551,6 +551,11 @@ const sessionsSlice = createSlice({
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);
       if (device) device.lastProjectName = action.payload.projectName;
     },
+    /** The Weft version the laptop's Station reports now (it changes on every update). */
+    deviceVersionReported(state, action: PayloadAction<{ channelId: string; appVersion: string }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.appVersion = action.payload.appVersion;
+    },
     // Raw wire events over the device (listener) channel — mirrors `debugAppended` for sessions but
     // scoped to ListenerDeviceState.events and its own (smaller) cap. Persisted via eventLog.ts,
     // throttled by sessionRuntime's scheduleDeviceEventPersist, same as sessions' debug log.
@@ -850,6 +855,7 @@ export const {
   deviceErrorSet,
   deviceSeen,
   deviceLastProjectSet,
+  deviceVersionReported,
   deviceEventAppended,
   sessionAdded,
   sessionRemoved,

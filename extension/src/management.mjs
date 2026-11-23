@@ -500,12 +500,13 @@ export function createManagement({
         };
         log("sessions.reload_all", { ...summary, source: payload.source ?? "control-center" });
         const sessions = (n) => `${n} session${n === 1 ? "" : "s"}`;
+        const verb = (n, one, many) => (n === 1 ? one : many);
         const parts = [
           summary.reloaded && `reloaded Weft in ${sessions(summary.reloaded)}`,
-          summary.waiting && `${sessions(summary.waiting)} reload when the current turn ends`,
-          summary.current && `${sessions(summary.current)} already run ${installed}`,
-          summary.manual && `${sessions(summary.manual)} need a manual reload (Reload Weft in open sessions, or /extensions reload)`,
-          summary.unsupported && `${sessions(summary.unsupported)} need /extensions reload typed in the session`,
+          summary.waiting && `${sessions(summary.waiting)} ${verb(summary.waiting, "reloads", "reload")} when the current turn ends`,
+          summary.current && `${sessions(summary.current)} already ${verb(summary.current, "runs", "run")} ${installed}`,
+          summary.manual && `${sessions(summary.manual)} ${verb(summary.manual, "needs", "need")} a manual reload (Reload Weft in open sessions, or /extensions reload)`,
+          summary.unsupported && `${sessions(summary.unsupported)} ${verb(summary.unsupported, "needs", "need")} /extensions reload typed in the session`,
           summary.failed && `${sessions(summary.failed)} did not answer`,
         ].filter(Boolean);
         const text = parts.join("; ");

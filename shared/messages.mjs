@@ -600,6 +600,7 @@ export const projectList = (
   deviceId,
   capabilities = null,
   defaultPermissionMode = "default",
+  appVersion = null,
 ) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.PROJECT_LIST, {
     projects: Array.isArray(projects) ? projects : [],
@@ -609,6 +610,7 @@ export const projectList = (
       ? { capabilities: capabilities.filter((value) => typeof value === "string" && value) }
       : {}),
     defaultPermissionMode: defaultPermissionMode === "allow-all" ? "allow-all" : "default",
+    ...(typeof appVersion === "string" && appVersion ? { appVersion } : {}),
   });
 /** Phone -> listener: request the machine's recent resumable CLI sessions (on-demand; not pushed on
  *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. Optional `cwd` narrows the
@@ -763,8 +765,11 @@ export const forgetDevice = () =>
  * crashed `weft` process shows as offline even if the underlying transport still reports
  * "connected". `deviceId` is the same stable, non-secret id carried in projectList().
  */
-export const deviceHeartbeat = (deviceId = null) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT, { deviceId: deviceId ?? null });
+export const deviceHeartbeat = (deviceId = null, appVersion = null) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.DEVICE_HEARTBEAT, {
+    deviceId: deviceId ?? null,
+    ...(typeof appVersion === "string" && appVersion ? { appVersion } : {}),
+  });
 
 // Terminal payloads remain private to the terminal consumers, not the diagnostic event log.
 // Receivers validate action-specific fields before any PTY or rendering operation.

@@ -142,6 +142,7 @@ import {
   deviceSeen,
   deviceEventAppended,
   deviceLastProjectSet,
+  deviceVersionReported,
   deviceProjectsLoadingSet,
   deviceProjectsReceived,
   deviceClipboardOpened,
@@ -859,6 +860,14 @@ export class SessionRuntime {
 
   private device(channelId: string): ListenerDeviceState | undefined {
     return this.store.getState().sessions.devices.find((d) => d.channelId === channelId);
+  }
+
+  /** Keep the laptop's version current: pairing only records the version Station ran back then. */
+  private noteLaptopVersion(channelId: string, appVersion: unknown): void {
+    if (typeof appVersion !== 'string' || !appVersion || appVersion.length > 64) return;
+    if (this.device(channelId)?.appVersion === appVersion) return;
+    this.store.dispatch(deviceVersionReported({ channelId, appVersion }));
+    void patchDevice(channelId, { appVersion });
   }
 
   private listenerController(channelId: string): ChannelController | undefined {
@@ -2634,8 +2643,9 @@ export class SessionRuntime {
     this.store.dispatch(deviceSeen({ channelId }));
     if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT) {
       // Proactive liveness beat (independent of PROJECT_LIST request/reply). deviceSeen above
-      // already refreshed lastSeenAt/connected + cleared error, so there's nothing else to do —
-      // the beat exists purely to keep an idle device from going stale between polls.
+      // already refreshed lastSeenAt/connected + cleared error; the beat also carries the version
+      // Station runs now, which changes on every update.
+      this.noteLaptopVersion(channelId, (message.msg as { appVersion?: unknown }).appVersion);
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.CLIPBOARD_RESULT) {
@@ -2681,6 +2691,7 @@ export class SessionRuntime {
         }),
       );
       this.negotiateAttention(channelId, msg.capabilities);
+      this.noteLaptopVersion(channelId, msg.appVersion);
       if (msg.capabilities?.includes(DEVICE_CAPABILITY.KEEP_AWAKE_V1)) this.refreshDeviceKeepAwake(channelId);
       if (msg.deviceName) void patchDevice(channelId, { name: msg.deviceName });
       // The listener's deviceId is stable across `weft start` restarts even though this
