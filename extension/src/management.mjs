@@ -5,6 +5,7 @@ import { join, resolve, isAbsolute } from "node:path";
 import { hostname } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
 import QRCode from "qrcode";
+import { pairingQrText } from "./pairingLink.mjs";
 import { weftHome, listProjects, addProject, removeProject, setDefault } from "./projects.mjs";
 import {
   loadTransportConfig, loadDeviceName, loadDefaultPermissionMode, isPersistentPairingEnabled,
@@ -13,17 +14,19 @@ import {
 } from "./transportConfig.mjs";
 import { rotatePersistedIdentity, clearPersistedIdentity, getOrCreatePersistedIdentity, readSavedPairing } from "./pairingIdentity.mjs";
 import {
-  backgroundCommand, backgroundTaskOperation, startBackground, stopBackground,
+  backgroundCommand, backgroundTaskOperation, startBackground, stopBackground, forceStopBackground, backgroundInstallId,
   readWorkerCrashReport, readUnexpectedTaskExit, describeWorkerProblem,
 } from "./backgroundLifecycle.mjs";
+import { ensureStationRunning } from "./ensureStation.mjs";
 import {
   healthyRegistryEntry, probePublicRelay, findDevTunnelBinary, isDevTunnelLoggedIn,
   ensureDevTunnelLogin, DEVTUNNEL_REGISTRY_FILE, describeStage, readDevTunnelAuthentication,
 } from "./devtunnel.mjs";
 import { readRegistry, isPidAlive } from "./registryFile.mjs";
-import { discoverRuntimeLifecycles, createRuntimeLifecycleClient } from "./runtimeLifecycle.mjs";
+import { scanSessions } from "./sessionRegistry.mjs";
+import { createSessionControlClient } from "./sessionControl.mjs";
+import { sessionHealth } from "@aasis21/weft-shared";
 import { resolveVersion } from "./version.mjs";
-import { verifyProcessIdentities } from "./processIdentity.mjs";
 import { readStationDiagnostics, appendStationLog } from "./stationLog.mjs";
 
 export class ManagementError extends Error {
@@ -31,7 +34,7 @@ export class ManagementError extends Error {
 }
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const actions = {
-  "station.start": [], "station.stop": ["confirmed"], "station.restart": ["confirmed"],
+  "station.start": ["reason", "replaceForeground"], "station.stop": ["confirmed"], "station.restart": ["confirmed"],
   "relay.start": [], "relay.stop": ["confirmed"], "relay.restart": ["confirmed"],
   "project.add": ["name", "path", "makeDefault"],
   "project.remove": ["name", "confirmed"], "project.default": ["name"],
@@ -40,6 +43,7 @@ const actions = {
   "pairing.rotate": ["confirmed"],
   "session.activate": ["runtimeId"], "session.disconnect": ["runtimeId", "confirmed"],
   "session.start": ["projectName", "name", "mode", "confirmed"],
+  "sessions.reloadAll": ["confirmed"],
 };
 export function validateManagementAction(action, payload) {
   if (!Object.hasOwn(actions, action)) throw new ManagementError("invalid-action", "This management action is not supported.");
@@ -57,9 +61,11 @@ export function validateManagementAction(action, payload) {
   if (action === "project.add" && !isAbsolute(payload.path)) throw new ManagementError("invalid-input", "Use an absolute folder path.");
   if (payload.makeDefault !== undefined && typeof payload.makeDefault !== "boolean") throw new ManagementError("invalid-input", "Invalid default selection.");
   if (payload.confirmed !== undefined && typeof payload.confirmed !== "boolean") throw new ManagementError("invalid-input", "Invalid confirmation.");
+  if (payload.reason !== undefined && !["start", "update", "control-center"].includes(payload.reason)) throw new ManagementError("invalid-input", "Invalid start reason.");
+  if (payload.replaceForeground !== undefined && typeof payload.replaceForeground !== "boolean") throw new ManagementError("invalid-input", "Invalid foreground replacement.");
   if (payload.mode !== undefined && !["default", "allow-all"].includes(payload.mode)) throw new ManagementError("invalid-input", "Invalid session permission mode.");
   if (action === "session.start" && payload.mode === "allow-all" && payload.confirmed !== true) throw new ManagementError("confirmation-required", "Confirm launching Copilot with Allow all permissions.");
-  if (["station.stop", "station.restart", "relay.stop", "relay.restart", "project.remove", "pairing.replace", "pairing.rotate", "session.disconnect"].includes(action) && payload.confirmed !== true) {
+  if (["station.stop", "station.restart", "relay.stop", "relay.restart", "project.remove", "pairing.replace", "pairing.rotate", "session.disconnect", "sessions.reloadAll"].includes(action) && payload.confirmed !== true) {
     throw new ManagementError("confirmation-required", "Confirm the action and its impact before continuing.");
   }
 }
@@ -104,8 +110,8 @@ export async function withManagementLock(baseDir, run, { timeoutMs = 200_000 } =
 
 export function createManagement({
   baseDir = weftHome(), cliPath, platform = process.platform,
-  background = { command: backgroundCommand, task: backgroundTaskOperation, start: startBackground, stop: stopBackground },
-  discover = discoverRuntimeLifecycles, runtimeClient = createRuntimeLifecycleClient,
+  background = { command: backgroundCommand, task: backgroundTaskOperation, start: startBackground, stop: stopBackground, forceStop: forceStopBackground },
+  scan = scanSessions, sessionClient = createSessionControlClient,
   relayHealth = healthyRegistryEntry, publicProbe = probePublicRelay,
   authentication = readDevTunnelAuthentication,
   statusProbeTimeoutMs = 4_000,
@@ -195,6 +201,8 @@ export function createManagement({
     appendStationLog(event, fields, { baseDir, level: "warn" });
   }
   let lastPresences = null;
+  // Supervisor health per runtime, as last reported by a running Station (null: none reporting).
+  let stationSessions = null;
   // Merge the in-memory phone traffic of Station and active sessions. Session discovery is reused
   // from the dashboard's own status polling, so this stays cheap enough to refresh every 2 seconds.
   async function traffic() {
@@ -215,19 +223,19 @@ export function createManagement({
       }
     }
     if (!lastPresences) {
-      try { lastPresences = (await discover({ baseDir, timeoutMs: 750, verifyBatch: verifyProcessIdentities, cleanup: false })).runtimes ?? []; }
+      try { lastPresences = (await scan({ baseDir, cleanup: false })).live ?? []; }
       catch { lastPresences = []; }
     }
-    await Promise.all(lastPresences.slice(0, 20).map(async (presence, index) => {
+    await Promise.all(lastPresences.slice(0, 20).map(async (record, index) => {
       const fallback = `Copilot session ${index + 1}`;
+      const runtimeId = record.run.runtimeId;
       try {
-        const response = await runtimeClient(presence, options).command("traffic", null, { timeoutMs: 1500 });
-        if (response?.ok !== true) throw new Error("unsupported");
-        const title = typeof response.result?.title === "string" && response.result.title.trim()
-          ? response.result.title.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) : fallback;
-        collect({ id: presence.runtimeInstanceId, name: title }, "session", response.result);
+        const result = await sessionClient(record, { baseDir }).command("traffic", null, { timeoutMs: 1500 });
+        const title = typeof result?.title === "string" && result.title.trim()
+          ? result.title.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 80) : fallback;
+        collect({ id: runtimeId, name: title }, "session", result);
       } catch {
-        sources.push({ id: presence.runtimeInstanceId, name: fallback, kind: "session", state: "unsupported" });
+        sources.push({ id: runtimeId, name: fallback, kind: "session", state: "unsupported" });
       }
     }));
     entries.sort((a, b) => b.lastAt - a.lastAt);
@@ -252,15 +260,19 @@ export function createManagement({
     // A registry record left by a worker that already exited cannot answer; skip contacting it.
     const workerExited = Number.isSafeInteger(controlRecord?.pid) && controlRecord.pid > 0 && !isPidAlive(controlRecord.pid);
     const workerStatus = workerExited ? null : await background.command(role, "status", null, options);
+    if (role === "station" && !workerStatus) stationSessions = null;
     if (workerStatus) {
-      const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
+      const { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version, installId,
         connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
         nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint } = workerStatus;
-      result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version,
+      result[role] = { state, error, paired, phoneName, deviceName, baseUrl, pid, startedAt, version, installId,
         connected, lastPeerContactAt, watchLevel, stage, progressAt, attempt, nextRetryAt,
         nextCheckAt, lastHealthyAt, localHealth, forwarding, checkedAt, transportState, transportCheckedAt, transportKind, transportEndpoint,
         stageLabel: stage ? describeStage(stage) : null, supported: true };
-      if (role === "station") result[role].checkedAt = Date.now();
+      if (role === "station") {
+        result[role].checkedAt = Date.now();
+        stationSessions = Array.isArray(workerStatus.sessions) ? workerStatus.sessions : null;
+      }
       const currentRecord = readRegistry(`background-${role}.json`, options);
       if (controlRecord?.identity?.runtimeInstanceId &&
           controlRecord.identity.runtimeInstanceId === currentRecord?.identity?.runtimeInstanceId) {
@@ -332,30 +344,58 @@ export function createManagement({
       result.relay = { ...result.relay, forwarding: "unknown", error: result.relay.error ?? "Relay health could not be verified. Refresh status." };
     }
   }
+  // Live sessions come from their own records (sessionRegistry); health comes from Station's
+  // supervisor when it is running, otherwise from the same shared projection over the record alone.
   async function runtimes() {
-    const discovery = await discover({ baseDir, timeoutMs: 750, verifyBatch: verifyProcessIdentities, cleanup: false });
-    lastPresences = discovery.runtimes ?? [];
-    return { discovery, list: await Promise.all((discovery.runtimes ?? []).map(async (presence) => {
+    const scanned = await scan({ baseDir, cleanup: false });
+    lastPresences = scanned.live ?? [];
+    const conflicted = new Set((scanned.sessions ?? []).filter((group) => group.ownerConflict)
+      .flatMap((group) => group.runtimes.map((record) => record.run.runtimeId)));
+    const supervised = new Map((stationSessions ?? []).map((item) => [item.runtimeId, item]));
+    const discovery = {
+      status: conflicted.size ? "conflict" : (scanned.unverified?.length || scanned.foreign?.length) ? "uncertain" : "verified",
+    };
+    return { discovery, list: await Promise.all(lastPresences.map(async (record) => {
+      const runtimeId = record.run.runtimeId;
+      const observed = supervised.get(runtimeId);
+      const health = observed ?? sessionHealth(record, {
+        observer: "station", processAlive: true, ...(conflicted.has(runtimeId) ? { ownerConflict: true } : {}),
+      });
+      const base = {
+        runtimeId, sessionId: record.session.sessionId, pid: record.run.pid,
+        state: record.link.state, label: health.label, reason: health.reason ?? null,
+        lastRepair: observed?.lastRepair ?? null, cwd: record.run.cwd, version: record.run.version,
+        lastPeerContactAt: record.link.lastPhoneContactAt ?? null,
+      };
       try {
-        const response = await runtimeClient(presence, options).command("status", null, { timeoutMs: 1000 });
-        if (response?.ok !== true) throw new ManagementError("runtime-unavailable", "Session status could not be verified.");
-        const s = response.result;
+        const s = await sessionClient(record, { baseDir }).command("status", null, { timeoutMs: 1000 });
         return {
-          runtimeId: presence.runtimeInstanceId, sessionId: presence.sessionId, pid: presence.pid,
-          state: s.state, paired: s.paired, phoneName: s.phoneName,
-          connected: s.state === "dormant" ? false : typeof s.connected === "boolean" ? s.connected : null,
-          watchLevel: s.state === "dormant" ? "off" : s.watchLevel ?? null, title: s.title, cwd: s.cwd,
-          version: s.version ?? null, lastPeerContactAt: s.lastPeerContactAt ?? null, busy: s.busy ?? null,
+          ...base, paired: s?.paired, phoneName: s?.phoneName,
+          connected: base.state === "linked" ? (typeof s?.connected === "boolean" ? s.connected : null) : false,
+          watchLevel: base.state === "dormant" ? "off" : s?.watchLevel ?? null, title: s?.title ?? null,
+          cwd: s?.cwd ?? base.cwd, version: s?.version ?? base.version,
+          lastPeerContactAt: s?.lastPeerContactAt ?? base.lastPeerContactAt, busy: s?.busy ?? null,
         };
-      } catch { return { runtimeId: presence.runtimeInstanceId, sessionId: presence.sessionId, pid: presence.pid, state: "unknown", connected: null, watchLevel: null, error: "Live session status unavailable." }; }
+      } catch {
+        return { ...base, connected: null, watchLevel: null, error: "Live session status unavailable." };
+      }
     })) };
   }
   async function target(runtimeId) {
-    const discovery = await discover({ baseDir, timeoutMs: 1000, verifyBatch: verifyProcessIdentities, cleanup: false });
-    if (["conflict", "uncertain"].includes(discovery.status)) throw new ManagementError("runtime-conflict", "Session identity is uncertain. Refresh before selecting a session.");
-    const presence = discovery.runtimes?.find((item) => item.runtimeInstanceId === runtimeId);
-    if (!presence) throw new ManagementError("stale-session", "This session is no longer available. Refresh the session list.");
-    return runtimeClient(presence, options);
+    const scanned = await scan({ baseDir, cleanup: false });
+    const record = scanned.live?.find((item) => item.run.runtimeId === runtimeId);
+    if (!record) throw new ManagementError("stale-session", "This session is no longer available. Refresh the session list.");
+    if ((scanned.sessions ?? []).some((group) => group.ownerConflict && group.runtimes.some((item) => item.run.runtimeId === runtimeId))) {
+      throw new ManagementError("runtime-conflict", "Two Copilot processes claim this session. Close one before controlling it.");
+    }
+    return sessionClient(record, { baseDir });
+  }
+  async function sessionCommand(client, command, payload, timeoutMs) {
+    try {
+      return await client.command(command, payload, { timeoutMs });
+    } catch (error) {
+      throw new ManagementError(error?.code ?? "session-failed", error?.message ?? "Session operation failed.");
+    }
   }
   async function execute(action, payload = {}, { interactive = false, trustedCli = false, operationId, onProgress } = {}) {
     validateManagementAction(action, payload);
@@ -399,20 +439,50 @@ export function createManagement({
       }
       if (action === "session.start") {
         const response = await background.command("station", "activate", {
-          operationId: operationId ?? randomUUID(), target: { kind: "new", projectName: payload.projectName },
-          mode: payload.mode ?? "default", name: payload.name,
+          requestId: operationId ?? randomUUID(),
+          target: { project: payload.projectName },
+          options: { permissionMode: payload.mode ?? "default", ...(payload.name ? { title: payload.name } : {}) },
         }, { ...options, timeoutMs: 55_000 });
         if (!response) throw new ManagementError("station-required", "Start Station before launching a new Copilot session.");
-        if (response.failure) throw new ManagementError(response.failure.code, response.failure.message);
-        const code = response.pairingPayload ? JSON.stringify(response.pairingPayload) : null;
-        return { state: response.state, message: "Session launch requested through Station. Do not repeat an uncertain launch.", code, qr: code ? await QRCode.toDataURL(code) : null };
+        if (response.outcome && response.outcome !== "done") {
+          throw new ManagementError(response.reason ?? response.outcome, response.result?.message ?? `The session request ended: ${response.outcome}.`);
+        }
+        const pairingPayload = response.result?.payload ?? null;
+        const code = pairingPayload ? JSON.stringify(pairingPayload) : null;
+        return {
+          state: response.outcome ?? response.stage, runtimeId: response.result?.runtimeId ?? null,
+          message: "Session launch requested through Station. Do not repeat an uncertain launch.",
+          code, qr: code ? await QRCode.toDataURL(pairingQrText(pairingPayload)) : null,
+        };
+      }
+      if (action === "sessions.reloadAll") {
+        // Opt-in after an update: each session reloads Weft in place (a running turn is interrupted).
+        const scanned = await scan({ baseDir, cleanup: false });
+        const results = await Promise.all((scanned.live ?? []).map(async (record) => {
+          try {
+            await sessionClient(record, { baseDir }).command("reloadExtension", { opId: randomUUID() }, { timeoutMs: 5_000 });
+            return "reloaded";
+          } catch (error) {
+            return error?.code === "unsupported" ? "unsupported" : "failed";
+          }
+        }));
+        const count = (value) => results.filter((item) => item === value).length;
+        const summary = { reloaded: count("reloaded"), unsupported: count("unsupported"), failed: count("failed") };
+        log("sessions.reload_all", summary);
+        return {
+          ...summary,
+          message: results.length === 0 ? "No open Copilot sessions use Weft."
+            : `Asked ${summary.reloaded} session${summary.reloaded === 1 ? "" : "s"} to reload Weft.` +
+              (summary.unsupported ? ` ${summary.unsupported} need /extensions reload typed in the session.` : "") +
+              (summary.failed ? ` ${summary.failed} did not answer.` : ""),
+        };
       }
       if (action.startsWith("session.")) {
         const client = await target(payload.runtimeId);
-        const response = await client.command(action === "session.activate" ? "activate" : "quiesce",
-          action === "session.activate" ? {} : { reason: "control-center" }, { timeoutMs: 30_000 });
-        if (response?.ok !== true) throw new ManagementError(response?.error?.code ?? "session-failed", response?.error?.message ?? "Session operation failed.");
-        return { state: response.result?.state, message: "Session connection updated. Copilot itself was not terminated." };
+        const result = action === "session.activate"
+          ? await sessionCommand(client, "activate", { requestId: operationId ?? randomUUID() }, 30_000)
+          : await sessionCommand(client, "quiesce", { opId: operationId ?? randomUUID(), reason: "control-center" }, 30_000);
+        return { state: result?.state, message: "Session connection updated. Copilot itself was not terminated." };
       }
       if (action === "pairing.rotate") {
         await rotatePersistedIdentity(options);
@@ -420,7 +490,8 @@ export function createManagement({
       }
       requireBackgroundWorkloads();
       const role = action.startsWith("relay.") ? "relay" : "station";
-      await ensureNotForeground(role);
+      // station.start decides about a foreground Station itself (ensureStationRunning).
+      if (action !== "station.start") await ensureNotForeground(role);
       if (action === "pairing.replace") {
         await background.stop("station", options);
         await rotatePersistedIdentity(options);
@@ -437,15 +508,26 @@ export function createManagement({
         if (action.endsWith(".stop")) return stopped;
       }
       if (role === "station") {
-        if (!listProjects(options).length) throw new ManagementError("project-required", "Register at least one project folder before starting Station.");
-        const config = loadTransportConfig(options);
-        if (!config) throw new ManagementError("transport-required", "Choose a transport in Setup before starting Station.");
-        if (config.kind === "supabase" && !loadSupabaseCredentials(options)) throw new ManagementError("credentials-required", "Supabase credentials are missing. Configure them through weft set-transport or the installer.");
-        if (config.kind === "devtunnel") {
-          await prepareRelay({ interactive, report });
-          await startRole("relay");
-        }
-      } else await prepareRelay({ interactive, report });
+        // Already under the management lock: observe, decide, then replace/repair/start one worker.
+        return ensureStationRunning({
+          reason: payload.reason ?? (action === "station.restart" ? "restart" : "control-center"),
+          replaceForeground: trustedCli && payload.replaceForeground === true,
+          baseDir, cliPath, background,
+          onProgress: (event) => onProgress?.({ progressAt: Date.now(), ...event }),
+          prepare: async () => {
+            if (!listProjects(options).length) throw new ManagementError("project-required", "Register at least one project folder before starting Station.");
+            const config = loadTransportConfig(options);
+            if (!config) throw new ManagementError("transport-required", "Choose a transport in Setup before starting Station.");
+            if (config.kind === "supabase" && !loadSupabaseCredentials(options)) throw new ManagementError("credentials-required", "Supabase credentials are missing. Configure them through weft set-transport or the installer.");
+            if (config.kind === "devtunnel") {
+              onProgress?.({ step: true, stage: "connecting-relay", label: "Connecting relay…", progressAt: Date.now() });
+              await prepareRelay({ interactive, report });
+              await startRole("relay");
+            }
+          },
+        });
+      }
+      await prepareRelay({ interactive, report });
       const status = await startRole(role);
       return { state: status.state, deviceName: status.deviceName, paired: status.paired, baseUrl: status.baseUrl };
     }).then((result) => {
@@ -514,7 +596,7 @@ export function createManagement({
         checkedAt: work.station.transportCheckedAt ?? null,
         unusedRelay: kind !== "devtunnel" && !["stopped", "unsupported", "unresponsive"].includes(work.relay.state),
       };
-      return { version: resolveVersion(), checkedAt: Date.now(), platform, deviceName: loadDeviceName(options) ?? hostname(), ...work, projects: listProjects(options),
+      return { version: resolveVersion(), installId: backgroundInstallId({ cliPath }), checkedAt: Date.now(), platform, deviceName: loadDeviceName(options) ?? hostname(), ...work, projects: listProjects(options),
         settings: currentSettings, settingsRevision: settingsRevision(currentSettings), sessions: runtime.list, warnings, connection };
   }
   return {
@@ -528,8 +610,10 @@ export function createManagement({
     refreshAuthentication: () => loadTransportConfig(options)?.kind === "devtunnel" ? auth(true)
       : Promise.resolve({ state: "not-applicable", provider: null, account: null, checkedAt: Date.now() }),
     async pairing(runtimeId) {
-      const response = runtimeId ? await (await target(runtimeId)).command("status", null, { timeoutMs: 2000 }) : null;
-      const status = runtimeId ? response?.result : await background.command("station", "status", null, options);
+      const response = runtimeId
+        ? await sessionCommand(await target(runtimeId), "status", null, 2000).catch(() => null)
+        : null;
+      const status = runtimeId ? response : await background.command("station", "status", null, options);
       if (!status && !runtimeId) {
         const saved = readSavedPairing(options);
         return { state: "stopped", paired: saved.paired, savedPairing: saved, code: null, qr: null };
@@ -537,7 +621,7 @@ export function createManagement({
       if (!status) throw new ManagementError("not-running", "Start the selected endpoint before showing pairing.");
       const payload = status.pairingPayload;
       const code = !status.paired && payload && payload.expiresAt > Date.now() ? JSON.stringify(payload) : null;
-      return { state: status.state, paired: status.paired === true, phoneName: status.phoneName, code, qr: code ? await QRCode.toDataURL(code, { width: 480, margin: 3 }) : null };
+      return { state: status.state, paired: status.paired === true, phoneName: status.phoneName, code, qr: code ? await QRCode.toDataURL(pairingQrText(payload), { width: 480, margin: 3 }) : null };
     },
     async update() {
       const origin = (process.env.WEFT_INSTALL_BASE || "https://useweft.netlify.app").replace(/\/+$/, "");

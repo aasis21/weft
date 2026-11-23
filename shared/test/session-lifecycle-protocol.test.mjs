@@ -9,8 +9,10 @@ import {
   LIFECYCLE_MESSAGE_MAX_BYTES,
   LIFECYCLE_RETENTION_MS,
   LIFECYCLE_STATES,
+  PROTOCOL_VERSION,
   SESSION_ACTIVATION_CAPABILITY,
   SUBTYPE,
+  endpointUpdate,
   latestLifecycleStatus,
   launchStatus,
   lifecycleCancel,
@@ -19,12 +21,16 @@ import {
   lifecycleStatusRequest,
   lifecycleStatusToLegacy,
   openIntentFingerprint,
+  openRequestFingerprint,
   openSession,
   openSessionFromLegacy,
   openSessionToLegacy,
   resumeSession,
+  sessionHealthMsg,
+  sessionHealthRequest,
   spawnSession,
   takeoverConfirm,
+  updateRequired,
 } from "../messages.mjs";
 
 test("session activation publishes additive constants and structured lifecycle values", () => {
@@ -44,127 +50,167 @@ test("session activation publishes additive constants and structured lifecycle v
   assert.ok(LIFECYCLE_ACTIONS.includes("confirm-takeover"));
 });
 
-test("coordinator failure codes survive lifecycle serialization", () => {
-  for (const code of [
-    "operation-stale",
-    "target-reserved",
-    "project-not-found",
-    "identity-failed",
-    "launch-outcome-unknown",
-    "launch-not-recoverable",
-  ]) {
-    const message = lifecycleStatus({
-      operationId: `failure-${code}`,
-      state: "failed",
-      revision: 2,
-      failure: { code, actions: ["retry", "cancel"] },
-    });
-    assert.equal(message.msg.failure.code, code);
-    assert.deepEqual(message.msg.failure.actions, ["retry", "cancel"]);
-  }
-});
-
-test("generic lifecycle factories build bounded CONTROL envelopes", () => {
-  const open = openSession("op-1", {
-    kind: "existing",
-    storeAuthority: " copilot-cli ",
-    sessionId: " session-1 ",
-  }, {
-    mode: "allow-all",
-    takeoverRequested: true,
+test("v3 openSession carries only a target and options; Station chooses the mechanism", () => {
+  const existing = openSession({
+    requestId: " req-1 ",
+    target: { sessionId: " session-1 ", storeAuthority: " sha256:store ", project: "ignored" },
+    options: { permissionMode: "allow-all", title: " weft updates " },
+    action: "resume",
   });
-  assert.equal(open.eventType, EVENT_TYPE.CONTROL);
-  assert.equal(open.eventSubtype, SUBTYPE.CONTROL.OPEN_SESSION);
-  assert.deepEqual(open.msg, {
-    operationId: "op-1",
-    target: {
-      kind: "existing",
-      storeAuthority: "copilot-cli",
-      sessionId: "session-1",
-    },
-    mode: "allow-all",
-    name: null,
-    takeoverRequested: true,
+  assert.equal(existing.eventType, EVENT_TYPE.CONTROL);
+  assert.equal(existing.eventSubtype, SUBTYPE.CONTROL.OPEN_SESSION);
+  assert.deepEqual(existing.msg, {
+    requestId: "req-1",
+    target: { sessionId: "session-1", storeAuthority: "sha256:store" },
+    options: { permissionMode: "allow-all", title: "weft updates" },
   });
 
-  assert.deepEqual(lifecycleStatusRequest("op-1").msg, { operationId: "op-1" });
-  assert.deepEqual(takeoverConfirm("op-1", "challenge-1", 7).msg, {
-    operationId: "op-1",
-    challengeId: "challenge-1",
-    revision: 7,
+  assert.deepEqual(openSession({ requestId: "req-2", target: { project: " weft " } }).msg, {
+    requestId: "req-2",
+    target: { project: "weft" },
+    options: { permissionMode: "default", title: null },
   });
-  assert.deepEqual(lifecycleCancel("op-1", 7).msg, {
-    operationId: "op-1",
-    revision: 7,
+  assert.deepEqual(openSession({ requestId: "req-3", target: { sessionId: "s" }, options: { permissionMode: "yolo" } }).msg, {
+    requestId: "req-3",
+    target: { sessionId: "s" },
+    options: { permissionMode: "default", title: null },
   });
-
-  const status = lifecycleStatus({
-    operationId: "op-1",
-    fingerprint: "f".repeat(64),
-    state: "failed",
-    revision: 7,
-    target: open.msg.target,
-    failure: {
-      code: "ownership-unknown",
-      actions: ["retry", "confirm-takeover", "not-real"],
-      retryable: false,
-    },
-    challenge: {
-      challengeId: "challenge-1",
-      sessionId: "session-1",
-      storeAuthority: "copilot-cli",
-      runtimeInstanceId: "runtime-1",
-      generation: 3,
-      pid: 123,
-      processStartedAt: 456,
-      responsive: true,
-    },
-  });
-  assert.equal(status.eventSubtype, SUBTYPE.CONTROL.LIFECYCLE_STATUS);
-  assert.deepEqual(status.msg.failure, {
-    code: "ownership-unknown",
-    actions: ["retry", "confirm-takeover"],
-    retryable: false,
-  });
-  assert.deepEqual(status.msg.challenge, {
-    challengeId: "challenge-1",
-    operationId: "op-1",
-    revision: 7,
-    storeAuthority: "copilot-cli",
-    sessionId: "session-1",
-    runtimeInstanceId: "runtime-1",
-    generation: 3,
-    pid: 123,
-    processStartedAt: 456,
-    responsive: true,
-  });
-
   assert.throws(
-    () => openSession("op-large", { kind: "new", projectName: "x".repeat(LIFECYCLE_MESSAGE_MAX_BYTES) }),
+    () => openSession({ requestId: "big", target: { project: "x".repeat(LIFECYCLE_MESSAGE_MAX_BYTES) } }),
     /^RangeError: too-large$/,
   );
 });
 
-test("operation fingerprints are canonical, normalized, and exclude the operation id", async () => {
-  const first = openSession("delivery-1", { kind: "new", projectName: " weft " }, {
-    mode: "allow-all",
-    name: " feature ",
+test("v3 request fingerprints ignore requestId and formatting but bind target, options and requester", async () => {
+  const first = openSession({ requestId: "delivery-1", target: { project: " weft " }, options: { title: " feature " } });
+  const redelivered = openSession({ requestId: "delivery-2", target: { project: "weft" }, options: { title: "feature" } });
+  const fingerprint = await openRequestFingerprint(first, "phone:1");
+  assert.match(fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(await openRequestFingerprint(redelivered.msg, "phone:1"), fingerprint);
+  assert.notEqual(await openRequestFingerprint(first, "phone:2"), fingerprint);
+  assert.notEqual(
+    await openRequestFingerprint(openSession({ requestId: "delivery-1", target: { project: "weft" }, options: { permissionMode: "allow-all", title: "feature" } }), "phone:1"),
+    fingerprint,
+  );
+});
+
+test("v3 lifecycle status reports stage, outcome, reason and a whitelisted result", () => {
+  const status = lifecycleStatus({
+    requestId: "req-1",
+    revision: 4,
+    stage: "awaiting-confirmation",
+    outcome: null,
+    reason: "controller-conflict",
+    result: {
+      action: "takeover",
+      sessionId: "session-1",
+      runtimeId: "runtime-1",
+      pid: 13972,
+      challenge: { challengeId: "ch-1", runtimeId: "runtime-1", controllerRevision: 2, controllerName: "Pixel" },
+      identityFile: "C:/secret/identity.json",
+      capability: "secret",
+    },
   });
-  const duplicate = openSession("delivery-2", { projectName: "weft", kind: "new" }, {
-    name: "feature",
-    mode: "allow-all",
+  assert.equal(status.eventSubtype, SUBTYPE.CONTROL.LIFECYCLE_STATUS);
+  assert.deepEqual(status.msg, {
+    requestId: "req-1",
+    revision: 4,
+    stage: "awaiting-confirmation",
+    outcome: null,
+    reason: "controller-conflict",
+    result: {
+      action: "takeover",
+      sessionId: "session-1",
+      runtimeId: "runtime-1",
+      pid: 13972,
+      challenge: { challengeId: "ch-1", runtimeId: "runtime-1", controllerRevision: 2, controllerName: "Pixel" },
+    },
   });
-  const conflicting = openSession("delivery-1", { kind: "new", projectName: "other" }, {
-    mode: "allow-all",
-    name: "feature",
+
+  const cancelled = lifecycleStatus({
+    requestId: "req-2",
+    stage: "awaiting-runtime",
+    outcome: "cancelled",
+    result: { mayBeRunning: true, action: "launch-anyway", challenge: { challengeId: "no-runtime" } },
   });
+  assert.deepEqual(cancelled.msg, {
+    requestId: "req-2",
+    revision: 0,
+    stage: "awaiting-runtime",
+    outcome: "cancelled",
+    reason: null,
+    result: { mayBeRunning: true },
+  });
+
+  const malformed = lifecycleStatus({ requestId: "req-3", stage: "launching", outcome: "open", reason: "weird", result: {} });
+  assert.deepEqual(
+    [malformed.msg.stage, malformed.msg.outcome, malformed.msg.reason, malformed.msg.result],
+    ["accepted", null, "internal-error", null],
+  );
+});
+
+test("v3 request follow-ups are keyed by requestId and the newest revision wins", () => {
+  assert.deepEqual(lifecycleStatusRequest(" req-1 ").msg, { requestId: "req-1" });
+  assert.deepEqual(takeoverConfirm("req-1", "ch-1", 7).msg, { requestId: "req-1", challengeId: "ch-1", revision: 7 });
+  assert.deepEqual(lifecycleCancel("req-1", 7).msg, { requestId: "req-1", revision: 7 });
+  assert.deepEqual(lifecycleCancel("req-1", -1).msg, { requestId: "req-1" });
+
+  const older = lifecycleStatus({ requestId: "req-1", revision: 1, stage: "resolving" });
+  const newer = lifecycleStatus({ requestId: "req-1", revision: 2, stage: "dispatching" });
+  const other = lifecycleStatus({ requestId: "req-2", revision: 0, stage: "accepted" });
+  assert.equal(latestLifecycleStatus(newer, older), newer);
+  assert.equal(latestLifecycleStatus(older, newer), newer);
+  assert.equal(latestLifecycleStatus(newer, other), other);
+});
+
+test("session health, endpoint and version notices normalize to what the phone can render", () => {
+  assert.deepEqual(sessionHealthRequest(" session-1 ").msg, { sessionId: "session-1" });
+  const health = sessionHealthMsg({
+    sessionId: "session-1",
+    label: "stalled",
+    reason: "link-stuck",
+    freshAt: 123,
+    runtimeId: "runtime-1",
+  });
+  assert.equal(health.eventSubtype, SUBTYPE.CONTROL.SESSION_HEALTH);
+  assert.deepEqual(health.msg, {
+    sessionId: "session-1",
+    label: "stalled",
+    reason: "link-stuck",
+    freshAt: 123,
+    observer: "station",
+    runtimeId: "runtime-1",
+  });
+  assert.deepEqual(sessionHealthMsg({ sessionId: "s", label: "mystery", reason: "bad", freshAt: NaN, observer: "x" }).msg, {
+    sessionId: "s",
+    label: "stalled",
+    reason: null,
+    freshAt: null,
+    observer: "station",
+  });
+
+  const descriptor = { kind: "devtunnel", url: "https://abc-8080.usw2.devtunnels.ms" };
+  const endpoint = endpointUpdate({ endpointRevision: 3, descriptor });
+  assert.equal(endpoint.eventSubtype, SUBTYPE.CONTROL.ENDPOINT_UPDATE);
+  assert.deepEqual(endpoint.msg, { endpointRevision: 3, descriptor });
+  assert.deepEqual(endpointUpdate({ endpointRevision: -2, descriptor: "nope" }).msg, { endpointRevision: 0, descriptor: null });
+
+  const notice = updateRequired({ peerVersion: 2, side: "laptop" });
+  assert.equal(notice.eventSubtype, SUBTYPE.CONTROL.UPDATE_REQUIRED);
+  assert.deepEqual(notice.msg, { minVersion: PROTOCOL_VERSION, peerVersion: 2, side: "laptop" });
+  assert.deepEqual(updateRequired({ minVersion: 0, side: "phone" }).msg, { minVersion: PROTOCOL_VERSION, peerVersion: null, side: "phone" });
+});
+
+test("deprecated v2 intent fingerprints stay canonical for remaining legacy callers", async () => {
+  const first = { operationId: "delivery-1", target: { kind: "new", projectName: " weft " }, mode: "allow-all", name: " feature " };
+  const duplicate = { operationId: "delivery-2", target: { projectName: "weft", kind: "new" }, name: "feature", mode: "allow-all" };
+  const conflicting = { ...first, target: { kind: "new", projectName: "other" } };
 
   const firstFingerprint = await openIntentFingerprint(first);
   assert.match(firstFingerprint, /^[a-f0-9]{64}$/);
   assert.equal(await openIntentFingerprint(duplicate), firstFingerprint);
   assert.notEqual(await openIntentFingerprint(conflicting), firstFingerprint);
 });
-
 test("legacy Start and Resume messages round-trip through generic Open", () => {
   const legacyStart = spawnSession("start-1", "weft", "allow-all", "feature");
   const genericStart = openSessionFromLegacy(legacyStart);
@@ -195,26 +241,19 @@ test("legacy launch replies project to monotonic lifecycle revisions and back", 
     sessionId: "session-1",
     readyAt: 20,
   }), accepted);
-  const stale = lifecycleStatus({
-    operationId: "op-1",
-    state: "launching",
-    revision: 0,
-  });
 
   assert.equal(accepted.msg.state, "accepted");
   assert.equal(accepted.msg.revision, 0);
   assert.equal(ready.msg.state, "pairing-ready");
   assert.equal(ready.msg.revision, 1);
-  assert.equal(latestLifecycleStatus(ready, stale), ready);
-  assert.equal(latestLifecycleStatus(accepted, ready), ready);
 
-  const projected = lifecycleStatusToLegacy(lifecycleStatus({
+  const projected = lifecycleStatusToLegacy({
     operationId: "op-1",
     state: "failed",
     revision: 2,
     target: { kind: "existing", storeAuthority: "copilot-cli", sessionId: "session-1" },
     failure: { code: "launch-failed", message: "could not launch", actions: ["retry"] },
-  }));
+  });
   assert.deepEqual(projected.map((message) => message.eventSubtype), [
     SUBTYPE.CONTROL.LAUNCH_STATUS,
     SUBTYPE.CONTROL.SPAWN_RESULT,
@@ -223,12 +262,12 @@ test("legacy launch replies project to monotonic lifecycle revisions and back", 
   assert.equal(projected[0].msg.state, "failed");
   assert.equal(projected[1].msg.ok, false);
 
-  const activating = lifecycleStatusToLegacy(lifecycleStatus({
+  const activating = lifecycleStatusToLegacy({
     operationId: "op-activating",
     state: "activating",
     revision: 1,
     target: { kind: "existing", storeAuthority: "copilot-cli", sessionId: "session-1" },
-  }));
+  });
   assert.deepEqual(
     activating.map((message) => message.eventSubtype),
     [SUBTYPE.CONTROL.LAUNCH_STATUS],

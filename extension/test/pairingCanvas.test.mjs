@@ -5,7 +5,7 @@ import { createPairingCanvasServer, readCanvasSessionDetails } from "../src/pair
 
 async function harness(t, overrides = {}) {
   let current = {
-    state: "pairing-ready",
+    state: "waiting",
     pairingPayload: { channelId: "test-channel", token: "test-grant", expiresAt: Date.now() + 60_000,
       transport: { kind: "local" } },
   };
@@ -63,15 +63,15 @@ test("the panel title stays user-facing regardless of the conversation name", as
 
 test("connected and expired states never expose an unusable grant", async (t) => {
   const h = await harness(t);
-  h.setStatus({ state: "active", pairingPayload: { token: "claimed" } });
+  h.setStatus({ state: "linked", pairingPayload: { token: "claimed" } });
   assert.equal((await h.state()).code, null);
   assert.equal((await h.state()).qr, null);
-  h.setStatus({ state: "pairing-ready", paired: true, pairingPayload: { token: "claimed", expiresAt: 1 } });
+  h.setStatus({ state: "waiting", paired: true, pairingPayload: { token: "claimed", expiresAt: 1 } });
   const reconnecting = await h.state();
   assert.equal(reconnecting.paired, true);
   assert.equal(reconnecting.code, null);
   assert.equal((await h.pair({ confirm: false })).status, 400);
-  h.setStatus({ state: "pairing-ready", pairingPayload: { expiresAt: 1, token: "expired" } });
+  h.setStatus({ state: "waiting", pairingPayload: { expiresAt: 1, token: "expired" } });
   const state = await h.state();
   assert.equal(state.expired, true);
   assert.equal(state.code, null);
@@ -79,7 +79,7 @@ test("connected and expired states never expose an unusable grant", async (t) =>
 
 test("only same-origin confirmed actions may replace a connected phone", async (t) => {
   const h = await harness(t);
-  h.setStatus({ state: "active" });
+  h.setStatus({ state: "linked" });
   assert.equal((await h.pair({ confirm: false })).status, 400);
   assert.equal((await h.pair({ confirm: true }, { Origin: "https://example.com" })).status, 403);
   assert.equal((await h.pair({ confirm: true }, { "Content-Type": "text/plain" })).status, 403);

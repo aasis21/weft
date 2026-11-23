@@ -2,7 +2,7 @@
 
 export const RELEASE_BUNDLES = [
   { name: "extension.mjs", entryPoint: "src/extension.mjs" },
-  { name: "activeRuntime.mjs", entryPoint: "src/activeRuntime.mjs" },
+  { name: "sessionLink.mjs", entryPoint: "src/sessionLink.mjs" },
   { name: "pairingCanvas.mjs", entryPoint: "src/pairingCanvas.mjs" },
   { name: "relayServerProcess.mjs", entryPoint: "src/relayServerProcess.mjs" },
   { name: "devtunnelHostWatchdog.mjs", entryPoint: "src/devtunnelHostWatchdog.mjs" },

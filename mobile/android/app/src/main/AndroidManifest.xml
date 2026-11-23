@@ -28,6 +28,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Pairing links: the laptop QR is https://useweft.netlify.app/pair#v3.<code>. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="useweft.netlify.app" android:pathPrefix="/pair" />
+            </intent-filter>
+
         </activity>
 
         <provider

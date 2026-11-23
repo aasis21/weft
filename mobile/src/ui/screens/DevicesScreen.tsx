@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { WeftMenuIcon } from '@/ui/brand/WeftMark';
+import { WeftMenuTile } from '@/ui/brand/WeftMark';
 import type { JSX } from 'react';
 import type { ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
@@ -242,7 +242,7 @@ export function DevicesScreen({
           onClick={() => setDrawerOpen(true)}
           aria-label="Open sessions"
         >
-          <WeftMenuIcon />
+          <WeftMenuTile />
         </button>
         <div className="status-id">
           <span className="status-title">Devices</span>

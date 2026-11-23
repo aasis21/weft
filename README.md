@@ -80,8 +80,10 @@ weft
 
 Review **Setup**, then explicitly choose **Start Station** on **Control**.
 For terminal-only startup, run `weft start` instead.
-Then open **[useweft.netlify.app](https://useweft.netlify.app)** on your phone, choose
-**Scan QR to pair**, then **Scan laptop QR**, and scan the dashboard or terminal QR. On Windows and macOS,
+Then point your phone camera at the dashboard or terminal QR: it is a
+`https://useweft.netlify.app/pair#…` link that opens the Weft Android app (or the web app) and
+pairs straight away. In-app **Scan QR to pair** → **Scan laptop QR** and **Paste code** still
+work. On Windows and macOS,
 Station runs in the background and you can close this terminal. Use `weft status`
 and `weft stop` to manage it. Startup is manual, not automatic at boot/sign-in.
 Use `weft start --foreground` for terminal-owned diagnostics; other platforms
@@ -212,22 +214,48 @@ Read the full [security model](docs/security.md), [privacy policy](PRIVACY.md), 
 
 ### Session activation contract
 
-- Every dormant Copilot extension publishes one small user-local presence record and holds one
-  idle local lifecycle endpoint. It performs no remote/network access, pairing cryptography, QR
-  work, logging, diagnostics, polling, heartbeat, retry timer, or other timer.
-- Filesystem state provides discovery and crash recovery; the Windows named pipe or Unix-domain
-  socket provides authenticated live commands such as activate, status, controller replacement,
-  and quiesce. Station connects only for a command and then disconnects.
+Protocol v3 (Weft 0.2.75). Older laptops, phones and on-disk files are refused with an explicit
+"update Weft" message, never adapted silently.
+
+- **One record per running Weft instance.** Every Copilot session with Weft writes exactly one
+  user-local live record, `~/.weft/sessions-live/<runtimeId>.json`, plus a private capability
+  file for its local control pipe. Only that session writes its record. A dormant session performs
+  no remote/network access, pairing cryptography, QR work, logging, polling, heartbeat or timer.
+- **Facts, not self-reported health.** The record holds facts (link state and generation, attempt
+  count, deadline, last error code, controller revision, last phone contact, whether the phone is
+  watching). Station, the phone and Control Center derive the same label and reason from those
+  facts with one shared projection (`shared/sessionHealth.mjs`): `dormant · connecting · waiting ·
+  linked · stalled · ending · gone`.
+- **One writer per saved Copilot session.** Station opens a session only with proof: a live,
+  responsive runtime is activated or repaired in place; another phone's session needs a confirmed
+  takeover bound to that runtime and its controller revision; a session whose owner cannot be
+  proven fails as `owner-unknown`; Copilot is resumed in a new terminal only when no writer is
+  proven. Two requests for the same session share one lock: the second follows the first.
+- **The phone names a target, Station picks the mechanism.** `open_session` carries `{ project }`
+  or `{ sessionId }`; progress streams as `lifecycle_status` stages (`accepted → resolving →
+  [awaiting-confirmation] → dispatching → awaiting-runtime → preparing-link`) and ends `done`,
+  `failed`, `cancelled` or `outcome-unknown`. A cancel after dispatch says the session may already
+  be starting and is never followed by a second launch.
+- **Ready means end-to-end ready.** A session link is `linked` only after the handshake ACK and a
+  `link_ready` exchange sent after every handler is attached. Each connect attempt has a 30 s
+  deadline, is cancellable, backs off (1.5 s doubling to 15 s), and is logged and recorded. Work from
+  a retired link generation is dropped; a retired instance never ACKs a hello or runs a prompt.
+- **Station supervises, sessions heal themselves.** Without Station a session keeps reconnecting on
+  its own. With Station, a 15 s sweep probes every live session (including `/weft`-only ones),
+  repairs a stuck link in place at most twice per episode, reports unresponsive sessions instead of
+  restarting them, and runs one shared check when every session is stuck at once. After laptop
+  sleep the first sweep only observes. A backgrounded phone is `phone-away`, never a fault.
+- **Commands are local and authenticated.** The Windows named pipe or Unix-domain socket of each
+  session accepts `probe`, `activate`, `resetLink`, `replaceController`, `quiesce`, `traffic` and
+  `reloadExtension`, authenticated by the capability in the first frame. Station connects only for
+  a command; a command that misses its 5 s deadline is treated as unknown, never as cancelled.
 - After pairing, prompts, events, approvals, streaming, and terminal traffic flow directly between
   the phone and session over the encrypted relay. Active phone traffic does not pass through Device
-  Station or the local lifecycle endpoint.
+  Station or the local control pipe.
 - `/clear` ends the current phone attachment. The replacement Copilot session starts dormant and
   requires fresh activation through Station or `/weft`.
-- Completed lifecycle operations and unclaimed recovery identities are retained for three days,
-  unless still referenced by a live runtime or unresolved operation.
-- A confirmed takeover of a responsive runtime replaces the current phone controller immediately
-  without restarting Copilot. Restart-and-Resume is reserved for a separately confirmed,
-  revalidated unresponsive-owner flow.
+- Finished open requests (and the private identity of a launched session) are kept for three days
+  after they finish, unless a live session record still references them.
 
 ```
 +------------------------------+        +------------------------------+        +-------------------------------+
@@ -273,7 +301,7 @@ Three layers, one monorepo:
 ## Runtime & packaging model
 
 - The extension is authored in `extension/src/` and bundled (esbuild) to a single
-  `extension/dist/extension.mjs` plus the lazily imported `extension/dist/activeRuntime.mjs`
+  `extension/dist/extension.mjs` plus the lazily imported `extension/dist/sessionLink.mjs`
   and on-demand `extension/dist/pairingCanvas.mjs`.
   `@github/copilot-sdk` is marked **external** (the Copilot host provides
   it at runtime); everything else (e.g. `@supabase/supabase-js`, `shared/`) is bundled in.
@@ -296,7 +324,7 @@ Source builds require **Node.js 20 or newer**.
 npm install --workspaces --include-workspace-root  # resolve shared, extension, and mobile
 npm test -w @aasis21/weft-shared            # crypto + pairing + transport + message tests
 node extension/harness/harness.mjs --auto   # full relay loop vs a simulated phone (no Supabase)
-npm run build -w @aasis21/weft-extension    # bundles -> extension/dist/extension.mjs + activeRuntime.mjs
+npm run build -w @aasis21/weft-extension    # bundles -> extension/dist/extension.mjs + sessionLink.mjs
 npm run build -w @aasis21/weft-mobile       # Vite production build
 cd mobile && npm run dev                    # then pick "Demo / Simulator"
 node design/capture.mjs                     # refresh product screenshots from the hosted app

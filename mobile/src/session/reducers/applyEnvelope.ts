@@ -1,4 +1,4 @@
-import { EVENT_TYPE, SUBTYPE, MODES, mergeHistory } from '@aasis21/weft-shared';
+import { EVENT_TYPE, SUBTYPE, MODES, PROTOCOL_VERSION, mergeHistory } from '@aasis21/weft-shared';
 import type {
   ApprovalRequestMsg,
   AssistantDelta,
@@ -175,6 +175,65 @@ function clearAgentStatus(session: Session): void {
   session.connection.thinkingSince = null;
 }
 
+export const UPDATE_LAPTOP_MESSAGE = 'Weft on your laptop needs an update.';
+export const UPDATE_PHONE_MESSAGE = 'Update Weft on this phone to keep using this session.';
+
+function isLinkGeneration(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function requireUpdate(session: Session, side: 'laptop' | 'phone', protocolVersion?: number | null): void {
+  session.connection.link = {
+    generation: session.connection.link?.generation ?? 0,
+    ready: false,
+    ...(protocolVersion !== undefined ? { protocolVersion } : {}),
+    updateRequired: side,
+  };
+  session.connection.status = 'error';
+  session.connection.error = side === 'laptop' ? UPDATE_LAPTOP_MESSAGE : UPDATE_PHONE_MESSAGE;
+}
+
+/** channel_up opens a link generation: it must speak protocol v3, and the session is not live until
+ *  the laptop's `link_ready` for that generation arrives (LLD §4.1). */
+function noteChannelUp(session: Session, msg: { protocolVersion?: number; linkGeneration?: number }): void {
+  const version = typeof msg.protocolVersion === 'number' && Number.isSafeInteger(msg.protocolVersion)
+    ? msg.protocolVersion : null;
+  if (version === null || version < PROTOCOL_VERSION) {
+    requireUpdate(session, 'laptop', version);
+    return;
+  }
+  if (version > PROTOCOL_VERSION) {
+    requireUpdate(session, 'phone', version);
+    return;
+  }
+  if (!isLinkGeneration(msg.linkGeneration)) {
+    delete session.connection.link;
+    return;
+  }
+  const link = session.connection.link;
+  if (link && !link.updateRequired && link.ready && link.generation === msg.linkGeneration) return;
+  session.connection.link = { generation: msg.linkGeneration, ready: false, protocolVersion: version };
+}
+
+function noteLinkReady(session: Session, msg: { linkGeneration: number; controllerRevision: number }): void {
+  if (!isLinkGeneration(msg.linkGeneration)) return;
+  const link = session.connection.link;
+  if (link?.updateRequired) return;
+  if (link && msg.linkGeneration < link.generation) return;
+  session.connection.link = {
+    ...link,
+    generation: msg.linkGeneration,
+    ready: true,
+    controllerRevision: msg.controllerRevision,
+  };
+}
+
+/** A v3 link that has not finished its `link_ready` exchange (or needs an update) is not live. */
+export function linkBlocksLive(session: Session): boolean {
+  const link = session.connection.link;
+  return !!link && (!!link.updateRequired || !link.ready);
+}
+
 export function applyEnvelope(session: Session, message: EventEnvelope): void {
   if (session.connection.compact) session.connection.compact = false;
   // Liveness clock: phone-local receipt time (set at the runtime edge) so heartbeat freshness is
@@ -182,9 +241,19 @@ export function applyEnvelope(session: Session, message: EventEnvelope): void {
   // that's the laptop's clock and cross-clock skew would flap the session idle/offline. Falls back
   // to `message.ts` for older code paths / tests that don't stamp `receivedAt`.
   const beatTs = message.receivedAt ?? message.ts;
+  if (message.eventType === EVENT_TYPE.CONTROL) {
+    if (message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_UP) noteChannelUp(session, message.msg);
+    else if (message.eventSubtype === SUBTYPE.CONTROL.LINK_READY) noteLinkReady(session, message.msg);
+    else if (message.eventSubtype === SUBTYPE.CONTROL.UPDATE_REQUIRED) {
+      requireUpdate(session, message.msg.side === 'phone' ? 'phone' : 'laptop', message.msg.peerVersion);
+      return;
+    }
+  }
   if (!(message.eventType === EVENT_TYPE.CONTROL && message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_DOWN)) {
-    session.connection.status = 'live';
-    session.connection.error = undefined;
+    if (!linkBlocksLive(session)) {
+      session.connection.status = 'live';
+      session.connection.error = undefined;
+    }
     if (session.connection.lastHeartbeat == null) session.connection.lastHeartbeat = beatTs;
   }
 
@@ -707,13 +776,38 @@ function noteBusySignal(session: Session, busy: boolean, ts: number): void {
   // The UI's "Working…" fallback also treats any transcript tool item still marked "running" as
   // busy (SessionScreen's agentBusy). Whenever we authoritatively learn the agent is idle, settle
   // any such stuck tool item too — otherwise a missed/dropped TOOL_COMPLETE leaves the pill stuck
-  // on "Working…" forever even though every subsequent heartbeat/snapshot says busy: false.
+  // on "Working…" forever even though every subsequent heartbeat/snapshot says busy: false. The
+  // phone never saw how the tool ended, so it is "finished, result unknown" — not a failure.
   for (const item of session.transcript.items) {
     if (item.kind === 'tool' && item.status === 'running') {
-      item.status = 'error';
+      item.status = 'unknown';
       item.finishedAt = ts;
     }
   }
+}
+
+/**
+ * After a reconnect's catch-up: a tool still `running` that started before the laptop's latest
+ * turn cannot still be running — catch-up would have carried its completion if the laptop had one.
+ * Mark it finished-unknown. A tool started after the latest turn is genuinely in flight; leave it.
+ */
+export function settleStaleTools(session: Session, ts: number): number {
+  let latestTurnAt = -Infinity;
+  for (const item of session.transcript.items) {
+    if (item.kind === 'assistant' || (item.kind === 'user' && !item.failed && (item.origin !== 'phone' || item.echoed))) {
+      latestTurnAt = Math.max(latestTurnAt, item.ts);
+    }
+  }
+  for (const item of session.history.items) latestTurnAt = Math.max(latestTurnAt, item.ts);
+  let settled = 0;
+  for (const item of session.transcript.items) {
+    if (item.kind === 'tool' && item.status === 'running' && item.startedAt < latestTurnAt) {
+      item.status = 'unknown';
+      item.finishedAt = ts;
+      settled += 1;
+    }
+  }
+  return settled;
 }
 
 function noteStreamActivity(session: Session, ts: number): void {
@@ -752,7 +846,7 @@ export interface PersistedSession {
   pinned?: boolean;
   transcript: { items: TimelineItem[] };
   history: Omit<Session['history'], 'loading'>;
-  connection?: { mode?: Session['connection']['mode'] };
+  connection?: { mode?: Session['connection']['mode']; model?: Session['connection']['model'] };
   debug: DebugEvent[];
 }
 
@@ -774,9 +868,15 @@ export function toPersistedSession(session: Session): PersistedSession {
       hasMore: session.history.hasMore,
       latestTurnIndex: session.history.latestTurnIndex,
     },
-    connection: { mode: session.connection.mode },
+    // The last model_state is kept so an offline session's pill still shows its model · effort.
+    connection: { mode: session.connection.mode, ...(session.connection.model ? { model: session.connection.model } : {}) },
     debug: session.debug,
   };
+}
+
+function restoredModel(persisted: PersistedSession): { model?: NonNullable<Session['connection']['model']> } {
+  const model = persisted.connection?.model;
+  return model && Array.isArray(model.models) ? { model } : {};
 }
 
 export function restorePersistedSession(persisted: PersistedSession): Session {
@@ -802,6 +902,7 @@ export function restorePersistedSession(persisted: PersistedSession): Session {
       intent: null,
       thinkingSince: null,
       mode: persisted.connection?.mode ?? DEFAULT_MODE,
+      ...restoredModel(persisted),
       reconnecting: false,
       settling: false,
       cold: false,

@@ -10,6 +10,21 @@ import { fileURLToPath } from "node:url";
 import { createManagement, withManagementLock } from "../src/management.mjs";
 import { saveTransportConfig, saveSupabaseCredentials } from "../src/transportConfig.mjs";
 import { shortcutScript, installControlCenterShortcut } from "../src/controlCenterShortcut.mjs";
+import { resolveVersion } from "../src/version.mjs";
+
+const EMPTY_SCAN = { live: [], foreign: [], unverified: [], sessions: [], legacyOwners: [] };
+function liveRecord(runtimeId, sessionId, state = "dormant") {
+  return {
+    schema: 1,
+    session: { storeAuthority: "sha256:store", sessionId },
+    run: { runtimeId, generation: 1, pid: 1, processStartedAt: 1, version: "0.2.75", openedBy: null, cwd: null },
+    control: { pipe: `pipe-${runtimeId}` },
+    link: { generation: 1, state, attempt: 0, deadlineAt: null, lastError: null, controllerRevision: 0, lastPhoneContactAt: null, phoneWatching: null, endpointRevision: 0 },
+    offer: null,
+    updatedAt: 1,
+  };
+}
+const scanOf = (live) => ({ ...EMPTY_SCAN, live, sessions: live.map((record) => ({ key: record.session, runtimes: [record], ownerConflict: false })) });
 
 async function home(t) {
   const dir = await mkdtemp(join(tmpdir(), "weft-management-"));
@@ -19,7 +34,7 @@ async function home(t) {
 test("management validates full settings before one atomic write and preserves unrelated keys", async (t) => {
   const baseDir = await home(t);
   await writeFile(join(baseDir, "weft.config.json"), JSON.stringify({ custom: "preserved", terminal: { enabled: false, extra: true } }));
-  const manager = createManagement({ baseDir, platform: "linux", discover: async () => ({ runtimes: [], status: "none" }) });
+  const manager = createManagement({ baseDir, platform: "linux", scan: async () => EMPTY_SCAN });
   await assert.rejects(manager.execute("settings.save", { deviceName: "New name", files: { enabled: true, roots: [] } }), /confirm|root/i);
   assert.equal(JSON.parse(await readFile(join(baseDir, "weft.config.json"), "utf8")).deviceName, undefined);
   await manager.execute("settings.save", { deviceName: "Laptop", permissionMode: "default", terminalEnabled: false });
@@ -61,26 +76,44 @@ test("status probes do not activate dormant sessions or expose pairing payloads"
   const commands = [];
   const manager = createManagement({
     baseDir, platform: "linux",
-    discover: async () => ({ status: "multiple", runtimes: [
-      { runtimeInstanceId: "one", sessionId: "one", pid: 1 },
-      { runtimeInstanceId: "two", sessionId: "two", pid: 2 },
-    ] }),
-    runtimeClient: (p) => ({ command: async (command) => {
+    scan: async () => scanOf([liveRecord("one", "one", "dormant"), liveRecord("two", "two", "connecting")]),
+    sessionClient: (record) => ({ command: async (command) => {
       commands.push(command);
-      return { ok: true, result: { state: p.sessionId === "one" ? "dormant" : "active",
-        pairingPayload: { token: "private-pairing-token" }, paired: true } };
+      return { state: record.link.state, pairingPayload: { token: "private-pairing-token" }, paired: true };
     } }),
   });
   const state = await manager.state();
   assert.deepEqual(commands, ["status", "status"]);
   assert.equal(state.sessions[0].connected, false, "dormant means Weft has no remote session link");
   assert.equal(state.sessions[0].watchLevel, "off");
-  assert.equal(state.sessions[1].connected, null);
+  assert.equal(state.sessions[0].label, "dormant", "health comes from the shared projection");
+  assert.equal(state.sessions[1].connected, false, "only a linked session counts as connected");
   assert.equal(state.sessions[1].watchLevel, null);
   assert.ok(!JSON.stringify(state).includes("private-pairing-token"));
   await manager.execute("session.activate", { runtimeId: "two" });
   assert.equal(commands.at(-1), "activate");
   await assert.rejects(manager.execute("station.start"), /Windows/);
+});
+
+test("reloading Weft in open sessions is confirmed and reports sessions that cannot reload", async (t) => {
+  const baseDir = await home(t);
+  const asked = [];
+  const manager = createManagement({
+    baseDir, platform: "linux",
+    scan: async () => scanOf([liveRecord("one", "one"), liveRecord("two", "two"), liveRecord("three", "three")]),
+    sessionClient: (record) => ({ command: async (command) => {
+      asked.push([record.run.runtimeId, command]);
+      if (record.run.runtimeId === "two") throw Object.assign(new Error("old Copilot"), { code: "unsupported" });
+      if (record.run.runtimeId === "three") throw Object.assign(new Error("timed out"), { code: "timeout", timeout: true });
+      return { state: "reloading" };
+    } }),
+  });
+  await assert.rejects(manager.execute("sessions.reloadAll", {}), /Confirm/);
+  assert.deepEqual(asked, []);
+  const result = await manager.execute("sessions.reloadAll", { confirmed: true });
+  assert.deepEqual([result.reloaded, result.unsupported, result.failed], [1, 1, 1]);
+  assert.match(result.message, /\/extensions reload/);
+  assert.ok(asked.every(([, command]) => command === "reloadExtension"));
 });
 test("Station management shares relay startup, confirms stops, and never claims readiness early", async (t) => {
   const baseDir = await home(t);
@@ -110,25 +143,29 @@ test("macOS management exposes background Station, relay, and Station traffic", 
   const baseDir = await home(t);
   saveTransportConfig({ kind: "devtunnel" }, { baseDir });
   const calls = [];
+  let stationRunning = false;
   const manager = createManagement({
     baseDir, platform: "darwin",
-    discover: async () => ({ status: "none", runtimes: [] }),
+    scan: async () => EMPTY_SCAN,
     relayHealth: async () => ({ baseUrl: "https://relay.example.test" }),
     background: {
       command: async (role, command) => {
         calls.push(`${role}.${command}`);
         if (command === "traffic") return { entries: [{ id: "phone-message", direction: "in", lastAt: Date.now(), count: 1 }] };
-        if (command === "status") return { state: "ready", paired: true };
+        if (command === "status") return role === "station" && !stationRunning ? null : { state: "ready", paired: true, version: resolveVersion() };
         return null;
       },
-      start: async (role) => { calls.push(`start-${role}`); return { state: "ready", deviceName: "Mac", paired: true }; },
+      start: async (role) => { calls.push(`start-${role}`); if (role === "station") stationRunning = true; return { state: "ready", deviceName: "Mac", paired: true }; },
       stop: async (role) => { calls.push(`stop-${role}`); return { state: "stopped" }; },
       task: async () => ({ state: "NotRegistered" }),
     },
   });
   await manager.execute("project.add", { name: "work", path: baseDir });
   await manager.execute("station.start");
-  assert.deepEqual(calls.slice(0, 2), ["start-relay", "start-station"]);
+  assert.deepEqual(calls.filter((call) => call.startsWith("start-")), ["start-relay", "start-station"]);
+  const calledBefore = calls.length;
+  assert.equal((await manager.execute("station.start")).outcome, "already-running");
+  assert.ok(!calls.slice(calledBefore).some((call) => call.startsWith("start-") || call.startsWith("stop-")), "a running current Station is not restarted");
   const state = await manager.state();
   assert.equal(state.station.supported, true);
   assert.equal(state.relay.supported, true);
@@ -153,7 +190,7 @@ test("operational telemetry keeps worker identity, relay health and secrets sepa
         paired: true, connected: true, phoneName: "Phone", lastPeerContactAt: startedAt,
         pairingPayload: { token: "private-pairing-token" } }),
     },
-    discover: async () => ({ status: "none", runtimes: [] }),
+    scan: async () => EMPTY_SCAN,
     relayHealth: async () => ({ baseUrl: "wss://relay.example.test" }),
     publicProbe: async () => "ok",
   });
@@ -176,7 +213,7 @@ test("stopped Station preserves saved trust and does not infer a missing phone",
     channelId: "saved", privateKeyJwk: { secret: "private-key" }, peerPublicKeyB64: "public-peer",
   }));
   const manager = createManagement({ baseDir, platform: "win32",
-    discover: async () => ({ status: "none", runtimes: [] }),
+    scan: async () => EMPTY_SCAN,
     background: { command: async () => null, task: async () => ({ state: "NotRegistered" }) },
   });
   const state = await manager.state();
@@ -197,7 +234,7 @@ test("selected transport scopes cached authentication and avoids claiming a diff
   saveTransportConfig({ kind: "devtunnel" }, { baseDir });
   let reads = 0;
   const manager = createManagement({ baseDir, platform: "win32",
-    discover: async () => ({ status: "none", runtimes: [] }),
+    scan: async () => EMPTY_SCAN,
     background: { command: async () => ({ state: "ready", transportKind: "devtunnel", transportState: "connected" }) },
     authentication: async () => { reads++; return { state: "signed-in", provider: "GitHub", account: "example", checkedAt: Date.now() }; },
   });
@@ -225,7 +262,7 @@ test("status reports partial failures and unexpected worker exits without failin
   let authReads = 0;
   let releaseAuth;
   const manager = createManagement({ baseDir, platform: "win32",
-    discover: async () => { throw Object.assign(new Error("private discovery detail"), { code: "EPERM" }); },
+    scan: async () => { throw Object.assign(new Error("private discovery detail"), { code: "EPERM" }); },
     background: {
       command: async (role) => {
         if (role === "relay") throw Object.assign(new Error("private relay detail"), { code: "EIO" });
@@ -270,7 +307,7 @@ test("a worker stuck crashing is reported as crash-looping with its exact last e
     at: now - 2_100, name: "Error", code: "EADDRINUSE", message: "listen EADDRINUSE: address already in use 127.0.0.1:4590", location: "listener.mjs:301",
   }));
   let workerReady = false;
-  const manager = createManagement({ baseDir, platform: "win32", discover: async () => ({ runtimes: [] }),
+  const manager = createManagement({ baseDir, platform: "win32", scan: async () => EMPTY_SCAN,
     background: {
       command: async (role) => role === "station" && workerReady ? { state: "ready", pid: 4242, startedAt: now - 1_000 } : null,
       task: async (_operation, { role }) => ({ state: role === "station" ? "Running" : "Disabled", taskName: `Weft-${role}`, lastResult: 267009 }),
@@ -298,12 +335,9 @@ test("a worker stuck crashing is reported as crash-looping with its exact last e
 test("phone traffic merges Station and session sources, newest first, without unsupported workers failing it", async (t) => {
   const baseDir = await home(t);
   const at = Date.now();
-  const sessions = [
-    { runtimeInstanceId: "runtime-current", sessionId: "s1" },
-    { runtimeInstanceId: "runtime-older", sessionId: "s2" },
-  ];
+  const sessions = [liveRecord("runtime-current", "s1"), liveRecord("runtime-older", "s2")];
   const manager = createManagement({ baseDir, platform: "win32",
-    discover: async () => ({ status: "single", runtimes: sessions }),
+    scan: async () => scanOf(sessions),
     background: {
       command: async (role, command) => {
         assert.equal(role, "station");
@@ -314,12 +348,12 @@ test("phone traffic merges Station and session sources, newest first, without un
         ] };
       },
     },
-    runtimeClient: (presence) => ({ command: async (command) => {
+    sessionClient: (record) => ({ command: async (command) => {
       assert.equal(command, "traffic");
-      if (presence.runtimeInstanceId === "runtime-older") return { ok: false, error: { code: "INVALID_REQUEST" } };
-      return { ok: true, result: { title: "Fix login\u0007 bug", entries: [
+      if (record.run.runtimeId === "runtime-older") throw Object.assign(new Error("unsupported"), { code: "UNSUPPORTED_COMMAND" });
+      return { title: "Fix login\u0007 bug", entries: [
         { id: 1, at: at - 5000, lastAt: at - 5000, direction: "out", event: "Launch result", count: 1, bytes: 300, result: "failed" },
-      ] } };
+      ] };
     } }),
   });
   const result = await manager.traffic();
@@ -343,12 +377,11 @@ test("interrupted management ownership is explicit and is not automatically dele
 test("concurrent status polling shares one verified discovery and releases it for fresh polling", async (t) => {
   const baseDir = await home(t);
   let calls = 0;
-  const manager = createManagement({ baseDir, platform: "linux", discover: async (options) => {
+  const manager = createManagement({ baseDir, platform: "linux", scan: async (options) => {
     calls++;
-    assert.equal(typeof options.verifyBatch, "function");
-    assert.equal(options.cleanup, false);
+    assert.equal(options.cleanup, false, "status polling never deletes records");
     await new Promise((done) => setTimeout(done, 20));
-    return { status: "none", runtimes: [] };
+    return EMPTY_SCAN;
   } });
   await Promise.all([manager.state(), manager.state(), manager.state()]);
   assert.equal(calls, 1);
@@ -361,7 +394,7 @@ test("a hung Task Scheduler probe is bounded, shared by overlapping polls, and i
   let taskCalls = 0;
   let release, released = false;
   const manager = createManagement({ baseDir, platform: "win32", statusProbeTimeoutMs: 50,
-    discover: async () => ({ status: "none", runtimes: [] }),
+    scan: async () => EMPTY_SCAN,
     background: {
       command: async () => null,
       task: (_operation, { role }) => {
@@ -392,7 +425,7 @@ test("a registry record from an exited worker is reported as stopped without con
   await writeFile(join(baseDir, "background-station.json"), JSON.stringify({ role: "station", pid: 2147483647 }));
   const contacted = [];
   const manager = createManagement({ baseDir, platform: "win32", statusProbeTimeoutMs: 50,
-    discover: async () => ({ status: "none", runtimes: [] }),
+    scan: async () => EMPTY_SCAN,
     background: {
       command: async (role) => { contacted.push(role); return null; },
       task: (_operation, { role }) => role === "station" ? new Promise(() => {}) : Promise.resolve({ state: "Disabled", taskName: "Weft-relay" }),
@@ -411,15 +444,15 @@ test("slow session discovery is bounded and later polls reuse its verified resul
   let calls = 0;
   let release;
   const manager = createManagement({ baseDir, platform: "linux", statusProbeTimeoutMs: 50,
-    discover: () => { calls++; return new Promise((resolve) => { release = resolve; }); },
-    runtimeClient: () => ({ command: async () => ({ ok: true, result: { state: "dormant", title: "Verified" } }) }),
+    scan: () => { calls++; return new Promise((resolve) => { release = resolve; }); },
+    sessionClient: () => ({ command: async () => ({ state: "dormant", title: "Verified" }) }),
   });
   const first = await manager.state();
   assert.deepEqual(first.sessions, []);
   assert.ok(first.warnings.some((warning) => /still running/.test(warning)));
   await manager.state();
   assert.equal(calls, 1);
-  release({ status: "single", runtimes: [{ runtimeInstanceId: "runtime-1", sessionId: "s1", pid: 1 }] });
+  release(scanOf([liveRecord("runtime-1", "s1")]));
   await new Promise((resolve) => setImmediate(resolve));
   const next = await manager.state();
   assert.equal(next.sessions[0]?.title, "Verified");

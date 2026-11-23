@@ -6,7 +6,7 @@ import { isDebugModeEnabled, setDebugModeEnabled } from '@/lib/debugSettings';
 import { runConnectivityProbe } from '@/lib/wsProbe';
 import { supabaseProbeEndpoint } from '@/lib/weftClient';
 import { WeftDrawer } from '@/ui/sessions/WeftDrawer';
-import { WeftMark, WeftMenuIcon } from '@/ui/brand/WeftMark';
+import { WeftMark, WeftMenuTile } from '@/ui/brand/WeftMark';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
 import { useLeftEdgeSwipe } from '@/ui/gestures/touchGestures';
@@ -28,6 +28,10 @@ interface ConnectScreenProps {
   error: string | null;
   onError(error: string | null): void;
   onPair(raw: string): Promise<void>;
+  /** A pairing link to pair immediately (web `/pair` route or Android App Link). */
+  autoPairCode?: string | null;
+  /** The auto-pair code was taken; the parent can forget it. */
+  onAutoPairStarted?(): void;
   onCancel?: () => void;
   /** In-app variant only (#186 nav consistency): the same menu + sessions drawer every other
    *  screen shows, so the connect screen isn't a dead-end with a lone back button. */
@@ -83,6 +87,8 @@ export function ConnectScreen({
   error,
   onError,
   onPair,
+  autoPairCode = null,
+  onAutoPairStarted,
   onCancel,
   sessions,
   activeId,
@@ -174,6 +180,12 @@ export function ConnectScreen({
   const handleScannerResult = useCallback((raw: string): void => {
     void run(() => pairCode(raw, 'scan'));
   }, [pairCode, run]);
+
+  useEffect(() => {
+    if (!autoPairCode) return;
+    onAutoPairStarted?.();
+    void run(() => pairCode(autoPairCode, 'scan'));
+  }, [autoPairCode, onAutoPairStarted, pairCode, run]);
 
   const openPaste = (): void => {
     onError(null);
@@ -267,7 +279,7 @@ export function ConnectScreen({
       {inApp ? (
         <header className="status-bar">
           <button className="icon-btn drawer-btn" type="button" onClick={() => setDrawerOpen(true)} aria-label="Open sessions">
-            <WeftMenuIcon />
+            <WeftMenuTile />
           </button>
           <div className="status-id">
             <span className="status-title">Connect</span>

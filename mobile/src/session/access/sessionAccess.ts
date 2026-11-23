@@ -1,32 +1,29 @@
-import {
-  DEVICE_CAPABILITY,
-  openIntentFingerprint,
-  type LifecycleAction,
-  type LifecycleFailureCode,
-  type LifecycleOperationAction,
-  type LifecycleState,
-  type LifecycleStatusMsg,
-  type OpenIntentMsg,
-  type SpawnMode,
-  type StructuredFailure,
-  type TakeoverChallenge,
-} from '@aasis21/weft-shared';
+import type { LifecycleStatusMsg, OpenReason, SpawnMode } from '@aasis21/weft-shared';
 import { loadPendingOperations } from '@/lib/pendingOperations';
 import { saveCriticalPreference } from '@/lib/storageJanitor';
 import {
   preferencesStorage,
   type PersistStorage,
 } from '@/services/persistence/preferencesStorage';
+import { openStatusMessage, requiresTakeoverConfirmation } from '@/session/openStatus';
 import type { SessionRuntime } from '@/session/runtime/sessionRuntime';
+
+export { openStatusMessage, requiresTakeoverConfirmation };
 
 const SESSION_ACCESS_KEY = 'weft.sessionAccess.v1';
 
+/**
+ * What the user asked to open. `new` and `existing` become a protocol v3 `open_session` target
+ * (`{ project }` / `{ sessionId }`) — Station decides activate, repair, resume or start. `offer`
+ * pairs to a session a laptop is offering over its device channel.
+ */
 export type SessionAccessTarget =
-  | OpenIntentMsg['target']
+  | { kind: 'new'; projectName: string }
+  | { kind: 'existing'; sessionId: string; storeAuthority?: string | null }
   | { kind: 'offer'; offerChannelId: string };
 
 export interface SessionOpenIntent {
-  operationId?: string;
+  requestId?: string;
   deviceChannelId: string;
   target: SessionAccessTarget;
   mode?: SpawnMode;
@@ -35,23 +32,25 @@ export interface SessionOpenIntent {
   initialPrompt?: string | null;
   title?: string | null;
   cwd?: string | null;
-  takeoverRequested?: boolean;
 }
 
 interface NormalizedSessionOpenIntent extends SessionOpenIntent {
-  operationId: string;
+  requestId: string;
   mode: SpawnMode;
   name: string | null;
   initialPrompt: string | null;
   title: string | null;
   cwd: string | null;
-  takeoverRequested: boolean;
 }
 
 interface PersistedSessionOperation {
   intent: NormalizedSessionOpenIntent;
-  fingerprint: string;
+  /** Same request id must mean the same request (idempotency key, LLD §3.2). */
+  key: string;
   status: LifecycleStatusMsg;
+  /** Newest Station revision applied; local-only updates never advance it. */
+  stationRevision?: number;
+  createdAt: number;
   runtimeCardId?: string;
   sourceDeviceId?: string;
 }
@@ -62,13 +61,7 @@ export interface SessionAccessRuntime {
   setActive(channelId: string): void;
   spawnSession(
     channelId: string,
-    opts: {
-      projectName: string;
-      mode: SpawnMode;
-      name?: string;
-      initialPrompt?: string;
-      operationId?: string;
-    },
+    opts: { projectName: string; mode: SpawnMode; name?: string; initialPrompt?: string; requestId?: string },
   ): Promise<string>;
   resumeSession(
     channelId: string,
@@ -78,23 +71,22 @@ export interface SessionAccessRuntime {
       mode: SpawnMode;
       title?: string | null;
       cwd?: string | null;
-      force?: boolean;
-      operationId?: string;
+      requestId?: string;
     },
   ): Promise<string>;
   joinOfferedSession(deviceChannelId: string, offerChannelId: string): Promise<string>;
   retrySpawn(channelId: string): Promise<string | null>;
   remove(channelId: string): Promise<void>;
-  getLifecycleStatus(operationId: string): LifecycleStatusMsg | null;
+  getLifecycleStatus(requestId: string): LifecycleStatusMsg | null;
   confirmLifecycleTakeover(
     channelId: string,
-    operationId: string,
+    requestId: string,
     challengeId: string,
     revision: number,
   ): Promise<LifecycleStatusMsg>;
   cancelLifecycleOperation(
     channelId: string,
-    operationId: string,
+    requestId: string,
     revision: number,
   ): Promise<LifecycleStatusMsg>;
 }
@@ -102,9 +94,9 @@ export interface SessionAccessRuntime {
 export interface SessionAccess {
   init(): Promise<void>;
   open(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
-  confirmTakeover(operationId: string): Promise<LifecycleStatusMsg>;
-  cancel(operationId: string): Promise<LifecycleStatusMsg>;
-  inspect(operationId: string): Promise<LifecycleStatusMsg | null>;
+  confirmTakeover(requestId: string): Promise<LifecycleStatusMsg>;
+  cancel(requestId: string): Promise<LifecycleStatusMsg>;
+  inspect(requestId: string): Promise<LifecycleStatusMsg | null>;
 }
 
 interface SessionAccessOptions {
@@ -113,172 +105,32 @@ interface SessionAccessOptions {
   randomId?: () => string;
 }
 
-type LifecycleStatusPatch = Partial<
-  Omit<LifecycleStatusMsg, 'operationId' | 'fingerprint' | 'revision' | 'failure' | 'challenge'>
-> & {
-  failure?: StructuredFailure | null;
-  challenge?: TakeoverChallenge | null;
-};
-
-function normalizeIntent(intent: SessionOpenIntent): NormalizedSessionOpenIntent {
-  return {
-    ...intent,
-    operationId: intent.operationId?.trim() || `open-${crypto.randomUUID()}`,
-    mode: intent.mode === 'allow-all' ? 'allow-all' : 'default',
-    name: intent.target.kind === 'new' ? intent.name?.trim() || null : null,
-    initialPrompt: intent.target.kind === 'new' ? intent.initialPrompt?.trim() || null : null,
-    title: intent.title?.trim() || null,
-    cwd: intent.cwd?.trim() || null,
-    takeoverRequested: intent.target.kind === 'existing' && intent.takeoverRequested === true,
-  };
+/** The request ended without opening the session. */
+export function openFailed(status: LifecycleStatusMsg): boolean {
+  return status.outcome === 'failed' || status.outcome === 'cancelled' || status.outcome === 'outcome-unknown';
 }
 
-async function fingerprint(intent: NormalizedSessionOpenIntent): Promise<string> {
-  if (intent.target.kind !== 'offer') {
-    return openIntentFingerprint({
-      operationId: intent.operationId,
-      target: intent.target,
-      mode: intent.mode,
-      name: intent.name,
-      takeoverRequested: intent.takeoverRequested,
-    });
-  }
-  return openIntentFingerprint({
-    operationId: intent.operationId,
-    target: {
-      kind: 'existing',
-      storeAuthority: 'legacy-offer',
-      sessionId: intent.target.offerChannelId,
-    },
-    mode: intent.mode,
-    name: null,
-    takeoverRequested: false,
-  });
+/** Plain words for an unsuccessful open request (empty-safe fallback). */
+export function lifecycleFailureMessage(status: LifecycleStatusMsg | null | undefined): string {
+  return (status && openStatusMessage(status)) || 'The session could not be opened.';
 }
 
-function lifecycleMessage(code: LifecycleFailureCode): string {
-  switch (code) {
-    case 'controller-conflict':
-      return 'This session is currently controlled by another phone.';
-    case 'session-not-found':
-      return 'This session is no longer available.';
-    case 'project-not-found':
-      return 'This project is no longer registered on the laptop.';
-    case 'directory-not-found':
-      return 'The session folder is no longer available.';
-    case 'runtime-unavailable':
-      return 'The laptop is not reachable right now.';
-    case 'pairing-failed':
-      return 'The session is ready, but the phone could not connect.';
-    case 'timeout':
-      return 'The laptop did not respond in time.';
-    case 'cancelled':
-      return 'The operation was cancelled.';
-    case 'operation-conflict':
-      return 'This operation ID was already used for a different request.';
-    case 'operation-stale':
-      return 'The operation changed before that action reached the laptop.';
-    case 'target-reserved':
-      return 'Another operation is already opening this session.';
-    case 'unsupported':
-      return 'This laptop needs a newer Weft version for that action.';
-    case 'takeover-stale':
-      return 'The session changed before takeover could be confirmed.';
-    case 'takeover-failed':
-      return 'The existing session could not be replaced safely.';
-    case 'launch-outcome-unknown':
-      return 'The laptop may have launched the session; Weft must reconcile it before retrying.';
-    case 'launch-not-recoverable':
-      return 'The prior launch could not be recovered safely.';
-    case 'identity-failed':
-      return 'The laptop could not create a secure session identity.';
-    default:
-      return 'The session could not be opened.';
-  }
+function intentKey(intent: NormalizedSessionOpenIntent): string {
+  return JSON.stringify([intent.deviceChannelId, intent.target, intent.mode, intent.name]);
 }
 
-export function lifecycleFailureMessage(failure?: StructuredFailure): string {
-  return failure?.message || lifecycleMessage(failure?.code ?? 'internal-error');
+function reasonFor(message: string): OpenReason {
+  if (/no longer available|no longer exists|not found/i.test(message)) return 'not-found';
+  if (/timed out|timeout|has not answered yet/i.test(message)) return 'timeout';
+  if (/not connected|could not reach|offline|unreachable/i.test(message)) return 'runtime-unavailable';
+  if (/could not connect|phone is not connected yet|pairing/i.test(message)) return 'link-failed';
+  return 'internal-error';
 }
 
-export function requiresTakeoverConfirmation(
-  status: LifecycleStatusMsg,
-): status is LifecycleStatusMsg & { challenge: TakeoverChallenge } {
-  const challenge = status.challenge;
-  return (
-    status.failure?.actions.includes('confirm-takeover') === true &&
-    typeof challenge?.challengeId === 'string' &&
-    challenge.challengeId.length > 0 &&
-    challenge.operationId === status.operationId &&
-    challenge.revision === status.revision
-  );
-}
-
-function legacyFailure(error: unknown): StructuredFailure {
-  const message = error instanceof Error ? error.message : 'The session could not be opened.';
-  if (/already (running|attached)|connected to a phone/i.test(message)) {
-    return {
-      code: 'controller-conflict',
-      actions: ['confirm-takeover', 'cancel'],
-      message,
-    };
-  }
-  if (/folder|directory/i.test(message) && /(no longer exists|not found|missing)/i.test(message)) {
-    return { code: 'directory-not-found', actions: ['choose-directory', 'cancel'], message };
-  }
-  if (/session offer is no longer available|session no longer exists|session.*not found/i.test(message)) {
-    return { code: 'session-not-found', actions: ['choose-session', 'cancel'], message };
-  }
-  if (/timed out|timeout|has not answered yet/i.test(message)) {
-    return { code: 'timeout', actions: ['retry', 'cancel'], message, retryable: true };
-  }
-  if (/not connected|could not reach|offline/i.test(message)) {
-    return { code: 'runtime-unavailable', actions: ['retry', 'cancel'], message, retryable: true };
-  }
-  return { code: 'internal-error', actions: ['retry', 'cancel'], message, retryable: true };
-}
-
-function stateForStage(stage: string): LifecycleState {
-  switch (stage) {
-    case 'not-delivered':
-      return 'accepted';
-    case 'delivered':
-    case 'launched':
-      return 'launching';
-    case 'ready':
-      return 'pairing-ready';
-    case 'pairing':
-      return 'pairing';
-    case 'pairing-failed':
-      return 'failed';
-    default:
-      return 'accepted';
-  }
-}
-
-function actionFor(intent: NormalizedSessionOpenIntent): LifecycleOperationAction {
-  if (intent.takeoverRequested) return 'takeover';
-  if (intent.target.kind === 'new') return 'start';
-  if (intent.target.kind === 'offer') return 'activate';
-  return 'resume';
-}
-
-function allowedActions(code: LifecycleFailureCode): LifecycleAction[] {
-  switch (code) {
-    case 'controller-conflict':
-      return ['confirm-takeover', 'cancel'];
-    case 'session-not-found':
-      return ['choose-session', 'cancel'];
-    case 'project-not-found':
-    case 'directory-not-found':
-      return ['choose-directory', 'cancel'];
-    case 'unsupported':
-      return ['update-peer', 'cancel'];
-    case 'cancelled':
-      return [];
-    default:
-      return ['retry', 'cancel'];
-  }
+function isStatus(value: unknown, requestId: string): value is LifecycleStatusMsg {
+  const status = value as Partial<LifecycleStatusMsg> | null;
+  return !!status && status.requestId === requestId && typeof status.stage === 'string' &&
+    Number.isSafeInteger(status.revision);
 }
 
 export class RuntimeSessionAccess implements SessionAccess {
@@ -312,136 +164,122 @@ export class RuntimeSessionAccess implements SessionAccess {
 
   async open(input: SessionOpenIntent): Promise<LifecycleStatusMsg> {
     await this.ensureLoaded();
-    const intent = normalizeIntent({
+    const target = input.target;
+    const intent: NormalizedSessionOpenIntent = {
       ...input,
-      operationId: input.operationId?.trim() || `open-${this.randomId()}`,
-    });
-    const intentFingerprint = await fingerprint(intent);
-    const previous = this.operations.get(intent.operationId);
+      requestId: input.requestId?.trim() || `open-${this.randomId()}`,
+      mode: input.mode === 'allow-all' ? 'allow-all' : 'default',
+      name: target.kind === 'new' ? input.name?.trim() || null : null,
+      initialPrompt: target.kind === 'new' ? input.initialPrompt?.trim() || null : null,
+      title: input.title?.trim() || null,
+      cwd: input.cwd?.trim() || null,
+    };
+    const key = intentKey(intent);
+    const previous = this.operations.get(intent.requestId);
     if (previous) {
-      if (previous.fingerprint !== intentFingerprint) {
-        return this.setFailure(previous, {
-          code: 'operation-conflict',
-          actions: [],
-        });
-      }
-      return previous.status;
+      if (previous.key === key) return previous.status;
+      return {
+        ...previous.status,
+        outcome: 'failed',
+        reason: 'invalid-request',
+        result: { message: 'This request ID was already used for a different request.' },
+      };
     }
-
     const now = this.clock();
+    const device = this.runtime.getSnapshot().devices.find((item) => item.channelId === intent.deviceChannelId);
     const record: PersistedSessionOperation = {
       intent,
-      fingerprint: intentFingerprint,
-      status: {
-        operationId: intent.operationId,
-        fingerprint: intentFingerprint,
-        state: 'accepted',
-        revision: 0,
-        ...(intent.target.kind === 'offer' ? {} : { target: intent.target }),
-        action: actionFor(intent),
-        createdAt: now,
-        updatedAt: now,
-      },
+      key,
+      createdAt: now,
+      sourceDeviceId: device?.deviceId ?? intent.deviceChannelId,
+      status: { requestId: intent.requestId, revision: 0, stage: 'accepted', outcome: null, reason: null, result: null },
     };
-    const device = this.runtime.getSnapshot().devices.find((item) => item.channelId === intent.deviceChannelId);
-    record.sourceDeviceId = device?.deviceId ?? intent.deviceChannelId;
-    this.operations.set(intent.operationId, record);
+    this.operations.set(intent.requestId, record);
     await this.persist();
     return this.execute(record);
   }
 
-  async confirmTakeover(operationId: string): Promise<LifecycleStatusMsg> {
+  async confirmTakeover(requestId: string): Promise<LifecycleStatusMsg> {
     await this.ensureLoaded();
     this.reconcileRuntime();
-    const record = this.operations.get(operationId);
-    if (!record) return this.missingOperation(operationId);
-    if (
-      record.intent.target.kind !== 'existing' ||
-      !requiresTakeoverConfirmation(record.status)
-    ) {
-      return this.setFailure(record, {
-        code: 'takeover-stale',
-        actions: ['retry', 'cancel'],
-      });
+    const record = this.operations.get(requestId);
+    if (!record) return this.missingOperation(requestId);
+    if (!requiresTakeoverConfirmation(record.status)) {
+      return { ...record.status, outcome: 'failed', reason: 'takeover-stale', result: record.status.result };
     }
-    const device = this.runtime.getSnapshot().devices
-      .find((item) => item.channelId === record.intent.deviceChannelId);
-    if (device?.capabilities?.includes(DEVICE_CAPABILITY.SESSION_ACTIVATION_V1)) {
-      const challenge = record.status.challenge;
-      const status = await this.runtime.confirmLifecycleTakeover(
-        record.intent.deviceChannelId,
-        operationId,
-        challenge.challengeId,
-        record.status.revision,
-      );
-      this.applySnapshot(record, status);
-      await this.persist();
-      return record.status;
-    }
-    record.intent = { ...record.intent, takeoverRequested: true };
-    this.update(record, {
-      state: 'accepted',
-      action: 'takeover',
-      failure: null,
-      challenge: null,
-    });
+    const status = await this.runtime.confirmLifecycleTakeover(
+      record.intent.deviceChannelId,
+      requestId,
+      record.status.result.challenge.challengeId,
+      record.status.revision,
+    );
+    this.applySnapshot(record, status);
     await this.persist();
-    return this.execute(record);
-  }
-
-  async cancel(operationId: string): Promise<LifecycleStatusMsg> {
-    await this.ensureLoaded();
-    this.reconcileRuntime();
-    const record = this.operations.get(operationId);
-    if (!record) return this.missingOperation(operationId);
-    const device = this.runtime.getSnapshot().devices
-      .find((item) => item.channelId === record.intent.deviceChannelId);
-    if (device?.capabilities?.includes(DEVICE_CAPABILITY.SESSION_ACTIVATION_V1)) {
-      const status = await this.runtime.cancelLifecycleOperation(
-        record.intent.deviceChannelId,
-        operationId,
-        record.status.revision,
-      );
-      this.applySnapshot(record, status);
-      await this.persist();
-      if (record.status.state === 'cancelled' && record.runtimeCardId) {
-        await this.runtime.remove(record.runtimeCardId);
-      }
-      return record.status;
-    }
-    this.update(record, {
-      state: 'cancelled',
-      failure: {
-        code: 'cancelled',
-        actions: [],
-        message: lifecycleMessage('cancelled'),
-      },
-      challenge: null,
-    });
-    await this.persist();
-    if (record.runtimeCardId) await this.runtime.remove(record.runtimeCardId);
     return record.status;
   }
 
-  async inspect(operationId: string): Promise<LifecycleStatusMsg | null> {
+  async cancel(requestId: string): Promise<LifecycleStatusMsg> {
     await this.ensureLoaded();
     this.reconcileRuntime();
-    return this.operations.get(operationId)?.status ?? null;
+    const record = this.operations.get(requestId);
+    if (!record) return this.missingOperation(requestId);
+    const stationStatus = this.runtime.getLifecycleStatus(requestId);
+    const stationFinished = !!stationStatus && stationStatus.outcome !== null;
+    if (record.status.outcome === 'done' || record.status.outcome === 'cancelled' || stationFinished) {
+      if (record.status.outcome !== 'done' && record.runtimeCardId) await this.runtime.remove(record.runtimeCardId);
+      return record.status;
+    }
+    const card = record.runtimeCardId
+      ? this.runtime.getSnapshot().sessions.find((session) => session.meta.channelId === record.runtimeCardId)
+      : undefined;
+    // Station knows the request once it answered or the open was delivered and is still pending.
+    const stationKnows = record.stationRevision !== undefined ||
+      (!!card?.spawning && card.spawning.stage !== 'not-delivered' && card.status !== 'error');
+    if (stationKnows) {
+      try {
+        const status = await this.runtime.cancelLifecycleOperation(
+          record.intent.deviceChannelId,
+          requestId,
+          record.status.revision,
+        );
+        this.applySnapshot(record, status);
+      } catch {
+        this.setLocal(record, { outcome: 'cancelled', reason: null });
+      }
+    } else {
+      // Never reached (or never answered from) Station: tell it best-effort, finish here.
+      void this.runtime.cancelLifecycleOperation(record.intent.deviceChannelId, requestId, record.status.revision)
+        .catch(() => {});
+      this.setLocal(record, { outcome: 'cancelled', reason: null });
+    }
+    await this.persist();
+    const finished: LifecycleStatusMsg = record.status;
+    if (finished.outcome === 'cancelled' && record.runtimeCardId) {
+      await this.runtime.remove(record.runtimeCardId);
+    }
+    return finished;
   }
 
-  async retry(operationId: string): Promise<LifecycleStatusMsg> {
+  async inspect(requestId: string): Promise<LifecycleStatusMsg | null> {
     await this.ensureLoaded();
-    const record = this.operations.get(operationId);
-    if (!record) return this.missingOperation(operationId);
-    if (record.runtimeCardId) {
-      this.update(record, { state: 'accepted', failure: null, challenge: null });
-      await this.persist();
-      await this.runtime.retrySpawn(record.runtimeCardId);
+    this.reconcileRuntime();
+    return this.operations.get(requestId)?.status ?? null;
+  }
+
+  async retry(requestId: string): Promise<LifecycleStatusMsg> {
+    await this.ensureLoaded();
+    const record = this.operations.get(requestId);
+    if (!record) return this.missingOperation(requestId);
+    this.setLocal(record, { outcome: null, reason: null, result: null });
+    await this.persist();
+    const card = record.runtimeCardId
+      ? this.runtime.getSnapshot().sessions.find((session) => session.meta.channelId === record.runtimeCardId)
+      : undefined;
+    if (card?.spawning) {
+      await this.runtime.retrySpawn(card.meta.channelId);
       this.reconcileRuntime();
       return record.status;
     }
-    this.update(record, { state: 'accepted', failure: null, challenge: null });
-    await this.persist();
     return this.execute(record);
   }
 
@@ -455,31 +293,18 @@ export class RuntimeSessionAccess implements SessionAccess {
           mode: intent.mode,
           ...(intent.name ? { name: intent.name } : {}),
           ...(intent.initialPrompt ? { initialPrompt: intent.initialPrompt } : {}),
-          operationId: intent.operationId,
+          requestId: intent.requestId,
         });
       } else if (intent.target.kind === 'offer') {
-        const device = this.runtime.getSnapshot().devices
-          .find((item) => item.channelId === intent.deviceChannelId);
-        cardId = device?.capabilities?.includes(DEVICE_CAPABILITY.SESSION_ACTIVATION_V1)
-          ? await this.runtime.resumeSession(intent.deviceChannelId, {
-              sessionId: intent.target.offerChannelId,
-              storeAuthority: 'legacy-offer',
-              mode: intent.mode,
-              title: intent.title,
-              operationId: intent.operationId,
-            })
-          : await this.runtime.joinOfferedSession(
-              intent.deviceChannelId,
-              intent.target.offerChannelId,
-            );
+        cardId = await this.runtime.joinOfferedSession(intent.deviceChannelId, intent.target.offerChannelId);
       } else {
         cardId = await this.runtime.resumeSession(intent.deviceChannelId, {
           sessionId: intent.target.sessionId,
+          storeAuthority: intent.target.storeAuthority ?? null,
           mode: intent.mode,
           title: intent.title,
           cwd: intent.cwd,
-          force: intent.takeoverRequested,
-          operationId: intent.operationId,
+          requestId: intent.requestId,
         });
       }
       record.runtimeCardId = cardId;
@@ -487,38 +312,21 @@ export class RuntimeSessionAccess implements SessionAccess {
       if (session?.meta.kind === 'spawning') {
         this.reconcileRuntime();
       } else {
-        this.update(record, {
-          state: 'open',
-          action:
-            intent.target.kind === 'existing' && !intent.takeoverRequested
-              ? 'reconnect'
-              : actionFor(intent),
-          failure: null,
-          challenge: null,
+        // The phone already holds this session (reconnected) or paired to an offer: done locally.
+        this.setLocal(record, {
+          stage: 'preparing-link',
+          outcome: 'done',
+          reason: null,
+          result: session?.meta.sessionId ? { sessionId: session.meta.sessionId } : null,
         });
         await this.persist();
       }
       return record.status;
     } catch (error) {
-      const failure = legacyFailure(error);
-      if (failure.code === 'controller-conflict' && record.intent.target.kind === 'existing') {
-        const challenge: TakeoverChallenge = {
-          challengeId: `legacy-${this.randomId()}`,
-          operationId: record.intent.operationId,
-          revision: record.status.revision + 1,
-          storeAuthority: record.intent.target.storeAuthority,
-          sessionId: record.intent.target.sessionId,
-          runtimeInstanceId: `legacy-${record.intent.target.sessionId}`,
-          generation: 0,
-          pid: null,
-          processStartedAt: null,
-          responsive: false,
-        };
-        this.update(record, { state: 'failed', failure, challenge });
-        await this.persist();
-        return record.status;
-      }
-      return this.setFailure(record, failure);
+      const message = error instanceof Error ? error.message : 'The session could not be opened.';
+      this.setLocal(record, { outcome: 'failed', reason: reasonFor(message), result: { message } });
+      await this.persist();
+      return record.status;
     }
   }
 
@@ -526,62 +334,51 @@ export class RuntimeSessionAccess implements SessionAccess {
     if (this.loaded) return;
     if (!this.loadPromise) {
       this.loadPromise = (async () => {
-        const raw = await this.storage.getItem(SESSION_ACCESS_KEY);
+        const raw = await this.storage.getItem(SESSION_ACCESS_KEY).catch(() => null);
         if (raw) {
-          const parsed = JSON.parse(raw) as { operations?: PersistedSessionOperation[] };
-          for (const operation of parsed.operations ?? []) {
-            if (
-              operation?.intent?.operationId &&
-              operation.status?.operationId === operation.intent.operationId
-            ) {
-              this.operations.set(operation.intent.operationId, operation);
+          try {
+            const parsed = JSON.parse(raw) as { operations?: PersistedSessionOperation[] };
+            for (const operation of parsed.operations ?? []) {
+              const requestId = operation?.intent?.requestId;
+              // Records from before protocol v3 (keyed by `operationId`) are dropped.
+              if (typeof requestId === 'string' && requestId && isStatus(operation.status, requestId)) {
+                this.operations.set(requestId, operation);
+              }
             }
+          } catch {
+            // A corrupt record set is discarded; pending launches below still restore.
           }
         }
         const pending = await loadPendingOperations();
         for (const operation of pending) {
           if (this.operations.has(operation.requestId)) continue;
           const intent: NormalizedSessionOpenIntent = {
-            operationId: operation.requestId,
+            requestId: operation.requestId,
             deviceChannelId: operation.deviceId,
             target: operation.kind === 'new'
               ? { kind: 'new', projectName: operation.projectName }
-              : {
-                  kind: 'existing',
-                  storeAuthority: null,
-                  sessionId: operation.sessionId ?? '',
-                },
+              : { kind: 'existing', storeAuthority: operation.storeAuthority ?? null, sessionId: operation.sessionId ?? '' },
             mode: operation.mode,
             name: operation.name ?? null,
             title: operation.title ?? null,
             cwd: operation.cwd ?? null,
-            takeoverRequested: operation.force === true,
             initialPrompt: operation.initialPrompt ?? null,
           };
-          const operationFingerprint = await fingerprint(intent);
+          const station = isStatus(operation.lifecycleStatus, operation.requestId) ? operation.lifecycleStatus : null;
           this.operations.set(operation.requestId, {
             intent,
-            fingerprint: operationFingerprint,
+            key: intentKey(intent),
+            createdAt: operation.createdAt,
             runtimeCardId: operation.tempId,
             sourceDeviceId: operation.spawnedFromDeviceId,
-            status: {
-              operationId: operation.requestId,
-              fingerprint: operationFingerprint,
-              state: stateForStage(operation.stage),
+            ...(station ? { stationRevision: station.revision } : {}),
+            status: station ?? {
+              requestId: operation.requestId,
               revision: 0,
-              ...(intent.target.kind === 'offer' ? {} : { target: intent.target }),
-              action: actionFor(intent),
-              createdAt: operation.createdAt,
-              updatedAt: operation.createdAt,
-              ...(operation.stage === 'pairing-failed'
-                ? {
-                    failure: {
-                      code: 'pairing-failed' as const,
-                      actions: allowedActions('pairing-failed'),
-                      retryable: true,
-                    },
-                  }
-                : {}),
+              stage: 'accepted',
+              outcome: null,
+              reason: null,
+              result: null,
             },
           });
         }
@@ -596,70 +393,33 @@ export class RuntimeSessionAccess implements SessionAccess {
     const snapshot = this.runtime.getSnapshot();
     let changed = false;
     for (const record of this.operations.values()) {
-      if (record.status.state === 'cancelled' || record.status.state === 'open') continue;
-      const lifecycleStatus = this.runtime.getLifecycleStatus(record.intent.operationId);
-      if (lifecycleStatus && lifecycleStatus.revision >= record.status.revision) {
-        changed = this.applySnapshot(record, lifecycleStatus) || changed;
-        if (
-          lifecycleStatus.state === 'failed' ||
-          lifecycleStatus.state === 'cancelled' ||
-          lifecycleStatus.state === 'open'
-        ) continue;
-      }
+      const requestId = record.intent.requestId;
+      const station = this.runtime.getLifecycleStatus(requestId);
+      if (station) changed = this.applySnapshot(record, station) || changed;
+      if (record.status.outcome !== null && record.status.outcome !== 'failed') continue;
       if (requiresTakeoverConfirmation(record.status)) continue;
-      const spawning = snapshot.sessions.find(
-        (session) => session.spawning?.requestId === record.intent.operationId,
-      );
+      const spawning = snapshot.sessions.find((session) => session.spawning?.requestId === requestId);
       if (spawning) {
         record.runtimeCardId = spawning.meta.channelId;
-        // A placeholder can lag the Station snapshot while its state is being saved.
-        if (lifecycleStatus) continue;
-        if (spawning.error) {
-          const failure = legacyFailure(new Error(spawning.error));
-          changed = this.update(record, {
-            state: 'failed',
-            failure,
-            ...(failure.code === 'controller-conflict' &&
-            record.intent.target.kind === 'existing'
-              ? {
-                  challenge: {
-                    challengeId: `legacy-${this.randomId()}`,
-                    operationId: record.intent.operationId,
-                    revision: record.status.revision + 1,
-                    storeAuthority: record.intent.target.storeAuthority,
-                    sessionId: record.intent.target.sessionId,
-                    runtimeInstanceId: `legacy-${record.intent.target.sessionId}`,
-                    generation: 0,
-                    pid: null,
-                    processStartedAt: null,
-                    responsive: false,
-                  },
-                }
-              : {}),
-          }) || changed;
-          continue;
+        if (spawning.error && record.status.outcome === null && !(station && station.outcome !== null)) {
+          // A phone-side failure (not delivered, no answer, pairing failed); retry keeps the request id.
+          const reason: OpenReason = spawning.spawning?.stage === 'pairing-failed' ? 'link-failed' : reasonFor(spawning.error);
+          changed = this.setLocal(record, { outcome: 'failed', reason, result: { message: spawning.error } }) || changed;
+        } else if (!spawning.error && record.status.outcome === 'failed' && !(station && station.outcome !== null)) {
+          // Retried from the card itself.
+          changed = this.setLocal(record, { outcome: null, reason: null, result: null }) || changed;
         }
-        const stage = spawning.spawning?.stage ?? 'not-delivered';
-        changed = this.update(record, {
-          state: stateForStage(stage),
-          failure: stage === 'pairing-failed'
-            ? {
-                code: 'pairing-failed',
-                actions: allowedActions('pairing-failed'),
-                retryable: true,
-              }
-            : null,
-        }) || changed;
         continue;
       }
-      if (!record.runtimeCardId) continue;
+      if (record.status.outcome !== null || !record.runtimeCardId) continue;
       const opened = this.findOpenedSession(record, snapshot.sessions);
       if (opened) {
         record.runtimeCardId = opened.meta.channelId;
-        changed = this.update(record, {
-          state: 'open',
-          failure: null,
-          challenge: null,
+        changed = this.setLocal(record, {
+          stage: 'preparing-link',
+          outcome: 'done',
+          reason: null,
+          result: { ...(record.status.result ?? {}), ...(opened.meta.sessionId ? { sessionId: opened.meta.sessionId } : {}) },
         }) || changed;
       }
     }
@@ -685,82 +445,50 @@ export class RuntimeSessionAccess implements SessionAccess {
     return sessions.find(
       (session) =>
         session.meta.kind === 'live' &&
-        session.meta.addedAt >= (record.status.createdAt ?? 0) &&
+        session.meta.addedAt >= record.createdAt &&
         session.meta.spawnedFromDeviceId === record.sourceDeviceId,
     );
   }
 
-  private update(
-    record: PersistedSessionOperation,
-    patch: LifecycleStatusPatch,
-  ): boolean {
-    const { failure, challenge, ...fields } = patch;
-    const candidate: LifecycleStatusMsg = { ...record.status, ...fields };
-    if (failure === null) delete candidate.failure;
-    else if (failure !== undefined) candidate.failure = failure;
-    if (challenge === null) delete candidate.challenge;
-    else if (challenge !== undefined) candidate.challenge = challenge;
-    if (
-      candidate.state === record.status.state &&
-      candidate.action === record.status.action &&
-      JSON.stringify(candidate.failure) === JSON.stringify(record.status.failure) &&
-      JSON.stringify(candidate.challenge) === JSON.stringify(record.status.challenge)
-    ) {
-      return false;
-    }
-
-    record.status = {
-      ...candidate,
-      operationId: record.intent.operationId,
-      fingerprint: record.fingerprint,
-      revision: record.status.revision + 1,
-      updatedAt: this.clock(),
+  /** Phone-side progress; never advances the Station revision used to fence takeover/cancel. */
+  private setLocal(record: PersistedSessionOperation, patch: Partial<LifecycleStatusMsg>): boolean {
+    const next: LifecycleStatusMsg = {
+      ...record.status,
+      ...patch,
+      requestId: record.intent.requestId,
+      revision: record.status.revision,
     };
+    if (JSON.stringify(next) === JSON.stringify(record.status)) return false;
+    record.status = next;
     return true;
   }
 
-  private applySnapshot(
-    record: PersistedSessionOperation,
-    status: LifecycleStatusMsg,
-  ): boolean {
+  private applySnapshot(record: PersistedSessionOperation, status: LifecycleStatusMsg): boolean {
     if (
-      status.operationId !== record.intent.operationId ||
-      status.revision < record.status.revision ||
-      JSON.stringify(status) === JSON.stringify(record.status)
+      !isStatus(status, record.intent.requestId) ||
+      (record.stationRevision !== undefined && status.revision < record.stationRevision) ||
+      (record.stationRevision === status.revision && JSON.stringify(status) === JSON.stringify(record.status))
     ) {
+      return false;
+    }
+    // A request this phone already finished (paired / cancelled) is not reopened by a late snapshot.
+    if (record.status.outcome !== null && record.status.outcome !== 'failed' && status.outcome === null) {
+      record.stationRevision = status.revision;
       return false;
     }
     record.status = status;
+    record.stationRevision = status.revision;
     return true;
   }
 
-  private async setFailure(
-    record: PersistedSessionOperation,
-    failure: StructuredFailure,
-  ): Promise<LifecycleStatusMsg> {
-    this.update(record, {
-      state: failure.code === 'cancelled' ? 'cancelled' : 'failed',
-      failure: {
-        ...failure,
-        message: failure.message || lifecycleMessage(failure.code),
-      },
-    });
-    await this.persist();
-    return record.status;
-  }
-
-  private missingOperation(operationId: string): LifecycleStatusMsg {
+  private missingOperation(requestId: string): LifecycleStatusMsg {
     return {
-      operationId,
-      fingerprint: null,
-      state: 'failed',
+      requestId,
       revision: 0,
-      failure: {
-        code: 'invalid-request',
-        actions: [],
-        message: 'The session operation is no longer available.',
-      },
-      updatedAt: this.clock(),
+      stage: 'accepted',
+      outcome: 'failed',
+      reason: 'invalid-request',
+      result: { message: 'The session request is no longer available.' },
     };
   }
 

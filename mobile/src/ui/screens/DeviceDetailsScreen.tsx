@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { WeftMenuIcon } from '@/ui/brand/WeftMark';
+import { WeftMenuTile } from '@/ui/brand/WeftMark';
 import type { JSX, TouchEvent as ReactTouchEvent } from 'react';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
@@ -438,7 +438,7 @@ export function DeviceDetailsScreen({
           onClick={() => setDrawerOpen(true)}
           aria-label="Open sessions"
         >
-          <WeftMenuIcon />
+          <WeftMenuTile />
         </button>
         <DeviceAvatar tone={status.tone} />
         <div className="status-id">

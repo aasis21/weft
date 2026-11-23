@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { isAbsolute, join, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import {
-  createLifecycleEndpoint,
-  lifecycleAuth,
-  runtimeEndpointAddress,
-  sendLifecycleCommand,
-} from "./lifecycleEndpoint.mjs";
+  createControlServer as createLifecycleEndpoint,
+  controlAuth as lifecycleAuth,
+  controlEndpointAddress as runtimeEndpointAddress,
+  sendControlCommand as sendLifecycleCommand,
+  createControlIdentity as createRuntimeIdentity,
+} from "./sessionControl.mjs";
 import { appendStationLog } from "./stationLog.mjs";
-import { createRuntimeIdentity } from "./runtimeIdentity.mjs";
-import { getProcessStartTime } from "./processIdentity.mjs";
-import { clearRegistry, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
+import { getProcessStartTime, verifyProcessIdentity } from "./processIdentity.mjs";
+import { clearRegistry, isPidAlive, readRegistry, writeRegistryAtomic } from "./registryFile.mjs";
 import { weftHome } from "./projects.mjs";
 import { resolveVersion } from "./version.mjs";
 
@@ -77,6 +77,20 @@ export function backgroundTaskName(role, { baseDir = weftHome(), platform = proc
   return `Weft-${requireRole(role)}-${homeHash}`;
 }
 
+/**
+ * Installation identity: the installed CLI folder plus the build version. The task definition and
+ * the running worker both report it, so `ensureStationRunning` can tell a worker running older code
+ * or another installation from one running exactly what is installed.
+ */
+export function backgroundInstallId({ cliPath, version = resolveVersion(), platform = process.platform } = {}) {
+  if (!cliPath) return null;
+  let path = resolve(cliPath);
+  try { path = realpathSync(path); } catch { /* A missing path still identifies the install. */ }
+  const folder = dirname(path);
+  return createHash("sha256").update(`${platform === "win32" ? folder.toLowerCase() : folder}\n${version}`)
+    .digest("hex").slice(0, 16);
+}
+
 /** Quote a value as a single-quoted PowerShell literal (no interpolation). */
 function powerShellLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -94,6 +108,7 @@ $nodeExecutable=${powerShellLiteral(nodePath)}
 $weftCli=${powerShellLiteral(resolve(cliPath))}
 $weftHome=${powerShellLiteral(resolve(baseDir))}
 $workerRole=${powerShellLiteral(role)}
+$weftInstallId=${powerShellLiteral(backgroundInstallId({ cliPath }) ?? "")}
 $stopMarkerPath=${powerShellLiteral(stopMarkerPath(role, baseDir))}
 $restartStatePath=${powerShellLiteral(win32.join(resolve(baseDir), restartStateFileName(role)))}
 $restartDelayInitialMs=${Number(restartDelayInitialMs)}
@@ -169,7 +184,9 @@ if ($existingTask) {
 if ($existingTask) {
   $lastTaskResult=$null
   try { $lastTaskResult=[int64](Get-ScheduledTaskInfo -TaskName $taskName -TaskPath '\\').LastTaskResult } catch { }
-  @{state=[string]$existingTask.State; taskName=$taskName; lastResult=$lastTaskResult} | ConvertTo-Json -Compress
+  $taskInstallId=$null
+  if ([string]$existingTask.Description -match 'installId=([0-9a-f]+)') { $taskInstallId=$Matches[1] }
+  @{state=[string]$existingTask.State; taskName=$taskName; lastResult=$lastTaskResult; installId=$taskInstallId} | ConvertTo-Json -Compress
 }
 else { @{state='NotRegistered'; taskName=$taskName} | ConvertTo-Json -Compress }`;
   }
@@ -207,7 +224,7 @@ if ($existingTask -and ([string]$existingTask.State -eq 'Running')) {
   $taskAction=New-ScheduledTaskAction -Execute $actionExecutable -Argument $actionArguments
   $taskPrincipal=New-ScheduledTaskPrincipal -UserId $currentUserSid -LogonType Interactive -RunLevel Limited
   $taskSettings=New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
-  $taskDefinition=New-ScheduledTask -Action $taskAction -Principal $taskPrincipal -Settings $taskSettings -Description 'Manually started Weft background workload. No boot or sign-in triggers.'
+  $taskDefinition=New-ScheduledTask -Action $taskAction -Principal $taskPrincipal -Settings $taskSettings -Description ${powerShellLiteral(`Manually started Weft background workload. No boot or sign-in triggers. installId=${backgroundInstallId({ cliPath }) ?? "unknown"}`)}
   Register-ScheduledTask -TaskName $taskName -TaskPath '\\' -InputObject $taskDefinition -Force | Out-Null
   Start-ScheduledTask -TaskName $taskName -TaskPath '\\'
 }
@@ -247,7 +264,7 @@ export function backgroundLaunchAgentPlist({
 <key>KeepAlive</key><false/>
 <key>StandardOutPath</key><string>/dev/null</string>
 <key>StandardErrorPath</key><string>/dev/null</string>
-<key>EnvironmentVariables</key><dict><key>WEFT_HOME</key><string>${xmlText(resolve(baseDir))}</string></dict>
+<key>EnvironmentVariables</key><dict><key>WEFT_HOME</key><string>${xmlText(resolve(baseDir))}</string><key>WEFT_INSTALL_ID</key><string>${xmlText(backgroundInstallId({ cliPath }))}</string></dict>
 </dict></plist>
 `;
 }
@@ -288,9 +305,15 @@ async function launchdStatus(role, options, exec) {
       : ["waiting", "not running", "spawn scheduled"].includes(stateName) ? "Ready" : null;
     if (!state) throw new Error("launchctl returned an unknown Weft workload state.");
     const exitMatch = /^\s*last exit code\s*=\s*(-?\d+)\s*$/mi.exec(stdout);
+    let installId = null;
+    try {
+      installId = /<key>WEFT_INSTALL_ID<\/key><string>([0-9a-f]+)<\/string>/.exec(
+        readFileSync(launchAgentPath(role, options.baseDir ?? weftHome()), "utf8"))?.[1] ?? null;
+    } catch { /* A missing job file has no installation identity. */ }
     return {
       state, taskName: label,
       lastResult: exitMatch ? Number(exitMatch[1]) : null,
+      installId,
     };
   } catch (error) {
     if (isMissingLaunchService(error)) return { state: "NotRegistered", taskName: label, lastResult: null };
@@ -604,6 +627,9 @@ export async function backgroundCommand(role, command = "status", payload = null
 /**
  * Start the role's task (a no-op if it is already running) and wait until the worker reports ready
  * over its authenticated control endpoint. A slow or busy worker is polled again, not failed.
+ * `localTimeoutMs` bounds how long the worker may stay silent on its local pipe. With
+ * `allowNetworkPending`, a worker that answers locally but is still connecting when `timeoutMs`
+ * ends is returned with `networkPending: true` instead of failing.
  */
 export async function startBackground(role, options, {
   taskOperation = backgroundTaskOperation,
@@ -611,19 +637,66 @@ export async function startBackground(role, options, {
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = Date.now,
   timeoutMs = 180_000,
+  localTimeoutMs = timeoutMs,
+  allowNetworkPending = false,
   pollIntervalMs = 500,
   onProgress = null,
 } = {}) {
   await taskOperation("start", { ...options, role });
-  const readyDeadline = now() + timeoutMs;
+  const startedAt = now();
+  const readyDeadline = startedAt + timeoutMs;
+  let lastStatus = null;
   while (now() < readyDeadline) {
     const workerStatus = await inspect();
-    if (workerStatus) onProgress?.(workerStatus);
+    if (workerStatus) { lastStatus = workerStatus; onProgress?.(workerStatus); }
     if (["ready", "endpoint-refresh-needed"].includes(workerStatus?.state)) return workerStatus;
     if (workerStatus?.state === "failed") throw new Error(workerStatus.error ?? "Weft background startup failed.");
+    if (!lastStatus && now() - startedAt >= localTimeoutMs) {
+      throw new Error(`Weft ${role} did not answer locally within ${Math.round(localTimeoutMs / 1000)} seconds.`);
+    }
     await sleep(pollIntervalMs);
   }
+  if (allowNetworkPending && lastStatus) return { ...lastStatus, networkPending: true };
   throw new Error(`Weft ${role} has not become ready. Use \`weft ${role === "station" ? "status" : "devtunnel status"}\` to inspect it; no duplicate process was started.`);
+}
+
+/** The worker's published control record: its pid and process start time, or null. */
+export function readBackgroundControlRecord(role, { baseDir = weftHome() } = {}) {
+  const record = readRegistry(controlRegistryFileName(role), { baseDir });
+  return Number.isSafeInteger(record?.pid) && record.pid > 0
+    ? { pid: record.pid, processStartedAt: record.processStartedAt ?? null } : null;
+}
+
+/**
+ * Stop a worker that no longer answers its pipe: disable restarts (stop marker), kill exactly the
+ * recorded worker process after verifying its start time, confirm it exited, then stop the task.
+ * A pid that was reused by another process is never signalled.
+ */
+export async function forceStopBackground(role, options, {
+  taskOperation = backgroundTaskOperation,
+  record = () => readBackgroundControlRecord(role, options),
+  verify = verifyProcessIdentity,
+  kill = (pid) => process.kill(pid),
+  isAlive = isPidAlive,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = Date.now,
+  timeoutMs = 10_000,
+} = {}) {
+  await taskOperation("disable", { ...options, role });
+  const worker = record();
+  let killed = null;
+  if (worker) {
+    const identity = await verify(worker);
+    if (identity.live === true) {
+      try { kill(worker.pid); killed = worker.pid; }
+      catch (error) { if (error.code !== "ESRCH") throw error; }
+      const deadline = now() + timeoutMs;
+      while (killed && isAlive(killed) && now() < deadline) await sleep(100);
+      if (killed && isAlive(killed)) throw new Error(`Weft ${role} worker (PID ${killed}) did not exit after it was stopped.`);
+    }
+  }
+  await taskOperation("stop", { ...options, role });
+  return { state: "stopped", graceful: false, killedPid: killed };
 }
 
 /**
@@ -658,6 +731,7 @@ export async function stopBackground(role, options, {
 export async function createBackgroundControl(role, {
   baseDir = weftHome(), status, stop, activate, traffic,
   getStartTime = getProcessStartTime,
+  installId = backgroundInstallId({ cliPath: process.argv[1] }),
   onStopError = (error) => { console.error(`Weft background shutdown failed: ${error.message}`); process.exitCode = 1; },
 } = {}) {
   requireRole(role);
@@ -672,7 +746,7 @@ export async function createBackgroundControl(role, {
     identity, capability, endpoint,
     presence: () => ({ ...identity, pid: process.pid, processStartedAt }),
     handlers: {
-      status: async () => ({ ...await status(), pid: process.pid, startedAt: processStartedAt, version: resolveVersion() }),
+      status: async () => ({ ...await status(), pid: process.pid, startedAt: processStartedAt, version: resolveVersion(), installId }),
       ...(activate ? { activate } : {}),
       ...(traffic ? { traffic } : {}),
       quiesce: () => {

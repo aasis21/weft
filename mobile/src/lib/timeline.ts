@@ -24,7 +24,7 @@ import type {
  * same ordered stream as assistant/user turns (VS Code / Copilot style) rather
  * than in a separate timeline panel.
  */
-export type ToolStatus = 'running' | 'success' | 'error';
+export type ToolStatus = 'running' | 'success' | 'error' | 'unknown';
 
 export interface UserItem {
   kind: 'user';

@@ -16,6 +16,8 @@ import type {
   SessionOffer,
   SessionFolder,
   SessionListSort,
+  SessionHealthLabel,
+  SessionHealthReason,
   StoredSession,
   TransportDescriptor,
 } from '@aasis21/weft-shared';
@@ -23,7 +25,8 @@ import type { RegisteredDevice } from '@/lib/devices';
 
 export type SessionStatus = 'initializing' | 'connecting' | 'live' | 'idle' | 'ended' | 'error';
 
-export type ToolStatus = 'running' | 'success' | 'error';
+/** `unknown`: the tool finished while the phone was away and catch-up carried no final state. */
+export type ToolStatus = 'running' | 'success' | 'error' | 'unknown';
 
 export interface UserItem {
   kind: 'user';
@@ -155,6 +158,8 @@ export interface ListenerDeviceState extends RegisteredDevice {
   projectsLoading: boolean;
   connected: boolean;
   error?: string;
+  /** Station answered `update_required`: one side must update Weft before it can open sessions. */
+  updateRequired?: 'laptop' | 'phone';
   /** Current page-scoped telemetry lease and newest accepted snapshot. Runtime-only. */
   monitoring?: DeviceMonitoringState;
   /** Exists only while the explicit clipboard sheet is open. Never persist or log text. */
@@ -201,6 +206,58 @@ export interface DeviceSessionListCache {
   error?: 'session-store-unavailable' | 'request-timeout' | 'request-failed';
 }
 
+/** Protocol v3 session-link state, as observed by the phone (LLD §4.1, §6.1). */
+export interface SessionLinkState {
+  /** Newest link generation seen in `channel_up` / `link_ready`; older generations are dropped. */
+  generation: number;
+  /** True once the laptop's `link_ready` for `generation` arrived (and the phone replied). */
+  ready: boolean;
+  controllerRevision?: number;
+  protocolVersion?: number | null;
+  /** One side speaks another protocol version; nothing flows until Weft is updated there. */
+  updateRequired?: 'laptop' | 'phone';
+}
+
+/** Station's last `session_health` verdict for this session (received on the device channel). */
+export interface SessionHealthSnapshot {
+  label: SessionHealthLabel;
+  reason: SessionHealthReason | null;
+  freshAt: number | null;
+  receivedAt: number;
+  runtimeId?: string;
+}
+
+/** Where a phone-driven `recover()` is (LLD §7.3). Absent when nothing is in progress. */
+export type RecoveryPhase =
+  | 'retrying'
+  | 'asking'
+  | 'repairing'
+  | 'resuming'
+  | 'linking'
+  | 'done'
+  | 'unreachable'
+  | 'no-station'
+  | 'controller-conflict'
+  | 'not-found'
+  | 'update-required'
+  | 'owner-unknown'
+  | 'needs-attention';
+
+export interface RecoveryState {
+  phase: RecoveryPhase;
+  startedAt: number;
+  updatedAt: number;
+  /** Open request streamed into the bar (Station path). */
+  requestId?: string;
+  revision?: number;
+  deviceChannelId?: string;
+  deviceName?: string;
+  /** Takeover challenge to confirm (`controller-conflict`). */
+  challengeId?: string;
+  /** How the session came back, for the `done` details line. */
+  doneVia?: 'reconnect' | 'repair' | 'resume';
+}
+
 export function sessionListScopeKey(cwd: string | null, sort: SessionListSort): string {
   return JSON.stringify([cwd, sort]);
 }
@@ -235,6 +292,10 @@ export interface SessionConnection {
   ended: boolean;
   endedReason?: string;
   error?: string;
+  /** Protocol v3 link; absent until a `channel_up` that carries a link generation. */
+  link?: SessionLinkState;
+  health?: SessionHealthSnapshot;
+  recovery?: RecoveryState;
   spawning?: {
     requestId: string;
     deviceId: string;

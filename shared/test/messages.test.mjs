@@ -24,6 +24,8 @@ import {
   approvalDecision,
   approvalComplete,
   channelUp,
+  linkReady,
+  PROTOCOL_VERSION,
   sessionMeta,
   channelDown,
   heartbeat,
@@ -162,14 +164,28 @@ test("approvalComplete carries the requestId and terminating decision", () => {
 
 // ---- control ---------------------------------------------------------------
 
-test("channelUp carries only cwd + title (identity is envelope-stamped)", () => {
+test("channelUp carries cwd + title + protocol version (identity is envelope-stamped)", () => {
   const m = channelUp("/home/me/app", "My Session");
   assertEnvelope(m, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CHANNEL_UP);
   assert.equal(m.msg.cwd, "/home/me/app");
   assert.equal(m.msg.title, "My Session");
+  assert.equal(m.msg.protocolVersion, PROTOCOL_VERSION);
+  assert.equal(m.msg.linkGeneration, undefined);
   // sessionId/channelId are NOT in the payload anymore.
   assert.equal(m.msg.sessionId, undefined);
   assert.equal(m.msg.channelId, undefined);
+  assert.equal(channelUp("/cwd", "T", null, 7).msg.linkGeneration, 7);
+  assert.equal(channelUp("/cwd", "T", null, 0).msg.linkGeneration, undefined);
+});
+
+test("linkReady fences readiness by link generation and controller revision", () => {
+  const ready = linkReady({ linkGeneration: 7, controllerRevision: 2 });
+  assertEnvelope(ready, EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.LINK_READY);
+  assert.deepEqual(ready.msg, { linkGeneration: 7, controllerRevision: 2 });
+  assert.deepEqual(linkReady({ linkGeneration: "7", controllerRevision: -1 }).msg, {
+    linkGeneration: 0,
+    controllerRevision: 0,
+  });
 });
 
 test("sessionMeta / channelDown carry their small payloads", () => {

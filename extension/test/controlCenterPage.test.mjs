@@ -522,7 +522,7 @@ test("Control Center rendered browser behavior", { skip: !browserEnabled, timeou
     await expect(h.page.locator("#station-start")).toBeDisabled();
     await expect(h.page.locator("#station-stop")).toBeEnabled();
     await expect(h.page.locator("#station-restart")).toBeEnabled();
-    await expect(h.page.locator("#control-primary")).toHaveText("Restart Station");
+    await expect(h.page.locator("#control-primary")).toHaveText("Repair Station");
     const relayPanel = h.page.locator("#relay-crash");
     await expect(relayPanel).toContainText("Stopped unexpectedly");
     await expect(relayPanel).toContainText("0xC000013A");

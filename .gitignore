@@ -18,7 +18,7 @@ coverage/
 
 # deploy-time artifact: prebuilt extension bundle copied into public/ for hosting
 mobile/public/extension.mjs
-mobile/public/activeRuntime.mjs
+mobile/public/sessionLink.mjs
 mobile/public/pairingCanvas.mjs
 mobile/public/relayServerProcess.mjs
 mobile/public/devtunnelHostWatchdog.mjs

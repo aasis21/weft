@@ -525,7 +525,7 @@ export function saveDefaultPermissionMode(mode, { baseDir } = {}) {
 const MAX_DEVICE_NAME_LENGTH = 60;
 
 /** Read the user-chosen display name for this device (`weft set-name`), or null if unset —
- * callers (listener.mjs, weft.mjs's `weft start` header) fall back to os.hostname() themselves so
+ * callers (station.mjs, weft.mjs's `weft start` header) fall back to os.hostname() themselves so
  * this module has no opinion about the default. Set during install (install.ps1/install.sh
  * prompt, defaulting to the machine hostname) or any time after via `weft set-name`. */
 export function loadDeviceName({ baseDir } = {}) {

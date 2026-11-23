@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "dev.aasis21.weft",
+      "sha256_cert_fingerprints": [
+        "63:34:5B:16:2A:E0:08:CC:45:87:32:6E:2B:B2:EE:E0:43:81:39:13:92:95:53:88:63:46:DB:B9:4A:B5:EC:68"
+      ]
+    }
+  }
+]

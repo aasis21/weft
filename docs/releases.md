@@ -72,4 +72,6 @@ The hosted release manifest declares the mandatory install bundle set consumed b
 `weft install`, `weft update`, release verification, and same-version repair.
 A commit on `main`, a GitHub release archive, and the hosted deployment are distinct:
 code is available to installed clients only after the hosted release is published.
-The documentation site on GitHub Pages is deployed separately from the web app.
+The documentation site on GitHub Pages is deployed separately from the web app, only when
+the manual **Docs** workflow (`.github/workflows/docs.yml`) is run; pushes to `main` do not
+publish it.

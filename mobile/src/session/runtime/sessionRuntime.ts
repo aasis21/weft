@@ -30,13 +30,15 @@ import {
   keepAwakeStatusRequest,
   keepAwakeStatus,
   lifecycleCancel as lifecycleCancelMessage,
+  lifecycleStatusRequest,
+  linkReady as linkReadyMessage,
   normalizeKeepAwakeDuration,
   openSession as openSessionMessage,
   stateRequest,
-  spawnSession as spawnSessionMessage,
+  sessionHealthRequest,
   sessionListRequest,
-  resumeSession as resumeSessionMessage,
   takeoverConfirm as takeoverConfirmMessage,
+  updateRequired as updateRequiredMessage,
   forgetDevice as forgetDeviceMessage,
   sessionClaimed as sessionClaimedMessage,
   voiceMode,
@@ -48,7 +50,7 @@ import type {
   EventEnvelope,
   WatchLevel,
   CatchUpPageMsg,
-  LaunchStatusMsg,
+  EndpointUpdateMsg,
   LifecycleStatusMsg,
   PairingPayload,
   ProjectListMsg,
@@ -56,14 +58,14 @@ import type {
   PromptDelivery,
   DeviceSnapshotMsg,
   DeviceUtilityCode,
+  SessionHealthMsg,
   SessionListMsg,
   SessionListSort,
   SessionMode,
   SessionOffersMsg,
   SpawnMode,
-  SpawnPairingMsg,
-  SpawnResultMsg,
   StateSnapshotMsg,
+  UpdateRequiredMsg,
   WorkspaceCommand,
   WorkspaceData,
 } from '@aasis21/weft-shared';
@@ -190,8 +192,16 @@ import {
   titleSet,
   unreadSet,
   userPromptAppended,
+  linkReset,
+  sessionHealthSet,
+  recoverySet,
+  staleToolsSettled,
+  deviceUpdateRequiredSet,
+  deviceTransportSet,
 } from '@/session/sessionsSlice';
-import { makeUserItem } from '@/session/reducers/applyEnvelope';
+import type { RecoveryState } from '@/session/model';
+import { UPDATE_LAPTOP_MESSAGE, UPDATE_PHONE_MESSAGE, linkBlocksLive, makeUserItem } from '@/session/reducers/applyEnvelope';
+import { openStatusMessage } from '@/session/openStatus';
 import { optimistic } from '@/session/intents/optimistic';
 import { selectAllSessions, selectManagerSnapshot, toTimelineState } from '@/session/selectors';
 import { TerminalController, isTerminalEnvelope } from './terminalController';
@@ -299,6 +309,28 @@ const RESUME_TIMEOUT_MS = 90_000;
 /* How long a resume may run before the placeholder admits it is taking a while. Silence past the
    point a spawn would have finished reads as a hang. */
 const RESUME_SLOW_MS = 25_000;
+/** recover(): a link stuck `connecting` this long is retried like a closed one (LLD §7.3). */
+const RECOVER_CONNECTING_STUCK_MS = 15_000;
+/** recover(): the phone-side socket retry gets this long before Station is asked. */
+const RECOVER_RETRY_MS = 5_000;
+/** recover(): how long "Back online and ready" stays before the bar fades. */
+const RECOVERY_DONE_VISIBLE_MS = 3_000;
+/** Station `session_health_request` throttle per session (forced on recover). */
+const HEALTH_REQUEST_MIN_MS = 10_000;
+
+interface RecoveryRequest {
+  requestId: string;
+  channelId: string;
+  sessionId: string;
+  deviceChannelId: string;
+  deviceName?: string;
+  startedAt: number;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+const RECOVERY_IN_PROGRESS: ReadonlySet<RecoveryState['phase']> = new Set([
+  'retrying', 'asking', 'repairing', 'resuming', 'linking',
+]);
 
 type ManagerSnapshot = ReturnType<typeof selectManagerSnapshot>;
 
@@ -307,7 +339,7 @@ interface SpawnRequestOptions {
   mode: SpawnMode;
   name?: string;
   initialPrompt?: string;
-  operationId?: string;
+  requestId?: string;
 }
 
 interface ResumeRequestOptions {
@@ -318,10 +350,7 @@ interface ResumeRequestOptions {
    *  resumed CLI session re-reports its own title/cwd via session_meta once paired. */
   title?: string | null;
   cwd?: string | null;
-  /** Close a session already attached on the laptop and resume anyway. Set only on the user's
-   *  second, confirmed tap — see {@link resumeSessionMessage}. */
-  force?: boolean;
-  operationId?: string;
+  requestId?: string;
 }
 
 interface PendingSpawn extends PendingOperation {
@@ -465,6 +494,14 @@ export class SessionRuntime {
   private readonly pendingSpawns = new Map<string, PendingSpawn>();
   private readonly lifecycleStatuses = new Map<string, LifecycleStatusMsg>();
   private readonly lifecycleWaiters = new Map<string, Set<LifecycleWaiter>>();
+  /** Open requests sent by recover(), keyed by requestId; their lifecycle_status drives the bar. */
+  private readonly recoveries = new Map<string, RecoveryRequest>();
+  /** Per-session recover() run token: a newer run or a cancel makes older continuations no-ops. */
+  private readonly recoveryTokens = new Map<string, number>();
+  private readonly healthRequestedAt = new Map<string, number>();
+  private readonly endpointRevisions = new Map<string, number>();
+  /** Sessions whose next catch-up (after a reconnect) should settle stale running tool rows. */
+  private readonly settleToolsPending = new Set<string>();
   private warmLru: string[] = [];
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private initStarted = false;
@@ -738,6 +775,7 @@ export class SessionRuntime {
           this.store.dispatch(historyLoadingSet({ id: channelId, loading: false }));
           this.clearHistoryTimeout(channelId);
           this.clearSettle(channelId);
+          this.settleStaleToolsAfterCatchUp(channelId);
           if (this.chatIsVisible(channelId) && (data.items.length || data.gap)) this.requestState(channelId);
         }
       }
@@ -765,33 +803,34 @@ export class SessionRuntime {
   // --- facade (useSyncExternalStore) ---------------------------------------------------------------
   subscribe = (listener: () => void): (() => void) => this.store.subscribe(listener);
   getSnapshot = (): ManagerSnapshot => selectManagerSnapshot(this.store.getState());
-  getLifecycleStatus = (operationId: string): LifecycleStatusMsg | null =>
-    this.lifecycleStatuses.get(operationId) ?? null;
+  getLifecycleStatus = (requestId: string): LifecycleStatusMsg | null =>
+    this.lifecycleStatuses.get(requestId) ?? null;
 
+  /** Confirm the exact takeover challenge Station showed (`result.challenge`), fenced by revision. */
   async confirmLifecycleTakeover(
     channelId: string,
-    operationId: string,
+    requestId: string,
     challengeId: string,
     revision: number,
   ): Promise<LifecycleStatusMsg> {
     return this.sendLifecycleCommand(
       channelId,
-      operationId,
+      requestId,
       revision,
-      takeoverConfirmMessage(operationId, challengeId, revision),
+      takeoverConfirmMessage(requestId, challengeId, revision),
     );
   }
 
   async cancelLifecycleOperation(
     channelId: string,
-    operationId: string,
+    requestId: string,
     revision: number,
   ): Promise<LifecycleStatusMsg> {
     return this.sendLifecycleCommand(
       channelId,
-      operationId,
+      requestId,
       revision,
-      lifecycleCancelMessage(operationId, revision),
+      lifecycleCancelMessage(requestId, revision),
     );
   }
 
@@ -974,7 +1013,7 @@ export class SessionRuntime {
       };
       showQueuedFirstMessage(session, operation);
       this.pendingSpawns.set(operation.requestId, { ...operation });
-      if (operation.lifecycleStatus) {
+      if (operation.lifecycleStatus?.requestId === operation.requestId) {
         this.lifecycleStatuses.set(operation.requestId, operation.lifecycleStatus);
       }
       this.store.dispatch(sessionAdded(session));
@@ -1092,9 +1131,15 @@ export class SessionRuntime {
     const previous = ctrl.client;
     ctrl.detach();
     ctrl.client = client;
+    ctrl.linkGeneration = 0;
     this.disconnectedPeers.delete(channelId);
     this.registry.adopt(channelId, client);
     if (previous && previous !== client) void previous.close().catch(() => {});
+    if (!ctrl.ephemeral) {
+      // A new socket is a new handshake: not linked until the laptop's next link_ready.
+      this.store.dispatch(linkReset({ id: channelId }));
+      this.settleToolsPending.add(channelId);
+    }
 
     const stopEvents = client.subscribe((message) => this.onMessage(channelId, client, message));
     const stopStatus = client.onStatus((status) => this.handleTransportStatus(channelId, client, status));
@@ -1145,6 +1190,7 @@ export class SessionRuntime {
           }),
         );
         if (s.connection.busy) this.store.dispatch(busySet({ id: channelId, busy: false }));
+        this.requestHealth(channelId);
       },
       HOST_CONFIRM_MS,
     );
@@ -1210,6 +1256,7 @@ export class SessionRuntime {
         );
         if (session.connection.busy) this.store.dispatch(busySet({ id: channelId, busy: false }));
       }
+      this.requestHealth(channelId);
       return;
     }
     this.disconnectedPeers.delete(channelId);
@@ -1302,6 +1349,15 @@ export class SessionRuntime {
     // Ignore a message that decrypted after its channel was superseded (reconnect) or cooled to cold:
     // acting on it could set a stale card back to 'live' with no live connection.
     if (ctrl.client !== client) return;
+    // Protocol v3 fencing: channel_up / link_ready from an older link generation are stale.
+    if (message.eventType === EVENT_TYPE.CONTROL &&
+        (message.eventSubtype === SUBTYPE.CONTROL.CHANNEL_UP || message.eventSubtype === SUBTYPE.CONTROL.LINK_READY)) {
+      const generation = (message.msg as { linkGeneration?: unknown }).linkGeneration;
+      if (typeof generation === 'number' && Number.isSafeInteger(generation) && generation > 0) {
+        if (generation < ctrl.linkGeneration) return;
+        ctrl.linkGeneration = generation;
+      }
+    }
     const journalKey = message.streamEpoch && Number.isSafeInteger(message.streamSequence)
       ? `${message.streamEpoch}:${message.streamSequence}` : null;
     const seen = this.catchUpSeen.get(channelId) ?? new Set<string>();
@@ -1381,6 +1437,7 @@ export class SessionRuntime {
     if (isControl && sub === SUBTYPE.CONTROL.RECENT_TURNS) {
       this.clearHistoryTimeout(channelId);
       this.clearSettle(channelId);
+      this.settleStaleToolsAfterCatchUp(channelId);
     }
 
     if (isControl && sub === SUBTYPE.CONTROL.CHANNEL_DOWN) {
@@ -1388,9 +1445,23 @@ export class SessionRuntime {
       ctrl.connectingSince = null;
       this.clearSettle(channelId);
       void notifySessionEnded(this.session(channelId)?.connection.endedReason);
-    } else {
+    } else if (this.session(channelId)?.connection.status === 'live') {
       this.confirmHost(channelId, wasLive);
     }
+
+    const link = this.session(channelId)?.connection.link;
+    if (link?.updateRequired && !before.connection.link?.updateRequired) {
+      // Nothing flows on a link that needs an update; stop waiting for it and say so.
+      ctrl.clear('confirm');
+      ctrl.connectingSince = null;
+      if (isControl && sub === SUBTYPE.CONTROL.CHANNEL_UP && link.updateRequired === 'laptop') {
+        void this.send(channelId, updateRequiredMessage({
+          peerVersion: link.protocolVersion ?? null, side: 'laptop',
+        })).catch(() => {});
+      }
+    }
+    if (isControl && sub === SUBTYPE.CONTROL.LINK_READY) this.onLinkReady(channelId, ctrl, before, message.msg);
+    if (!wasLive && this.session(channelId)?.connection.status === 'live') this.noteRecovered(channelId);
 
     if (isControl && sub === SUBTYPE.CONTROL.CHANNEL_UP) {
       const sid = message.sessionId;
@@ -1403,7 +1474,9 @@ export class SessionRuntime {
       // its history is never asked twice.
       const cur = this.session(channelId);
       const empty = !cur || (cur.history.items.length === 0 && cur.transcript.items.length === 0);
-      if (empty && ctrl.client && !ctrl.ephemeral && !historyJustRequested) this.syncHistory(channelId, ctrl.client);
+      if (empty && ctrl.client && !ctrl.ephemeral && !historyJustRequested && !(cur && linkBlocksLive(cur))) {
+        this.syncHistory(channelId, ctrl.client);
+      }
     }
 
     // Persist any changed durable metadata as ONE coalesced patch. Separate un-awaited patchSession
@@ -2033,37 +2106,17 @@ export class SessionRuntime {
     await this.connectDevice(pending.deviceId);
     const ctrl = this.listenerController(pending.deviceId);
     if (!ctrl?.client) throw new Error('Listener device is not connected.');
-    const device = this.device(pending.deviceId);
-    const lifecycleCapable = device?.capabilities?.includes(DEVICE_CAPABILITY.SESSION_ACTIVATION_V1);
-    const message = lifecycleCapable
-      ? openSessionMessage(
-          pending.requestId,
-          pending.kind === 'resume'
-            ? {
-                kind: 'existing',
-                storeAuthority: pending.storeAuthority ?? null,
-                sessionId: pending.sessionId ?? '',
-              }
-            : { kind: 'new', projectName: pending.projectName },
-          {
-            mode: pending.mode,
-            name: launchName(pending),
-            takeoverRequested: pending.force === true,
-          },
-        )
-      : pending.kind === 'resume'
-        ? resumeSessionMessage(
-            pending.requestId,
-            pending.sessionId ?? '',
-            pending.mode,
-            pending.force === true,
-          )
-        : spawnSessionMessage(
-            pending.requestId,
-            pending.projectName,
-            pending.mode,
-            launchName(pending),
-          );
+    // Protocol v3: name the target only; Station decides activate / repair / resume / start.
+    const message = openSessionMessage({
+      requestId: pending.requestId,
+      target: pending.kind === 'resume'
+        ? {
+            sessionId: pending.sessionId ?? '',
+            ...(pending.storeAuthority ? { storeAuthority: pending.storeAuthority } : {}),
+          }
+        : { project: pending.projectName },
+      options: { permissionMode: pending.mode, title: launchName(pending) },
+    });
     this.recordDeviceEvent(pending.deviceId, 'out', message);
     await ctrl.client.send(message);
     await this.setPendingStage(pending, 'delivered');
@@ -2072,7 +2125,7 @@ export class SessionRuntime {
 
   private async sendLifecycleCommand(
     channelId: string,
-    operationId: string,
+    requestId: string,
     afterRevision: number,
     message: EventEnvelope,
   ): Promise<LifecycleStatusMsg> {
@@ -2085,24 +2138,24 @@ export class SessionRuntime {
         resolve,
         reject,
         timer: setTimeout(() => {
-          this.lifecycleWaiters.get(operationId)?.delete(waiter);
-          reject(new Error('The laptop did not acknowledge the lifecycle command.'));
+          this.lifecycleWaiters.get(requestId)?.delete(waiter);
+          reject(new Error('The laptop did not acknowledge the request.'));
         }, SPAWN_DELIVERY_TIMEOUT_MS),
       };
-      const waiters = this.lifecycleWaiters.get(operationId) ?? new Set<LifecycleWaiter>();
+      const waiters = this.lifecycleWaiters.get(requestId) ?? new Set<LifecycleWaiter>();
       waiters.add(waiter);
-      this.lifecycleWaiters.set(operationId, waiters);
+      this.lifecycleWaiters.set(requestId, waiters);
     });
     this.recordDeviceEvent(channelId, 'out', message);
     try {
       await ctrl.client.send(message);
     } catch (error) {
-      const waiters = this.lifecycleWaiters.get(operationId);
+      const waiters = this.lifecycleWaiters.get(requestId);
       for (const waiter of waiters ?? []) {
         clearTimeout(waiter.timer);
         waiter.reject(error instanceof Error ? error : new Error(String(error)));
       }
-      this.lifecycleWaiters.delete(operationId);
+      this.lifecycleWaiters.delete(requestId);
       throw error;
     }
     return response;
@@ -2158,7 +2211,7 @@ export class SessionRuntime {
   async spawnSession(channelId: string, opts: SpawnRequestOptions): Promise<string> {
     const device = this.device(channelId);
     if (!device) throw new Error('Choose a registered listener device first.');
-    const requestId = opts.operationId ?? `spawn-${crypto.randomUUID()}`;
+    const requestId = opts.requestId ?? `spawn-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
     // Without a chosen name, the first message stands in as the title until Copilot reports its own.
     const provisionalTitle = opts.name?.trim() ? undefined : firstMessageTitle(opts.initialPrompt);
@@ -2308,12 +2361,12 @@ export class SessionRuntime {
     this.startSessionListRequest(channelId, queued);
   }
 
-  /** Resume an existing CLI session from the laptop's store: spawn `copilot --resume=<id>` in that
-   *  session's own cwd and pair to it — reusing the entire spawn machinery (pendingSpawns →
-   *  SPAWN_PAIRING → openPairedSession), so the only difference from `spawnSession` is the wire
-   *  message (RESUME_SESSION vs SPAWN_SESSION) and that there's no project. The placeholder card is
-   *  titled from the tapped session; `renamed` stays false so the resumed session's own CLI title
-   *  (re-reported via session_meta once paired) wins. Returns the temp id of the Initializing card. */
+  /** Open an existing CLI session from the laptop's store through Station: a protocol v3
+   *  `open_session({ target: { sessionId } })` — Station decides activate, repair or resume — and
+   *  pair from the `lifecycle_status` result, reusing the launch machinery (pendingSpawns →
+   *  openPairedSession). The placeholder card is titled from the tapped session; `renamed` stays
+   *  false so the session's own CLI title (re-reported via session_meta once paired) wins. Returns
+   *  the temp id of the Initializing card. */
   async resumeSession(channelId: string, opts: ResumeRequestOptions): Promise<string> {
     const device = this.device(channelId);
     if (!device) throw new Error('Choose a registered listener device first.');
@@ -2358,7 +2411,7 @@ export class SessionRuntime {
       if (await this.reconnectAndConfirm(existingId)) return existingId;
     }
 
-    const requestId = opts.operationId ?? `resume-${crypto.randomUUID()}`;
+    const requestId = opts.requestId ?? `resume-${crypto.randomUUID()}`;
     const tempId = `initializing-${requestId}`;
     const displayName = opts.title?.trim() || (opts.cwd ? basename(opts.cwd) : '') || 'Resuming session';
     const createdAt = this.clock();
@@ -2402,7 +2455,6 @@ export class SessionRuntime {
       storeAuthority: opts.storeAuthority ?? null,
       cwd: opts.cwd ?? undefined,
       title: displayName,
-      force: opts.force === true,
       createdAt,
       stage: 'not-delivered',
       // Past the point a fresh spawn would have landed, say so rather than sitting mute. The card
@@ -2527,11 +2579,20 @@ export class SessionRuntime {
       stopStatus();
     };
     this.store.dispatch(deviceErrorSet({ channelId, error: undefined, connected: true }));
+    this.store.dispatch(deviceUpdateRequiredSet({ channelId, side: null }));
     this.terminals.get(channelId)?.setConnected(true);
     // Fresh client: drop any stale in-flight marker from the previous (now-closed) socket so this
     // genuine (re)attach always issues exactly one project_list_request.
     this.clearProjectListInflight(channelId);
     void this.refreshProjects(channelId);
+    // Station keeps open requests across reconnects; ask where the delivered ones are now. A status
+    // request is read-only, so an offline laptop can never be made to launch anything by it.
+    for (const pending of this.pendingSpawns.values()) {
+      if (pending.deviceId !== channelId || pending.stage === 'not-delivered' || pending.pairingPayload) continue;
+      const request = lifecycleStatusRequest(pending.requestId);
+      this.recordDeviceEvent(channelId, 'out', request);
+      void client.send(request).catch(() => {});
+    }
   }
 
   private async reconcileDevice(channelId: string, deviceId: string): Promise<void> {
@@ -2658,16 +2719,29 @@ export class SessionRuntime {
       }
       return;
     }
-    if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
-      void this.handleSpawnPairing(message.msg as SpawnPairingMsg);
-      return;
-    }
-    if (message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS) {
-      void this.handleLaunchStatus(message.msg as LaunchStatusMsg);
-      return;
-    }
     if (message.eventSubtype === SUBTYPE.CONTROL.LIFECYCLE_STATUS) {
-      void this.handleLifecycleStatus(message.msg as LifecycleStatusMsg);
+      void this.handleLifecycleStatus(channelId, message.msg as LifecycleStatusMsg);
+      return;
+    }
+    if (
+      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING ||
+      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT ||
+      message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS
+    ) {
+      // Only a pre-v3 Station still speaks these; there is no compatibility path (protocol v3).
+      void this.handleDeviceUpdateRequired(channelId, { minVersion: 3, peerVersion: null, side: 'laptop' });
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_HEALTH) {
+      this.handleSessionHealth(message.msg as SessionHealthMsg);
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.ENDPOINT_UPDATE) {
+      void this.handleEndpointUpdate(channelId, message.msg as EndpointUpdateMsg);
+      return;
+    }
+    if (message.eventSubtype === SUBTYPE.CONTROL.UPDATE_REQUIRED) {
+      void this.handleDeviceUpdateRequired(channelId, message.msg as UpdateRequiredMsg);
       return;
     }
     if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_OFFERS) {
@@ -2715,148 +2789,157 @@ export class SessionRuntime {
       this.finishSessionListRequest(channelId, active);
       return;
     }
-    if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
-      const msg = message.msg as SpawnResultMsg;
-      const pending = this.pendingSpawns.get(msg.requestId);
-      if (!pending) return;
-      if (msg.ok) {
-        clearSpawnTimers(pending);
-        pending.timer = undefined;
-        void this.setPendingStage(pending, 'launched');
-      } else {
-        void this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
-      }
-    }
   }
 
-  private async handleLaunchStatus(msg: LaunchStatusMsg): Promise<void> {
-    const pending = this.pendingSpawns.get(msg.requestId);
-    if (!pending) return;
-    if (msg.name) pending.name = msg.name;
-
-    switch (msg.state) {
-      case 'accepted':
-        await this.setPendingStage(pending, 'delivered');
-        return;
-      case 'launched':
-        clearSpawnTimers(pending);
-        pending.timer = undefined;
-        await this.setPendingStage(pending, 'launched');
-        return;
-      case 'ready':
-        clearSpawnTimers(pending);
-        pending.timer = undefined;
-        pending.slowTimer = undefined;
-        if (msg.payload) pending.pairingPayload = msg.payload;
-        await this.setPendingStage(pending, msg.payload ? 'ready' : 'launched');
-        if (pending.pairingPayload) await this.attemptPendingPair(msg.requestId);
-        return;
-      case 'failed':
-        await this.failSpawn(msg.requestId, msg.error || 'The laptop could not start the session.');
-        return;
-      case 'claimed': {
-        clearSpawnTimers(pending);
-        this.pendingSpawns.delete(msg.requestId);
-        await removePendingOperation(msg.requestId);
-        this.store.dispatch(sessionRemoved(pending.tempId));
-        const claimedChannelId = msg.payload?.channelId;
-        if (claimedChannelId && this.session(claimedChannelId)) {
-          this.activateSession(claimedChannelId);
-        }
-        return;
+  /** Protocol v3 open-request progress from Station (LLD §4.2). Routes to a launch placeholder or to
+   *  a recovery run, and resolves any takeover/cancel waiters. */
+  private async handleLifecycleStatus(deviceChannelId: string, msg: LifecycleStatusMsg): Promise<void> {
+    if (!msg || typeof msg !== 'object') return;
+    if (typeof msg.requestId !== 'string' || !msg.requestId) {
+      // A pre-v3 Station answers with `operationId`: it cannot serve this phone.
+      const legacyId = (msg as { operationId?: unknown }).operationId;
+      if (typeof legacyId === 'string' && legacyId) {
+        await this.handleDeviceUpdateRequired(deviceChannelId, { minVersion: 3, peerVersion: null, side: 'laptop' });
       }
-      case 'abandoned':
-      case 'superseded':
-        await this.failSpawn(
-          msg.requestId,
-          msg.error || `This ${pending.kind === 'resume' ? 'resume' : 'launch'} was ${msg.state}.`,
-        );
+      return;
     }
-  }
-
-  private async handleLifecycleStatus(msg: LifecycleStatusMsg): Promise<void> {
-    if (
-      typeof msg.operationId !== 'string' ||
-      !msg.operationId ||
-      !Number.isSafeInteger(msg.revision) ||
-      msg.revision < 0
-    ) return;
-    const previous = this.lifecycleStatuses.get(msg.operationId);
+    if (!Number.isSafeInteger(msg.revision) || msg.revision < 0) return;
+    const previous = this.lifecycleStatuses.get(msg.requestId);
     if (previous && msg.revision < previous.revision) return;
-    this.lifecycleStatuses.set(msg.operationId, msg);
-    const waiters = this.lifecycleWaiters.get(msg.operationId);
+    this.lifecycleStatuses.set(msg.requestId, msg);
+    const waiters = this.lifecycleWaiters.get(msg.requestId);
     if (waiters) {
       for (const waiter of [...waiters]) {
-        if (msg.revision > waiter.afterRevision || msg.failure?.code === 'operation-stale') {
+        if (msg.revision > waiter.afterRevision || msg.outcome !== null || msg.reason === 'takeover-stale') {
           clearTimeout(waiter.timer);
           waiters.delete(waiter);
           waiter.resolve(msg);
         }
       }
-      if (waiters.size === 0) this.lifecycleWaiters.delete(msg.operationId);
+      if (waiters.size === 0) this.lifecycleWaiters.delete(msg.requestId);
     }
-    const pending = this.pendingSpawns.get(msg.operationId);
-    if (!pending) return;
-    pending.lifecycleStatus = msg;
-    await upsertPendingOperation(persistedPending(pending));
-    if (msg.name) pending.name = msg.name;
-    switch (msg.state) {
-      case 'accepted':
-      case 'locating':
-      case 'reserved':
-        await this.setPendingStage(pending, 'delivered');
-        return;
-      case 'activating':
-      case 'launching':
-        clearSpawnTimers(pending);
-        pending.timer = undefined;
-        await this.setPendingStage(pending, 'launched');
-        return;
-      case 'pairing-ready':
-      case 'pairing':
-        clearSpawnTimers(pending);
-        pending.timer = undefined;
-        pending.slowTimer = undefined;
-        if (msg.payload) pending.pairingPayload = msg.payload;
-        await this.setPendingStage(pending, msg.payload ? 'ready' : 'launched');
-        if (pending.pairingPayload) await this.attemptPendingPair(msg.operationId);
-        return;
-      case 'open':
-        clearSpawnTimers(pending);
-        if (msg.payload && !pending.pairingPayload) {
-          pending.pairingPayload = msg.payload;
-          await this.setPendingStage(pending, 'ready');
-          await this.attemptPendingPair(msg.operationId);
-          return;
-        }
-        this.pendingSpawns.delete(msg.operationId);
-        await removePendingOperation(msg.operationId);
-        this.store.dispatch(sessionRemoved(pending.tempId));
-        return;
-      case 'failed':
-        await this.failSpawn(
-          msg.operationId,
-          msg.failure?.message || 'The laptop could not open the session.',
-        );
-        return;
-      case 'cancelled':
-        await this.failSpawn(
-          msg.operationId,
-          msg.failure?.message || 'The session operation was cancelled.',
-        );
+    const recovery = this.recoveries.get(msg.requestId);
+    if (recovery) {
+      await this.applyRecoveryStatus(recovery, msg);
+      return;
     }
-  }
-
-  private async handleSpawnPairing(msg: SpawnPairingMsg): Promise<void> {
     const pending = this.pendingSpawns.get(msg.requestId);
     if (!pending) return;
-    clearSpawnTimers(pending);
-    pending.timer = undefined;
-    pending.slowTimer = undefined;
-    pending.pairingPayload = msg.payload as PairingPayload;
-    if (msg.name) pending.name = msg.name;
-    await this.setPendingStage(pending, 'launched');
-    await this.attemptPendingPair(msg.requestId);
+    pending.lifecycleStatus = msg;
+    if (msg.result?.name) pending.name = msg.result.name;
+    await upsertPendingOperation(persistedPending(pending));
+    const payload = msg.result?.payload;
+    if (msg.outcome === null) {
+      switch (msg.stage) {
+        case 'accepted':
+        case 'resolving':
+        case 'awaiting-confirmation':
+          await this.setPendingStage(pending, 'delivered');
+          return;
+        case 'dispatching':
+        case 'awaiting-runtime':
+          clearSpawnTimers(pending);
+          pending.timer = undefined;
+          await this.setPendingStage(pending, 'launched');
+          return;
+        case 'preparing-link':
+          clearSpawnTimers(pending);
+          pending.timer = undefined;
+          pending.slowTimer = undefined;
+          if (payload) pending.pairingPayload = payload;
+          await this.setPendingStage(pending, pending.pairingPayload ? 'ready' : 'launched');
+          if (pending.pairingPayload) await this.attemptPendingPair(msg.requestId);
+          return;
+        default:
+          return;
+      }
+    }
+    if (msg.outcome === 'done') {
+      clearSpawnTimers(pending);
+      if (payload && !pending.pairingPayload) pending.pairingPayload = payload;
+      if (pending.pairingPayload) {
+        await this.setPendingStage(pending, 'ready');
+        await this.attemptPendingPair(msg.requestId);
+        return;
+      }
+      // Done without pairing material: the session is already on this phone (activated or repaired
+      // in place), so the placeholder gives way to the existing card.
+      this.pendingSpawns.delete(msg.requestId);
+      await removePendingOperation(msg.requestId);
+      const wasActive = this.activeId() === pending.tempId;
+      this.store.dispatch(sessionRemoved(pending.tempId));
+      const sessionId = msg.result?.sessionId ?? pending.sessionId;
+      const existing = sessionId
+        ? selectAllSessions(this.store.getState()).find((s) => s.meta.sessionId === sessionId && s.meta.kind === 'live')
+        : undefined;
+      if (existing) {
+        if (wasActive) this.activateSession(existing.id);
+        this.ensureConnected(existing.id);
+      }
+      return;
+    }
+    await this.failSpawn(msg.requestId, openStatusMessage(msg) ?? 'The laptop could not open the session.');
+  }
+
+  /** Station's health verdict for one session (answer to `session_health_request`). */
+  private handleSessionHealth(msg: SessionHealthMsg): void {
+    if (!msg || typeof msg.sessionId !== 'string' || !msg.sessionId || typeof msg.label !== 'string') return;
+    this.store.dispatch(sessionHealthSet({
+      sessionId: msg.sessionId,
+      health: {
+        label: msg.label,
+        reason: msg.reason ?? null,
+        freshAt: typeof msg.freshAt === 'number' ? msg.freshAt : null,
+        receivedAt: this.clock(),
+        ...(msg.runtimeId ? { runtimeId: msg.runtimeId } : {}),
+      },
+    }));
+  }
+
+  /** The laptop's reachable address changed (Dev Tunnel rotation): store it and reconnect over it. */
+  private async handleEndpointUpdate(channelId: string, msg: EndpointUpdateMsg): Promise<void> {
+    const descriptor = msg?.descriptor;
+    if (!descriptor || typeof descriptor.kind !== 'string') return;
+    if (!Number.isSafeInteger(msg.endpointRevision) || msg.endpointRevision <= (this.endpointRevisions.get(channelId) ?? 0)) return;
+    const device = this.device(channelId);
+    if (!device) return;
+    this.endpointRevisions.set(channelId, msg.endpointRevision);
+    const previous = device.transport;
+    this.store.dispatch(deviceTransportSet({ channelId, transport: descriptor }));
+    await patchDevice(channelId, { transport: descriptor }).catch(() => {});
+    // Sessions that rode the same tunnel address move with it.
+    if (previous?.kind === 'devtunnel') {
+      const stored = await loadSessions().catch(() => [] as StoredSession[]);
+      for (const entry of stored) {
+        const transport = entry.pairing.transport;
+        if (transport?.kind !== 'devtunnel' || transport.url !== previous.url) continue;
+        await upsertSession({ ...entry, pairing: { ...entry.pairing, transport: descriptor } }).catch(() => {});
+        const session = this.session(entry.pairing.channelId);
+        if (session && session.connection.status !== 'live' && session.connection.status !== 'ended') {
+          void this.reconnect(entry.pairing.channelId);
+        }
+      }
+    }
+    this.store.dispatch(deviceErrorSet({ channelId, connected: false }));
+    await this.connectDevice(channelId);
+  }
+
+  /** Station says one side must update Weft: nothing it serves can work until then. */
+  private async handleDeviceUpdateRequired(channelId: string, msg: UpdateRequiredMsg): Promise<void> {
+    const side = msg?.side === 'phone' ? 'phone' : 'laptop';
+    const message = side === 'laptop' ? UPDATE_LAPTOP_MESSAGE : UPDATE_PHONE_MESSAGE;
+    this.store.dispatch(deviceUpdateRequiredSet({ channelId, side }));
+    this.store.dispatch(deviceErrorSet({ channelId, error: message }));
+    for (const pending of [...this.pendingSpawns.values()]) {
+      if (pending.deviceId === channelId && !pending.pairingPayload) await this.failSpawn(pending.requestId, message);
+    }
+    for (const recovery of [...this.recoveries.values()]) {
+      if (recovery.deviceChannelId !== channelId) continue;
+      this.finishRecoveryRequest(recovery.requestId);
+      this.updateRecovery(recovery.channelId, recovery.sessionId, {
+        ...this.recoveryBase(recovery), phase: 'update-required',
+      });
+    }
   }
 
   private async failSpawn(requestId: string, error: string): Promise<void> {
@@ -2914,6 +2997,330 @@ export class SessionRuntime {
     });
   }
 
+  // --- protocol v3 link + recovery (LLD §4.1, §7.3) ---------------------------------------------------
+  /** The laptop's `link_ready`: reply with the same generation, then (once per generation) mark the
+   *  link live and run state + catch-up. Re-sent link_ready frames are answered but change nothing. */
+  private onLinkReady(
+    channelId: string,
+    ctrl: ChannelController,
+    before: Session,
+    msg: { linkGeneration: number; controllerRevision: number },
+  ): void {
+    const link = this.session(channelId)?.connection.link;
+    if (!link || link.updateRequired || !link.ready || link.generation !== msg.linkGeneration) return;
+    void this.send(channelId, linkReadyMessage({
+      linkGeneration: msg.linkGeneration,
+      controllerRevision: msg.controllerRevision,
+    })).catch(() => {});
+    const already = before.connection.link?.ready === true && before.connection.link.generation === msg.linkGeneration;
+    if (already) return;
+    this.confirmHost(channelId, before.connection.status === 'live');
+    this.requestState(channelId);
+    if (ctrl.client && !ctrl.ephemeral) this.syncHistory(channelId, ctrl.client);
+  }
+
+  /** After a reconnect's catch-up, settle tool rows the laptop's latest turn has moved past. */
+  private settleStaleToolsAfterCatchUp(channelId: string): void {
+    if (!this.settleToolsPending.delete(channelId)) return;
+    this.store.dispatch(staleToolsSettled({ id: channelId, ts: this.clock() }));
+    this.schedulePersist(channelId);
+  }
+
+  /** The Station device that can reopen this session: the laptop it was launched from, one that
+   *  lists it, or the only registered laptop. */
+  private stationFor(channelId: string): ListenerDeviceState | undefined {
+    const session = this.session(channelId);
+    const sessionId = session?.meta.sessionId;
+    if (!session || !sessionId || sessionId === 'unknown-session') return undefined;
+    const devices = this.store.getState().sessions.devices;
+    const from = session.meta.spawnedFromDeviceId;
+    return (from ? devices.find((d) => d.deviceId === from || d.channelId === from) : undefined)
+      ?? devices.find((d) => d.sessions?.some((s) => s.sessionId === sessionId))
+      ?? (devices.length === 1 ? devices[0] : undefined);
+  }
+
+  /** Ask Station how a session that is not linked is doing (`session_health_request`). */
+  private requestHealth(channelId: string, force = false): void {
+    const session = this.session(channelId);
+    const sessionId = session?.meta.sessionId;
+    if (!session || session.meta.kind !== 'live' || !sessionId || sessionId === 'unknown-session') return;
+    if (!force && session.connection.status === 'live') return;
+    const now = this.clock();
+    const last = this.healthRequestedAt.get(channelId);
+    if (!force && last !== undefined && now - last < HEALTH_REQUEST_MIN_MS) return;
+    const device = this.stationFor(channelId);
+    const client = device ? this.listenerController(device.channelId)?.client : null;
+    if (!device || !client || !this.device(device.channelId)?.connected) return;
+    this.healthRequestedAt.set(channelId, now);
+    const message = sessionHealthRequest(sessionId);
+    this.recordDeviceEvent(device.channelId, 'out', message);
+    void client.send(message).catch(() => {});
+  }
+
+  /** Write a recovery row to the card (and, after a resume rotated the channel, its successor). */
+  private updateRecovery(channelId: string, sessionId: string | undefined, recovery: RecoveryState | null): void {
+    const ids = new Set<string>();
+    if (this.session(channelId)) ids.add(channelId);
+    if (sessionId) {
+      for (const s of selectAllSessions(this.store.getState())) {
+        if (s.meta.sessionId === sessionId && s.meta.kind === 'live') ids.add(s.id);
+      }
+    }
+    for (const id of ids) this.store.dispatch(recoverySet({ id, recovery }));
+  }
+
+  private recoveryBase(request: RecoveryRequest): Omit<RecoveryState, 'phase'> {
+    return {
+      startedAt: request.startedAt,
+      updatedAt: this.clock(),
+      requestId: request.requestId,
+      deviceChannelId: request.deviceChannelId,
+      ...(request.deviceName ? { deviceName: request.deviceName } : {}),
+    };
+  }
+
+  private finishRecoveryRequest(requestId: string): void {
+    const request = this.recoveries.get(requestId);
+    if (request?.timer) clearTimeout(request.timer);
+    this.recoveries.delete(requestId);
+  }
+
+  private markRecoveryDone(channelId: string, sessionId: string | undefined, base: Omit<RecoveryState, 'phase'>, via: RecoveryState['doneVia']): void {
+    const done: RecoveryState = { ...base, phase: 'done', updatedAt: this.clock(), ...(via ? { doneVia: via } : {}) };
+    this.updateRecovery(channelId, sessionId, done);
+    setTimeout(() => {
+      for (const s of selectAllSessions(this.store.getState())) {
+        const current = s.connection.recovery;
+        if (current?.phase === 'done' && current.startedAt === done.startedAt) {
+          this.store.dispatch(recoverySet({ id: s.id, recovery: null }));
+        }
+      }
+    }, RECOVERY_DONE_VISIBLE_MS);
+  }
+
+  /** The session came back on its own (or through recover()): settle whatever the bar shows. */
+  private noteRecovered(channelId: string): void {
+    const recovery = this.session(channelId)?.connection.recovery;
+    if (!recovery || recovery.phase === 'done') return;
+    if (recovery.phase === 'retrying' || recovery.phase === 'linking' || recovery.phase === 'repairing') {
+      // The Station path keeps its own request open until Station reports done.
+      if (recovery.requestId && this.recoveries.has(recovery.requestId)) return;
+      this.markRecoveryDone(channelId, this.session(channelId)?.meta.sessionId, recovery,
+        recovery.phase === 'retrying' ? 'reconnect' : recovery.doneVia ?? 'repair');
+      return;
+    }
+    if (recovery.requestId && this.recoveries.has(recovery.requestId)) return;
+    this.store.dispatch(recoverySet({ id: channelId, recovery: null }));
+  }
+
+  /**
+   * One Reconnect (LLD §7.3). Escalates: (1) a closed link, or one stuck connecting > 15 s, gets a
+   * phone-side socket retry of ≤ 5 s; (2) if a Station for the session is reachable, it is asked to
+   * open the session by target and its lifecycle stages stream into the recovery bar; (3) otherwise
+   * the bar shows the no-Station guidance. A linked session just refreshes its recent turns.
+   */
+  async recover(channelId: string): Promise<void> {
+    const session = this.session(channelId);
+    if (!session || session.meta.kind !== 'live') return;
+    const current = session.connection.recovery;
+    if (current && RECOVERY_IN_PROGRESS.has(current.phase)) return;
+    if (session.connection.status === 'live' && !linkBlocksLive(session)) {
+      this.reloadHistory(channelId);
+      return;
+    }
+    const token = (this.recoveryTokens.get(channelId) ?? 0) + 1;
+    this.recoveryTokens.set(channelId, token);
+    const stale = (): boolean => this.recoveryTokens.get(channelId) !== token || !this.session(channelId);
+    const sessionId = session.meta.sessionId;
+    const startedAt = this.clock();
+    const base = { startedAt, updatedAt: startedAt };
+    if (session.connection.link?.updateRequired === 'laptop') {
+      this.updateRecovery(channelId, undefined, { ...base, phase: 'update-required' });
+      return;
+    }
+
+    // 1. Retry the socket from the phone.
+    const ctrl = this.controllers.get(channelId);
+    const status = session.connection.status;
+    const connectingFor = ctrl?.connectingSince != null ? startedAt - ctrl.connectingSince : 0;
+    const closed = status === 'error' || (status === 'idle' && session.connection.cold) || !ctrl?.client;
+    if (status === 'connecting' && connectingFor <= RECOVER_CONNECTING_STUCK_MS && ctrl?.client) return;
+    if (status !== 'ended' && (closed || status === 'connecting')) {
+      this.updateRecovery(channelId, undefined, { ...base, phase: 'retrying' });
+      const ok = await this.reconnectAndConfirm(channelId, RECOVER_RETRY_MS);
+      if (stale()) return;
+      if (ok) {
+        this.markRecoveryDone(channelId, sessionId, base, 'reconnect');
+        return;
+      }
+    }
+
+    // 2. Ask Station to open the session by target.
+    const device = this.stationFor(channelId);
+    if (!device || !sessionId) {
+      this.updateRecovery(channelId, undefined, status === 'ended' ? null : { ...base, phase: 'no-station' });
+      return;
+    }
+    const deviceBase = { ...base, deviceChannelId: device.channelId, ...(device.name ? { deviceName: device.name } : {}) };
+    this.updateRecovery(channelId, undefined, { ...deviceBase, phase: 'asking' });
+    await this.connectDevice(device.channelId);
+    if (stale()) return;
+    const client = this.listenerController(device.channelId)?.client;
+    const reachable = this.device(device.channelId);
+    if (!client || !reachable?.connected) {
+      this.updateRecovery(channelId, undefined, { ...deviceBase, updatedAt: this.clock(), phase: 'unreachable' });
+      return;
+    }
+    if (reachable.updateRequired === 'laptop') {
+      this.updateRecovery(channelId, undefined, { ...deviceBase, updatedAt: this.clock(), phase: 'update-required' });
+      return;
+    }
+    this.requestHealth(channelId, true);
+    const requestId = `recover-${crypto.randomUUID()}`;
+    const request: RecoveryRequest = {
+      requestId, channelId, sessionId, deviceChannelId: device.channelId, startedAt,
+      ...(device.name ? { deviceName: device.name } : {}),
+    };
+    this.recoveries.set(requestId, request);
+    this.updateRecovery(channelId, undefined, { ...this.recoveryBase(request), revision: 0, phase: 'asking' });
+    request.timer = setTimeout(() => {
+      if (!this.recoveries.has(requestId) || this.lifecycleStatuses.has(requestId)) return;
+      this.finishRecoveryRequest(requestId);
+      this.updateRecovery(channelId, sessionId, { ...this.recoveryBase(request), phase: 'unreachable' });
+    }, SPAWN_DELIVERY_TIMEOUT_MS);
+    const message = openSessionMessage({
+      requestId,
+      target: { sessionId },
+      options: { permissionMode: device.defaultPermissionMode ?? 'default', title: null },
+    });
+    this.recordDeviceEvent(device.channelId, 'out', message);
+    try {
+      await client.send(message);
+    } catch {
+      this.finishRecoveryRequest(requestId);
+      if (!stale()) this.updateRecovery(channelId, undefined, { ...this.recoveryBase(request), phase: 'unreachable' });
+    }
+  }
+
+  /** Station progress for a recover() request → the bar's rows. */
+  private async applyRecoveryStatus(request: RecoveryRequest, msg: LifecycleStatusMsg): Promise<void> {
+    const { channelId, sessionId } = request;
+    if (request.timer) {
+      clearTimeout(request.timer);
+      delete request.timer;
+    }
+    const action = msg.result?.action;
+    const base = { ...this.recoveryBase(request), revision: msg.revision };
+    if (msg.outcome === null) {
+      const challengeId = msg.result?.challenge?.challengeId;
+      if (msg.stage === 'awaiting-confirmation' && challengeId) {
+        this.updateRecovery(channelId, sessionId, { ...base, phase: 'controller-conflict', challengeId });
+      } else if (msg.stage === 'preparing-link') {
+        this.updateRecovery(channelId, sessionId, {
+          ...base, phase: 'linking', doneVia: action === 'resume' || action === 'start' ? 'resume' : 'repair',
+        });
+      } else if (action === 'resume' || action === 'start') {
+        this.updateRecovery(channelId, sessionId, { ...base, phase: 'resuming', doneVia: 'resume' });
+      } else if (action === 'activate' || action === 'repair' || action === 'takeover') {
+        this.updateRecovery(channelId, sessionId, { ...base, phase: 'repairing', doneVia: 'repair' });
+      } else {
+        this.updateRecovery(channelId, sessionId, { ...base, phase: 'asking' });
+      }
+      return;
+    }
+    this.finishRecoveryRequest(request.requestId);
+    if (msg.outcome === 'cancelled') {
+      this.updateRecovery(channelId, sessionId, null);
+      return;
+    }
+    if (msg.outcome === 'failed' || msg.outcome === 'outcome-unknown') {
+      const phase: RecoveryState['phase'] =
+        msg.reason === 'not-found' ? 'not-found'
+          : msg.reason === 'owner-unknown' ? 'owner-unknown'
+            : msg.reason === 'update-required' ? 'update-required'
+              : msg.reason === 'controller-conflict' ? 'controller-conflict'
+                : 'needs-attention';
+      this.updateRecovery(channelId, sessionId, { ...base, phase });
+      return;
+    }
+    // done: pair to a reopened session, or reconnect to the one repaired in place.
+    const via: RecoveryState['doneVia'] = action === 'resume' || action === 'start' ? 'resume' : 'repair';
+    this.updateRecovery(channelId, sessionId, { ...base, phase: 'linking', doneVia: via });
+    let targetId = channelId;
+    try {
+      const payload = msg.result?.payload;
+      if (payload) {
+        const { client, pairing } = await pairSession(payload as PairingPayload, { timeoutMs: PAIRING_ATTEMPT_TIMEOUT_MS });
+        const prior = this.session(channelId);
+        targetId = await this.openPairedSession(client, pairing, {
+          title: prior?.meta.renamed ? prior.meta.title : null,
+          cwd: prior?.meta.cwd ?? null,
+          activate: this.activeId() === channelId,
+          renamed: prior?.meta.renamed ?? false,
+          ...(prior?.meta.spawnedFromDeviceId ? { spawnedFromDeviceId: prior.meta.spawnedFromDeviceId } : {}),
+          ...(prior?.meta.spawnedFromDeviceName ? { spawnedFromDeviceName: prior.meta.spawnedFromDeviceName } : {}),
+        });
+      }
+    } catch {
+      this.updateRecovery(channelId, sessionId, { ...base, phase: 'needs-attention' });
+      return;
+    }
+    const live = targetId !== channelId
+      ? await this.waitForLive(targetId, HOST_CONFIRM_MS)
+      : await this.reconnectAndConfirm(channelId, HOST_CONFIRM_MS);
+    if (live) this.markRecoveryDone(targetId, sessionId, base, via);
+    else this.updateRecovery(targetId, sessionId, { ...base, phase: 'needs-attention' });
+  }
+
+  private async waitForLive(channelId: string, timeoutMs: number): Promise<boolean> {
+    const deadline = this.clock() + timeoutMs;
+    for (;;) {
+      const session = this.session(channelId)
+        ?? selectAllSessions(this.store.getState()).find((s) => s.meta.channelId === channelId);
+      const status = session?.connection.status;
+      if (status === 'live') return true;
+      if (status === undefined || status === 'ended' || this.clock() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL_MS));
+    }
+  }
+
+  /** Confirm the takeover the recovery bar is showing (bound to Station's challenge + revision). */
+  async confirmRecoveryTakeover(channelId: string): Promise<void> {
+    const recovery = this.session(channelId)?.connection.recovery;
+    if (recovery?.phase !== 'controller-conflict' || !recovery.requestId || !recovery.challengeId || !recovery.deviceChannelId) return;
+    const request = this.recoveries.get(recovery.requestId);
+    if (!request) return;
+    this.updateRecovery(channelId, request.sessionId, { ...recovery, phase: 'repairing', updatedAt: this.clock() });
+    try {
+      await this.confirmLifecycleTakeover(recovery.deviceChannelId, recovery.requestId, recovery.challengeId, recovery.revision ?? 0);
+    } catch {
+      if (this.recoveries.has(recovery.requestId)) {
+        this.finishRecoveryRequest(recovery.requestId);
+        this.updateRecovery(channelId, request.sessionId, { ...recovery, phase: 'needs-attention', updatedAt: this.clock() });
+      }
+    }
+  }
+
+  /** ✕ on the recovery bar: stop the phone-side retry, or cancel the Station request. */
+  async cancelRecovery(channelId: string): Promise<void> {
+    const session = this.session(channelId);
+    const recovery = session?.connection.recovery;
+    this.recoveryTokens.set(channelId, (this.recoveryTokens.get(channelId) ?? 0) + 1);
+    this.updateRecovery(channelId, undefined, null);
+    if (!recovery?.requestId || !recovery.deviceChannelId || !this.recoveries.has(recovery.requestId)) return;
+    this.finishRecoveryRequest(recovery.requestId);
+    await this.cancelLifecycleOperation(recovery.deviceChannelId, recovery.requestId, recovery.revision ?? 0)
+      .catch(() => {});
+  }
+
+  /** Pull-to-refresh: a linked session reloads its recent turns; anything else recovers. */
+  refresh(channelId: string): void {
+    const session = this.session(channelId);
+    if (!session) return;
+    if (session.connection.status === 'live' && !linkBlocksLive(session)) this.reloadHistory(channelId);
+    else void this.recover(channelId);
+  }
+
   // --- session controls ----------------------------------------------------------------------------
   /** Ask the laptop for recent turns again, on purpose. The automatic request can be lost to a
    *  race on connect, and while `channel_up` now retries it there is no way to recover from a
@@ -2957,6 +3364,7 @@ export class SessionRuntime {
     this.updateWatches();
     this.touchWarm(channelId);
     this.ensureConnected(channelId);
+    if (session.connection.status !== 'live') this.requestHealth(channelId);
     if (!ctrl?.ephemeral) {
       const lastSeenAt = this.clock();
       void (async () => {
@@ -3128,9 +3536,12 @@ export class SessionRuntime {
    *  socket opened; the laptop confirms the session separately, and a `weft` that has gone away
    *  leaves the card sitting in `connecting` until the watchdog times it out. Resolves true once the
    *  session is genuinely back, false on error or if the confirmation never arrives. */
-  private async reconnectAndConfirm(channelId: string): Promise<boolean> {
-    await this.reconnect(channelId);
-    const deadline = this.clock() + HOST_CONFIRM_MS;
+  private async reconnectAndConfirm(channelId: string, timeoutMs = HOST_CONFIRM_MS): Promise<boolean> {
+    const deadline = this.clock() + timeoutMs;
+    await Promise.race([
+      this.reconnect(channelId),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
     for (;;) {
       const status = this.session(channelId)?.connection.status;
       if (status === undefined || status === 'error' || status === 'ended') return false;

@@ -6,6 +6,8 @@ export * from "./history.mjs";
 export * from "./workspace.mjs";
 export * from "./crypto.mjs";
 export * from "./pairing.mjs";
+export * from "./pairingLink.mjs";
+export * from "./sessionHealth.mjs";
 export { SecureChannel } from "./channel.mjs";
 export {
   createLocalTransport,

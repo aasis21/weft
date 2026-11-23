@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { hostname } from "node:os";
 import QRCode from "qrcode";
+import { pairingQrText } from "./pairingLink.mjs";
 import { readSession } from "./store.mjs";
 import { loadDeviceName } from "./transportConfig.mjs";
 import { resolveVersion } from "./version.mjs";
@@ -59,13 +60,13 @@ export async function createPairingCanvasServer({ session, preparePairing, statu
   async function snapshot() {
     const session = await sessionDetails();
     const current = status();
-    const connected = current.state === "active";
+    const connected = current.state === "linked";
     const paired = connected || current.paired === true;
     const payload = current.pairingPayload;
     const expired = !paired && payload?.expiresAt <= Date.now();
     const code = !paired && !expired && payload ? JSON.stringify(payload) : null;
     if (code !== cachedCode) {
-      const qr = code ? await QRCode.toDataURL(code, { width: 480, margin: 4 }) : null;
+      const qr = code ? await QRCode.toDataURL(pairingQrText(payload), { width: 480, margin: 4 }) : null;
       cachedQr = qr;
       cachedCode = code;
     }
@@ -132,7 +133,7 @@ export async function createPairingCanvasServer({ session, preparePairing, statu
         throw new Error("Choose Supabase or Dev Tunnel.");
       }
       const current = status();
-      if ((current.state === "active" || current.paired === true) && input.confirm !== true) {
+      if ((current.state === "linked" || current.paired === true) && input.confirm !== true) {
         throw new Error("Confirm before replacing the connected phone.");
       }
       if (pairing) throw new Error("A pairing request is already in progress.");
@@ -226,7 +227,7 @@ button { cursor:pointer; } button:disabled { opacity:.5; cursor:default; }
 <img id="qr" alt="Scan this QR in the Weft phone app" hidden>
 <p id="details" class="footer"></p></div><div id="instructions">
 <div class="step"><b aria-hidden="true">1</b><p><strong>Open Weft on your phone</strong><br><a href="https://useweft.netlify.app" target="_blank" rel="noreferrer">useweft.netlify.app</a></p></div>
-<div class="step"><b aria-hidden="true">2</b><p><strong>Scan QR to pair</strong><br>Choose Scan QR in the phone app and scan this code.</p></div>
+<div class="step"><b aria-hidden="true">2</b><p><strong>Scan QR to pair</strong><br>Point your phone camera at this code, or choose Scan QR in the phone app.</p></div>
 <div class="step"><b aria-hidden="true">3</b><p><strong>Stay with this session</strong><br>Follow the work, send prompts, and answer native approval requests.</p></div>
 <button id="copy" class="primary" type="button" disabled>Copy pairing code</button></div></div>
 <div id="connected-note" class="connected-note" hidden>Your phone is connected to this session. Closing this panel keeps that connection open.</div>

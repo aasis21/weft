@@ -237,7 +237,7 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
   const [copied, setCopied] = useState<'args' | 'result' | null>(null);
   const [fullResult, setFullResult] = useState(false);
   const copiedTimer = useRef<number | null>(null);
-  const icon = item.status === 'running' ? '↻' : item.status === 'success' ? '✓' : '✕';
+  const icon = item.status === 'running' ? '↻' : item.status === 'success' ? '✓' : item.status === 'unknown' ? '–' : '✕';
   const arg = describeArg(item.args, item.name);
   const argLine = arg.primary;
   const argPath = arg.isPath ? splitPath(argLine) : null;
@@ -389,7 +389,7 @@ export function ToolCard({ item }: ToolCardProps): JSX.Element {
                 {item.status === 'running'
                   ? 'Running'
                   : shellResult?.exitCode === undefined
-                    ? item.status === 'success' ? 'Completed' : 'Failed'
+                    ? item.status === 'success' ? 'Completed' : item.status === 'unknown' ? 'Finished (result unknown)' : 'Failed'
                     : `Exit ${shellResult.exitCode}`}
               </span>
               {shellResult?.shellId ? <span>shell {shellResult.shellId}</span> : null}

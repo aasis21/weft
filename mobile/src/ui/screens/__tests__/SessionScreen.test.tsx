@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionScreen } from '@/ui/screens/SessionScreen';
 import type { ListenerDeviceState } from '@/session/model';
@@ -141,14 +141,9 @@ describe('SessionScreen composer liveness', () => {
     defaultPermissionMode: 'allow-all',
     events: [],
   };
-  const status: LifecycleStatusMsg = {
-    operationId: 'resume-1',
-    fingerprint: 'resume-fingerprint',
-    state: 'launching',
-    revision: 1,
-  };
-  const closedSession = () => ({
-    ...makeSession('ended'),
+  const closedSession = (status: 'ended' | 'idle' = 'ended', extra: Record<string, unknown> = {}) => ({
+    ...makeSession(status === 'ended' ? 'ended' : 'idle'),
+    ...(status === 'idle' ? { status: 'error' } : {}),
     meta: {
       ...makeSession().meta,
       kind: 'live',
@@ -156,56 +151,86 @@ describe('SessionScreen composer liveness', () => {
       sessionId: 'saved-conversation',
       spawnedFromDeviceId: 'laptop-1',
     },
-  });
+    ...extra,
+  }) as never;
 
-  it('resumes a closed conversation through its own Station without replacing Reconnect', async () => {
-    const onOpenSession = vi.fn().mockResolvedValue(status);
+  it('replaces the offline banner and its buttons with one recovery bar on the composer', () => {
+    const onRecover = vi.fn();
     const onReconnect = vi.fn();
-    renderActive(closedSession(), { devices: [device], onOpenSession, onReconnect });
-    fireEvent.click(screen.getByRole('button', { name: /reconnect/i }));
-    expect(onReconnect).toHaveBeenCalledWith('session-a');
-    fireEvent.click(screen.getByRole('button', { name: 'Resume on laptop' }));
-    await waitFor(() => expect(onOpenSession).toHaveBeenCalledWith({
-      deviceChannelId: 'station-1',
-      target: { kind: 'existing', storeAuthority: null, sessionId: 'saved-conversation' },
-      mode: 'allow-all',
-      title: 'Weft',
-      cwd: 'C:\\Users\\akash\\weft',
-    }));
+    renderActive(closedSession('idle'), { devices: [device], onRecover, onReconnect });
+    expect(screen.queryByRole('button', { name: 'Resume on laptop' })).toBeNull();
+    expect(screen.queryByText(/reconnect to pick it back up/i)).toBeNull();
+    const bar = screen.getByRole('status');
+    expect(bar).toHaveAttribute('data-reason', 'offline');
+    expect(within(bar).getByRole('button', { name: 'This session is offline' })).toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Reconnect' }));
+    expect(onRecover).toHaveBeenCalledWith('session-a');
+    expect(onReconnect).not.toHaveBeenCalled();
   });
 
-  it('requires an explicit laptop choice when the original Station is not known', async () => {
-    const onOpenSession = vi.fn().mockResolvedValue(status);
-    renderActive(closedSession(), { devices: [{ ...device, deviceId: 'other-laptop' }], onOpenSession });
-    expect(screen.getByRole('button', { name: 'Resume on laptop' })).toBeDisabled();
-    expect(onOpenSession).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText('Resume on device'), { target: { value: 'station-1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Resume on laptop' }));
-    await waitFor(() => expect(onOpenSession).toHaveBeenCalledWith(expect.objectContaining({ deviceChannelId: 'station-1' })));
+  it('offers Resume for an ended session with a known Station, through the same recover()', () => {
+    const onRecover = vi.fn();
+    renderActive(closedSession('ended'), { devices: [device], onRecover });
+    const bar = screen.getByRole('status');
+    expect(bar).toHaveAttribute('data-reason', 'ended');
+    fireEvent.click(within(bar).getByRole('button', { name: 'Resume' }));
+    expect(onRecover).toHaveBeenCalledWith('session-a');
   });
 
-  it('shows a resume failure and requires a separate takeover confirmation', async () => {
+  it('streams recovery progress with a ✕ that cancels, and Take over that confirms', () => {
+    const onCancelRecovery = vi.fn();
+    const onConfirmRecoveryTakeover = vi.fn();
+    const view = renderActive(
+      closedSession('idle', { recovery: { phase: 'resuming', startedAt: 1, updatedAt: 1, deviceName: 'Laptop' } }),
+      { devices: [device], onCancelRecovery, onConfirmRecoveryTakeover },
+    );
+    expect(screen.getByRole('status')).toHaveAttribute('data-reason', 'resuming');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancelRecovery).toHaveBeenCalledWith('session-a');
+    view.unmount();
+
+    renderActive(
+      closedSession('idle', { recovery: { phase: 'controller-conflict', startedAt: 1, updatedAt: 1, challengeId: 'c-1' } }),
+      { devices: [device], onCancelRecovery, onConfirmRecoveryTakeover },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Take over' }));
+    expect(onConfirmRecoveryTakeover).toHaveBeenCalledWith('session-a');
+  });
+
+  it('shows no recovery bar for a linked session', () => {
+    renderScreen('live');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('keeps the explicit takeover confirmation for a launch placeholder', async () => {
     const blocked: LifecycleStatusMsg = {
-      ...status,
-      state: 'activating',
-      failure: { code: 'controller-conflict', actions: ['confirm-takeover', 'cancel'], message: 'Another phone controls this session.' },
-      challenge: {
-        challengeId: 'challenge-1', operationId: status.operationId, revision: 1,
-        storeAuthority: null, sessionId: 'saved-conversation', runtimeInstanceId: 'runtime-1',
-        generation: 1, pid: 42, processStartedAt: 1, responsive: true,
-      },
+      requestId: 'resume-1',
+      revision: 2,
+      stage: 'awaiting-confirmation',
+      outcome: null,
+      reason: 'controller-conflict',
+      result: { challenge: { challengeId: 'challenge-1', runtimeId: 'runtime-1', controllerRevision: 3 } },
     };
-    const onConfirmTakeover = vi.fn().mockResolvedValue(status);
-    renderActive(closedSession(), {
-      devices: [device],
-      onOpenSession: vi.fn().mockResolvedValue(blocked),
-      onConfirmTakeover,
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Resume on laptop' }));
-    await waitFor(() => expect(screen.getByText('Another phone controls this session.')).toBeInTheDocument());
+    const onConfirmTakeover = vi.fn().mockResolvedValue({ ...blocked, stage: 'preparing-link', reason: null, result: null });
+    renderActive(
+      { ...makeSession('connecting'), status: 'initializing', meta: { ...makeSession().meta, kind: 'spawning', channelId: 'session-a' } } as never,
+      { devices: [device], sessionOperation: blocked, onConfirmTakeover },
+    );
+    expect(screen.getByText('Another phone is using this session.')).toBeInTheDocument();
     expect(onConfirmTakeover).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Close it and open here' }));
     await waitFor(() => expect(onConfirmTakeover).toHaveBeenCalledWith('resume-1'));
+  });
+
+  it('pull-to-refresh hands the gesture to refresh (recent turns when linked, recover otherwise)', async () => {
+    const onRefresh = vi.fn();
+    const { container } = renderActive(closedSession('idle'), { devices: [device], onRefresh });
+    const thread = container.querySelector('.thread-scroll') as HTMLElement;
+    fireEvent.touchStart(thread, { touches: [{ clientX: 100, clientY: 100 }] });
+    fireEvent.touchMove(thread, { touches: [{ clientX: 100, clientY: 140 }] });
+    fireEvent.touchMove(thread, { touches: [{ clientX: 100, clientY: 400 }] });
+    fireEvent.touchEnd(thread, { touches: [] });
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith('session-a'));
   });
 
   it('disables the composer while connecting and keeps it enabled when live', () => {
@@ -474,7 +499,7 @@ describe('SessionScreen direct Discover gesture', () => {
 });
 
 describe('SessionScreen leave-session confirmation (#one-click-delete)', () => {
-  it('deletes directly from the drawer inline ✓ without popping a second "Leave this session?" dialog', () => {
+  it('deletes directly from the drawer inline ✓ without popping a second "Remove from this phone?" dialog', () => {
     // The drawer row already shows its own inline "Delete?" ✓/✕ confirm, so its ✓ must remove
     // the session in one tap — not re-open the top-bar Leave dialog and ask again.
     const matchMediaSpy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
@@ -495,23 +520,29 @@ describe('SessionScreen leave-session confirmation (#one-click-delete)', () => {
 
       expect(onRemoveSession).toHaveBeenCalledTimes(1);
       expect(onRemoveSession).toHaveBeenCalledWith('session-a');
-      expect(screen.queryByText('Leave this session?')).not.toBeInTheDocument();
+      expect(screen.queryByText('Remove from this phone?')).not.toBeInTheDocument();
     } finally {
       matchMediaSpy.mockRestore();
     }
   });
 
-  it('still guards the top-bar StatusBar "Leave" (no inline confirm) behind the dialog', () => {
+  it('guards the top-bar "Remove from this phone" behind a confirm that says the laptop keeps it', () => {
     const onRemoveSession = vi.fn();
     renderActive(makeSession('live'), { onRemoveSession });
 
     fireEvent.click(screen.getByTestId('status-remove'));
 
-    // The bar's Leave has no inline confirm, so it must open the dialog first, not delete.
-    expect(screen.getByText('Leave this session?')).toBeInTheDocument();
+    // The ⋯ item has no inline confirm, so it must open the dialog first, not delete.
+    const dialog = screen.getByRole('dialog', { name: 'Remove from this phone?' });
+    expect(dialog).toHaveTextContent('The session keeps running on the laptop.');
     expect(onRemoveSession).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Remove from this phone?' })).not.toBeInTheDocument();
+    expect(onRemoveSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('status-remove'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     expect(onRemoveSession).toHaveBeenCalledWith('session-a');
   });
 });

@@ -33,6 +33,8 @@ export class ChannelController {
   /** When the current 'connecting' attempt began (ms), so a hung connect can be failed by the
    *  watchdog even before the confirm deadline is armed. */
   connectingSince: number | null = null;
+  /** Newest protocol v3 link generation seen on the current socket; older ones are dropped. */
+  linkGeneration = 0;
 
   private timers = new Map<TimerName, Handle>();
 

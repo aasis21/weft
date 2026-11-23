@@ -134,9 +134,14 @@ const APPROVAL_LABEL: Record<ApprovalMode, string> = {
   assisted: 'AI review',
   'allow-all': 'Allow all',
 };
-/** Upward travel on the pill that opens the sheet. */
-const PILL_SWIPE_PX = 40;
-/** Downward travel on the sheet's grip before it follows the finger. */
+/** Upward travel anywhere on the composer that opens the sheet (and how much steeper than sideways). */
+const OPEN_SWIPE_PX = 40;
+const OPEN_SWIPE_STEEPNESS = 1.5;
+/** A touch held this long before it moves is a text-selection press, not a swipe. */
+const SWIPE_LONG_PRESS_MS = 500;
+/** Travel before a pointer counts as moving (long-press check, scroll-direction check). */
+const SWIPE_SLOP_PX = 8;
+/** Downward travel on the sheet before it follows the finger. */
 const SHEET_DRAG_SLOP_PX = 4;
 /** Release past this distance, or faster than the flick speed, closes the sheet. */
 const SHEET_CLOSE_PX = 80;
@@ -278,14 +283,21 @@ function modelOptions(model: ModelStateMsg | undefined): PhoneCommandOption[] {
   });
 }
 
+/** The model's default effort; when the CLI omits it but the model offers Medium, Medium. */
+function defaultEffortOf(item: ModelStateMsg['models'][number] | undefined): string | null {
+  if (!item) return null;
+  return item.defaultEffort ?? (item.efforts.includes('medium') ? 'medium' : null);
+}
+
 /** Effort levels the current model supports, as command options. */
 function effortOptions(model: ModelStateMsg | undefined): PhoneCommandOption[] {
   const current = model?.models.find((item) => item.id === model.current?.modelId);
+  const fallbackDefault = defaultEffortOf(current);
   return (current?.efforts ?? []).map((effort) => ({
     value: effort,
     label: describeReasoningEffort(effort),
     ...(effort === model?.current?.reasoningEffort ? { hint: 'Current effort' }
-      : effort === current?.defaultEffort ? { hint: 'Model default' } : {}),
+      : effort === fallbackDefault ? { hint: 'Model default' } : {}),
   }));
 }
 
@@ -315,10 +327,16 @@ export function Composer({
   /** Live downward offset while the sheet follows a drag; null when not dragging. */
   const [sheetDragY, setSheetDragY] = useState<number | null>(null);
   const [sheetSnapping, setSheetSnapping] = useState(false);
-  const sheetDragRef = useRef<{ id: number; startY: number; lastY: number; lastT: number; velocity: number; moved: boolean } | null>(null);
-  const pillSwipeRef = useRef<{ id: number; x: number; y: number } | null>(null);
-  const suppressPillClickUntilRef = useRef(0);
+  const sheetDragRef = useRef<{
+    id: number; startX: number; startY: number; lastY: number; lastT: number; velocity: number; moved: boolean;
+    /** Started inside a scroll area (at its top): an upward or sideways move scrolls it instead. */
+    inScroll: boolean;
+  } | null>(null);
+  /** An upward swipe that may open the sheet; `opened` once it did, until the pointer lifts. */
+  const composerSwipeRef = useRef<{ id: number; x: number; y: number; t: number; moving: boolean; opened: boolean } | null>(null);
+  const suppressComposerClickUntilRef = useRef(0);
   const suppressSheetClickUntilRef = useRef(0);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -860,49 +878,107 @@ export function Composer({
     onModelChange?.({ approvalMode: 'allow-all' });
   };
 
-  /** A swipe up on the pill opens the sheet; a plain tap still toggles it via onClick. */
-  const onPillPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    pillSwipeRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  /**
+   * Swipe up anywhere on the composer (textarea, buttons row, padding) to open the sheet. Nothing is
+   * captured before the threshold, so taps, typing, send, mic and attach behave as before; the click
+   * that ends a swipe is swallowed by `onComposerClickCapture`.
+   */
+  const onComposerPointerDown = (event: ReactPointerEvent<HTMLFormElement>): void => {
+    composerSwipeRef.current = null;
+    if (menuOpen || voxOpen || disabled || !onModelChange) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const target = event.target as Element;
+    // Popovers above the shell keep their own scrolling and taps.
+    if (target.closest?.('.slash-menu, .slash-confirm, .mode-menu, .controls-sheet, .controls-scrim')) return;
+    const area = areaRef.current;
+    if (area && area.contains(target)) {
+      // A mouse drag in the textarea selects text; a scrolled textarea scrolls first.
+      if (event.pointerType === 'mouse' || area.scrollTop > 0) return;
+    }
+    composerSwipeRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, t: performance.now(), moving: false, opened: false };
   };
 
-  const trackPillSwipe = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    const start = pillSwipeRef.current;
-    if (!start || start.id !== event.pointerId) return;
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    if (dy > -PILL_SWIPE_PX || Math.abs(dy) <= Math.abs(dx) * 1.5) return;
-    pillSwipeRef.current = null;
-    suppressPillClickUntilRef.current = performance.now() + GESTURE_CLICK_GUARD_MS;
+  const onComposerPointerMove = (event: ReactPointerEvent<HTMLFormElement>): void => {
+    const swipe = composerSwipeRef.current;
+    if (!swipe || swipe.id !== event.pointerId || swipe.opened) return;
+    const dx = event.clientX - swipe.x;
+    const dy = event.clientY - swipe.y;
+    if (!swipe.moving && Math.max(Math.abs(dx), Math.abs(dy)) >= SWIPE_SLOP_PX) {
+      swipe.moving = true;
+      // Held before moving: a long-press drag selects text, it is not a swipe.
+      if (performance.now() - swipe.t >= SWIPE_LONG_PRESS_MS) {
+        composerSwipeRef.current = null;
+        return;
+      }
+    }
+    if (dy >= SWIPE_SLOP_PX) {
+      // Downward is the hide-keyboard swipe, not ours.
+      composerSwipeRef.current = null;
+      return;
+    }
+    if (dy > -OPEN_SWIPE_PX || Math.abs(dy) <= Math.abs(dx) * OPEN_SWIPE_STEEPNESS) return;
+    swipe.opened = true;
+    suppressComposerClickUntilRef.current = performance.now() + GESTURE_CLICK_GUARD_MS;
     setMenuOpen(true);
   };
 
-  const endPillSwipe = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    trackPillSwipe(event);
-    pillSwipeRef.current = null;
+  const endComposerSwipe = (event: ReactPointerEvent<HTMLFormElement>): void => {
+    if (composerSwipeRef.current?.id !== event.pointerId) return;
+    onComposerPointerMove(event);
+    composerSwipeRef.current = null;
   };
 
+  const onComposerClickCapture = (event: ReactMouseEvent<HTMLFormElement>): void => {
+    if (performance.now() >= suppressComposerClickUntilRef.current) return;
+    suppressComposerClickUntilRef.current = 0;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  // Browsers pan on a vertical touch drag and then cancel the pointer stream, so claim the upward
+  // swipe's touchmoves. React registers touch listeners as passive, hence the native listener.
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return undefined;
+    const onTouchMove = (event: TouchEvent): void => {
+      const swipe = composerSwipeRef.current;
+      const touch = event.touches[0];
+      if (!swipe || !touch || !event.cancelable) return;
+      const dx = touch.clientX - swipe.x;
+      const dy = touch.clientY - swipe.y;
+      if (swipe.opened || (dy < 0 && Math.abs(dy) > Math.abs(dx))) event.preventDefault();
+    };
+    form.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => form.removeEventListener('touchmove', onTouchMove);
+  }, []);
+
   const onPillClick = (): void => {
-    if (performance.now() < suppressPillClickUntilRef.current) {
-      suppressPillClickUntilRef.current = 0;
-      return;
-    }
     setMenuOpen((v) => !v);
   };
 
-  /** The sheet's grip (handle + header) drags it down; it follows the finger and closes past a threshold or on a flick. */
-  const onGripPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  /**
+   * Drag down anywhere on the sheet: it follows the finger and closes past a threshold or on a flick.
+   * A drag that starts in a scrolled list scrolls the list instead; at the list's top, an upward or
+   * sideways move scrolls it too, and only a downward one moves the sheet.
+   */
+  const onSheetPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    sheetDragRef.current = null;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const scroller = (event.target as Element).closest?.('.controls-scroll') ?? null;
+    if (scroller && scroller.scrollTop > 0) return;
     sheetDragRef.current = {
       id: event.pointerId,
+      startX: event.clientX,
       startY: event.clientY,
       lastY: event.clientY,
       lastT: performance.now(),
       velocity: 0,
       moved: false,
+      inScroll: scroller !== null,
     };
   };
 
-  /** Updates the drag's velocity sample and returns its downward offset, or null for a foreign pointer. */
+  /** Updates the drag's velocity sample and returns its downward offset, or null when there is no drag. */
   const trackSheetDrag = (event: ReactPointerEvent<HTMLDivElement>): number | null => {
     const drag = sheetDragRef.current;
     if (!drag || drag.id !== event.pointerId) return null;
@@ -912,10 +988,16 @@ export function Composer({
       drag.lastY = event.clientY;
       drag.lastT = now;
     }
-    const offset = Math.max(0, event.clientY - drag.startY);
+    const dy = event.clientY - drag.startY;
+    const dx = event.clientX - drag.startX;
+    if (!drag.moved && drag.inScroll && Math.max(-dy, Math.abs(dx)) >= SHEET_DRAG_SLOP_PX && dy <= Math.abs(dx)) {
+      sheetDragRef.current = null;
+      return null;
+    }
+    const offset = Math.max(0, dy);
     if (!drag.moved && offset >= SHEET_DRAG_SLOP_PX) {
       drag.moved = true;
-      // Capture only once it is a drag, so taps on header buttons still click them.
+      // Capture only once it is a drag, so taps on rows and header buttons still click them.
       try {
         event.currentTarget.setPointerCapture?.(event.pointerId);
       } catch {
@@ -925,14 +1007,14 @@ export function Composer({
     return offset;
   };
 
-  const onGripPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const onSheetPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const offset = trackSheetDrag(event);
     if (offset === null || !sheetDragRef.current?.moved) return;
     setSheetSnapping(false);
     setSheetDragY(offset);
   };
 
-  const onGripPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const onSheetPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const offset = trackSheetDrag(event);
     const drag = sheetDragRef.current;
     sheetDragRef.current = null;
@@ -946,7 +1028,7 @@ export function Composer({
     setSheetSnapping(true);
   };
 
-  const onGripPointerCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const onSheetPointerCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (sheetDragRef.current?.id !== event.pointerId) return;
     const moved = sheetDragRef.current.moved;
     sheetDragRef.current = null;
@@ -954,6 +1036,21 @@ export function Composer({
     setSheetDragY(null);
     setSheetSnapping(true);
   };
+
+  // As on the composer: keep the browser from panning (and cancelling) a downward sheet drag that
+  // starts at the top of the list. Upward moves there still scroll the list natively.
+  useEffect(() => {
+    const sheet = sheetRef.current;
+    if (!menuOpen || !sheet) return undefined;
+    const onTouchMove = (event: TouchEvent): void => {
+      const drag = sheetDragRef.current;
+      const touch = event.touches[0];
+      if (!drag || !touch || !event.cancelable) return;
+      if (drag.moved || touch.clientY > drag.startY) event.preventDefault();
+    };
+    sheet.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => sheet.removeEventListener('touchmove', onTouchMove);
+  }, [menuOpen]);
 
   const onSheetClickCapture = (event: ReactMouseEvent<HTMLDivElement>): void => {
     if (performance.now() >= suppressSheetClickUntilRef.current) return;
@@ -967,11 +1064,12 @@ export function Composer({
   const currentEffort = model?.current?.reasoningEffort ?? null;
   const approvals = model?.approvals;
   const effortPageModel = effortPageId ? model?.models.find((item) => item.id === effortPageId) ?? null : null;
+  const effortPageDefault = defaultEffortOf(effortPageModel ?? undefined);
   /** Pre-selected level: the current effort when kept or supported, else the model default. */
   const effortPageSelected = !effortPageModel ? null
     : effortPageModel.id === currentModelId ? currentEffort
     : currentEffort && effortPageModel.efforts.includes(currentEffort) ? currentEffort
-    : effortPageModel.defaultEffort ?? null;
+    : effortPageDefault;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -986,19 +1084,28 @@ export function Composer({
     }
   }, [effortPageId, menuOpen]);
 
-  const pillLabel = [
-    PILL_MODE[mode],
+  const modelEffortLabel = [
     model?.current ? shortModelName(model.current.name) : 'Model',
     model?.current?.reasoningEffort ? shortEffort(model.current.reasoningEffort) : null,
   ].filter(Boolean).join(' · ');
+  // Offline/ended: the greyed, non-interactive pill keeps the last known model · effort.
+  const pillLabel = disabled && model?.current
+    ? modelEffortLabel
+    : [PILL_MODE[mode], modelEffortLabel].filter(Boolean).join(' · ');
 
   return (
     <form
+      ref={formRef}
       className="composer"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
       }}
+      onPointerDown={onComposerPointerDown}
+      onPointerMove={onComposerPointerMove}
+      onPointerUp={endComposerSwipe}
+      onPointerCancel={() => { composerSwipeRef.current = null; }}
+      onClickCapture={onComposerClickCapture}
     >
       {slashOpen ? (
         <div
@@ -1188,10 +1295,6 @@ export function Composer({
                 aria-label={`Session controls: ${pillLabel}`}
                 disabled={disabled || !onModelChange}
                 onClick={onPillClick}
-                onPointerDown={onPillPointerDown}
-                onPointerMove={trackPillSwipe}
-                onPointerUp={endPillSwipe}
-                onPointerCancel={() => { pillSwipeRef.current = null; }}
                 onKeyDown={onModelButtonKeyDown}
               >
                 <span className="pill-dot" aria-hidden="true" />
@@ -1209,15 +1312,13 @@ export function Composer({
                     style={sheetDragY !== null ? { transform: `translate(-50%, ${sheetDragY}px)` } : undefined}
                     onKeyDown={onModelMenuKeyDown}
                     onClickCapture={onSheetClickCapture}
+                    onPointerDown={onSheetPointerDown}
+                    onPointerMove={onSheetPointerMove}
+                    onPointerUp={onSheetPointerUp}
+                    onPointerCancel={onSheetPointerCancel}
                     onTransitionEnd={() => setSheetSnapping(false)}
                   >
-                    <div
-                      className="controls-grip"
-                      onPointerDown={onGripPointerDown}
-                      onPointerMove={onGripPointerMove}
-                      onPointerUp={onGripPointerUp}
-                      onPointerCancel={onGripPointerCancel}
-                    >
+                    <div className="controls-grip">
                       <span className="controls-handle" aria-hidden="true" />
                       {effortPageModel ? (
                         <div className="controls-head">
@@ -1251,7 +1352,7 @@ export function Composer({
                           >
                             {effortPageModel.efforts.map((value) => {
                               const selected = value === effortPageSelected;
-                              const isDefault = value === effortPageModel.defaultEffort;
+                              const isDefault = value === effortPageDefault;
                               const hint = EFFORT_HINT[value];
                               return (
                                 <button

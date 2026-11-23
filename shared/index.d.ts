@@ -4,6 +4,8 @@ export * from "./history";
 export * from "./workspace";
 export * from "./crypto";
 export * from "./pairing";
+export * from "./pairingLink";
+export * from "./sessionHealth";
 export { SecureChannel } from "./channel";
 export type { SecureChannelIdentity, Envelope } from "./channel";
 export {

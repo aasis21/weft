@@ -17,6 +17,7 @@ import {
   elicitationRequest,
   elicitationComplete,
   channelUp,
+  linkReady,
   sessionMeta,
   channelDown,
   heartbeat,
@@ -41,7 +42,6 @@ import {
 } from "@aasis21/weft-shared";
 import { readSummary, readHistory, readLatestTurnIndex } from "./store.mjs";
 import { createRecentTurns } from "./recentTurns.mjs";
-import { clearAttachedSession, recordAttachedSession } from "./attachedSessions.mjs";
 import { WorkspaceError } from "./workspaceView.mjs";
 import { SessionFilesError } from "./sessionFiles.mjs";
 import { FileSharingError } from "./transportConfig.mjs";
@@ -435,7 +435,6 @@ export async function attachRelay({
   }
   const unsubscribers = [];
   let stopped = false;
-  let attached = false;
   let consecutiveSendFailures = 0;
   let connectionLostNotified = false;
   // Voice Mode (#176): while on, each relayed phone prompt is prefixed with a directive telling
@@ -461,6 +460,9 @@ export async function attachRelay({
   let delivering = false;
   let needsCatchUp = false;
   let lastPeerContactAt = null;
+  // Link hooks of the CURRENT binding (protocol v3): its link generation, whether it may still
+  // act (a retired generation never handles a prompt), and the link_ready / update_required sinks.
+  let link = {};
 
   const captureMessage = async (msg) => {
     if (msg.eventType === EVENT_TYPE.STREAM && msg.eventSubtype === SUBTYPE.STREAM.ACTIVITY) lastBusy = msg.msg.busy;
@@ -583,21 +585,10 @@ export async function attachRelay({
       return [ATTENTION_CAPABILITY];
     } finally { clearTimeout(timer); }
   }
-  // This session is now attached to a phone. Publish that, so a RESUME_SESSION arriving at the
-  // station for this same CLI session can be answered with "it's already running" instead of
-  // forking a second `copilot --resume` onto it. Refreshed on every beat below so the station can
-  // distinguish a healthy attachment from a wedged writer that requires explicit force takeover.
-  const markAttached = () => {
-    try {
-      recordAttachedSession({ sessionId, channelId, cwd });
-    } catch {
-      // best-effort — losing the guard is never worth failing the session over.
-    }
-  };
-  if (channel) markAttached();
+  // Ownership of the saved session is published by the session's live record (sessionRegistry),
+  // not here; the relay only carries the phone link.
   const heartbeatTimer = setInterval(() => {
     void (async () => {
-      if (attached) markAttached();
       if (!channel || attention.level === "off") return;
       // Carry the store's latest turn_index so a connected phone keeps a fresh forward cursor
       // (readLatestTurnIndex is best-effort and returns null on any read failure), plus the
@@ -646,6 +637,7 @@ export async function attachRelay({
   wireSubscriptions.push(
     channel.onEvent(EVENT_TYPE.PROMPT, (msg) => {
       lastPeerContactAt = Date.now();
+      if (channel !== boundChannel || link.accept?.() === false) return;
       if (msg?.eventSubtype !== SUBTYPE.PROMPT.PROMPT || typeof msg.msg?.text !== "string") return;
       const body = msg.msg;
       // Voice Mode (#176): prepend a spoken-response directive so the agent replies for LISTENING.
@@ -691,6 +683,16 @@ export async function attachRelay({
   wireSubscriptions.push(
     channel.onEvent(EVENT_TYPE.CONTROL, (msg) => {
       lastPeerContactAt = Date.now();
+      if (channel !== boundChannel || link.accept?.() === false) return;
+      link.onActivity?.();
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.LINK_READY) {
+        link.onLinkReady?.(msg.msg ?? {});
+        return;
+      }
+      if (msg?.eventSubtype === SUBTYPE.CONTROL.UPDATE_REQUIRED) {
+        link.onUpdateRequired?.(msg.msg ?? {});
+        return;
+      }
       if (msg?.eventSubtype === SUBTYPE.CONTROL.WATCH_REQUEST) {
         void (async () => {
           const ack = attention.update(msg.msg);
@@ -784,6 +786,7 @@ export async function attachRelay({
   function detach() {
     lastPeerContactAt = null;
     phoneSeenPosition = null;
+    link = {};
     deliveryGeneration++;
     outbound.length = 0;
     delivering = false;
@@ -796,10 +799,15 @@ export async function attachRelay({
     attention.reset();
   }
 
-  async function rebind(next) {
+  /**
+   * Bind a freshly handshaken channel. Protocol v3: `channel_up` carries the link generation, and
+   * `link_ready` follows once every handler above is attached, so "ready" means end-to-end ready.
+   */
+  async function rebind(next, hooks = {}) {
     detach();
     channel = next;
     if (!channel || stopped) return;
+    link = hooks;
     const boundChannel = channel;
     const deliveryChannel = {
       onEvent: (...args) => boundChannel.onEvent(...args),
@@ -809,10 +817,22 @@ export async function attachRelay({
     elicitations.rebind?.(deliveryChannel);
     exitPlans.rebind?.(deliveryChannel);
     bindSubscriptions();
-    await sendSafe(channelUp(cwd, lastTitle, await readWorkspaceCapabilities()), boundChannel);
+    await sendSafe(channelUp(cwd, lastTitle, await readWorkspaceCapabilities(), hooks.linkGeneration ?? null), boundChannel);
     if (channel !== boundChannel || stopped) return;
-    attached = true;
-    markAttached();
+    if (Number.isSafeInteger(hooks.linkGeneration)) await sendLinkReady();
+  }
+
+  async function sendLinkReady() {
+    if (!channel || stopped || !Number.isSafeInteger(link.linkGeneration)) return;
+    await sendSafe(linkReady({
+      linkGeneration: link.linkGeneration,
+      controllerRevision: link.controllerRevision ?? 0,
+    }), channel, false);
+  }
+
+  async function sendControl(message) {
+    if (!channel || stopped) return;
+    await sendSafe(message, channel, false);
   }
 
   async function stop(reason = "extension_shutdown", { closeTransport = true } = {}) {
@@ -821,11 +841,6 @@ export async function attachRelay({
     deliveryGeneration++;
     outbound.length = 0;
     clearInterval(heartbeatTimer);
-    try {
-      clearAttachedSession(sessionId);
-    } catch {
-      // best-effort — a stale entry self-prunes on pid death anyway.
-    }
     for (const unsubscribe of unsubscribers.splice(0)) unsubscribe?.();
     await captureChain;
     for (const unsubscribe of wireSubscriptions.splice(0)) unsubscribe?.();
@@ -842,7 +857,7 @@ export async function attachRelay({
   }
 
   if (channel) await rebind(channel);
-  return { stop, detach, rebind, onPermissionRequest: approvals.onPermissionRequest,
+  return { stop, detach, rebind, sendLinkReady, sendControl, onPermissionRequest: approvals.onPermissionRequest,
     managementStatus: () => ({ watchLevel: attention.level, title: lastTitle, lastPeerContactAt, busy: lastBusy,
       connected: !channel ? false : lastPeerContactAt && Date.now() - lastPeerContactAt < 120_000 ? true : null }) };
 }

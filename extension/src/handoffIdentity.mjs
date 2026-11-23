@@ -4,8 +4,11 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { importKeyPair } from "@aasis21/weft-shared";
-import { launchIdentityPath } from "./launchOperations.mjs";
 
+/**
+ * Write the private identity a launched session reads through WEFT_IDENTITY_FILE. Station passes
+ * `file` (requests/<id>/identity.json); without one a throwaway temp file is used.
+ */
 export function writeIdentityFile(
   {
     channelId,
@@ -16,14 +19,12 @@ export function writeIdentityFile(
     operationId = null,
     operationOwnerToken = null,
   },
-  { baseDir } = {},
+  { file: suppliedFile = null } = {},
 ) {
   if (!channelId || !publicKeyB64 || !privateKeyJwk) {
     throw new Error("Weft spawn: channelId, publicKeyB64, and privateKeyJwk are required");
   }
-  const file = operationId
-    ? launchIdentityPath(operationId, { baseDir })
-    : join(tmpdir(), `weft-identity-${process.pid}-${randomUUID()}.json`);
+  const file = suppliedFile ?? join(tmpdir(), `weft-identity-${process.pid}-${randomUUID()}.json`);
   if (existsSync(file)) {
     const error = new Error(`Weft spawn: identity file already exists for operation ${operationId}`);
     error.code = "EEXIST";
@@ -40,7 +41,7 @@ export function writeIdentityFile(
         privateKeyJwk,
         ...(pairingToken ? { pairingToken } : {}),
         ...(pairingExpiresAt ? { pairingExpiresAt } : {}),
-        ...(operationId ? { operationId } : {}),
+        ...(operationId ? { operationId, requestId: operationId } : {}),
         ...(operationOwnerToken ? { operationOwnerToken } : {}),
       }),
       "utf8",
@@ -86,7 +87,10 @@ export async function readIdentityFile(file) {
       typeof parsed.controllerDeviceId === "string" ? parsed.controllerDeviceId : null,
     controllerName:
       typeof parsed.controllerName === "string" ? parsed.controllerName : null,
-    operationId: typeof parsed.operationId === "string" ? parsed.operationId : null,
+    operationId: typeof parsed.operationId === "string" ? parsed.operationId
+      : typeof parsed.requestId === "string" ? parsed.requestId : null,
+    requestId: typeof parsed.requestId === "string" ? parsed.requestId
+      : typeof parsed.operationId === "string" ? parsed.operationId : null,
     operationOwnerToken: typeof parsed.operationOwnerToken === "string" ? parsed.operationOwnerToken : null,
   };
 }

@@ -2,7 +2,7 @@
 //
 // Generic helper for small JSON "is this shared resource still alive" registry files under
 // ~/.weft (see projects.mjs's weftHome()). Used by devtunnel.mjs (shared relay/tunnel discovery)
-// and listener.mjs (live device-connection bookkeeping) — this file knows nothing about either;
+// and station.mjs (live device-connection bookkeeping) — this file knows nothing about either;
 // it just reads/writes JSON atomically and answers "is this pid still running", cross-platform.
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";

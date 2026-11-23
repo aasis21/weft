@@ -46,7 +46,15 @@ export {
   spawnResult,
   launchStatus,
   lifecycleStatus,
+  lifecycleStatusRequest,
+  takeoverConfirm,
+  lifecycleCancel,
   openSession,
+  linkReady,
+  sessionHealthRequest,
+  sessionHealthMsg,
+  endpointUpdate,
+  updateRequired,
   sessionListRequest,
   sessionList,
   resumeSession,
@@ -85,6 +93,17 @@ export function stamp<T extends EnvelopeBase>(envelope: T, fields: StampFields):
  */
 export function channelUp(channelId: string, sessionId?: string, cwd?: string, title?: string): ChannelUp {
   return stamp(realChannelUp(cwd, title), { channelId, sessionId });
+}
+
+/** A protocol v3 `channel_up` that opens link generation `linkGeneration` (gated on `link_ready`). */
+export function linkedChannelUp(
+  channelId: string,
+  sessionId: string,
+  linkGeneration: number,
+  cwd?: string,
+  title?: string,
+): ChannelUp {
+  return stamp(realChannelUp(cwd, title, undefined, linkGeneration), { channelId, sessionId });
 }
 
 /** Build a single backfill HistoryItem. */

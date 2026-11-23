@@ -117,6 +117,19 @@ securely. Connections to an older laptop retain the version-1 direct encrypted-m
 connections that complete the challenge use the replay-protected version-2 stream envelope.
 Older cached phone builds must be refreshed before scanning a version-2 QR.
 
+## Pairing links (`shared/pairingLink.mjs`)
+
+The QR text is a link, not raw JSON:
+`https://useweft.netlify.app/pair#v3.<base64url(payload JSON)>`. A phone camera opens it in
+the Android app (App Link, verified by `/.well-known/assetlinks.json`) or the web app. The
+payload is a bearer grant, so it lives only in the URL fragment, which browsers never send to
+a server; the web `/pair` route reads the fragment and immediately clears it with
+`history.replaceState`. In-app **Scan** and **Paste** accept the link or the raw payload JSON
+(`decodePairingInput`). A link version the phone doesn't know shows "This code needs a newer
+Weft". The laptop builds links from `WEFT_INSTALL_BASE` (default
+`https://useweft.netlify.app`), the same origin the installers use; **Copy pairing code** keeps
+copying the raw JSON so older phone builds can still paste it.
+
 A worked, runnable example lives in `shared/test/pairing.test.mjs`.
 
 ## Transport ordering note

@@ -5,7 +5,8 @@ import { SESSION_FILES_CAPABILITY } from '@aasis21/weft-shared';
 import type { WorkspaceCommand, WorkspaceData } from '@aasis21/weft-shared';
 import type { SessionView } from '@/session/view';
 import type { ListenerDeviceState } from '@/session/model';
-import { lifecycleFailureMessage, requiresTakeoverConfirmation, type SessionOpenIntent } from '@/session/access/sessionAccess';
+import { lifecycleFailureMessage, requiresTakeoverConfirmation } from '@/session/access/sessionAccess';
+import { RecoveryBar, recoveryReason, stationForSession, type RecoveryAction } from '@/ui/recovery/RecoveryBar';
 import { ChatThread } from '@/ui/thread/ChatThread';
 import { Composer } from '@/ui/composer/Composer';
 import { DebugPanel } from '@/ui/diagnostics/DebugPanel';
@@ -21,7 +22,6 @@ import { getStableDeviceId } from '@/lib/weftClient';
 import { isDesktopInput, useIsWideViewport } from '@/lib/platform';
 import { useBackHandler } from '@/ui/gestures/backNavigation';
 import { PullIndicator, useLeftEdgeSwipe, usePullToRefresh } from '@/ui/gestures/touchGestures';
-import { deviceLabel } from '@/ui/screens/deviceDisplay';
 
 const ExploreScreen = lazy(() =>
   import('@/ui/explore/ExploreScreen').then((module) => ({ default: module.ExploreScreen })),
@@ -252,8 +252,15 @@ interface SessionScreenProps {
   onReloadHistory?(channelId: string): void;
   onArchiveSession?(channelId: string): void;
   onReconnect(channelId: string): void;
-  onOpenSession?(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
-  onConfirmTakeover?(operationId: string): Promise<LifecycleStatusMsg>;
+  /** One Reconnect: retry the link, then ask Station to reopen the session (LLD §7.3). */
+  onRecover?(channelId: string): void;
+  /** ✕ on the recovery bar. */
+  onCancelRecovery?(channelId: string): void;
+  /** "Take over" on the recovery bar (bound to Station's challenge). */
+  onConfirmRecoveryTakeover?(channelId: string): void;
+  /** Pull-to-refresh: linked → recent turns, otherwise recover. */
+  onRefresh?(channelId: string): void;
+  onConfirmTakeover?(requestId: string): Promise<LifecycleStatusMsg>;
   sessionOperation?: LifecycleStatusMsg | null;
   /** Re-issue the spawn/resume behind a failed placeholder card. */
   onRetrySpawn?(channelId: string): void;
@@ -294,7 +301,10 @@ export function SessionScreen({
   onReloadHistory,
   onArchiveSession,
   onReconnect,
-  onOpenSession,
+  onRecover,
+  onCancelRecovery,
+  onConfirmRecoveryTakeover,
+  onRefresh,
   onConfirmTakeover,
   sessionOperation,
   onRetrySpawn,
@@ -305,13 +315,9 @@ export function SessionScreen({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  const [resumeBlocked, setResumeBlocked] = useState<LifecycleStatusMsg | null>(null);
-  const [resumeDeviceId, setResumeDeviceId] = useState('');
   useEffect(() => {
     setResuming(false);
     setResumeError(null);
-    setResumeBlocked(null);
-    setResumeDeviceId('');
   }, [activeId]);
   const [debugOpen, setDebugOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -414,74 +420,51 @@ export function SessionScreen({
   // dismiss, hang, then restore); the offline banner already explains the state (#90).
   const responsive = status === 'live';
   const cold = active.cold === true;
-  // Manual "Reconnect" must not be offered for warm-idle (socket still open, just missed a heartbeat):
-  // tapping it needlessly closes a live client and redoes the ECDH handshake, dropping in-flight output
-  // (#126). Offer it only for cold-idle (evicted, no socket), error, or ended.
-  const canReconnect = meta.kind === 'live' && (status === 'ended' || status === 'error' || (status === 'idle' && cold));
-  const knownResumeDevice = devices?.find((device) =>
-    !!meta.spawnedFromDeviceId && (device.deviceId === meta.spawnedFromDeviceId || device.channelId === meta.spawnedFromDeviceId),
-  ) ?? devices?.find((device) =>
-    device.sessions?.some((session) => session.sessionId === meta.sessionId) ||
-    device.offers?.some((offer) => offer.channelId === activeId),
-  );
-  const resumeDevice = knownResumeDevice ?? devices?.find((device) => device.channelId === resumeDeviceId);
-  const canResume = canReconnect && !!meta.sessionId && meta.sessionId !== 'unknown-session' && !!devices?.length && !!onOpenSession;
-  const takeoverStatus = sessionOperation && requiresTakeoverConfirmation(sessionOperation) ? sessionOperation : resumeBlocked;
-  const resumeFailure = resumeError ?? (takeoverStatus ? lifecycleFailureMessage(takeoverStatus.failure) : null);
-  const resumeOnLaptop = async (takeover = false): Promise<void> => {
-    if (resuming) return;
-    if (takeover ? !takeoverStatus || !onConfirmTakeover : !resumeDevice || !meta.sessionId || !onOpenSession) return;
+  // One recovery bar replaces the offline banner and its buttons (LLD §7.3): the row is derived from
+  // the session, its Station's reachability and any recover() run in flight.
+  const station = meta.kind === 'live' ? stationForSession(active, devices) : undefined;
+  const recovery = recoveryReason(active, { known: !!station, reachable: station?.connected === true });
+  const onRecoveryAction = (action: RecoveryAction): void => {
+    switch (action) {
+      case 'reconnect':
+      case 'try-again':
+      case 'resume':
+        if (onRecover) onRecover(activeId);
+        else onReconnect(activeId);
+        return;
+      case 'cancel':
+        onCancelRecovery?.(activeId);
+        return;
+      case 'take-over':
+        onConfirmRecoveryTakeover?.(activeId);
+        return;
+      case 'new-session':
+        if (onStartOnDevice && station) onStartOnDevice(station.channelId);
+        else onStartSession?.();
+        return;
+      case 'scan':
+        onAddSession();
+        return;
+      default:
+        return;
+    }
+  };
+  // A launch placeholder whose open request is waiting on a takeover confirmation (Start/Resume).
+  const takeoverStatus = sessionOperation && requiresTakeoverConfirmation(sessionOperation) ? sessionOperation : null;
+  const resumeFailure = resumeError ?? (takeoverStatus ? lifecycleFailureMessage(takeoverStatus) : null);
+  const confirmPlaceholderTakeover = async (): Promise<void> => {
+    if (resuming || !takeoverStatus || !onConfirmTakeover) return;
     setResuming(true);
     setResumeError(null);
     try {
-      let result: LifecycleStatusMsg;
-      if (takeover && takeoverStatus && onConfirmTakeover) {
-        result = await onConfirmTakeover(takeoverStatus.operationId);
-      } else if (resumeDevice && meta.sessionId && onOpenSession) {
-        result = await onOpenSession({
-          deviceChannelId: resumeDevice.channelId,
-          target: { kind: 'existing', storeAuthority: null, sessionId: meta.sessionId },
-          mode: resumeDevice.defaultPermissionMode ?? 'default',
-          title: meta.title,
-          cwd: meta.cwd,
-        });
-      } else {
-        return;
-      }
-      setResumeBlocked(requiresTakeoverConfirmation(result) ? result : null);
-      if (result.state === 'failed' || requiresTakeoverConfirmation(result)) {
-        setResumeError(lifecycleFailureMessage(result.failure));
-      }
+      const result = await onConfirmTakeover(takeoverStatus.requestId);
+      if (result.outcome !== null && result.outcome !== 'done') setResumeError(lifecycleFailureMessage(result));
     } catch (error) {
-      setResumeError(error instanceof Error ? error.message : 'Could not resume the session on the laptop.');
+      setResumeError(error instanceof Error ? error.message : 'Could not take over the session.');
     } finally {
       setResuming(false);
     }
   };
-  const recoveryActions = canReconnect ? (
-    <div className="session-recovery-actions">
-      <button type="button" className="reconnect-btn ghost" disabled={resuming} onClick={() => onReconnect(activeId)}>
-        ↻ Reconnect
-      </button>
-      {canResume && !knownResumeDevice ? (
-        <select
-          className="session-resume-device"
-          aria-label="Resume on device"
-          value={resumeDeviceId}
-          disabled={resuming}
-          onChange={(event) => setResumeDeviceId(event.currentTarget.value)}
-        >
-          <option value="">Choose laptop</option>
-          {devices?.map((device) => <option key={device.channelId} value={device.channelId}>{deviceLabel(device)}</option>)}
-        </select>
-      ) : null}
-      {canResume ? (
-        <button type="button" className="reconnect-btn" disabled={resuming || !resumeDevice} onClick={() => void resumeOnLaptop()}>
-          {resuming ? 'Resuming…' : 'Resume on laptop'}
-        </button>
-      ) : null}
-    </div>
-  ) : null;
   const offline = status === 'initializing' || status === 'connecting' || status === 'idle';
   const spawnLabel = (() => {
     const spawn = active.spawning;
@@ -727,7 +710,9 @@ export function SessionScreen({
   useLeftEdgeSwipe(!isDesktopWide && !exploreOpen && !conflictingOverlayOpen, () => setDrawerOpen(true));
   const threadScrollRef = useRef<HTMLElement>(null);
   const pull = usePullToRefresh(threadScrollRef, () => {
-    if (status === 'live') onReloadHistory?.(activeId);
+    // Linked → fetch recent turns; anything else runs the one Reconnect (LLD §7.3).
+    if (onRefresh) onRefresh(activeId);
+    else if (status === 'live') onReloadHistory?.(activeId);
     else onReconnect(activeId);
   }, !isDesktopWide && meta.kind !== 'demo');
 
@@ -913,7 +898,6 @@ export function SessionScreen({
         {...(onArchiveSession ? { onArchive: () => onArchiveSession(activeId) } : {})}
         onRename={(newTitle) => onRenameSession(activeId, newTitle)}
         {...(onPinSession ? { onPin: (nextPinned: boolean) => onPinSession(activeId, nextPinned) } : {})}
-        {...(onReloadHistory ? { onReloadHistory: () => onReloadHistory(activeId) } : {})}
         pinned={active.pinned ?? false}
         isDemo={meta.kind === 'demo'}
         onRemove={() => requestRemove(activeId)}
@@ -991,17 +975,10 @@ export function SessionScreen({
       </main>
 
       <div className="composer-dock" ref={composerDockRef}>
-        {ended ? (
-          <div className="ended-banner">
-            <span>Session ended{timeline.endedReason ? ` · ${timeline.endedReason}` : ''}.</span>
-            {recoveryActions}
-          </div>
-        ) : null}
-
-        {(active.error || canReconnect) && !ended ? (
-          <div className="ended-banner" {...(active.error ? { role: 'alert' as const } : {})}>
-            <span>{active.error ?? 'Session offline — reconnect to pick it back up.'}</span>
-            {canReconnect ? recoveryActions : meta.kind === 'spawning' ? (
+        {active.error && meta.kind !== 'live' ? (
+          <div className="ended-banner" role="alert">
+            <span>{active.error}</span>
+            {meta.kind === 'spawning' ? (
               <>
                 {onRetrySpawn ? (
                   <button type="button" className="reconnect-btn" onClick={() => onRetrySpawn(activeId)}>
@@ -1020,7 +997,7 @@ export function SessionScreen({
           <div className="ended-banner" role="alert">
             <span>{resumeFailure}</span>
             {takeoverStatus && onConfirmTakeover ? (
-              <button type="button" className="reconnect-btn" disabled={resuming} onClick={() => void resumeOnLaptop(true)}>
+              <button type="button" className="reconnect-btn" disabled={resuming} onClick={() => void confirmPlaceholderTakeover()}>
                 Close it and open here
               </button>
             ) : null}
@@ -1172,6 +1149,17 @@ export function SessionScreen({
           </div>
         ) : null}
 
+        {recovery ? (
+          <RecoveryBar
+            reason={recovery}
+            deviceName={active.recovery?.deviceName ?? station?.name}
+            lastSeenAt={active.lastHeartbeatAt ?? active.lastEventAt ?? null}
+            doneVia={active.recovery?.doneVia}
+            canResume={!!station}
+            onAction={onRecoveryAction}
+          />
+        ) : null}
+
         <Composer
           sessionId={activeId}
           disabled={ended || offline}
@@ -1313,9 +1301,9 @@ export function SessionScreen({
             <span className="approval-warn" aria-hidden="true">⚠</span>
             <div className="approval-body">
               <h2 id="leave-session-title" className="approval-tool" style={{ margin: 0 }}>
-                Leave this session?
+                Remove from this phone?
               </h2>
-              <span className="approval-hint">This also clears its saved history on this phone.</span>
+              <span className="approval-hint">The session keeps running on the laptop.</span>
             </div>
           </div>
           <div className="approval-actions">
@@ -1328,7 +1316,7 @@ export function SessionScreen({
               onClick={confirmRemove}
               style={{ width: 'auto' }}
             >
-              Leave
+              Remove
             </button>
           </div>
         </div>

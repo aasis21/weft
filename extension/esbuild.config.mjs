@@ -7,7 +7,7 @@ import { stageNativeRuntime } from "../scripts/native-runtime.mjs";
 import { RELEASE_BUNDLES } from "../scripts/release-layout.mjs";
 
 const outfile = "dist/extension.mjs";
-const activeRuntimeOutfile = "dist/activeRuntime.mjs";
+const sessionLinkOutfile = "dist/sessionLink.mjs";
 
 // Bake the repo-root VERSION into every bundle so the installed extension/CLI report the right
 // version with zero runtime file reads (see src/version.mjs). `define` replaces the bare
@@ -31,7 +31,7 @@ await build({
     "@github/copilot-sdk",
     "@github/copilot-sdk/extension",
     "node-pty",
-    "./activeRuntime.mjs",
+    "./sessionLink.mjs",
     "./pairingCanvas.mjs",
   ],
   // Bundled CommonJS deps (qrcode, supabase transitive deps) call require("fs").
@@ -45,8 +45,8 @@ await build({
 });
 
 await build({
-  entryPoints: ["src/activeRuntime.mjs"],
-  outfile: activeRuntimeOutfile,
+  entryPoints: ["src/sessionLink.mjs"],
+  outfile: sessionLinkOutfile,
   bundle: true,
   platform: "node",
   target: "node20",
@@ -68,7 +68,7 @@ await build({
 // bundle:true/platform/format so they have zero dependency on files outside dist/ once installed.
 //
 const siblingEntrypoints = RELEASE_BUNDLES.filter(({ name }) =>
-  !["extension.mjs", "activeRuntime.mjs", "weft.mjs"].includes(name));
+  !["extension.mjs", "sessionLink.mjs", "weft.mjs"].includes(name));
 for (const { name, entryPoint } of siblingEntrypoints) {
   await build({
     entryPoints: [entryPoint],
@@ -137,5 +137,5 @@ try {
     process.exit(1);
   }
 }
-await import(pathToFileURL(activeRuntimeOutfile).href);
-console.log("[verify] active runtime bundle loads without activating");
+await import(pathToFileURL(sessionLinkOutfile).href);
+console.log("[verify] session link bundle loads without activating");

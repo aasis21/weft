@@ -3,7 +3,7 @@
 // A STABLE, NON-SECRET device id for the `weft` listener, persisted at ~/.weft/device-id.
 //
 // Deliberately separate from pairing crypto: persistent mode reuses a pairing identity while
-// ephemeral mode mints a fresh keypair + channelId every run (see listener.mjs). This id carries
+// ephemeral mode mints a fresh keypair + channelId every run (see station.mjs). This id carries
 // no cryptographic weight; it is an opaque random tag so the phone can recognize "this is the
 // same laptop I paired with before" across restarts and dedupe its device list. Safe to read,
 // log, or leak — it derives no secret and cannot be used to decrypt or impersonate anything.

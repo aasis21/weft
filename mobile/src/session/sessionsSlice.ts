@@ -10,13 +10,16 @@ import type {
   ListenerDeviceState,
   NoticeItem,
   ChannelHistoryEntry,
+  RecoveryState,
   Session,
+  SessionHealthSnapshot,
   SessionMeta,
   SessionStatus,
   UserItem,
 } from './model';
 import { sessionListScopeKey } from './model';
 import type { DeviceHealthCache } from '@/lib/devices';
+import type { TransportDescriptor } from '@aasis21/weft-shared';
 import {
   applyEnvelope,
   orderCaughtUpEnvelope,
@@ -29,6 +32,8 @@ import {
   restoreApproval,
   restoreElicitation,
   setUserFailed,
+  settleStaleTools,
+  linkBlocksLive,
 } from './reducers/applyEnvelope';
 
 const DEVICE_EVENT_LOG_CAP = 100;
@@ -167,6 +172,8 @@ function mergeSessions(keep: Session, drop: Session, channelId: string): void {
   keep.connection.model = drop.connection.model ?? keep.connection.model;
   keep.connection.ended = keep.connection.ended && drop.connection.ended;
   keep.connection.endedReason = keep.connection.endedReason ?? drop.connection.endedReason;
+  // A recovery that reopened the session in a new terminal finishes on the new channel.
+  if (!keep.connection.recovery && drop.connection.recovery) keep.connection.recovery = drop.connection.recovery;
   // Only carry an error forward if the merged session actually lands in a failed/ended state. A live
   // (or connecting/idle) keeper must never inherit the dead channel's stale "couldn't reach" error —
   // that produced a green "Live" header sitting above an offline banner (#185).
@@ -616,8 +623,10 @@ const sessionsSlice = createSlice({
       if (!session) return;
       session.connection.compact = true;
       session.connection.busy = action.payload.busy;
-      session.connection.status = 'live';
-      session.connection.error = undefined;
+      if (!linkBlocksLive(session)) {
+        session.connection.status = 'live';
+        session.connection.error = undefined;
+      }
       session.connection.lastHeartbeat = action.payload.ts;
       session.connection.pendingApprovals = action.payload.pendingApprovals;
       session.connection.pendingForms = action.payload.pendingForms;
@@ -774,6 +783,39 @@ const sessionsSlice = createSlice({
       const session = state.entities[action.payload.id];
       if (session) mergeHistoryPage(session, action.payload.page);
     },
+    /** A new socket starts a new handshake: the link is not ready until the laptop's next `link_ready`. */
+    linkReset(state, action: PayloadAction<{ id: string }>) {
+      const link = state.entities[action.payload.id]?.connection.link;
+      if (link) link.ready = false;
+    },
+    sessionHealthSet(state, action: PayloadAction<{ sessionId: string; health: SessionHealthSnapshot }>) {
+      for (const id of state.ids) {
+        const session = state.entities[id];
+        if (session?.meta.sessionId === action.payload.sessionId && session.meta.kind === 'live') {
+          session.connection.health = action.payload.health;
+        }
+      }
+    },
+    recoverySet(state, action: PayloadAction<{ id: string; recovery: RecoveryState | null }>) {
+      const session = state.entities[action.payload.id];
+      if (!session) return;
+      if (action.payload.recovery) session.connection.recovery = action.payload.recovery;
+      else delete session.connection.recovery;
+    },
+    staleToolsSettled(state, action: PayloadAction<{ id: string; ts: number }>) {
+      const session = state.entities[action.payload.id];
+      if (session) settleStaleTools(session, action.payload.ts);
+    },
+    deviceUpdateRequiredSet(state, action: PayloadAction<{ channelId: string; side: 'laptop' | 'phone' | null }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (!device) return;
+      if (action.payload.side) device.updateRequired = action.payload.side;
+      else delete device.updateRequired;
+    },
+    deviceTransportSet(state, action: PayloadAction<{ channelId: string; transport: TransportDescriptor }>) {
+      const device = state.devices.find((d) => d.channelId === action.payload.channelId);
+      if (device) device.transport = action.payload.transport;
+    },
   },
 });
 
@@ -845,6 +887,12 @@ export const {
   spawnSlowSet,
   spawnStateSet,
   historyPageMerged,
+  linkReset,
+  sessionHealthSet,
+  recoverySet,
+  staleToolsSettled,
+  deviceUpdateRequiredSet,
+  deviceTransportSet,
 } = sessionsSlice.actions;
 
 export const sessionsSelectors = sessionsAdapter.getSelectors();

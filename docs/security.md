@@ -18,20 +18,35 @@ Confidentiality and integrity live on the paired endpoints.
 
 ## Dormant activation and local control
 
-A dormant extension publishes one bounded presence record and listens on one
-user-local lifecycle endpoint. It performs no transport lookup, remote network access,
-pairing cryptography, QR generation, logging, diagnostics, polling, heartbeat,
-retry timer, or other timer.
+A dormant extension publishes one bounded live record
+(`~/.weft/sessions-live/<runtimeId>.json`) and listens on one user-local control pipe. It
+performs no transport lookup, remote network access, pairing cryptography, QR generation,
+logging, diagnostics, polling, heartbeat, retry timer, or other timer.
 
-The filesystem record supports discovery and crash recovery. A separate capability
-file and the Windows named pipe or Unix-domain socket authorize live probe, activate,
-status, controller-replacement, and quiesce commands. Requests must prove the private
-capability plus the session, runtime, and generation identities; Station closes each
-temporary connection after the command.
+**Ownership.** Each file has exactly one writer: a session writes only its own live record and
+capability file; Station writes only open requests (`~/.weft/requests/`) and keeps its
+observations in memory. Station never rewrites a session's record. It deletes a record only after
+proving the owning process is gone (pid and operating-system start time); a record whose process
+cannot be verified is kept and its saved session is treated as `owner-unknown`, so Weft never
+launches a second writer next to a process it cannot rule out. Records and stores left by Weft
+versions before 0.2.75 are deleted only when their processes are dead; while an old-version process
+lives, its saved session stays `owner-unknown`.
+
+The record supports discovery and crash recovery. A separate 0600 capability file and the Windows
+named pipe or Unix-domain socket authorize the live `probe`, `activate`, `resetLink`,
+`replaceController`, `quiesce`, `traffic` and `reloadExtension` commands. Each request must carry
+the private capability plus the session, runtime and generation identities in its first frame;
+Station closes each temporary connection after the command. `resetLink` is fenced by the expected
+link generation and `replaceController` by the expected controller revision, so a stale command
+cannot act on a newer link or phone.
 
 After pairing, prompts, events, approvals, streaming, and terminal traffic bypass
-Station and the lifecycle endpoint and travel directly between the phone and active
+Station and the control pipe and travel directly between the phone and active
 session over the encrypted relay.
+
+**Retention.** Finished open requests, including the private identity file of a session Station
+launched, are deleted three days after they finish unless a live session record still references
+the request. Unfinished requests are never pruned; they are reconciled when Station starts.
 
 ## Cryptography
 
@@ -80,7 +95,7 @@ channel identifiers, timing, and traffic sizes) remain visible.
 | Message tampering / replay | GCM authentication plus encrypted stream ids and monotonic sequence numbers reject modified, duplicate, stale-stream, and non-monotonic envelopes | a relay can still delay or drop traffic |
 | **QR shoulder-surf / screenshot** | QR bearer grant expires after 10 minutes and is invalid after its first successful claim | someone who copies a fresh QR can still race the intended phone during that window |
 | **Pairing race / impersonation** | the grant is proved inside ECDH-encrypted data and atomically binds to the first valid phone key; every connection requires a fresh laptop challenge and encrypted private-key proof | first valid claimant wins, so protect the QR until pairing completes |
-| **Stale local presence or PID reuse** | Station verifies session/runtime generation, PID, operating-system process start time, endpoint proof, and the private capability before lifecycle actions | uncertain ownership fails closed and may require closing the stale terminal manually |
+| **Stale live record or PID reuse** | Station verifies PID and operating-system process start time for every live record, authenticates each command with the private capability plus session, runtime and generation identities, and fences repairs and takeovers by link generation and controller revision | uncertain ownership fails closed (`owner-unknown`) and may require closing the stale terminal manually |
 | **Controller takeover** | a different phone receives a challenge and requires explicit confirmation; a responsive runtime immediately revokes the prior controller and rotates pairing without restarting Copilot | the previous phone is disconnected immediately after confirmation |
 | Approval prompt hangs the agent | prompt remains pending until the user responds or the relay/session stops | an unattended prompt can block the session indefinitely |
 | Lost/stolen phone | `/weft` keys die with the session; Device Station identities can be invalidated with `weft rotate-pairing` | a phone paired to a persistent Device Station can reconnect until its identity is rotated |
@@ -127,7 +142,7 @@ rather than silently bypassing an opt-out.
 | Location | Stored data |
 |---|---|
 | Phone / installed PWA | Session metadata, cached transcripts and diagnostic event logs, preferences, device records, and local pairing private keys. Diagnostic payloads can include device health snapshots. Clipboard contents and Keep Awake operation state are runtime-only and are not persisted. Pairing storage uses Capacitor Preferences on native and browser storage in the PWA. |
-| Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, persistent Device Station pairing identity, runtime presence/capabilities, lifecycle operations, and recovery identity references under `~/.weft/`. A per-session `/weft` identity is ephemeral. Completed operations and unclaimed recovery identities expire after three days unless a live runtime or unresolved operation still references them. |
+| Laptop | Installed code under `~/.copilot/extensions/weft/`; configuration, registered projects, logs, persistent Device Station pairing identity, live session records and their capabilities (`sessions-live/`), and open requests with the private identity of each session Station launched (`requests/`) under `~/.weft/`. A per-session `/weft` identity is ephemeral. A live record is removed by its session on exit, or by Station once the process is proven gone. Finished open requests expire three days after they finish unless a live session record still references them. |
 | Relay infrastructure | No session content, transcripts, or key escrow. It handles encrypted envelopes in transit. The infrastructure provider may retain ordinary operational metadata or logs such as IP addresses, timestamps, and channel identifiers. |
 
 Removing a session from the phone deletes its locally cached transcript. Rotating a

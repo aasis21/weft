@@ -9,7 +9,8 @@ import { createHash } from "node:crypto";
 import { stdin as input, stdout as output } from "node:process";
 import readline from "node:readline/promises";
 import QRCode from "qrcode";
-import { createListener } from "../src/listener.mjs";
+import { pairingQrText } from "../src/pairingLink.mjs";
+import { createStation } from "../src/station.mjs";
 import { resolveTransportDescriptor } from "../src/transportFactory.mjs";
 import {
   clearTransportConfig,
@@ -53,6 +54,7 @@ import { RELEASE_BUNDLE_NAMES, RELEASE_SKILL_NAME, validateInstallDescriptor } f
 import { createManagement } from "../src/management.mjs";
 import { openControlCenter, inspectControlCenter, stopControlCenter, createControlCenterHost } from "../src/controlCenter.mjs";
 import { installControlCenterShortcut } from "../src/controlCenterShortcut.mjs";
+import { decideStationAction, expectedStationIdentity, stationSummaryLines, cleanupNodePtyBackups } from "../src/ensureStation.mjs";
 
 const [, , command = "ui", ...args] = process.argv;
 const management = createManagement({ cliPath: fileURLToPath(import.meta.url) });
@@ -316,19 +318,49 @@ async function prepareBackgroundRelay() {
 
 async function startCommand(options) {
   if (!["win32", "darwin"].includes(process.platform) || options.foreground) return start(options);
+  // `weft update` runs the newly installed CLI's start to restart a Station running older code.
+  const reason = process.env.WEFT_START_REASON === "update" ? "update" : "start";
   resolveTransportDescriptor();
-  await ensureAtLeastOneProject();
+  if (reason !== "update") await ensureAtLeastOneProject();
   if (options.newDevice) {
     await management.execute("pairing.replace", { confirmed: true });
   }
-  const status = await management.execute("station.start", {}, { interactive: true });
-  console.log(`Weft Device Station is running in the background on ${status.deviceName}.`);
+  const printed = new Set();
+  const onProgress = (event) => {
+    if (!event?.step || printed.has(event.label)) return;
+    printed.add(event.label);
+    console.log(c.dim(event.label));
+  };
+  const run = (replaceForeground) => management.execute("station.start",
+    { reason, ...(replaceForeground ? { replaceForeground: true } : {}) },
+    { interactive: true, trustedCli: true, onProgress });
+  let status;
+  try {
+    status = await run(false);
+  } catch (error) {
+    if (error?.code !== "foreground-owned" || !process.stdin.isTTY || !process.stdout.isTTY) throw error;
+    const rl = readline.createInterface({ input, output });
+    const answer = (await rl.question(`Station is running in a terminal (PID ${error.pid}). Stop it and run Station in the background instead? [y/N] `)).trim().toLowerCase();
+    rl.close();
+    if (answer !== "y" && answer !== "yes") {
+      console.log("Left the terminal Station running. Nothing was changed.");
+      return;
+    }
+    status = await run(true);
+  }
+  printStationSummary(status);
   if (!status.paired) {
     const pairing = await backgroundCommand("station");
     console.log(await renderPairingQr(pairing.pairingPayload));
   }
-  else console.log("Your paired phone reconnects automatically; no new scan is needed.");
-  console.log("You can close this terminal. Use `weft status` or `weft stop` to manage Station.");
+  else if (status.outcome !== "already-running") console.log("Your paired phone reconnects automatically; no new scan is needed.");
+  console.log(c.dim("You can close this terminal."));
+}
+
+function printStationSummary(summary) {
+  const [headline, ...details] = stationSummaryLines(summary);
+  console.log(headline.startsWith("✓") ? c.green(headline) : c.bold(headline));
+  for (const line of details) console.log(line);
 }
 
 function readFileSyncSafe(path) {
@@ -352,7 +384,20 @@ async function stationStatus() {
     }
     const unexpectedStop = task ? readUnexpectedTaskExit(role, task, { baseDir: options.baseDir }) : null;
     const problem = describeWorkerProblem(role, { crash, unexpectedStop });
-    if (workerStatus) {
+    if (workerStatus && role === "station") {
+      const looping = crash?.repeated && workerStatus.state !== "ready";
+      if (looping) console.log("Station: crashing repeatedly.");
+      else printStationSummary({
+        outcome: "status", ...workerStatus, paired: workerStatus.paired === true,
+        network: ["ready", "endpoint-refresh-needed"].includes(workerStatus.state) ? "ready" : "connecting",
+      });
+      const decision = decideStationAction({ ...workerStatus, state: looping ? "crash-looping" : workerStatus.state, expected: expectedStationIdentity(options.cliPath) });
+      if (decision.action === "replace") {
+        console.log(c.yellow(decision.reason === "update"
+          ? `  Station runs ${decision.from}; ${decision.to} is installed. Run \`weft start\` to restart it on the installed version.`
+          : "  Station runs from a different installation. Run `weft start` to restart it from this one."));
+      }
+    } else if (workerStatus) {
       const state = crash?.repeated && workerStatus.state !== "ready" ? "crashing repeatedly" : workerStatus.state;
       console.log(`${label}: ${state}${workerStatus.deviceName ? ` (${workerStatus.deviceName})` : ""}${workerStatus.error ? ` - ${workerStatus.error}` : ""}`);
     } else if (crash?.repeated) {
@@ -724,7 +769,7 @@ async function start({ newDevice = false, background = false, onReady = null, on
   }
 
   const status = createStatusLine();
-  const listener = createListener({
+  const listener = createStation({
     allowTerminal,
     onProgress,
     onDeviceConnected: (peer) => {
@@ -762,17 +807,20 @@ async function start({ newDevice = false, background = false, onReady = null, on
       status.log(`${c.cyan("→")} Session adopted by phone ${c.dim(`(${String(channelId).slice(0, 8)})`)}`);
       appendStationLog("session.claimed", { channel: String(channelId).slice(0, 8) });
     },
-    onSpawnRequest: ({ projectName, mode, name }) => {
-      status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${projectName || "default project"} ${c.dim(`[${mode}]`)}`);
-      appendStationLog("spawn.request", { name: name || "(unnamed)", project: projectName || "default", mode });
+    onOpenRequest: ({ projectName, sessionId, mode, name }) => {
+      const target = sessionId ? `session ${String(sessionId).slice(0, 8)}` : projectName || "default project";
+      status.log(`${c.cyan("→")} Session request: ${c.bold(name || "(unnamed)")} on ${target} ${c.dim(`[${mode}]`)}`);
+      appendStationLog("open.request", { name: name || "(unnamed)", project: projectName || null, session: sessionId ? String(sessionId).slice(0, 8) : null, mode });
     },
-    onSpawnResult: ({ ok, error, name, projectName }) => {
+    onOpenStatus: ({ requestId, outcome, reason, result }) => {
+      if (!outcome) return;
+      const ok = outcome === "done";
       status.log(
         ok
-          ? `${c.green("✓")} Session started: ${c.bold(name)} ${c.dim(`(${projectName})`)}`
-          : `${c.red("✗")} Session failed${projectName ? ` (${projectName})` : ""}: ${error}`,
+          ? `${c.green("✓")} Session ready ${c.dim(`(${result?.action ?? "open"})`)}`
+          : `${c.red("✗")} Session request ${outcome}${reason ? ` (${reason})` : ""}${result?.message ? `: ${result.message}` : ""}`,
       );
-      appendStationLog("spawn.result", { ok, name, project: projectName, error }, { level: ok ? "info" : "warn" });
+      appendStationLog("open.result", { request: String(requestId).slice(0, 12), outcome, reason }, { level: ok ? "info" : "warn" });
     },
   });
 
@@ -1103,7 +1151,7 @@ async function repairOnNewUrl({ log, listener, onWaiting, baseUrl }) {
 /** Terminal-renderable QR for a pairing payload — shared by the station banner and the mid-run
  * re-pair path so a recovery QR is visually identical to the original one. */
 async function renderPairingQr(payload) {
-  const qr = await QRCode.toString(JSON.stringify(payload), { type: "terminal", small: true });
+  const qr = await QRCode.toString(pairingQrText(payload), { type: "terminal", small: true });
   return qr.replace(/\n+$/, "");
 }
 
@@ -1704,6 +1752,26 @@ async function update(cmdArgs = []) {
   await placeRelease();
   ensureWindowsShim(extensionInstallDir());
   console.log(`\n${c.green(`Updated to Weft ${manifest.version}.`)} ${c.dim("Your ~/.weft config was left untouched.")}`);
+  if (["win32", "darwin"].includes(process.platform)) {
+    let worker = null;
+    try { worker = await backgroundCommand("station"); }
+    catch { /* An unreadable control record is reported by weft status; never block the update. */ }
+    if (worker && worker.version !== manifest.version) {
+      // The new code is on disk; let the newly installed CLI run ensureStationRunning.
+      console.log(`\nStation is running ${worker.version ?? "an older version"}; restarting it on ${manifest.version}. Pairing is kept.`);
+      const restarted = spawnSync(process.execPath, [join(extensionInstallDir(), "weft.mjs"), "start"], {
+        stdio: "inherit", env: { ...process.env, WEFT_START_REASON: "update" },
+      });
+      if (restarted.status !== 0) console.log(c.yellow("Station was not restarted. Run `weft start` to restart it on the new version."));
+    }
+  }
+  const cleanup = cleanupNodePtyBackups(extensionInstallDir());
+  if (cleanup.removed.length) console.log(c.dim(`Removed ${cleanup.removed.length} leftover node-pty backup folder(s).`));
+  if (cleanup.remaining.length) {
+    console.log(c.yellow(`${cleanup.remaining.length} leftover node-pty backup folder(s) are still in use and were kept: ${cleanup.remaining.map((item) => item.name).join(", ")}.`));
+    console.log(c.dim("Restart or reload open Copilot sessions; the next `weft update` removes them."));
+  }
+  console.log(c.dim("Restart or reload Copilot (CLI or app) to load the new extension in open sessions."));
 }
 
 // `weft clean-install`: nuke BOTH the code dir (~/.copilot/extensions/weft) and ALL user data

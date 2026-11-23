@@ -49,7 +49,7 @@ npm test -w @aasis21/weft-shared
 node extension/harness/harness.mjs --auto
 
 # 3. Bundle the extension (esbuild; @github/copilot-sdk left external)
-npm run build -w @aasis21/weft-extension   # -> dormant extension.mjs + lazy activeRuntime.mjs
+npm run build -w @aasis21/weft-extension   # -> dormant extension.mjs + lazy sessionLink.mjs
 
 # 4. Build the mobile app (Vite production build)
 npm run build -w @aasis21/weft-mobile
@@ -101,7 +101,7 @@ The source installer writes code into your personal Copilot extensions directory
 Review it before running it in a managed environment.
 
 **1. Install the extension** (builds + copies the dormant `extension.mjs` bootstrap, lazy
-`activeRuntime.mjs`, and on-demand `pairingCanvas.mjs` into
+`sessionLink.mjs`, and on-demand `pairingCanvas.mjs` into
 `~/.copilot/extensions/weft/`, discovered by CLI and local app sessions — that directory holds
 installed **code only**):
 
@@ -154,6 +154,8 @@ Weft uses its in-app camera if the Google Barcode Scanner module is unavailable.
 For an emulator or an unavailable camera, choose **Paste code** instead.
 Copy the code from the laptop's **Pairing** tab in Weft Control Center, paste it
 into the app, and choose **Pair**. Don't share the code in logs or chat.
+On a phone with this APK installed, the laptop QR also opens it from the camera app; debug
+builds are not signed with the release key, so Android may open the browser instead.
 This APK is for local testing, not a signed production release.
 
 **3. Pair and drive it.** Run `weft start`. On Windows and macOS you can close its
@@ -161,20 +163,27 @@ terminal once startup succeeds; Station continues in a manually started per-user
 background workload. Use `weft status` and `weft stop` to manage it. For
 terminal-owned operation, use `weft start --foreground`; other platforms retain
 foreground mode.
-Open <https://useweft.netlify.app> on the phone, choose **Scan QR to pair**, then
-**Scan laptop QR**, and scan the code. The phone can then start or resume Copilot sessions in registered projects.
+Point the phone camera at the QR: it is a `https://useweft.netlify.app/pair#…` link that
+opens the Weft Android app (verified App Link) or <https://useweft.netlify.app> and pairs
+straight away. You can also open the app, choose **Scan QR to pair**, then
+**Scan laptop QR**, and scan the code; **Paste code** accepts the copied code or the link.
+The phone can then start or resume Copilot sessions in registered projects.
 For a source-built phone UI, use your HTTPS development deployment instead.
 
 Device Station must remain running for phone-driven project/session discovery, Start,
 Open/Resume, and activation of dormant sessions. If the selected Copilot session is
-already open, Station uses its user-local lifecycle endpoint to activate that exact
-session runtime, including a local Copilot app session; it does not launch a second `copilot --resume`.
+already open, Station activates (or repairs) that exact running session through its
+user-local control pipe, including a local Copilot app session; it never launches a second
+`copilot --resume` next to a session it cannot prove has stopped.
 
-If a laptop session has closed, its phone chat offers **Resume on laptop** through a
-paired Station. Choose the laptop first if the chat's source device is unknown.
-This reopens the same saved conversation, reconnecting to
-an existing runtime first when possible. **Reconnect** only retries the old connection.
-Station must be running; a takeover still requires confirmation. The **Continue**
+If a laptop session goes offline, its phone chat shows one recovery bar above the composer
+with a single **Reconnect**: the phone first retries its own link for a few seconds, then
+asks the paired Station to reopen the same saved conversation (repairing the running
+session in place when it can, resuming it in a new terminal only when its terminal is
+gone), and streams each step into the bar. Pull down on the conversation to do the same;
+a linked session just refreshes its recent turns. Without a reachable Station the bar says
+how to get back (run `/weft` in the session's terminal and scan). Taking over a session
+another phone controls still requires confirmation. The **Continue**
 list can sort newest-first by **Latest activity** or **Created**. Creation sorting
 requires an updated Station to supply creation dates and sort before the result limit.
 
@@ -182,7 +191,7 @@ To pair only the current session, `/weft` shows a terminal QR in CLI or a canvas
 the local Copilot app. You can also ask Copilot to open Weft pairing. Station is not required.
 After either path pairs, active prompts, events, approvals, streaming, and terminal data
 flow directly between the phone and session over the encrypted relay, bypassing Station
-and the local lifecycle endpoint.
+and the local control pipe.
 
 Keep the same browser identity when testing reconnection. If its storage has been
 cleared, stop the station and follow

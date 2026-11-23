@@ -36,7 +36,6 @@ export interface PendingOperation {
   storeAuthority?: string | null;
   cwd?: string;
   title?: string;
-  force?: boolean;
   createdAt: number;
   stage: PendingOperationStage;
   pairingPayload?: PairingPayload;

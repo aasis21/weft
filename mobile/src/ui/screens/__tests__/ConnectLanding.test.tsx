@@ -157,6 +157,29 @@ describe('ConnectScreen', () => {
     expect(screen.getByRole('button', { name: 'Scan laptop QR' })).toBeInTheDocument();
   });
 
+  it('pairs an opened pairing link immediately with the progress UI', async () => {
+    let finish!: () => void;
+    const onPair = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const onAutoPairStarted = vi.fn();
+    const link = 'https://useweft.netlify.app/pair#v3.e30';
+    render(
+      <ConnectScreen
+        hasSessions={false}
+        error={null}
+        onError={vi.fn()}
+        onPair={onPair}
+        autoPairCode={link}
+        onAutoPairStarted={onAutoPairStarted}
+      />,
+    );
+
+    expect(await screen.findByRole('status', { name: 'Pairing progress' })).toHaveTextContent('Connecting to your laptop…');
+    expect(onPair).toHaveBeenCalledTimes(1);
+    expect(onPair).toHaveBeenCalledWith(link);
+    expect(onAutoPairStarted).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+  });
+
   it('shows pairing progress, then Try again re-opens the method that failed', async () => {
     const user = userEvent.setup();
     let fail!: (error: Error) => void;

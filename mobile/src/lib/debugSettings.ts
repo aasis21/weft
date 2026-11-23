@@ -16,6 +16,15 @@ export async function isDebugModeEnabled(): Promise<boolean> {
   return globalThis.localStorage?.getItem(DEBUG_KEY) === '1';
 }
 
+/** Synchronous first guess from the localStorage mirror, for a render before the async read lands. */
+export function debugModeMirror(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(DEBUG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export async function setDebugModeEnabled(enabled: boolean): Promise<void> {
   const value = enabled ? '1' : '0';
   try {

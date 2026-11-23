@@ -2,6 +2,15 @@
 
 import type { HistoryItem } from "./history";
 import type { PairingPayload } from "./pairing";
+import type { SessionHealthLabel, SessionHealthObserver, SessionHealthReason } from "./sessionHealth";
+import type { TransportDescriptor } from "./transport";
+
+/**
+ * Application protocol version (v3). Carried by `channel_up` and `update_required`; distinct from
+ * the pairing handshake's PAIR_VERSION (still 2). No adapters: any other version gets
+ * `update_required`.
+ */
+export const PROTOCOL_VERSION: 3;
 
 /** Top-level event type — also the transport topic the message travels on. */
 export type EventType =
@@ -75,6 +84,8 @@ export const SUBTYPE: {
     readonly CATCH_UP_REQUEST: "catch_up_request";
     readonly CATCH_UP_PAGE: "catch_up_page";
     readonly CHANNEL_UP: "channel_up";
+    /** v3, both directions on the session link: end-to-end ready after handlers attach. */
+    readonly LINK_READY: "link_ready";
     readonly WORKSPACE_REQUEST: "workspace_request";
     readonly WORKSPACE_RESULT: "workspace_result";
     readonly SESSION_META: "session_meta";
@@ -92,17 +103,32 @@ export const SUBTYPE: {
     readonly STATE_SNAPSHOT: "state_snapshot";
     readonly PROJECT_LIST_REQUEST: "project_list_request";
     readonly PROJECT_LIST: "project_list";
+    /** @deprecated pre-v3; replaced by OPEN_SESSION. Remove once extension/phone stop using it. */
     readonly SPAWN_SESSION: "spawn_session";
     readonly SESSION_LIST_REQUEST: "session_list_request";
     readonly SESSION_LIST: "session_list";
+    /** @deprecated pre-v3; replaced by OPEN_SESSION. Remove once extension/phone stop using it. */
     readonly RESUME_SESSION: "resume_session";
+    /** v3: target-only open request (phone -> Station). */
     readonly OPEN_SESSION: "open_session";
     readonly LIFECYCLE_STATUS_REQUEST: "lifecycle_status_request";
+    /** v3: `{ requestId, revision, stage, outcome, reason, result }` (Station -> phone). */
     readonly LIFECYCLE_STATUS: "lifecycle_status";
     readonly TAKEOVER_CONFIRM: "takeover_confirm";
     readonly LIFECYCLE_CANCEL: "lifecycle_cancel";
+    /** v3, phone -> Station. */
+    readonly SESSION_HEALTH_REQUEST: "session_health_request";
+    /** v3, Station -> phone: one sessionHealth() verdict. */
+    readonly SESSION_HEALTH: "session_health";
+    /** v3, Station -> phone: Dev Tunnel endpoint changed. */
+    readonly ENDPOINT_UPDATE: "endpoint_update";
+    /** v3, either direction: explicit protocol-version mismatch notice. */
+    readonly UPDATE_REQUIRED: "update_required";
+    /** @deprecated pre-v3; replaced by LIFECYCLE_STATUS. */
     readonly SPAWN_PAIRING: "spawn_pairing";
+    /** @deprecated pre-v3; replaced by LIFECYCLE_STATUS. */
     readonly SPAWN_RESULT: "spawn_result";
+    /** @deprecated pre-v3; replaced by LIFECYCLE_STATUS. */
     readonly LAUNCH_STATUS: "launch_status";
     readonly FORGET_DEVICE: "forget_device";
     readonly DEVICE_HEARTBEAT: "device_heartbeat";
@@ -266,6 +292,16 @@ export interface ChannelUpMsg {
   cwd?: string;
   /** CLI chat summary ("title"); may be empty until the CLI derives one. */
   title?: string;
+  /** Sender's PROTOCOL_VERSION; a phone on another version replies `update_required`. */
+  protocolVersion?: number;
+  /** v3: the session link generation (≥ 1); the phone ignores messages from older generations. */
+  linkGeneration?: number;
+}
+/** v3 session-link readiness, sent by the extension after handlers attach and echoed by the phone. */
+export interface LinkReadyMsg {
+  /** ≥ 1 for a real link; malformed input is coerced to 0, which never matches. */
+  linkGeneration: number;
+  controllerRevision: number;
 }
 export interface SessionMetaMsg {
   title?: string;
@@ -398,19 +434,26 @@ export type LifecycleOperationAction =
   | "resume"
   | "start"
   | "takeover";
+/** @deprecated pre-v3 (v2 lifecycle state). Use {@link OPEN_STAGES} / {@link OPEN_OUTCOMES}. */
 export const LIFECYCLE_STATES: readonly LifecycleState[];
+/** @deprecated pre-v3. */
 export const LIFECYCLE_ACTIONS: readonly LifecycleAction[];
+/** @deprecated pre-v3. Use {@link OPEN_REASONS}. */
 export const LIFECYCLE_FAILURE_CODES: readonly LifecycleFailureCode[];
+/** @deprecated pre-v3 target. v3 uses {@link OpenRequestTarget}. */
 export interface NewSessionTarget {
   kind: "new";
   projectName: string;
 }
+/** @deprecated pre-v3 target. v3 uses {@link OpenRequestTarget}. */
 export interface ExistingSessionTarget {
   kind: "existing";
   storeAuthority: string | null;
   sessionId: string;
 }
+/** @deprecated pre-v3 target. v3 uses {@link OpenRequestTarget}. */
 export type OpenTarget = NewSessionTarget | ExistingSessionTarget;
+/** @deprecated pre-v3 open payload (caller could request a takeover). v3 uses {@link OpenSessionMsg}. */
 export interface OpenIntentMsg {
   operationId: string;
   target: OpenTarget;
@@ -418,15 +461,14 @@ export interface OpenIntentMsg {
   name: string | null;
   takeoverRequested: boolean;
 }
-export interface LifecycleStatusRequestMsg {
-  operationId: string;
-}
+/** @deprecated pre-v3. */
 export interface StructuredFailure {
   code: LifecycleFailureCode;
   actions: LifecycleAction[];
   message?: string;
   retryable?: boolean;
 }
+/** @deprecated pre-v3 challenge. v3 uses {@link OpenChallenge}. */
 export interface TakeoverChallenge {
   challengeId: string;
   operationId: string;
@@ -440,7 +482,8 @@ export interface TakeoverChallenge {
   responsive: boolean;
   controllerName?: string;
 }
-export interface LifecycleStatusMsg {
+/** @deprecated pre-v3 lifecycle snapshot (was `LifecycleStatusMsg`). Only the legacy converters use it. */
+export interface LegacyLifecycleStatusMsg {
   operationId: string;
   fingerprint: string | null;
   state: LifecycleState;
@@ -454,14 +497,126 @@ export interface LifecycleStatusMsg {
   createdAt?: number;
   updatedAt?: number;
 }
+
+// ---- protocol v3: open requests (LLD §3.2, §4.2, §6.2) -----------------------
+export type OpenStage =
+  | "accepted"
+  | "resolving"
+  | "awaiting-confirmation"
+  | "dispatching"
+  | "awaiting-runtime"
+  | "preparing-link";
+export type OpenOutcome = "done" | "failed" | "cancelled" | "outcome-unknown";
+export type OpenReason =
+  | "invalid-request"
+  | "not-found"
+  | "owner-unknown"
+  | "controller-conflict"
+  | "takeover-stale"
+  | "update-required"
+  | "config-error"
+  | "launch-failed"
+  | "runtime-unavailable"
+  | "link-failed"
+  | "timeout"
+  | "internal-error";
+/** What Station chose to do. Reported in `result.action`; the phone never requests it. */
+export type OpenAction = "activate" | "repair" | "resume" | "start" | "takeover";
+export const OPEN_STAGES: readonly OpenStage[];
+export const OPEN_OUTCOMES: readonly OpenOutcome[];
+export const OPEN_REASONS: readonly OpenReason[];
+export const OPEN_ACTIONS: readonly OpenAction[];
+/** A new session in a registered project, or an existing saved session. */
+export type OpenRequestTarget =
+  | { project: string }
+  | { sessionId: string; storeAuthority?: string };
+export interface OpenRequestOptions {
+  permissionMode: SpawnMode;
+  /** Display label for the session; null when not supplied. */
+  title: string | null;
+}
+/** v3 `open_session` payload. No `action` and no takeover flag: Station decides. */
+export interface OpenSessionMsg {
+  requestId: string;
+  target: OpenRequestTarget;
+  options: OpenRequestOptions;
+}
+/** Shown at `awaiting-confirmation`; confirming is bound to this runtime + controller revision. */
+export interface OpenChallenge {
+  challengeId: string;
+  runtimeId: string;
+  controllerRevision: number;
+  controllerName?: string;
+}
+/** Whitelisted request result; unknown keys are dropped so private handoff material never leaks. */
+export interface OpenResult {
+  action?: OpenAction;
+  sessionId?: string;
+  storeAuthority?: string;
+  runtimeId?: string;
+  pid?: number;
+  name?: string;
+  /** Pairing payload for a launched/resumed session (the phone pairs without a QR). */
+  payload?: PairingPayload;
+  challenge?: OpenChallenge;
+  /** Cancelled after dispatch: the session may still be starting on the laptop. */
+  mayBeRunning?: true;
+  message?: string;
+}
+/**
+ * v3 `lifecycle_status` payload. `stage` is the latest stage reached; `outcome` is null until the
+ * request ends; `reason` explains a failure or a wait (e.g. `controller-conflict` at
+ * `awaiting-confirmation`). Unknown stages become "accepted" and unknown reasons "internal-error".
+ */
+export interface LifecycleStatusMsg {
+  requestId: string;
+  revision: number;
+  stage: OpenStage;
+  outcome: OpenOutcome | null;
+  reason: OpenReason | null;
+  result: OpenResult | null;
+}
+export interface LifecycleStatusRequestMsg {
+  /** v3: renamed from `operationId`. */
+  requestId: string;
+}
 export interface TakeoverConfirmMsg {
-  operationId: string;
+  /** v3: renamed from `operationId`. */
+  requestId: string;
   challengeId: string;
   revision: number;
 }
 export interface LifecycleCancelMsg {
-  operationId: string;
+  /** v3: renamed from `operationId`. */
+  requestId: string;
   revision?: number;
+}
+
+// ---- protocol v3: device-link health, endpoint and version notices ----------
+export interface SessionHealthRequestMsg {
+  sessionId: string;
+}
+/** Station's sessionHealth() verdict. Unknown labels arrive as "stalled", unknown reasons as null. */
+export interface SessionHealthMsg {
+  sessionId: string;
+  label: SessionHealthLabel;
+  reason: SessionHealthReason | null;
+  freshAt: number | null;
+  observer: SessionHealthObserver;
+  runtimeId?: string;
+}
+export interface EndpointUpdateMsg {
+  endpointRevision: number;
+  /** New transport descriptor; null when the sender supplied an invalid one. */
+  descriptor: TransportDescriptor | null;
+}
+export interface UpdateRequiredMsg {
+  /** Protocol version the sender requires (defaults to PROTOCOL_VERSION). */
+  minVersion: number;
+  /** Version the peer advertised; null when it advertised none. */
+  peerVersion: number | null;
+  /** Which side must update Weft (defaults to "laptop"). */
+  side: "laptop" | "phone";
 }
 /** One registered project a `weft` listener can spawn a session in. */
 export interface ListenerProject {
@@ -773,11 +928,20 @@ export type SpawnSessionMessage = Envelope<"control", "spawn_session", SpawnSess
 export type SessionListRequest = Envelope<"control", "session_list_request", SessionListRequestMsg>;
 export type SessionListMessage = Envelope<"control", "session_list", SessionListMsg>;
 export type ResumeSessionMessage = Envelope<"control", "resume_session", ResumeSessionMsg>;
-export type OpenSessionMessage = Envelope<"control", "open_session", OpenIntentMsg>;
+export type OpenSessionMessage = Envelope<"control", "open_session", OpenSessionMsg>;
 export type LifecycleStatusRequest = Envelope<"control", "lifecycle_status_request", LifecycleStatusRequestMsg>;
 export type LifecycleStatusMessage = Envelope<"control", "lifecycle_status", LifecycleStatusMsg>;
 export type TakeoverConfirmMessage = Envelope<"control", "takeover_confirm", TakeoverConfirmMsg>;
 export type LifecycleCancelMessage = Envelope<"control", "lifecycle_cancel", LifecycleCancelMsg>;
+export type LinkReady = Envelope<"control", "link_ready", LinkReadyMsg>;
+export type SessionHealthRequest = Envelope<"control", "session_health_request", SessionHealthRequestMsg>;
+export type SessionHealthMessage = Envelope<"control", "session_health", SessionHealthMsg>;
+export type EndpointUpdateMessage = Envelope<"control", "endpoint_update", EndpointUpdateMsg>;
+export type UpdateRequiredMessage = Envelope<"control", "update_required", UpdateRequiredMsg>;
+/** @deprecated pre-v3 shapes produced/consumed only by the legacy converters; not in EventEnvelope. */
+export type LegacyOpenSessionMessage = Envelope<"control", "open_session", OpenIntentMsg>;
+/** @deprecated see {@link LegacyOpenSessionMessage}. */
+export type LegacyLifecycleStatusMessage = Envelope<"control", "lifecycle_status", LegacyLifecycleStatusMsg>;
 export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
 export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
 export type LaunchStatusMessage = Envelope<"control", "launch_status", LaunchStatusMsg>;
@@ -887,6 +1051,11 @@ export type EventEnvelope =
   | LifecycleStatusMessage
   | TakeoverConfirmMessage
   | LifecycleCancelMessage
+  | LinkReady
+  | SessionHealthRequest
+  | SessionHealthMessage
+  | EndpointUpdateMessage
+  | UpdateRequiredMessage
   | SpawnPairing
   | SpawnResult
   | LaunchStatusMessage
@@ -962,7 +1131,14 @@ export function elicitationComplete(
   requestId: string,
   action?: ElicitationAction
 ): ElicitationComplete;
-export function channelUp(cwd?: string, title?: string, capabilities?: string[]): ChannelUp;
+/** `protocolVersion` is always PROTOCOL_VERSION; `linkGeneration` is included when it is ≥ 1. */
+export function channelUp(
+  cwd?: string,
+  title?: string,
+  capabilities?: string[],
+  linkGeneration?: number | null
+): ChannelUp;
+export function linkReady(link: { linkGeneration: number; controllerRevision: number }): LinkReady;
 export function sessionMeta(title?: string, cwd?: string): SessionMeta;
 export function channelDown(reason?: string): ChannelDown;
 export function heartbeat(latestTurnIndex?: number | null, busy?: boolean | null): Heartbeat;
@@ -1003,6 +1179,7 @@ export function projectList(
   capabilities?: string[] | null,
   defaultPermissionMode?: SpawnMode
 ): ProjectListMessage;
+/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
 export function spawnSession(
   requestId: string,
   projectName: string,
@@ -1020,61 +1197,99 @@ export function sessionList(
   folders?: SessionFolder[] | null,
   scope?: { requestId?: string | null; cwd?: string | null; sort?: SessionListSort; errorCode?: 'session-store-unavailable' }
 ): SessionListMessage;
+/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
 export function resumeSession(
   requestId: string,
   sessionId: string,
   mode?: SpawnMode,
   force?: boolean
 ): ResumeSessionMessage;
+/** @deprecated pre-v3. Normalizes the v2 open payload; use {@link normalizeOpenRequest}. */
 export function normalizeOpenIntent(intent?: Partial<OpenIntentMsg> & { target?: Partial<OpenTarget> }): OpenIntentMsg;
-export function openIntentFingerprint(intent: OpenIntentMsg | OpenSessionMessage): Promise<string>;
-export function openSession(
-  operationId: string,
-  target: OpenTarget,
-  options?: {
-    mode?: SpawnMode;
-    name?: string | null;
-    takeoverRequested?: boolean;
-  }
-): OpenSessionMessage;
-export function lifecycleStatusRequest(operationId: string): LifecycleStatusRequest;
+/** @deprecated pre-v3. Use {@link openRequestFingerprint}. */
+export function openIntentFingerprint(intent: OpenIntentMsg | LegacyOpenSessionMessage): Promise<string>;
+/** Normalize a v3 `open_session` payload: trims ids, `sessionId` wins over `project`, mode defaults to "default". */
+export function normalizeOpenRequest(request?: {
+  requestId?: string;
+  target?: Partial<{ project: string; sessionId: string; storeAuthority: string }>;
+  options?: Partial<OpenRequestOptions>;
+}): OpenSessionMsg;
+/** Hex sha256 over the canonical (target, options, requester); excludes `requestId`. */
+export function openRequestFingerprint(
+  request: OpenSessionMsg | OpenSessionMessage,
+  requester?: string | null
+): Promise<string>;
+/** v3 (breaking): one object argument; no caller-chosen action. Throws RangeError("too-large") over 64 KiB. */
+export function openSession(request: {
+  requestId: string;
+  target: OpenRequestTarget;
+  options?: Partial<OpenRequestOptions>;
+}): OpenSessionMessage;
+export function lifecycleStatusRequest(requestId: string): LifecycleStatusRequest;
+/** v3 (breaking): `{ requestId, revision, stage, outcome, reason, result }`. */
 export function lifecycleStatus(
-  status: Partial<LifecycleStatusMsg> & Pick<LifecycleStatusMsg, "operationId" | "state">
+  status: Partial<LifecycleStatusMsg> & Pick<LifecycleStatusMsg, "requestId" | "stage">
 ): LifecycleStatusMessage;
 export function takeoverConfirm(
-  operationId: string,
+  requestId: string,
   challengeId: string,
   revision: number
 ): TakeoverConfirmMessage;
-export function lifecycleCancel(operationId: string, revision?: number | null): LifecycleCancelMessage;
+export function lifecycleCancel(requestId: string, revision?: number | null): LifecycleCancelMessage;
+/** @deprecated pre-v3 adapter; emits the v2 open payload. Remove with sessionCompatibility (W1). */
 export function openSessionFromLegacy(
   message: SpawnSessionMessage | ResumeSessionMessage | EventEnvelope
-): OpenSessionMessage | null;
+): LegacyOpenSessionMessage | null;
+/** @deprecated pre-v3 adapter. */
 export function openSessionToLegacy(
-  message: OpenIntentMsg | OpenSessionMessage
+  message: OpenIntentMsg | LegacyOpenSessionMessage
 ): SpawnSessionMessage | ResumeSessionMessage | null;
+/** @deprecated pre-v3 adapter; emits the v2 lifecycle snapshot. */
 export function lifecycleStatusFromLegacy(
   message: LaunchStatusMessage | SpawnPairing | SpawnResult | SessionClaimedMessage | EventEnvelope,
-  previous?: LifecycleStatusMsg | LifecycleStatusMessage | null
-): LifecycleStatusMessage | null;
+  previous?: LegacyLifecycleStatusMsg | LegacyLifecycleStatusMessage | null
+): LegacyLifecycleStatusMessage | null;
+/** @deprecated pre-v3 adapter. */
 export function lifecycleStatusToLegacy(
-  message: LifecycleStatusMsg | LifecycleStatusMessage
+  message: LegacyLifecycleStatusMsg | LegacyLifecycleStatusMessage
 ): Array<LaunchStatusMessage | SpawnPairing | SpawnResult>;
+/** Keeps the higher `revision` for the same `requestId` (v3; previously keyed by `operationId`). */
 export function latestLifecycleStatus<T extends LifecycleStatusMsg | LifecycleStatusMessage>(
   current: T | null,
   candidate: T | null
 ): T | null;
+export function sessionHealthRequest(sessionId: string): SessionHealthRequest;
+export function sessionHealthMsg(health: {
+  sessionId: string;
+  label: SessionHealthLabel;
+  reason?: SessionHealthReason | null;
+  freshAt?: number | null;
+  observer?: SessionHealthObserver;
+  runtimeId?: string | null;
+}): SessionHealthMessage;
+export function endpointUpdate(update: {
+  endpointRevision: number;
+  descriptor: TransportDescriptor;
+}): EndpointUpdateMessage;
+export function updateRequired(notice: {
+  minVersion?: number;
+  peerVersion?: number | null;
+  side: "laptop" | "phone";
+}): UpdateRequiredMessage;
+/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
 export function spawnPairing(
   requestId: string,
   payload: PairingPayload,
   name?: string | null,
   projectName?: string | null
 ): SpawnPairing;
+/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
 export function spawnResult(
   requestId: string,
   ok: boolean,
   error?: string | null
 ): SpawnResult;
+/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
 export function launchStatus(
   requestId: string,
   state: LaunchState,

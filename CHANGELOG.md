@@ -5,6 +5,30 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.75
+
+This release rebuilds how the laptop keeps sessions connected. Laptop and phone must both be on
+0.2.75; older versions are told to update instead of failing silently.
+
+- **Sessions reconnect on their own.** Station supervises every open session: a session whose phone
+  link gets stuck (for example after an extension reload) is repaired in place, without a tap. Every
+  connection attempt now has a deadline and is logged.
+- **One way to recover.** A recovery bar above the composer replaces the offline banner. One button
+  reconnects, asks Station to reopen the session, or explains exactly what is wrong (laptop asleep,
+  another phone in control, session ended, update needed). Pull down in a session does the same.
+  A session is only resumed in a new terminal after Station proves the old one has stopped.
+- **`weft start` always ends with a working Station.** It says when Station is already running,
+  restarts it after an update, and replaces a stuck or mismatched Station automatically. `weft update`
+  restarts Station on the new code and cleans up leftover files. Control Center shows the same state
+  (Running / Restart to update / Repair Station) and can reload Weft in open sessions.
+- **Pair with the phone's camera.** The laptop QR is now a link: the phone camera opens the Weft
+  Android app (or the web app), and in-app Scan and Paste still work.
+- **Phone UI:** the Weft logo is the menu button on every screen; the ⋯ menu is reorganised with
+  *Remove from this phone*; swipe up anywhere on the composer to open Session controls and drag down
+  anywhere to close; offline sessions keep showing their last model.
+- Behind the scenes: session state moved from six stores to two (`~/.weft/sessions-live/`,
+  `~/.weft/requests/`), protocol version 3, and a shared health model used by phone, Station and
+  Control Center. Design: `docs/design/0.2.74-hld.md`, `docs/design/0.2.74-lld.md`.
 ## 0.2.73
 
 - Session controls add **Approvals**: Ask each time, AI review or Allow all, limited to what the

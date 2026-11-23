@@ -16,6 +16,16 @@ function listenerQr(channelId: string): string {
   });
 }
 
+function sessionPayload(channelId: string) {
+  return {
+    v: 1 as const,
+    channelId,
+    pub: `${channelId}-pub`,
+    kind: 'session' as const,
+    transport: { kind: 'local' as const },
+  };
+}
+
 describe('firstMessageTitle', () => {
   it('collapses whitespace and cuts a long first message on a word boundary', () => {
     expect(firstMessageTitle('  Fix   the\n flaky test ')).toBe('Fix the flaky test');
@@ -24,7 +34,7 @@ describe('firstMessageTitle', () => {
   });
 });
 
-describe('scenario: phone-launched sessions', () => {
+describe('scenario: phone-launched sessions (protocol v3)', () => {
   let h: ReturnType<typeof makeManager> | undefined;
 
   beforeEach(() => {
@@ -39,7 +49,7 @@ describe('scenario: phone-launched sessions', () => {
     vi.useRealTimers();
   });
 
-  it('registers a listener, receives projects, spawns a session, handles failure, and forgets the device', async () => {
+  it('registers a listener, opens a new session by target, pairs from lifecycle_status, handles failure, and forgets the device', async () => {
     const route = await h!.manager.addByQr(listenerQr('listener-1'));
     await h!.flush();
 
@@ -70,16 +80,31 @@ describe('scenario: phone-launched sessions', () => {
 
     expect(h!.snapshot().activeId).toBe(tempId);
     expect(h!.active()?.status).toBe('initializing');
-    const spawn = listener!.sentOfKind('control.spawn_session')[0];
-    expect(spawn).toMatchObject({ projectName: 'weft', mode: 'allow-all', name: 'Phone launch' });
+    const open = listener!.sentOfKind('control.open_session')[0]!;
+    // Target only: no action, no takeover flag — Station decides.
+    expect(open).toEqual({
+      requestId: expect.any(String),
+      target: { project: 'weft' },
+      options: { permissionMode: 'allow-all', title: 'Phone launch' },
+    });
+    expect(listener!.sentOfKind('control.spawn_session')).toHaveLength(0);
 
-    listener!.emit(B.spawnPairing(spawn.requestId as string, {
-      v: 1,
-      channelId: 'spawned-1',
-      pub: 'spawned-pub',
-      kind: 'session',
-      transport: { kind: 'local' },
-    }, 'Phone launch', 'weft'));
+    listener!.emit(B.lifecycleStatus({
+      requestId: open.requestId as string,
+      revision: 1,
+      stage: 'dispatching',
+      result: { action: 'start' },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
+    await h!.flush();
+    expect(h!.byChannel(tempId)?.spawning?.stage).toBe('launched');
+
+    listener!.emit(B.lifecycleStatus({
+      requestId: open.requestId as string,
+      revision: 2,
+      stage: 'preparing-link',
+      result: { action: 'start', name: 'Phone launch', payload: sessionPayload('spawned-1') },
+    }));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
@@ -91,12 +116,12 @@ describe('scenario: phone-launched sessions', () => {
     expect(h!.active()?.meta.spawnedFromDeviceId).toBe('listener-1');
     expect(h!.active()?.meta.spawnedFromDeviceName).toBe('Akash Laptop');
 
-    // The device event log records the outbound project-list-request + spawn-session and the inbound
-    // project-list + spawn-pairing, but never the (noisy, liveness-only) DEVICE_HEARTBEAT.
+    // The device event log records the v3 open request and its lifecycle replies, but never the
+    // (noisy, liveness-only) DEVICE_HEARTBEAT.
     const deviceEvents = h!.snapshot().devices[0]!.events;
     expect(deviceEvents.some((e) => e.eventSubtype === 'project_list_request')).toBe(true);
-    expect(deviceEvents.some((e) => e.eventSubtype === 'spawn_session')).toBe(true);
-    expect(deviceEvents.some((e) => e.eventSubtype === 'spawn_pairing')).toBe(true);
+    expect(deviceEvents.some((e) => e.eventSubtype === 'open_session')).toBe(true);
+    expect(deviceEvents.some((e) => e.eventSubtype === 'lifecycle_status')).toBe(true);
     expect(deviceEvents.some((e) => e.eventSubtype === 'device_heartbeat')).toBe(false);
 
     const failedTempId = await h!.manager.spawnSession('listener-1', {
@@ -104,8 +129,16 @@ describe('scenario: phone-launched sessions', () => {
       mode: 'default',
     });
     await h!.flush();
-    const failedSpawn = listener!.sentOfKind('control.spawn_session').at(-1)!;
-    listener!.emit(B.spawnResult(failedSpawn.requestId as string, false, 'No project named cortex'));
+    const failedOpen = listener!.sentOfKind('control.open_session').at(-1)!;
+    listener!.emit(B.lifecycleStatus({
+      requestId: failedOpen.requestId as string,
+      revision: 1,
+      stage: 'resolving',
+      outcome: 'failed',
+      reason: 'not-found',
+      result: { message: 'No project named cortex' },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
     expect(h!.snapshot().activeId).toBe(failedTempId);
@@ -139,16 +172,15 @@ describe('scenario: phone-launched sessions', () => {
     expect((await loadPendingOperations())[0]).toMatchObject({ initialPrompt: 'Fix the flaky test' });
     expect(h!.byChannel(tempId)?.meta.title).toBe('Fix the flaky test');
 
-    const spawn = listener.sentOfKind('control.spawn_session')[0]!;
+    const open = listener.sentOfKind('control.open_session')[0]!;
     // Launched under the first message so the laptop's title matches until Copilot names it.
-    expect(spawn).toMatchObject({ name: 'Fix the flaky test' });
-    listener.emit(B.spawnPairing(spawn.requestId as string, {
-      v: 1,
-      channelId: 'spawned-write-first',
-      pub: 'spawned-pub',
-      kind: 'session',
-      transport: { kind: 'local' },
-    }, 'weft', 'weft'));
+    expect(open).toMatchObject({ options: { title: 'Fix the flaky test' } });
+    listener.emit(B.lifecycleStatus({
+      requestId: open.requestId as string,
+      revision: 1,
+      stage: 'preparing-link',
+      result: { action: 'start', payload: sessionPayload('spawned-write-first') },
+    }));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
@@ -163,75 +195,72 @@ describe('scenario: phone-launched sessions', () => {
     expect(await loadPendingOperations()).toHaveLength(0);
   });
 
-  it('uses lifecycle Open with a new Station and retains legacy Start for an old Station', async () => {
-    await h!.manager.addByQr(listenerQr('listener-matrix'));
+  it('resumes an existing session by target and gives way to the card Station repaired in place', async () => {
+    await h!.manager.addByQr(listenerQr('listener-existing'));
     await h!.flush();
-    const listener = registry.get('listener-matrix')!;
-
-    listener.emit(B.projectList(
-      [{ name: 'weft', path: 'C:\\Users\\akash\\weft', isDefault: true }],
-      'New Station',
-      'device-new',
-      [B.DEVICE_CAPABILITY.SESSION_ACTIVATION_V1],
-    ));
+    const listener = registry.get('listener-existing')!;
+    const { client } = await h!.pair('kept-card');
+    client.emit(B.channelUp('kept-card', 'session-kept', 'C:\\repo', 'Kept'));
+    client.emit(B.channelDown('terminal closed'));
     await h!.flush();
 
-    const tempId = await h!.manager.spawnSession('listener-matrix', {
-      projectName: 'weft',
+    const tempId = await h!.manager.resumeSession('listener-existing', {
+      sessionId: 'session-other',
+      storeAuthority: 'cli',
       mode: 'default',
-      operationId: 'matrix-open',
+      title: 'Other',
+      requestId: 'resume-other',
     });
     await h!.flush();
+    expect(listener.sentOfKind('control.open_session')).toEqual([{
+      requestId: 'resume-other',
+      target: { sessionId: 'session-other', storeAuthority: 'cli' },
+      options: { permissionMode: 'default', title: null },
+    }]);
 
-    expect(listener.sentOfKind('control.open_session')).toEqual([
-      expect.objectContaining({
-        operationId: 'matrix-open',
-        target: { kind: 'new', projectName: 'weft' },
-      }),
-    ]);
-    expect(listener.sentOfKind('control.spawn_session')).toHaveLength(0);
-
-    const payload = {
-      v: 1 as const,
-      channelId: 'matrix-session',
-      pub: 'matrix-pub',
-      kind: 'session' as const,
-      transport: { kind: 'local' as const },
-    };
     listener.emit(B.lifecycleStatus({
-      operationId: 'matrix-open',
-      state: 'pairing-ready',
-      revision: 1,
-      target: { kind: 'new', projectName: 'weft' },
-      action: 'start',
-      payload,
+      requestId: 'resume-other',
+      revision: 3,
+      stage: 'preparing-link',
+      outcome: 'done',
+      result: { action: 'repair', sessionId: 'session-kept' },
     }));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
-
     expect(h!.byChannel(tempId)).toBeUndefined();
-    expect(h!.active()?.meta.channelId).toBe('matrix-session');
+    expect(h!.snapshot().activeId).toBe('kept-card');
+    expect(await loadPendingOperations()).toHaveLength(0);
+  });
 
-    listener.emit(B.projectList(
-      [{ name: 'weft', path: 'C:\\Users\\akash\\weft', isDefault: true }],
-      'Old Station',
-      'device-new',
-      [],
-    ));
+  it('treats a pre-v3 Station reply as "update Weft on your laptop" and fails the launch honestly', async () => {
+    await h!.manager.addByQr(listenerQr('listener-old'));
     await h!.flush();
-    await h!.manager.spawnSession('listener-matrix', {
-      projectName: 'weft',
-      mode: 'default',
-      operationId: 'matrix-legacy',
-    });
+    const listener = registry.get('listener-old')!;
+    const tempId = await h!.manager.spawnSession('listener-old', { projectName: 'weft', mode: 'default' });
     await h!.flush();
-    expect(listener.sentOfKind('control.spawn_session').at(-1)).toMatchObject({
-      requestId: 'matrix-legacy',
-      projectName: 'weft',
+    const open = listener.sentOfKind('control.open_session')[0]!;
+
+    listener.emit(B.spawnResult(open.requestId as string, false, 'Unknown request'));
+    await h!.flush();
+
+    expect(h!.snapshot().devices[0]).toMatchObject({ updateRequired: 'laptop' });
+    expect(h!.byChannel(tempId)?.status).toBe('error');
+    expect(h!.byChannel(tempId)?.error).toBe('Weft on your laptop needs an update.');
+  });
+
+  it('marks the device update-required when Station says so', async () => {
+    await h!.manager.addByQr(listenerQr('listener-update'));
+    await h!.flush();
+    const listener = registry.get('listener-update')!;
+    listener.emit(B.updateRequired({ side: 'phone', peerVersion: 2 }));
+    await h!.flush();
+    expect(h!.snapshot().devices[0]).toMatchObject({
+      updateRequired: 'phone',
+      error: 'Update Weft on this phone to keep using this session.',
     });
   });
 
-  it('keeps a slow launch recoverable, retries the same operation, and accepts late pairing', async () => {
+  it('keeps a slow launch recoverable, retries the same request, and accepts late pairing', async () => {
     await h!.manager.addByQr(listenerQr('listener-timeout'));
     await h!.flush();
     const listener = registry.get('listener-timeout')!;
@@ -240,7 +269,7 @@ describe('scenario: phone-launched sessions', () => {
       mode: 'default',
     });
     await h!.flush();
-    const first = listener.sentOfKind('control.spawn_session')[0]!;
+    const first = listener.sentOfKind('control.open_session')[0]!;
 
     await vi.advanceTimersByTimeAsync(30_000);
     await h!.flush();
@@ -252,17 +281,16 @@ describe('scenario: phone-launched sessions', () => {
 
     await h!.manager.retrySpawn(tempId);
     await h!.flush();
-    const requests = listener.sentOfKind('control.spawn_session');
+    const requests = listener.sentOfKind('control.open_session');
     expect(requests).toHaveLength(2);
     expect(requests[1]!.requestId).toBe(first.requestId);
 
-    listener.emit(B.spawnPairing(first.requestId as string, {
-      v: 1,
-      channelId: 'late-session',
-      pub: 'late-pub',
-      kind: 'session',
-      transport: { kind: 'local' },
-    }, null, 'weft'));
+    listener.emit(B.lifecycleStatus({
+      requestId: first.requestId as string,
+      revision: 2,
+      stage: 'preparing-link',
+      result: { action: 'start', payload: sessionPayload('late-session') },
+    }));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
@@ -272,7 +300,7 @@ describe('scenario: phone-launched sessions', () => {
     expect(await loadPendingOperations()).toHaveLength(0);
   });
 
-  it('restores an unresolved launch after restart without redelivering it automatically', async () => {
+  it('restores an unresolved launch after restart, asks Station for its status, and never redelivers it automatically', async () => {
     await h!.manager.addByQr(listenerQr('listener-restart'));
     await h!.flush();
     const firstListener = registry.get('listener-restart')!;
@@ -281,7 +309,7 @@ describe('scenario: phone-launched sessions', () => {
       mode: 'default',
     });
     await h!.flush();
-    const requestId = firstListener.sentOfKind('control.spawn_session')[0]!.requestId;
+    const requestId = firstListener.sentOfKind('control.open_session')[0]!.requestId;
 
     h!.dispose();
     h = makeManager();
@@ -290,11 +318,12 @@ describe('scenario: phone-launched sessions', () => {
 
     expect(h!.byChannel(tempId)?.status).toBe('initializing');
     const reconnectedListener = registry.get('listener-restart')!;
-    expect(reconnectedListener.sentOfKind('control.spawn_session')).toHaveLength(0);
+    expect(reconnectedListener.sentOfKind('control.open_session')).toHaveLength(0);
+    expect(reconnectedListener.sentOfKind('control.lifecycle_status_request')).toEqual([{ requestId }]);
 
     await h!.manager.retrySpawn(tempId);
     await h!.flush();
-    expect(reconnectedListener.sentOfKind('control.spawn_session')[0]!.requestId).toBe(requestId);
+    expect(reconnectedListener.sentOfKind('control.open_session')[0]!.requestId).toBe(requestId);
   });
 
   it('reuses the same phone identity when a ready session needs another pairing attempt', async () => {
@@ -306,17 +335,15 @@ describe('scenario: phone-launched sessions', () => {
       mode: 'default',
     });
     await h!.flush();
-    const request = listener.sentOfKind('control.spawn_session')[0]!;
-    const payload = {
-      v: 1 as const,
-      channelId: 'pair-retry-session',
-      pub: 'pair-retry-pub',
-      kind: 'session' as const,
-      transport: { kind: 'local' as const },
-    };
+    const request = listener.sentOfKind('control.open_session')[0]!;
 
     failNextPairing();
-    listener.emit(B.launchStatus(request.requestId as string, 'ready', { payload, operation: 'new' }));
+    listener.emit(B.lifecycleStatus({
+      requestId: request.requestId as string,
+      revision: 1,
+      stage: 'preparing-link',
+      result: { action: 'start', payload: sessionPayload('pair-retry-session') },
+    }));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
@@ -332,27 +359,25 @@ describe('scenario: phone-launched sessions', () => {
     expect(pairingIdentities[1]).toEqual(firstIdentity);
   });
 
-  it('preserves the accepted operation and phone identity across an app reload', async () => {
+  it('preserves the accepted request and phone identity across an app reload', async () => {
     await h!.manager.addByQr(listenerQr('listener-pair-reload'));
     await h!.flush();
     const listener = registry.get('listener-pair-reload')!;
     const tempId = await h!.manager.spawnSession('listener-pair-reload', {
       projectName: 'weft',
       mode: 'default',
-      operationId: 'reload-operation',
+      requestId: 'reload-operation',
     });
     await h!.flush();
-    const request = listener.sentOfKind('control.spawn_session')[0]!;
-    const payload = {
-      v: 1 as const,
-      channelId: 'pair-reload-session',
-      pub: 'pair-reload-pub',
-      kind: 'session' as const,
-      transport: { kind: 'local' as const },
-    };
+    const payload = sessionPayload('pair-reload-session');
 
     failNextPairing();
-    listener.emit(B.launchStatus(request.requestId as string, 'ready', { payload, operation: 'new' }));
+    listener.emit(B.lifecycleStatus({
+      requestId: 'reload-operation',
+      revision: 1,
+      stage: 'preparing-link',
+      result: { action: 'start', payload },
+    }));
     await vi.advanceTimersByTimeAsync(0);
     for (let i = 0; i < 5; i += 1) await h!.flush();
     const firstIdentity = pairingIdentities[0];
@@ -364,6 +389,7 @@ describe('scenario: phone-launched sessions', () => {
         stage: 'pairing-failed',
         pairingPayload: payload,
         phoneIdentity: firstIdentity,
+        lifecycleStatus: expect.objectContaining({ requestId: 'reload-operation', stage: 'preparing-link' }),
       }),
     ]);
 

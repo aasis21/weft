@@ -92,6 +92,8 @@ for (const width of [320, 390, 640, 760, 768, 1440]) {
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await page.reload();
       await expect(page.getByRole('button', { name: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` })).toBeVisible();
+      // Axe on the long, narrow handbook is CPU-bound; give each scan its own budget on a loaded laptop.
+      test.setTimeout(test.info().timeout + 60_000);
       const { violations } = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
       expect(violations).toEqual([]);

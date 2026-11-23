@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import { StatusBar } from '@/ui/sessions/StatusBar';
 import { noteChatVisit } from '@/ui/sessions/chatSwitcher';
 import { emptyTimeline } from '@/lib/timeline';
+import { setDebugModeEnabled } from '@/lib/debugSettings';
 
 const mockEmptySnapshot = { ready: true, activeId: null as string | null, sessions: [] as unknown[], devices: [] as unknown[] };
 let mockSnapshot: typeof mockEmptySnapshot = mockEmptySnapshot;
@@ -102,7 +103,7 @@ describe('StatusBar', () => {
     expect(statusLine).toHaveClass('error');
   });
 
-  it('opens the drawer, start session button, menu actions, and direct leave callback', async () => {
+  it('opens the drawer, start session button, menu actions, and direct remove callback', async () => {
     const user = userEvent.setup();
     const onOpenDrawer = vi.fn();
     const onStartSession = vi.fn();
@@ -113,12 +114,10 @@ describe('StatusBar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open sessions' }));
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
-    // Start (＋) + Scan are the header's icons — they are NOT duplicated inside the ⋯ menu
-    // (which now holds only this-session actions), mirroring the sidebar row-action cleanup.
+    // Start (＋) stays in the header; Scan moved into the ⋯ menu (and the drawer).
     await user.click(screen.getByRole('button', { name: 'Start another session' }));
     expect(onStartSession).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole('button', { name: 'Scan to join a session' }));
-    expect(onAddSession).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /Scan/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Session menu' }));
     const menu = screen.getByRole('menu');
@@ -128,8 +127,52 @@ describe('StatusBar', () => {
     expect(within(menu).queryByRole('menuitem', { name: /Reconnect/ })).not.toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: /Rejoin/ })).not.toBeInTheDocument();
 
-    await user.click(within(menu).getByRole('menuitem', { name: '✕ Leave this session' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Scan QR to connect' }));
+    expect(onAddSession).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    // The caller (SessionScreen) owns the "Remove from this phone?" confirmation.
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    const remove = within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Remove from this phone' });
+    expect(remove).toHaveClass('danger');
+    await user.click(remove);
     expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists the ⋯ items in groups with line icons, Debug only in Debug mode, and no history reload', async () => {
+    const user = userEvent.setup();
+    mockSnapshot = {
+      ready: true,
+      activeId: 'ch-live',
+      sessions: [{ meta: { channelId: 'ch-live' }, status: 'live', cold: false }],
+      devices: [],
+    };
+    renderStatusBar({ onRename: vi.fn(), onPin: vi.fn(), onArchive: vi.fn() });
+
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent))
+      .toEqual(['Rename', 'Pin to top', 'Archive', 'Scan QR to connect', 'Remove from this phone']);
+    expect(within(menu).getAllByRole('separator')).toHaveLength(2);
+    for (const item of within(menu).getAllByRole('menuitem')) {
+      expect(item.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+    expect(within(menu).queryByRole('menuitem', { name: /Load recent turns|Reload/ })).toBeNull();
+    expect(within(menu).queryByRole('menuitem', { name: 'Debug events' })).toBeNull();
+  });
+
+  it('labels Pin as Unpin for a pinned session', async () => {
+    const user = userEvent.setup();
+    const onPin = vi.fn();
+    renderStatusBar({ onPin, pinned: true });
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Unpin' }));
+    expect(onPin).toHaveBeenCalledWith(false);
+  });
+
+  it('uses the folder, never the brand, as the session title', () => {
+    renderStatusBar({ title: 'Weft', cwd: 'C:\\code\\orchard' });
+    expect(document.querySelector('.status-title')).toHaveTextContent(/^orchard$/);
   });
 
   it('keeps Explore as a permanent action without changing the read-only status subtitle', async () => {
@@ -173,9 +216,20 @@ describe('StatusBar', () => {
       ],
       devices: [],
     };
-    const { container } = renderStatusBar();
-    expect(screen.getByRole('button', { name: 'Open sessions, 1 waiting for your decision' })).toBeInTheDocument();
-    expect(container.querySelector('.decision-waiting-dot')).toBeInTheDocument();
+    renderStatusBar();
+    const button = screen.getByRole('button', { name: 'Open sessions, 1 waiting for your decision' });
+    // The Weft mark tile is the trigger; the approval dot sits on the tile's corner.
+    const tile = button.querySelector('.weft-menu-tile');
+    expect(tile?.querySelector('svg')).toBeInTheDocument();
+    expect(tile?.querySelector('.decision-waiting-dot')).toBeInTheDocument();
+  });
+
+  it('uses the Weft mark tile, without a dot, as the plain "Open sessions" button', () => {
+    renderStatusBar();
+    const button = screen.getByRole('button', { name: 'Open sessions' });
+    expect(button).toHaveClass('drawer-btn');
+    expect(button.querySelector('.weft-menu-tile svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(button.querySelector('.decision-waiting-dot')).not.toBeInTheDocument();
   });
 
   it('swaps the hamburger for a static Weft mark when the sidebar is already docked (#183)', async () => {
@@ -193,13 +247,18 @@ describe('StatusBar', () => {
     expect(onOpenDrawer).not.toHaveBeenCalled();
   });
 
-  it('exposes a visible New session button that calls onAddSession', async () => {
+  it('opens the debug panel from the overflow menu when Debug mode is on', async () => {
+    await setDebugModeEnabled(true);
     const user = userEvent.setup();
-    const onAddSession = vi.fn();
-    renderStatusBar({ onAddSession });
+    const onOpenDebug = vi.fn();
+    renderStatusBar({ onOpenDebug });
 
-    await user.click(screen.getByRole('button', { name: 'Scan to join a session' }));
-    expect(onAddSession).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Session menu' }));
+    const debug = await screen.findByRole('menuitem', { name: 'Debug events' });
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent))
+      .toEqual(['Scan QR to connect', 'Debug events', 'Remove from this phone']);
+    await user.click(debug);
+    expect(onOpenDebug).toHaveBeenCalledTimes(1);
   });
 
   it('closes the session menu on Escape and returns focus to the menu button', async () => {
@@ -227,29 +286,6 @@ describe('StatusBar', () => {
       const items = screen.getAllByRole('menuitem');
       expect(items[0]).toHaveFocus();
     });
-  });
-
-  it('opens the debug panel from the overflow menu', async () => {
-    const user = userEvent.setup();
-    const onOpenDebug = vi.fn();
-    renderStatusBar({ onOpenDebug });
-
-    await user.click(screen.getByRole('button', { name: 'Session menu' }));
-    await user.click(screen.getByRole('menuitem', { name: /Debug events/ }));
-    expect(onOpenDebug).toHaveBeenCalledTimes(1);
-  });
-
-  it('offers a manual recent-turns reload, and only when the caller can serve one', async () => {
-    const user = userEvent.setup();
-    renderStatusBar();
-    await user.click(screen.getByRole('button', { name: 'Session menu' }));
-    expect(screen.queryByRole('menuitem', { name: /Load recent turns/ })).toBeNull();
-
-    const onReloadHistory = vi.fn();
-    renderStatusBar({ onReloadHistory });
-    await user.click(screen.getAllByRole('button', { name: 'Session menu' })[1] as HTMLElement);
-    await user.click(screen.getByRole('menuitem', { name: /Load recent turns/ }));
-    expect(onReloadHistory).toHaveBeenCalledTimes(1);
   });
 
   describe('title gestures', () => {

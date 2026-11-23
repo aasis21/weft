@@ -1,23 +1,53 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { WeftMenuIcon } from '@/ui/brand/WeftMark';
-import type { JSX, KeyboardEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { WeftMenuTile } from '@/ui/brand/WeftMark';
+import type { JSX, KeyboardEvent, ReactNode } from 'react';
 import { sessionRuntime } from '@/session/runtime/instance';
 import type { SessionStatus } from '@/session/model';
+import { debugModeMirror, isDebugModeEnabled } from '@/lib/debugSettings';
 import { deriveStatus, type ComposerActivity } from './sessionStatus';
 import { FolderGlyph, ChangesGlyph } from '@/ui/workspace/fileGlyphs';
 import { ChatSwitcher, noteChatVisit, useTitleGestures } from './chatSwitcher';
 
-/** Viewfinder-with-QR mark: the header action opens the camera to scan a pairing code. */
+/** One line-icon style for every ⋯ menu item: 24-unit grid, 1.7 stroke, current colour. */
+function MenuGlyph({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+
+/** Viewfinder-with-QR mark: opens the camera to scan a pairing code. */
 function ScanGlyph(): JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <MenuGlyph>
       <path d="M4 8V6a2 2 0 0 1 2-2h2" />
       <path d="M16 4h2a2 2 0 0 1 2 2v2" />
       <path d="M20 16v2a2 2 0 0 1-2 2h-2" />
       <path d="M8 20H6a2 2 0 0 1-2-2v-2" />
       <rect x="9" y="9" width="6" height="6" rx="1" />
-    </svg>
+    </MenuGlyph>
   );
+}
+
+function RenameGlyph(): JSX.Element {
+  return <MenuGlyph><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z" /><path d="m14 7 3 3" /></MenuGlyph>;
+}
+
+function PinGlyph(): JSX.Element {
+  return <MenuGlyph><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Z" /><path d="M12 13v7" /></MenuGlyph>;
+}
+
+function ArchiveGlyph(): JSX.Element {
+  return <MenuGlyph><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></MenuGlyph>;
+}
+
+function DebugGlyph(): JSX.Element {
+  return <MenuGlyph><path d="M8 4H7a2 2 0 0 0-2 2v4l-2 2 2 2v4a2 2 0 0 0 2 2h1" /><path d="M16 4h1a2 2 0 0 1 2 2v4l2 2-2 2v4a2 2 0 0 1-2 2h-1" /></MenuGlyph>;
+}
+
+function RemoveGlyph(): JSX.Element {
+  return <MenuGlyph><path d="M4 7h16" /><path d="M10 11v6M14 11v6" /><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" /><path d="M9 7V4h6v3" /></MenuGlyph>;
 }
 
 function CompassGlyph(): JSX.Element {
@@ -42,6 +72,7 @@ interface StatusBarProps {
   onOpenDrawer(): void;
   /** Open the permanent Explore destination. Independent from the read-only session status line. */
   onOpenExplore?(): void;
+  /** Scan a QR to connect another session (the ⋯ menu's "Scan QR to connect"). */
   onAddSession(): void;
   onStartSession?(): void;
   /** #163: archive this session now (drop the live socket, keep the card). Shown only when live. */
@@ -50,11 +81,10 @@ interface StatusBarProps {
   onRename?(title: string): void;
   /** Pin/unpin this session (exempt from auto-delete + eviction preference). */
   onPin?(pinned: boolean): void;
-  /** Ask the laptop for recent turns again, for when the automatic request never landed. */
-  onReloadHistory?(): void;
   pinned?: boolean;
   /** #163: demo sessions can't archive — hide that item. */
   isDemo?: boolean;
+  /** "Remove from this phone"; the caller confirms first (the session keeps running on the laptop). */
   onRemove(): void;
   onGoHome(): void;
   onOpenDebug(): void;
@@ -73,6 +103,13 @@ function folderName(path: string | null): string | null {
   return parts[parts.length - 1] || path;
 }
 
+/** The header names the session (its name, else its folder) and never shows the brand as a title. */
+function sessionTitle(title: string, cwd: string | null): string {
+  const name = title.trim();
+  if (name && name.toLowerCase() !== 'weft') return name;
+  return folderName(cwd) ?? 'Session';
+}
+
 export function StatusBar({
   title,
   cwd,
@@ -86,7 +123,6 @@ export function StatusBar({
   onArchive,
   onRename,
   onPin,
-  onReloadHistory,
   pinned = false,
   isDemo = false,
   onRemove,
@@ -98,6 +134,10 @@ export function StatusBar({
   onSwitchSession,
 }: StatusBarProps): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
+  /** "Debug events" is a developer tool: listed only while Debug mode is on (Settings). */
+  const [debugMode, setDebugMode] = useState(debugModeMirror);
+  const debugModeRef = useRef(debugMode);
+  debugModeRef.current = debugMode;
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState(title);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +184,16 @@ export function StatusBar({
   const cancelRename = (): void => setRenaming(false);
 
   useEffect(() => {
+    let live = true;
+    void isDebugModeEnabled().then((enabled) => {
+      if (live && enabled !== debugModeRef.current) setDebugMode(enabled);
+    });
+    return () => {
+      live = false;
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
     if (!menuOpen) return undefined;
     const onDoc = (e: MouseEvent): void => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -183,6 +233,38 @@ export function StatusBar({
     }
   };
 
+  const menuItem = (label: string, glyph: JSX.Element, onSelect: () => void, danger = false): JSX.Element => (
+    <button
+      key={label}
+      type="button"
+      role="menuitem"
+      className={`bar-menu-item bar-menu-item-with-icon${danger ? ' danger' : ''}`}
+      onClick={() => {
+        setMenuOpen(false);
+        onSelect();
+      }}
+    >
+      {glyph}
+      <span>{label}</span>
+    </button>
+  );
+  // Groups, divided: workspace · this session · connect · developer · destructive.
+  const menuGroups = [
+    [
+      onOpenFiles ? menuItem('Files', <FolderGlyph />, onOpenFiles) : null,
+      onOpenChanges ? menuItem('Changes', <ChangesGlyph />, onOpenChanges) : null,
+    ],
+    [
+      onRename ? menuItem('Rename', <RenameGlyph />, beginRename) : null,
+      onPin ? menuItem(pinned ? 'Unpin' : 'Pin to top', <PinGlyph />, () => onPin(!pinned)) : null,
+      derived.active && !isDemo && onArchive ? menuItem('Archive', <ArchiveGlyph />, onArchive) : null,
+    ],
+    [menuItem('Scan QR to connect', <ScanGlyph />, onAddSession)],
+    [debugMode ? menuItem('Debug events', <DebugGlyph />, onOpenDebug) : null],
+    [menuItem('Remove from this phone', <RemoveGlyph />, onRemove, true)],
+  ].map((group) => group.filter((item): item is JSX.Element => item !== null))
+    .filter((group) => group.length > 0);
+
   return (
     <header className="status-bar">
       {desktopDocked ? (
@@ -193,7 +275,7 @@ export function StatusBar({
           title="About Weft"
           aria-label="About Weft"
         >
-          <span className="weft-mark" aria-hidden="true">⎈</span>
+          <WeftMenuTile />
         </button>
       ) : (
         <button
@@ -202,8 +284,7 @@ export function StatusBar({
           onClick={onOpenDrawer}
           aria-label={drawerLabel}
         >
-          <WeftMenuIcon />
-          {othersAwaitingDecision > 0 ? <span className="decision-waiting-dot" aria-hidden="true" /> : null}
+          <WeftMenuTile dot={othersAwaitingDecision > 0} />
         </button>
       )}
 
@@ -236,7 +317,7 @@ export function StatusBar({
           ) : (
             <span className="status-title" title={cwd ?? undefined}>
               {pinned ? <span className="pin-mark" title="Pinned" aria-label="Pinned">📌</span> : null}
-              {title}
+              {sessionTitle(title, cwd)}
             </span>
           )}
           <span className={`status-line ${lineClass}`}>
@@ -286,16 +367,6 @@ export function StatusBar({
           ＋
         </button>
 
-        <button
-          className="icon-btn add-btn"
-          type="button"
-          onClick={onAddSession}
-          aria-label="Scan to join a session"
-          title="Scan to join a session"
-        >
-          <ScanGlyph />
-        </button>
-
         <div className="bar-menu-wrap" ref={menuRef}>
           <button
             className="icon-btn menu-btn"
@@ -311,84 +382,12 @@ export function StatusBar({
           </button>
           {menuOpen ? (
             <div className="bar-menu" role="menu" onKeyDown={onMenuKeyDown}>
-              {onOpenFiles ? <button type="button" role="menuitem" className="bar-menu-item bar-menu-item-with-icon"
-                onClick={() => { setMenuOpen(false); onOpenFiles(); }}><FolderGlyph /><span>Files</span></button> : null}
-              {onOpenChanges ? <button type="button" role="menuitem" className="bar-menu-item bar-menu-item-with-icon"
-                onClick={() => { setMenuOpen(false); onOpenChanges(); }}><ChangesGlyph /><span>Changes</span></button> : null}
-              {onRename ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="bar-menu-item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    beginRename();
-                  }}
-                >
-                  ✎ Rename session
-                </button>
-              ) : null}
-              {onPin ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="bar-menu-item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onPin(!pinned);
-                  }}
-                >
-                  📌 {pinned ? 'Unpin session' : 'Pin session'}
-                </button>
-              ) : null}
-              {onReloadHistory ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="bar-menu-item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onReloadHistory();
-                  }}
-                >
-                  ⟳ Load recent turns
-                </button>
-              ) : null}
-              {derived.active && !isDemo && onArchive ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="bar-menu-item"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onArchive();
-                  }}
-                >
-                  ⏸ Archive this session
-                </button>
-              ) : null}
-              <button
-                type="button"
-                role="menuitem"
-                className="bar-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onOpenDebug();
-                }}
-              >
-                {'{ }'} Debug events
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="bar-menu-item danger"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onRemove();
-                }}
-              >
-                ✕ Leave this session
-              </button>
+              {menuGroups.map((group, index) => (
+                <Fragment key={index}>
+                  {index > 0 ? <div className="bar-menu-sep" role="separator" /> : null}
+                  {group}
+                </Fragment>
+              ))}
             </div>
           ) : null}
         </div>

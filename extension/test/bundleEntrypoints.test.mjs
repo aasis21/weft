@@ -71,10 +71,10 @@ test("ship scripts and release CI stage the centralized payload and verify its m
   }
 });
 
-test("the active runtime is built and shipped beside the dormant bootstrap", () => {
+test("the session link is built and shipped beside the dormant session host", () => {
   const esbuildConfig = readFileSync(path.join(extensionRoot, "esbuild.config.mjs"), "utf8");
-  assert.match(esbuildConfig, /entryPoints:\s*\["src\/activeRuntime\.mjs"\]/);
-  assert.match(esbuildConfig, /activeRuntimeOutfile\s*=\s*"dist\/activeRuntime\.mjs"/);
-  assert.ok(RELEASE_BUNDLE_NAMES.includes("activeRuntime.mjs"));
+  assert.match(esbuildConfig, /entryPoints:\s*\["src\/sessionLink\.mjs"\]/);
+  assert.match(esbuildConfig, /sessionLinkOutfile\s*=\s*"dist\/sessionLink\.mjs"/);
+  assert.ok(RELEASE_BUNDLE_NAMES.includes("sessionLink.mjs"));
   assert.ok(RELEASE_BUNDLE_NAMES.includes("pairingCanvas.mjs"));
 });

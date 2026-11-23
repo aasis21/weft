@@ -13,8 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { createRuntimeIdentity } from "../src/runtimeIdentity.mjs";
-import { startRuntimeLifecycleHost } from "../src/runtimeLifecycle.mjs";
+import { LIVE_DIR, publishSessionRecord } from "../src/sessionRegistry.mjs";
+import { sessionPipeAddress, startSessionControlServer } from "../src/sessionControl.mjs";
 
 const DEFAULT_COUNTS = Object.freeze([20, 100]);
 const TWENTY_SESSION_RSS_BUDGET_BYTES = 5 * 1_024 * 1_024;
@@ -101,34 +101,30 @@ async function sampleIdleCpu() {
   };
 }
 
-function createIdentity(index) {
-  return createRuntimeIdentity({
-    storeAuthority: "sha256:dormant-scale-store",
-    sessionId: `dormant-session-${index}`,
-    terminalInstanceId: `terminal-${index}`,
-    runtimeInstanceId: `runtime-${process.pid}-${index}`,
-    generation: 1,
-  }, { scope: {} });
-}
-
 async function startHost(baseDir, index) {
   const startedAt = performance.now();
-  const host = await startRuntimeLifecycleHost({
-    identity: createIdentity(index),
-    handlers: {},
-  }, {
-    baseDir,
-    presenceOptions: {
-      now: () => 1,
-      capability: `capability-${index}`,
-    },
-    discoveryOptions: {
-      verify: async () => ({ live: true }),
-    },
+  const runtimeId = `runtime-${process.pid}-${index}`;
+  const session = { storeAuthority: "sha256:dormant-scale-store", sessionId: `dormant-session-${index}` };
+  const pipe = sessionPipeAddress(runtimeId, { baseDir });
+  const record = await publishSessionRecord({
+    session,
+    run: { runtimeId, generation: 1, processStartedAt: 1, terminalInstanceId: `terminal-${index}`, version: "scale" },
+    pipe,
+  }, { baseDir, now: () => 1, capability: `capability-${index}-0123456789abcdef` });
+  const control = await startSessionControlServer({
+    identity: () => ({ ...session, runtimeInstanceId: runtimeId, generation: 1 }),
+    capability: () => record.capability,
+    pipe,
+    handlers: { probe: () => ({ runtimeId }) },
   });
+  const host = {
+    async close() {
+      await control.close();
+      record.close();
+    },
+  };
   return { host, startupMs: performance.now() - startedAt };
 }
-
 async function warmRuntime(baseDir, count) {
   const hosts = [];
   for (let index = 0; index < count; index++) {
@@ -175,14 +171,14 @@ async function runWorker(count) {
     await new Promise((resolve) => setTimeout(resolve, IDLE_SAMPLE_MS));
     const activityAfterIdle = resourceCounts();
 
-    const runtimeRoot = join(baseDir, "runtimes", "v1");
+    const runtimeRoot = join(baseDir, LIVE_DIR);
     const runtimeDirectories = readdirSync(runtimeRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."));
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
     const presenceBytes = runtimeDirectories.reduce((sum, entry) =>
-      sum + statSync(join(runtimeRoot, entry.name, "presence.json")).size +
-      statSync(join(runtimeRoot, entry.name, "capability")).size, 0);
+      sum + statSync(join(runtimeRoot, entry.name)).size +
+      statSync(join(runtimeRoot, entry.name.replace(/\.json$/, ".key"))).size, 0);
 
-    assert.equal(runtimeDirectories.length, count, "each dormant session must own one presence directory");
+    assert.equal(runtimeDirectories.length, count, "each dormant session must own one live record");
     assert.equal(remoteActivity.length, 0, "dormant sessions must not initiate TCP, TLS, HTTP, or DNS activity");
     assert.equal(
       dormantRemoteSockets,
@@ -250,9 +246,9 @@ async function runWorker(count) {
     const cleanupResources = resourceCounts();
     const cleanupHandles = osHandleCount();
     const remainingRuntimeDirectories = existsSync(runtimeRoot)
-      ? readdirSync(runtimeRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).length
+      ? readdirSync(runtimeRoot, { withFileTypes: true }).filter((entry) => entry.isFile()).length
       : 0;
-    assert.equal(remainingRuntimeDirectories, 0, "closing dormant sessions must remove every presence directory");
+    assert.equal(remainingRuntimeDirectories, 0, "closing dormant sessions must remove every live record");
     assert.ok(
       resourceTotal(cleanupResources) <= resourceTotal(baselineResources),
       "closing dormant sessions must release their endpoint resources",

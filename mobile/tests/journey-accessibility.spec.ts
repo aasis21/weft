@@ -123,7 +123,8 @@ test.describe('Journey: accessibility', () => {
     await expect(openSessions).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Message your Copilot session' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Start another session' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Scan to join a session' })).toBeVisible();
+    // Scan moved out of the header into the ⋯ menu (and the drawer).
+    await expect(page.getByRole('button', { name: 'Scan to join a session' })).toHaveCount(0);
 
     // Safari/WebKit does not focus buttons on pointer click. Open from the keyboard so focus
     // restoration is tested against the actual accessible activation path in every browser.

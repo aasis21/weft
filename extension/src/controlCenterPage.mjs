@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { decideStationAction } from "./ensureStation.mjs";
 
 export function renderControlCenterPage() {
   return `<!doctype html>
@@ -56,7 +57,7 @@ export function renderControlCenterPage() {
       <section id="panel-sessions" class="panel" hidden aria-labelledby="page-title">
         <div class="notice subtle"><strong>Your Copilot process stays yours.</strong><p>Activate Weft for an existing runtime, explicitly start a session in a registered project, or disconnect its phone link. No transcripts or terminal emulator are shown here.</p></div>
         <form id="session-start-form" class="card launch-card"><div><h2>Start a Copilot session</h2><p id="session-start-remedy" class="muted small">Start Device Station and configure transport first.</p></div><div class="launch-fields"><div><label for="session-project">Project</label><select id="session-project" required><option value="">Choose a registered project</option></select></div><div><label for="session-name">Session name <span class="muted">(optional)</span></label><input id="session-name" maxlength="200" autocomplete="off" placeholder="What are you working on?"></div><div><label for="session-mode">Approval mode</label><select id="session-mode"><option value="default">Default — native approvals</option><option value="allow-all">Allow all — broader permissions</option></select></div><button id="session-start" type="submit" class="button primary" disabled>Start session</button></div></form>
-        <div class="list-toolbar"><label class="search-field"><span data-icon="search"></span><span class="sr-only">Search sessions</span><input id="session-search" type="search" placeholder="Search title, folder, or session ID"></label><label class="filter-field"><span class="sr-only">Filter sessions</span><select id="session-filter"><option value="all">All sessions</option><option value="connected">Connected phones</option><option value="attention">Needs attention</option></select></label></div>
+        <div class="list-toolbar"><label class="search-field"><span data-icon="search"></span><span class="sr-only">Search sessions</span><input id="session-search" type="search" placeholder="Search title, folder, or session ID"></label><label class="filter-field"><span class="sr-only">Filter sessions</span><select id="session-filter"><option value="all">All sessions</option><option value="connected">Connected phones</option><option value="attention">Needs attention</option></select></label><button id="sessions-reload-all" class="button" type="button">Reload Weft in open sessions</button></div>
         <div id="sessions-list" class="session-list" aria-live="polite"></div>
       </section>
 
@@ -83,7 +84,7 @@ export function renderControlCenterPage() {
 
       <section id="panel-pairing" class="panel" hidden aria-labelledby="page-title">
         <div class="pairing-toolbar"><div><label for="pairing-target">Pairing destination</label><select id="pairing-target"><option value="">Device Station</option></select></div><button id="pairing-refresh" class="button" type="button">Refresh pairing</button></div>
-        <div class="card pairing-card"><div class="pairing-visual"><span id="pairing-badge" class="badge">Not loaded</span><div id="qr-placeholder" class="qr-placeholder"><span data-icon="phone"></span><strong id="pairing-visual-title">Your phone, connected securely</strong><p id="pairing-visual-detail">Pairing details load only in this view.</p></div><img id="pairing-qr" alt="Scan this QR code in the Weft phone app to pair" hidden><p class="small muted">Pairing codes are private. Never share them in chat or logs.</p></div><div class="pairing-instructions"><p class="eyebrow">A PRIVATE HANDSHAKE</p><h2>Bring your phone<br>into the loop.</h2><ol class="steps"><li><strong>Open Weft on your phone</strong><p>Use your installed phone app or PWA.</p></li><li><strong>Choose Scan QR</strong><p>Scan the code on this computer. Keep this page private.</p></li><li><strong>Stay connected</strong><p>Pairing establishes trust; a live connection also needs an available transport.</p></li></ol><p id="pairing-message" class="hint" role="status" aria-live="polite"></p><details id="pairing-code-details" hidden><summary>Use a pairing code instead</summary><label class="sr-only" for="pairing-code">Private pairing code</label><textarea id="pairing-code" readonly rows="4" spellcheck="false"></textarea><button id="pairing-copy" class="button compact" type="button">Copy pairing code</button></details></div></div>
+        <div class="card pairing-card"><div class="pairing-visual"><span id="pairing-badge" class="badge">Not loaded</span><div id="qr-placeholder" class="qr-placeholder"><span data-icon="phone"></span><strong id="pairing-visual-title">Your phone, connected securely</strong><p id="pairing-visual-detail">Pairing details load only in this view.</p></div><img id="pairing-qr" alt="Scan this QR code in the Weft phone app to pair" hidden><p class="small muted">Pairing codes are private. Never share them in chat or logs.</p></div><div class="pairing-instructions"><p class="eyebrow">A PRIVATE HANDSHAKE</p><h2>Bring your phone<br>into the loop.</h2><ol class="steps"><li><strong>Open Weft on your phone</strong><p>Use your installed phone app or PWA.</p></li><li><strong>Scan the QR</strong><p>Point your phone camera at the code, or use Scan QR in the app. Keep this page private.</p></li><li><strong>Stay connected</strong><p>Pairing establishes trust; a live connection also needs an available transport.</p></li></ol><p id="pairing-message" class="hint" role="status" aria-live="polite"></p><details id="pairing-code-details" hidden><summary>Use a pairing code instead</summary><label class="sr-only" for="pairing-code">Private pairing code</label><textarea id="pairing-code" readonly rows="4" spellcheck="false"></textarea><button id="pairing-copy" class="button compact" type="button">Copy pairing code</button></details></div></div>
         <div class="notice warning pairing-trust"><div><strong>Replacing a phone changes trust.</strong><p>The previous phone loses its pairing. This is an explicit trust rotation, not a reconnect button.</p></div><button id="pairing-replace" class="button danger-quiet" type="button" disabled>Replace paired phone</button></div>
       </section>
 
@@ -104,7 +105,7 @@ export function renderControlCenterPage() {
 </div>
 <dialog id="confirmation" aria-labelledby="confirmation-title" aria-describedby="confirmation-description"><form method="dialog"><span class="dialog-icon" data-icon="shield"></span><h2 id="confirmation-title">Confirm change</h2><p id="confirmation-description"></p><ul id="confirmation-effects"></ul><div class="actions"><button id="confirmation-cancel" class="button" value="cancel" autofocus>Cancel</button><button id="confirmation-accept" class="button danger" value="confirm">Confirm</button></div></form></dialog>
 <noscript><p class="notice error">JavaScript is required to load local status and explicitly requested operations.</p></noscript>
-<script>(${controlCenterClient.toString()})();</script>
+<script>const decideStationAction = ${decideStationAction.toString()};(${controlCenterClient.toString()})();</script>
 </body></html>`;
 }
 
@@ -441,12 +442,25 @@ function controlCenterClient() {
     return item?.paired ? "Trusted; contact not reported" : "No contact reported";
   }
   function sessionGroup(item) {
+    if (item?.label === "stalled" || item?.label === "gone") return "need attention";
     if (item?.state === "dormant") return "not shared";
-    if (item?.state === "pairing-ready") return "awaiting phone";
-    if (/^(activating|connecting|starting|recovering)$/.test(item?.state)) return "connecting";
-    if (/^(active|running)$/.test(item?.state)) return "shared";
-    if (/failed|error|unresponsive|endpoint-refresh/i.test(item?.state)) return "need attention";
+    if (item?.state === "waiting") return "awaiting phone";
+    if (/^(connecting|starting|recovering)$/.test(item?.state)) return "connecting";
+    if (item?.state === "linked") return "shared";
+    if (/failed|error|unresponsive|ending/i.test(item?.state)) return "need attention";
     return "status unreported";
+  }
+  // Plain words for the shared sessionHealth() reasons (same projection the phone uses).
+  const HEALTH_REASONS = {
+    "phone-away": "Phone in background", "link-stuck": "Link stuck — repairing", unresponsive: "Session not answering",
+    "owner-unknown": "Owner can't be proven", "controller-conflict": "Another phone controls it",
+    "endpoint-changed": "Laptop address changed", "config-error": "Transport configuration error",
+    "shared-outage": "Relay outage (all sessions)", "needs-attention": "Station tried twice — needs attention",
+    "update-required": "Needs a Weft update — reload Weft in this session",
+  };
+  function healthText(item) {
+    if (!item?.label) return "";
+    return "Health: " + item.label + (item.reason ? " · " + (HEALTH_REASONS[item.reason] || item.reason) : "");
   }
   function progress(item) {
     if (!item || item.state === "ready" || item.stage === "ready") return "";
@@ -674,6 +688,8 @@ function controlCenterClient() {
       if (session.busy === false) meta.append(element("span", "Agent idle"));
       if (session.state !== "dormant") meta.append(element("span", "Last phone contact: " + lastContact(session)));
       if (session.pid) meta.append(element("span", "PID " + session.pid));
+      if (healthText(session)) meta.append(element("span", healthText(session)));
+      if (session.lastRepair) meta.append(element("span", "Last repair: " + session.lastRepair.result + (timestamp(session.lastRepair.at) !== null ? " · " + elapsed(session.lastRepair.at) + " ago" : "")));
       content.append(meta, element("div", "Session " + (session.sessionId || "unknown") + " · Runtime " + session.runtimeId, "session-id"));
       if (session.error) content.append(element("p", message(session.error), "inline-error small"));
       const controls = element("div", null, "actions");
@@ -850,6 +866,7 @@ function controlCenterClient() {
     "project.add": "Adding project", "project.remove": "Removing project registration", "project.default": "Changing default project",
     "settings.save": "Saving settings", "pairing.replace": "Replacing phone trust",
     "session.activate": "Activating Weft session", "session.disconnect": "Disconnecting session phone", "session.start": "Starting Copilot session",
+    "sessions.reloadAll": "Reloading Weft in open sessions",
   };
   function renderOperation() {
     $("operation").hidden = !operation;
@@ -965,12 +982,19 @@ function controlCenterClient() {
     if (stale || !state) { primaryAction = "refresh"; primaryLabel = "Refresh status"; }
     else if (!["devtunnel", "supabase"].includes(state.settings.transport?.kind)) { primaryAction = "settings"; primaryLabel = "Set up connection"; }
     else if (!state.projects.length && state.station?.state === "stopped") { primaryAction = "projects"; primaryLabel = "Register a project"; }
-    else if (state.station?.state === "stopped") { primaryAction = "start"; primaryLabel = "Start Station"; }
-    else if (state.station?.state === "crash-looping") { primaryAction = "restart"; primaryLabel = "Restart Station"; }
-    else if (state.connection?.liveState === "restart-needed") { primaryAction = "restart"; primaryLabel = "Review Station restart"; }
-    else if (/failed|recovering|starting|unresponsive|waiting-network/.test(state.station?.state || "") ||
-        state.settings.transport?.kind === "devtunnel" && /failed|recovering|starting|unresponsive|waiting-network|degraded/.test(state.relay?.state || "")) {
-      primaryAction = "diagnostics"; primaryLabel = "View connection details";
+    else if (workloadSupported() && state.station && !isUnknown(state.station.state) && state.station.state !== "unsupported") {
+      // Same decision as `weft start` (ensureStationRunning); Start/Restart/Repair all run station.start.
+      const decision = decideStationAction({ state: state.station.state, version: state.station.version, installId: state.station.installId,
+        pid: state.station.pid, expected: { version: state.version, installId: state.installId } });
+      if (decision.action === "already-running") {
+        if (state.connection?.liveState === "restart-needed") { primaryAction = "restart"; primaryLabel = "Review Station restart"; }
+        else if (/failed|recovering|starting|waiting-network/.test(state.station.state) ||
+            state.settings.transport?.kind === "devtunnel" && /failed|recovering|starting|unresponsive|waiting-network|degraded/.test(state.relay?.state || "")) {
+          primaryAction = "diagnostics"; primaryLabel = "View connection details";
+        } else { primaryAction = "pairing"; primaryLabel = decision.label; }
+      } else if (decision.action === "foreground") { primaryAction = "diagnostics"; primaryLabel = decision.label; }
+      else if (decision.action === "wait") { primaryAction = "refresh"; primaryLabel = decision.label; }
+      else { primaryAction = "start"; primaryLabel = decision.label; }
     }
     primary.textContent = primaryLabel;
     primary.dataset.action = primaryAction;
@@ -1104,6 +1128,11 @@ function controlCenterClient() {
   $("retry").addEventListener("click", () => void refreshState());
   $("session-search").addEventListener("input", () => { renderSessions(); updateControls(); });
   $("session-filter").addEventListener("change", () => { renderSessions(); updateControls(); });
+  $("sessions-reload-all").addEventListener("click", async () => {
+    if (await confirmChange("Reload Weft in open sessions?", "Each open Copilot session reloads its Weft extension so it runs the updated code.", ["A running turn in those sessions is interrupted.", "Phones reconnect on their own; Copilot itself keeps running."], "Reload Weft")) {
+      await runOperation("sessions.reloadAll", { confirmed: true });
+    }
+  });
   $("operation-dismiss").addEventListener("click", () => { if (operation?.state !== "running") { operation = null; renderOperation(); } });
   $("operation-retry").addEventListener("click", () => { clearTimeout(operationTimer); void pollOperation(); });
   for (const kind of ["station", "relay"]) {

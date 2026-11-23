@@ -73,7 +73,7 @@ describe('scenario: resume a CLI session from the phone', () => {
       loading: false,
     });
 
-    // Resume it — spawns an Initializing card and sends RESUME_SESSION (not SPAWN_SESSION).
+    // Resume it — spawns an Initializing card and sends a target-only v3 OPEN_SESSION.
     const tempId = await h!.manager.resumeSession('listener-1', {
       sessionId: 'sid-42',
       mode: 'allow-all',
@@ -86,19 +86,24 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(h!.active()?.status).toBe('initializing');
     expect(h!.active()?.meta.title).toBe('Fix the bug');
     expect(h!.active()?.meta.sessionId).toBe('sid-42');
-    const resume = listener!.sentOfKind('control.resume_session')[0];
-    expect(resume).toMatchObject({ sessionId: 'sid-42', mode: 'allow-all' });
+    const resume = listener!.sentOfKind('control.open_session')[0]!;
+    expect(resume).toEqual({
+      requestId: expect.any(String),
+      target: { sessionId: 'sid-42' },
+      options: { permissionMode: 'allow-all', title: null },
+    });
     expect(listener!.sentOfKind('control.spawn_session')).toHaveLength(0);
 
-    // The laptop replies with the resumed session's pairing material (reusing the spawn path).
-    listener!.emit(
-      B.spawnPairing(
-        resume.requestId as string,
-        { v: 1, channelId: 'resumed-1', pub: 'resumed-pub', kind: 'session', transport: { kind: 'local' } },
-        null,
-        null,
-      ),
-    );
+    // Station resumes it and hands over the resumed session's pairing material in lifecycle_status.
+    listener!.emit(B.lifecycleStatus({
+      requestId: resume.requestId as string,
+      revision: 2,
+      stage: 'preparing-link',
+      result: {
+        action: 'resume',
+        payload: { v: 1, channelId: 'resumed-1', pub: 'resumed-pub', kind: 'session', transport: { kind: 'local' } },
+      },
+    }));
     await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
@@ -112,7 +117,7 @@ describe('scenario: resume a CLI session from the phone', () => {
     const deviceEvents = h!.snapshot().devices[0]!.events;
     expect(deviceEvents.some((e) => e.eventSubtype === 'session_list_request')).toBe(true);
     expect(deviceEvents.some((e) => e.eventSubtype === 'session_list')).toBe(true);
-    expect(deviceEvents.some((e) => e.eventSubtype === 'resume_session')).toBe(true);
+    expect(deviceEvents.some((e) => e.eventSubtype === 'open_session')).toBe(true);
   });
 
   it('serializes refreshes per device and keeps each folder/sort snapshot separate', async () => {
@@ -237,8 +242,16 @@ describe('scenario: resume a CLI session from the phone', () => {
     });
     await h!.flush();
 
-    const resume = listener!.sentOfKind('control.resume_session')[0];
-    listener!.emit(B.spawnResult(resume.requestId as string, false, 'That session no longer exists.'));
+    const resume = listener!.sentOfKind('control.open_session')[0]!;
+    listener!.emit(B.lifecycleStatus({
+      requestId: resume.requestId as string,
+      revision: 1,
+      stage: 'resolving',
+      outcome: 'failed',
+      reason: 'not-found',
+      result: { message: 'That session no longer exists.' },
+    }));
+    await vi.advanceTimersByTimeAsync(0);
     await h!.flush();
 
     expect(h!.snapshot().activeId).toBe(tempId);
@@ -246,7 +259,7 @@ describe('scenario: resume a CLI session from the phone', () => {
     expect(h!.active()?.error).toBe('That session no longer exists.');
   });
 
-  it('retries a slow resume with the same operation id instead of starting a second writer', async () => {
+  it('retries a slow resume with the same request id instead of starting a second writer', async () => {
     await h!.manager.addByQr(listenerQr('listener-retry'));
     await h!.flush();
     const listener = registry.get('listener-retry')!;
@@ -258,7 +271,7 @@ describe('scenario: resume a CLI session from the phone', () => {
       cwd: 'C:\\repo\\weft',
     });
     await h!.flush();
-    const first = listener.sentOfKind('control.resume_session')[0]!;
+    const first = listener.sentOfKind('control.open_session')[0]!;
 
     await vi.advanceTimersByTimeAsync(90_000);
     await h!.flush();
@@ -267,10 +280,10 @@ describe('scenario: resume a CLI session from the phone', () => {
     await h!.manager.retrySpawn(tempId);
     await h!.flush();
 
-    const requests = listener.sentOfKind('control.resume_session');
+    const requests = listener.sentOfKind('control.open_session');
     expect(requests).toHaveLength(2);
     expect(requests[1]!.requestId).toBe(first.requestId);
-    expect(requests[1]!.sessionId).toBe('sid-slow');
+    expect(requests[1]!.target).toEqual({ sessionId: 'sid-slow' });
   });
 });
 
@@ -313,7 +326,7 @@ describe('scenario: resuming a session the phone is already driving', () => {
     await h!.flush();
 
     // No message to the laptop at all — the only thing a resume could have achieved is already true.
-    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(0);
+    expect(listener!.sentOfKind('control.open_session')).toHaveLength(0);
     expect(id).toBe('already-here');
     expect(h!.snapshot().activeId).toBe('already-here');
     // And no second card: the reconcile that used to clean this up disposed the duplicate card but
@@ -340,7 +353,7 @@ describe('scenario: resuming a session the phone is already driving', () => {
     });
     await h!.flush();
 
-    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(1);
+    expect(listener!.sentOfKind('control.open_session')).toHaveLength(1);
   });
 
   it('resumes normally when no card on this phone knows the session', async () => {
@@ -357,7 +370,7 @@ describe('scenario: resuming a session the phone is already driving', () => {
     });
     await h!.flush();
 
-    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(1);
+    expect(listener!.sentOfKind('control.open_session')).toHaveLength(1);
   });
 
   it('reconnects an archived card first, and only resumes if it does not come back', async () => {
@@ -380,13 +393,13 @@ describe('scenario: resuming a session the phone is already driving', () => {
     // Reconnect is tried first: it keeps the transcript on the same card and cannot fork a process.
     expect(h!.snapshot().activeId).toBe('napping');
     expect(h!.byChannel('napping')?.status).toBe('connecting');
-    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(0);
+    expect(listener!.sentOfKind('control.open_session')).toHaveLength(0);
 
     // The laptop never confirms the session, so the pairing really is dead — now a resume is the
     // only way back, and the ladder falls through to it.
     await vi.advanceTimersByTimeAsync(31_000);
     await pending;
 
-    expect(listener!.sentOfKind('control.resume_session')).toHaveLength(1);
+    expect(listener!.sentOfKind('control.open_session')).toHaveLength(1);
   });
 });

@@ -46,6 +46,12 @@ export interface SessionView {
   events: DebugEvent[];
   error?: string;
   spawning?: SessionConnection['spawning'];
+  /** Protocol v3 link (generation, readiness, update-required). */
+  link?: SessionConnection['link'];
+  /** Station's last health verdict for this session. */
+  health?: SessionConnection['health'];
+  /** The in-progress (or just finished) recover() run that drives the recovery bar. */
+  recovery?: SessionConnection['recovery'];
 }
 
 /** The whole app state the SHELL subscribes to: readiness, the active session, and every card. */

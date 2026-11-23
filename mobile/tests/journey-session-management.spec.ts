@@ -4,8 +4,8 @@ import { test, expect } from '@playwright/test';
 //
 // Proves the drawer + confirm + routing flow a real user drives: open the session
 // drawer, see the joined session listed with its demo tag, jump to the scanner,
-// and delete a session through the row's two-step confirmation. The status menu
-// uses the larger leave-session confirmation before removing the current session.
+// and delete a session through the row's two-step confirmation. The status menu's
+// "Remove from this phone" uses the larger confirmation before removing the current session.
 //
 // NOTE ON MULTI-SESSION: the in-app demo hard-codes one Copilot sessionId, and the
 // manager dedupes cards by sessionId (a resume collapses onto the same card), so a
@@ -69,15 +69,17 @@ test.describe('Journey: session management', () => {
     await expect(page.locator('.weft-session')).toHaveCount(0);
   });
 
-  test('the status-bar menu offers the leave-session confirmation', async ({ page }) => {
+  test('the status-bar menu offers Remove from this phone behind a confirmation', async ({ page }) => {
     await page.getByRole('button', { name: 'Session menu' }).click();
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: /Join another session/ })).toHaveCount(0);
-    await menu.getByRole('menuitem', { name: /Leave this session/ }).click();
+    await expect(menu.getByRole('menuitem', { name: 'Scan QR to connect' })).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Remove from this phone' }).click();
 
-    const confirm = page.getByRole('dialog', { name: 'Leave this session?' });
+    const confirm = page.getByRole('dialog', { name: 'Remove from this phone?' });
     await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText('The session keeps running on the laptop.');
     await confirm.getByRole('button', { name: 'Cancel' }).click();
     await expect(confirm).toHaveCount(0);
     await expect(page.locator('.weft-session')).toBeVisible();

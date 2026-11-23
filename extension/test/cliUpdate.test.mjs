@@ -147,7 +147,7 @@ test("weft update --check reports same-version missing or corrupt mandatory file
   mkdirSync(installDir);
   mkdirSync(skillDir);
   for (const name of RELEASE_BUNDLE_NAMES) writeFileSync(join(installDir, name), payloads[name]);
-  writeFileSync(join(installDir, "activeRuntime.mjs"), "corrupt");
+  writeFileSync(join(installDir, "sessionLink.mjs"), "corrupt");
   writeFileSync(join(skillDir, "SKILL.md"), payloads[RELEASE_SKILL_NAME]);
   try {
     const result = await execFileAsync(process.execPath, [cliPath, "update", "--check"], {
@@ -158,8 +158,8 @@ test("weft update --check reports same-version missing or corrupt mandatory file
       },
       timeout: 10_000,
     });
-    assert.match(result.stdout, /Repair required:.*activeRuntime\.mjs/);
-    assert.equal(readFileSync(join(installDir, "activeRuntime.mjs"), "utf8"), "corrupt");
+    assert.match(result.stdout, /Repair required:.*sessionLink\.mjs/);
+    assert.equal(readFileSync(join(installDir, "sessionLink.mjs"), "utf8"), "corrupt");
   } finally {
     await new Promise((resolveClose, rejectClose) => server.close((error) => error ? rejectClose(error) : resolveClose()));
     rmSync(root, { recursive: true, force: true });
@@ -205,6 +205,9 @@ test("new updater repairs an expanded same-version bundle set left incomplete by
   writeFileSync(join(installDir, "extension.mjs"), "corrupt old transaction");
   writeFileSync(join(skillDir, "SKILL.md"), payloads[RELEASE_SKILL_NAME]);
   writeFileSync(join(home, "pairing-sentinel.json"), '{"paired":true}');
+  const leftoverBackup = join(installDir, "node_modules", ".node-pty.123.456.backup");
+  mkdirSync(join(leftoverBackup, "prebuilds"), { recursive: true });
+  writeFileSync(join(leftoverBackup, "prebuilds", "pty.node"), "old native runtime");
   try {
     const result = await execFileAsync(process.execPath, [cliPath, "update"], {
       env: {
@@ -215,6 +218,8 @@ test("new updater repairs an expanded same-version bundle set left incomplete by
       timeout: 30_000,
     });
     assert.match(result.stdout, new RegExp(`Updated to Weft ${currentVersion.replaceAll(".", "\\.")}`));
+    assert.equal(existsSync(leftoverBackup), false, "leftover node-pty backup folders are removed after the update");
+    assert.match(result.stdout, /Removed 1 leftover node-pty backup folder/);
     assert.deepEqual(readFileSync(join(installDir, futureBundle)), payloads[futureBundle]);
     assert.deepEqual(readFileSync(join(installDir, "extension.mjs")), payloads["extension.mjs"]);
     assert.equal(readFileSync(join(home, "pairing-sentinel.json"), "utf8"), '{"paired":true}');
@@ -225,7 +230,7 @@ test("new updater repairs an expanded same-version bundle set left incomplete by
 });
 
 test("weft update keeps the complete prior release when the staged skill fails integrity", async () => {
-  const bundleNames = ["extension.mjs", "activeRuntime.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
+  const bundleNames = ["extension.mjs", "sessionLink.mjs", "relayServerProcess.mjs", "devtunnelHostWatchdog.mjs", "weft.mjs"];
   const payloads = Object.fromEntries(bundleNames.map((name) => [name, `new:${name}`]));
   const files = Object.fromEntries(
     bundleNames.map((name) => [

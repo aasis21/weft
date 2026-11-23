@@ -206,25 +206,39 @@
   margin-left: auto;
 }
 
-.drawer-btn .weft-menu-icon {
-  display: block;
-  width: 24px;
-  height: 24px;
+/* Header menu trigger: the Weft mark in a 36px accent tile; the button keeps the 44px hit target. */
+.weft-menu-tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  transition: background 140ms ease;
 }
+.icon-btn .weft-menu-tile svg,
+.weft-session .icon-btn .weft-menu-tile svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+.weft-session .icon-btn.drawer-btn:hover,
+.weft-session .icon-btn.weft-mark-btn:hover { background: transparent; }
+.drawer-btn:hover .weft-menu-tile,
+.weft-mark-btn:hover .weft-menu-tile { background: color-mix(in srgb, var(--accent) 26%, transparent); }
 .drawer-btn { position: relative; }
-.drawer-btn .decision-waiting-dot {
+.weft-menu-tile .decision-waiting-dot {
   position: absolute;
-  top: 5px;
-  right: 4px;
+  top: -3px;
+  right: -3px;
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: var(--warning);
   box-shadow: 0 0 0 2px var(--bg, #0d1117);
-}
-.weft-mark-btn .weft-mark {
-  font-size: 19px;
-  line-height: 1;
 }
 .session-count {
   position: absolute;
@@ -499,6 +513,7 @@
 .bar-menu-item {
   display: block;
   width: 100%;
+  min-height: 44px;
   padding: 9px 10px;
   border: 0;
   border-radius: 9px;
@@ -508,9 +523,11 @@
   text-align: left;
 }
 .bar-menu-item:hover { background: var(--bg); }
-.bar-menu-item.bar-menu-item-with-icon { display:flex; align-items:center; gap:8px; }
-.bar-menu-item-with-icon svg { flex:none; display:block; }
-.bar-menu-item.danger { color: var(--error); }
+.bar-menu-item.bar-menu-item-with-icon { display:flex; align-items:center; gap:10px; }
+.bar-menu-item-with-icon svg { flex:none; display:block; color: var(--fg-dim); }
+.bar-menu-item.danger,
+.bar-menu-item.danger svg { color: var(--error); }
+.bar-menu-sep { height: 1px; margin: 5px 6px; background: var(--bg-rule); }
 @keyframes weft-pop {
   from { opacity: 0; transform: translateY(-4px); }
 }
@@ -4413,8 +4430,12 @@
 .controls-sheet.is-dragging { transition: none; }
 .controls-sheet.is-snapping { transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1); }
 @media (prefers-reduced-motion: reduce) { .controls-sheet.is-snapping { transition: none; } }
-/* Swipes on the pill and the sheet's grip are handled in JS, so the browser must not pan from them. */
+/* Swipe up on the composer and drag down on the sheet are handled in JS (see Composer.tsx): the
+   browser must not pan from the pill or the sheet; the sheet's lists still scroll vertically and
+   claim a downward drag from their top in a non-passive touchmove listener. */
 .model-pill { touch-action: none; }
+.controls-sheet { touch-action: none; }
+.controls-sheet .controls-scroll { touch-action: pan-y; }
 .controls-grip {
   display: flex;
   flex: none;

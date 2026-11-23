@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { WeftMenuIcon } from '@/ui/brand/WeftMark';
+import { WeftMenuTile } from '@/ui/brand/WeftMark';
 import type {
   CSSProperties,
   JSX,
@@ -501,7 +501,7 @@ export function ExploreScreen({
             </button>
           ) : desktopDocked ? (
             <button type="button" className="icon-btn weft-mark-btn" aria-label="About Weft" onClick={onGoHome}>
-              <span className="weft-mark" aria-hidden="true">⎈</span>
+              <WeftMenuTile />
             </button>
           ) : (
             <button
@@ -510,7 +510,7 @@ export function ExploreScreen({
               aria-label={(active?.unreadCount ?? 0) > 0 ? `Open sessions, ${active?.unreadCount} unread` : 'Open sessions'}
               onClick={onOpenSessions}
             >
-              <WeftMenuIcon />
+              <WeftMenuTile />
             </button>
           )}
           <div className="explore-heading">

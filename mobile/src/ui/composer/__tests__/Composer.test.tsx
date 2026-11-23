@@ -248,6 +248,40 @@ describe('Composer', () => {
     expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
   });
 
+  it('marks Medium as the default effort when the laptop reports levels but no default', async () => {
+    const user = userEvent.setup();
+    renderComposer({
+      model: {
+        current: { modelId: 'auto', name: 'Auto', reasoningEffort: null },
+        models: [
+          { id: 'auto', name: 'Auto', efforts: [], defaultEffort: null },
+          { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts: ['low', 'medium', 'high'], defaultEffort: null },
+        ],
+      },
+      onModelChange: vi.fn(),
+    });
+
+    await user.click(screen.getByRole('button', { name: /^Session controls:/ }));
+    await user.click(screen.getByRole('radio', { name: /GPT-6\.1 Sol/ }));
+    const efforts = screen.getByRole('radiogroup', { name: 'Effort for GPT-6.1 Sol' });
+    const medium = within(efforts).getByRole('radio', { name: /^Medium, model default/ });
+    expect(medium).toHaveTextContent('· default');
+    expect(medium).toHaveAttribute('aria-checked', 'true');
+    expect(within(efforts).getAllByRole('radio').filter((r) => /model default/.test(r.getAttribute('aria-label') ?? '')))
+      .toHaveLength(1);
+  });
+
+  it('keeps the last known model · effort on the greyed pill while offline', () => {
+    const { rerender, props } = renderComposer({ model: liveModels, onModelChange: vi.fn(), mode: 'plan' as SessionMode });
+    expect(screen.getByRole('button', { name: 'Session controls: Plan · Opus 5.5 · High' })).toBeEnabled();
+
+    rerender(<Composer {...props} disabled disabledReason="offline" />);
+    const pill = screen.getByRole('button', { name: 'Session controls: Opus 5.5 · High' });
+    expect(pill).toBeDisabled();
+    expect(pill).toHaveTextContent('Opus 5.5 · High');
+    expect(pill).not.toHaveTextContent('Model');
+  });
+
   describe('sheet gestures', () => {
     /** jsdom has no layout or real timing, so drags are driven by clientY and a controlled clock. */
     let clock: ReturnType<typeof vi.spyOn>;
@@ -299,8 +333,10 @@ describe('Composer', () => {
       expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
     });
 
-    it('does not drag from inside the model list', () => {
+    it('does not drag from inside a scrolled model list, which scrolls first', () => {
       const { sheet } = openSheet();
+      const list = sheet.querySelector('.controls-scroll') as HTMLElement;
+      Object.defineProperty(list, 'scrollTop', { configurable: true, value: 60 });
       const row = within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ });
       fireEvent.pointerDown(row, { pointerId: 1, clientY: 100 });
       clock.mockReturnValue(1200);
@@ -308,6 +344,118 @@ describe('Composer', () => {
       fireEvent.pointerUp(row, { pointerId: 1, clientY: 300 });
       expect(sheet.style.transform).toBe('');
       expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+    });
+
+    it('drags down from the top of the model list and closes', () => {
+      const { sheet } = openSheet();
+      const row = within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ });
+      fireEvent.pointerDown(row, { pointerId: 1, clientY: 100 });
+      clock.mockReturnValue(1200);
+      fireEvent.pointerMove(row, { pointerId: 1, clientY: 160 });
+      expect(sheet.style.transform).toBe('translate(-50%, 60px)');
+      clock.mockReturnValue(1400);
+      fireEvent.pointerMove(row, { pointerId: 1, clientY: 200 });
+      fireEvent.pointerUp(row, { pointerId: 1, clientY: 200 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+    });
+
+    it('lets an upward drag at the top of the list scroll it instead of moving the sheet', () => {
+      const { sheet } = openSheet();
+      const row = within(sheet).getByRole('radio', { name: /GPT-6\.1 Sol/ });
+      fireEvent.pointerDown(row, { pointerId: 1, clientY: 300 });
+      clock.mockReturnValue(1100);
+      fireEvent.pointerMove(row, { pointerId: 1, clientY: 280 });
+      fireEvent.pointerMove(row, { pointerId: 1, clientY: 400 });
+      fireEvent.pointerUp(row, { pointerId: 1, clientY: 400 });
+      expect(sheet.style.transform).toBe('');
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+    });
+
+    it('drags down from the header title and the mode buttons', () => {
+      const { sheet } = openSheet();
+      const title = within(sheet).getByText('Session controls');
+      fireEvent.pointerDown(title, { pointerId: 1, clientY: 100 });
+      clock.mockReturnValue(1300);
+      fireEvent.pointerMove(title, { pointerId: 1, clientY: 200 });
+      fireEvent.pointerUp(title, { pointerId: 1, clientY: 200 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Session controls:/ }));
+      const reopened = screen.getByRole('dialog', { name: 'Session controls' });
+      const plan = within(reopened).getByRole('radio', { name: 'Plan' });
+      fireEvent.pointerDown(plan, { pointerId: 2, clientY: 100 });
+      clock.mockReturnValue(1600);
+      fireEvent.pointerMove(plan, { pointerId: 2, clientY: 200 });
+      fireEvent.pointerUp(plan, { pointerId: 2, clientY: 200 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+    });
+
+    const swipe = (el: Element, from: { x: number; y: number }, to: { x: number; y: number }) => {
+      fireEvent.pointerDown(el, { pointerId: 7, clientX: from.x, clientY: from.y });
+      fireEvent.pointerMove(el, { pointerId: 7, clientX: (from.x + to.x) / 2, clientY: (from.y + to.y) / 2 });
+      fireEvent.pointerMove(el, { pointerId: 7, clientX: to.x, clientY: to.y });
+      fireEvent.pointerUp(el, { pointerId: 7, clientX: to.x, clientY: to.y });
+    };
+
+    it('opens on a swipe up that starts in the textarea', () => {
+      renderComposer({ model: liveModels, onModelChange: vi.fn() });
+      swipe(screen.getByRole('textbox', { name: 'Message your Copilot session' }), { x: 100, y: 500 }, { x: 104, y: 440 });
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+    });
+
+    it('opens on a swipe up from the buttons row and swallows the click that ends it', () => {
+      const onPrompt = vi.fn();
+      const { container } = renderComposer({ model: liveModels, onModelChange: vi.fn(), onPrompt });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message your Copilot session' }), { target: { value: 'hi' } });
+      const sendButton = screen.getByRole('button', { name: /^Send/ });
+      swipe(sendButton, { x: 300, y: 600 }, { x: 290, y: 540 });
+      fireEvent.click(sendButton);
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+      expect(onPrompt).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      swipe(container.querySelector('.composer-controls') as Element, { x: 20, y: 600 }, { x: 20, y: 555 });
+      expect(screen.getByRole('dialog', { name: 'Session controls' })).toBeInTheDocument();
+    });
+
+    it('leaves taps, short or sideways moves, and downward swipes alone', () => {
+      const onPrompt = vi.fn();
+      renderComposer({ model: liveModels, onModelChange: vi.fn(), onPrompt });
+      const textarea = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+      swipe(textarea, { x: 100, y: 500 }, { x: 100, y: 500 });
+      swipe(textarea, { x: 100, y: 500 }, { x: 100, y: 470 });
+      swipe(textarea, { x: 100, y: 500 }, { x: 200, y: 450 });
+      swipe(textarea, { x: 100, y: 500 }, { x: 100, y: 600 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+
+      fireEvent.change(textarea, { target: { value: 'hi' } });
+      const sendButton = screen.getByRole('button', { name: /^Send/ });
+      fireEvent.pointerDown(sendButton, { pointerId: 8, clientX: 300, clientY: 600 });
+      fireEvent.pointerUp(sendButton, { pointerId: 8, clientX: 300, clientY: 600 });
+      fireEvent.click(sendButton);
+      expect(onPrompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a scrolled textarea scroll instead of opening the sheet', () => {
+      renderComposer({ model: liveModels, onModelChange: vi.fn() });
+      const textarea = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+      Object.defineProperty(textarea, 'scrollTop', { configurable: true, value: 24 });
+      swipe(textarea, { x: 100, y: 500 }, { x: 100, y: 400 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+    });
+
+    it('does not open from a long-press drag (text selection) or while disabled', () => {
+      const { rerender, props } = renderComposer({ model: liveModels, onModelChange: vi.fn() });
+      const textarea = screen.getByRole('textbox', { name: 'Message your Copilot session' });
+      fireEvent.pointerDown(textarea, { pointerId: 9, clientX: 100, clientY: 500 });
+      clock.mockReturnValue(1700);
+      fireEvent.pointerMove(textarea, { pointerId: 9, clientX: 100, clientY: 440 });
+      fireEvent.pointerUp(textarea, { pointerId: 9, clientX: 100, clientY: 440 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
+
+      rerender(<Composer {...props} disabled disabledReason="offline" />);
+      swipe(screen.getByRole('textbox', { name: 'Message your Copilot session' }), { x: 100, y: 500 }, { x: 100, y: 400 });
+      expect(screen.queryByRole('dialog', { name: 'Session controls' })).not.toBeInTheDocument();
     });
 
     it('opens on a swipe up from the pill, while a tap still toggles it', () => {

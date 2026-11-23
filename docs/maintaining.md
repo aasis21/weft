@@ -8,7 +8,8 @@ are at <https://useweft.netlify.app>.
 
 No build step, remote Markdown renderer, CDN, or new dependency is required. Serve
 this directory as static files. GitHub Pages serves the documentation separately
-from Netlify's `mobile/dist` app deployment.
+from Netlify's `mobile/dist` app deployment; publish it by running the manual **Docs**
+workflow (`gh workflow run docs.yml`).
 
 ## Content changes
 

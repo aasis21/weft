@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX, KeyboardEvent } from 'react';
-import { WeftMenuIcon } from '@/ui/brand/WeftMark';
+import { WeftMenuTile } from '@/ui/brand/WeftMark';
 import type { LifecycleStatusMsg, SessionListSort, SpawnMode, StoredSession } from '@aasis21/weft-shared';
 import type { DeviceSessionListCache, ListenerDeviceState } from '@/session/model';
 import type { SessionView } from '@/session/view';
 import {
   lifecycleFailureMessage,
+  openFailed,
   requiresTakeoverConfirmation,
   type SessionOpenIntent,
 } from '@/session/access/sessionAccess';
@@ -30,7 +31,7 @@ interface StartSessionScreenProps {
   onDraftChange?(message: string): void;
   onConnectDevice(channelId: string): void;
   onOpen(intent: SessionOpenIntent): Promise<LifecycleStatusMsg>;
-  onConfirmTakeover(operationId: string): Promise<LifecycleStatusMsg>;
+  onConfirmTakeover(requestId: string): Promise<LifecycleStatusMsg>;
   /** Pull the folder's recent CLI/app sessions from the device. */
   onRefreshSessions(channelId: string, cwd?: string | null, sort?: SessionListSort): void;
   onScanListener(): void;
@@ -236,14 +237,14 @@ export function StartSessionScreen({
 
   const applyStatus = (status: LifecycleStatusMsg): void => {
     if (requiresTakeoverConfirmation(status)) {
-      setError(lifecycleFailureMessage(status.failure));
+      setError(lifecycleFailureMessage(status));
       setBlocked(status);
       setBusy(false);
       setOpeningId(null);
       return;
     }
-    if (status.state !== 'failed') return;
-    setError(lifecycleFailureMessage(status.failure));
+    if (!openFailed(status)) return;
+    setError(lifecycleFailureMessage(status));
     setBlocked(null);
     setBusy(false);
     setOpeningId(null);
@@ -302,13 +303,13 @@ export function StartSessionScreen({
     setBusy(true);
     setError(null);
     try {
-      applyStatus(await onConfirmTakeover(blocked.operationId));
+      applyStatus(await onConfirmTakeover(blocked.requestId));
     } catch (err) {
       fail(err, 'Could not take over the session.');
     }
   };
 
-  const canTakeOver = blocked?.failure?.actions.includes('confirm-takeover') === true;
+  const canTakeOver = blocked ? requiresTakeoverConfirmation(blocked) : false;
   const status = selected ? deviceStatus(selected) : null;
   const lastSeen = selected ? formatLastSeen(selected.lastSeenAt, now) : null;
   const hasText = message.trim().length > 0;
@@ -410,7 +411,7 @@ export function StartSessionScreen({
           onClick={() => setDrawerOpen(true)}
           aria-label="Open sessions"
         >
-          <WeftMenuIcon />
+          <WeftMenuTile />
         </button>
         <div className="status-id">
           <span className="status-title">Weft</span>

@@ -9,9 +9,11 @@ import type { WorkspaceCommand } from '@aasis21/weft-shared';
 import { isNativeRuntime } from '@/ui/hooks/usePairing';
 import { useBackHandler } from '@/ui/gestures/backNavigation';
 import { isFlagDone, markFlagDone, ONBOARDING_KEY } from '@/lib/firstRun';
+import { listenForPairingLinks, normalizePairingCode, takePairingLinkFromLocation } from '@/lib/pairingLinkRoute';
 import { sessionAccess, sessionRuntime } from '@/session/runtime/instance';
 import {
   lifecycleFailureMessage,
+  openFailed,
   requiresTakeoverConfirmation,
 } from '@/session/access/sessionAccess';
 
@@ -75,6 +77,8 @@ export default function App(): JSX.Element {
     if (!showLanding) setShowProduct(false);
   }, [showLanding]);
   const [error, setError] = useState<string | null>(null);
+  /** A pairing link opened from the web `/pair` route or an Android App Link, waiting to pair. */
+  const [pairingLink, setPairingLink] = useState<string | null>(null);
   const onChatVisibilityChange = useCallback((id: string | null): void => {
     sessionRuntime.setChatVisible(id);
   }, []);
@@ -142,6 +146,17 @@ export default function App(): JSX.Element {
     setDeviceDetailsChannelId(undefined);
     setAdding(true);
   }, []);
+
+  // A pairing link goes straight to the Connect progress UI. The web route scrubs the code from
+  // the address bar before anything else; native App Links arrive through the Capacitor App plugin.
+  useEffect(() => {
+    const fromLocation = takePairingLinkFromLocation();
+    if (fromLocation) setPairingLink(fromLocation);
+    return isNativeRuntime() ? listenForPairingLinks(setPairingLink) : undefined;
+  }, []);
+  useEffect(() => {
+    if (pairingLink) openJoin(false);
+  }, [pairingLink, openJoin]);
 
   const openStart = useCallback((channelId?: string, mode: StartMode = 'new'): void => {
     setExploreOpen(false);
@@ -217,7 +232,7 @@ export default function App(): JSX.Element {
   }, []);
 
   const handlePair = useCallback(async (raw: string): Promise<void> => {
-    const route = await sessionRuntime.addByQr(raw);
+    const route = await sessionRuntime.addByQr(normalizePairingCode(raw));
     completeOnboarding();
     setAdding(false);
     setShowLanding(false);
@@ -334,6 +349,8 @@ export default function App(): JSX.Element {
         error={error}
         onError={setError}
         onPair={handlePair}
+        autoPairCode={pairingLink}
+        onAutoPairStarted={() => setPairingLink(null)}
         onCancel={() => {
           setError(null);
           setAddManual(false);
@@ -493,7 +510,7 @@ export default function App(): JSX.Element {
                 deviceChannelId: deviceId,
                 target: { kind: 'offer', offerChannelId },
               }).then((status) => {
-                if (status.state === 'failed') setError(lifecycleFailureMessage(status.failure));
+                if (openFailed(status)) setError(lifecycleFailureMessage(status));
               });
             }}
             onOpenSession={(id) => {
@@ -556,11 +573,7 @@ export default function App(): JSX.Element {
           onOpenExplore={openExplore}
           onOpen={async (intent) => {
             const status = await sessionAccess.open(intent);
-            if (
-              status.state !== 'failed' &&
-              status.state !== 'cancelled' &&
-              !requiresTakeoverConfirmation(status)
-            ) {
+            if (!openFailed(status) && !requiresTakeoverConfirmation(status)) {
               setStarting(false);
               setStartDeviceId(undefined);
               setShowLanding(false);
@@ -568,13 +581,9 @@ export default function App(): JSX.Element {
             }
             return status;
           }}
-          onConfirmTakeover={async (operationId) => {
-            const status = await sessionAccess.confirmTakeover(operationId);
-            if (
-              status.state !== 'failed' &&
-              status.state !== 'cancelled' &&
-              !requiresTakeoverConfirmation(status)
-            ) {
+          onConfirmTakeover={async (requestId) => {
+            const status = await sessionAccess.confirmTakeover(requestId);
+            if (!openFailed(status) && !requiresTakeoverConfirmation(status)) {
               setStarting(false);
               setStartDeviceId(undefined);
               setShowLanding(false);
@@ -673,8 +682,11 @@ export default function App(): JSX.Element {
       onReloadHistory={(id) => sessionRuntime.reloadHistory(id)}
       onArchiveSession={(id) => sessionRuntime.archive(id)}
       onReconnect={(id) => void sessionRuntime.reconnect(id)}
-      onOpenSession={(intent) => sessionAccess.open(intent)}
-      onConfirmTakeover={(operationId) => sessionAccess.confirmTakeover(operationId)}
+      onRecover={(id) => void sessionRuntime.recover(id)}
+      onCancelRecovery={(id) => void sessionRuntime.cancelRecovery(id)}
+      onConfirmRecoveryTakeover={(id) => void sessionRuntime.confirmRecoveryTakeover(id)}
+      onRefresh={(id) => sessionRuntime.refresh(id)}
+      onConfirmTakeover={(requestId) => sessionAccess.confirmTakeover(requestId)}
       sessionOperation={active.spawning ? sessionRuntime.getLifecycleStatus(active.spawning.requestId) : null}
       onRetrySpawn={(id) => {
         const operationId = snapshot.sessions.find((session) => session.meta.channelId === id)

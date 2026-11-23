@@ -48,10 +48,12 @@ function lifecycleStatus(
   overrides: Partial<LifecycleStatusMsg> = {},
 ): LifecycleStatusMsg {
   return {
-    operationId: 'open-1',
-    fingerprint: 'fingerprint-1',
-    state: 'launching',
+    requestId: 'open-1',
     revision: 1,
+    stage: 'accepted',
+    outcome: null,
+    reason: null,
+    result: null,
     ...overrides,
   };
 }
@@ -61,7 +63,7 @@ function renderScreen(overrides: Partial<Props> = {}) {
     devices: [makeDevice()],
     onConnectDevice: vi.fn(),
     onOpen: vi.fn().mockResolvedValue(lifecycleStatus()),
-    onConfirmTakeover: vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' })),
+    onConfirmTakeover: vi.fn().mockResolvedValue(lifecycleStatus({ stage: 'preparing-link', result: { action: 'takeover' } })),
     onRefreshSessions: vi.fn(),
     onScanListener: vi.fn(),
     sessions: [],
@@ -111,23 +113,10 @@ const send = (): HTMLButtonElement => document.querySelector('.start-composer .s
 const composer = (): HTMLTextAreaElement => screen.getByLabelText(/first message/i) as HTMLTextAreaElement;
 
 const controllerConflict = lifecycleStatus({
-  state: 'activating',
-  failure: {
-    code: 'controller-conflict',
-    actions: ['confirm-takeover', 'cancel'],
-    message: 'That session is already running on this laptop and connected to a phone.',
-  },
-  challenge: {
-    challengeId: 'challenge-1',
-    operationId: 'open-1',
-    revision: 1,
-    storeAuthority: null,
-    sessionId: 'a',
-    runtimeInstanceId: 'runtime-1',
-    generation: 1,
-    pid: 42,
-    processStartedAt: 10,
-    responsive: true,
+  stage: 'awaiting-confirmation',
+  reason: 'controller-conflict',
+  result: {
+    challenge: { challengeId: 'challenge-1', runtimeId: 'runtime-1', controllerRevision: 2 },
   },
 });
 
@@ -234,8 +223,9 @@ describe('StartSessionScreen', () => {
 
   it('keeps the draft when the launch is refused', async () => {
     const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({
-      state: 'failed',
-      failure: { code: 'directory-not-found', actions: ['cancel'], message: 'The folder no longer exists: /gone' },
+      outcome: 'failed',
+      reason: 'not-found',
+      result: { message: 'The folder no longer exists: /gone' },
     }));
     renderScreen({ onOpen });
     fireEvent.change(composer(), { target: { value: 'Keep me' } });
@@ -409,19 +399,20 @@ describe('StartSessionScreen', () => {
 
   it('offers the takeover when the session is already attached elsewhere', async () => {
     const onOpen = vi.fn().mockResolvedValue(controllerConflict);
-    const onConfirmTakeover = vi.fn().mockResolvedValue(lifecycleStatus({ action: 'takeover' }));
+    const onConfirmTakeover = vi.fn().mockResolvedValue(lifecycleStatus({ stage: 'preparing-link', result: { action: 'takeover' } }));
     renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')], onOpen, onConfirmTakeover });
 
     fireEvent.click(screen.getByRole('button', { name: /fix the auth bug/i }));
-    await waitFor(() => expect(screen.getByText(/already running/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/another phone is using this session/i)).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /close it and open here/i }));
     await waitFor(() => expect(onConfirmTakeover).toHaveBeenCalledWith('open-1'));
   });
 
   it('does not offer the takeover for an ordinary failure', async () => {
     const onOpen = vi.fn().mockResolvedValue(lifecycleStatus({
-      state: 'failed',
-      failure: { code: 'directory-not-found', actions: ['choose-directory', 'cancel'], message: "The session's folder no longer exists: /gone" },
+      outcome: 'failed',
+      reason: 'not-found',
+      result: { message: "The session's folder no longer exists: /gone" },
     }));
     renderScreen({ devices: [resumeDevice('C:\\CLP\\ModernOrder')], onOpen });
     fireEvent.click(screen.getByRole('button', { name: /fix the auth bug/i }));

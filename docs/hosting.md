@@ -15,15 +15,19 @@ Device Station is the required machine-wide bridge for phone-driven discovery, S
 Open/Resume, and dormant-session activation. `/weft` is an explicit direct pairing for
 one current Copilot session and does not require Station.
 
-Before activation, each compatible extension writes only a small user-local presence
-record and listens on one Windows named pipe or Unix-domain socket. It performs no relay
-lookup, remote connection, cryptography, QR generation, logging, diagnostics,
-polling, heartbeat, retry timer, or other timer. Files provide discovery and recovery;
-the local endpoint provides authenticated live lifecycle commands. Neither is a relay.
+Before activation, each compatible extension writes only its own small user-local live record
+(`~/.weft/sessions-live/`) and listens on one Windows named pipe or Unix-domain socket. It performs
+no relay lookup, remote connection, cryptography, QR generation, logging, diagnostics, polling,
+heartbeat, retry timer, or other timer. The record provides discovery, recovery and the facts
+Station uses to derive session health; the local pipe provides authenticated, fenced commands
+(probe, activate, link repair, takeover, quiesce, reload). Neither is a relay.
 
 After pairing, application traffic flows directly between the phone and Copilot session
 over the selected encrypted Supabase or Dev Tunnel transport. Device Station and the
-local lifecycle endpoint are not in the active phone traffic path.
+local control pipe are not in the active phone traffic path. When Station's Dev Tunnel address
+changes it tells the bound phone with an `endpoint_update` message; a session's own link retries
+on its own with or without Station. Peers on an older Weft protocol are refused explicitly with an
+`update_required` message.
 
 ## Two separate things
 

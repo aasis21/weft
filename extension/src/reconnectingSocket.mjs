@@ -20,7 +20,7 @@ const WS_OPEN = 1;
  * The devtunnel path used to hand `createRelayTransport` a raw, one-shot `ws` socket with no
  * reconnect and no keepalive. When a Dev Tunnel (or the relay) drops an idle connection, that
  * socket is gone for good — and because the Device Station's device-heartbeat + status-line
- * timers are all `unref()`'d (see listener.mjs / bin/weft.mjs), the still-open socket handle is
+ * timers are all `unref()`'d (see station.mjs / bin/weft.mjs), the still-open socket handle is
  * the ONLY thing keeping the Node event loop alive. Once it disappears the loop drains and the
  * never-settling `await start()` in bin/weft.mjs trips Node's "Detected unsettled top-level
  * await" exit, silently killing the station. The Supabase transport never hit this because

@@ -14,6 +14,7 @@ import {
   backgroundLaunchAgentPlist, runBackgroundSupervisor,
   describeExitCode, summarizeWorkerError, readWorkerCrashReport, readUnexpectedTaskExit,
   describeWorkerProblem, restartStateFileName, workerFailureFileName,
+  backgroundInstallId, forceStopBackground,
 } from "../src/backgroundLifecycle.mjs";
 
 const options = { baseDir: "C:\\User's files\\Weft", cliPath: "C:\\Weft tools\\weft.mjs", nodePath: "C:\\node\\node.exe" };
@@ -40,6 +41,51 @@ test("background tasks are user-scoped, manual, limited, and safely quoted", () 
   const status = backgroundTaskScript("status", { ...options, role: "station" });
   assert.match(status, /Get-ScheduledTaskInfo/);
   assert.match(status, /lastResult=\$lastTaskResult/);
+});
+
+test("task definition and worker status share one installation identity", () => {
+  const installId = backgroundInstallId({ cliPath: options.cliPath, version: "0.2.75", platform: "win32" });
+  assert.match(installId, /^[0-9a-f]{16}$/);
+  assert.equal(backgroundInstallId({ cliPath: options.cliPath.toUpperCase(), version: "0.2.75", platform: "win32" }), installId);
+  assert.notEqual(backgroundInstallId({ cliPath: options.cliPath, version: "0.2.74", platform: "win32" }), installId);
+  assert.notEqual(backgroundInstallId({ cliPath: "C:\\checkout\\weft.mjs", version: "0.2.75", platform: "win32" }), installId);
+  const current = backgroundInstallId({ cliPath: options.cliPath });
+  assert.ok(backgroundTaskScript("start", { ...options, role: "station" }).includes(`installId=${current}`));
+  assert.ok(backgroundSupervisorScript({ ...options, role: "station" }).includes(`$weftInstallId='${current}'`),
+    "a new version changes the task action, so a running older task is never silently reused");
+  assert.match(backgroundTaskScript("status", { ...options, role: "station" }), /installId=\$taskInstallId/);
+  const plist = backgroundLaunchAgentPlist({ role: "station", baseDir: "/Users/example/.weft", cliPath: "/opt/weft/weft.mjs" });
+  assert.ok(plist.includes(`<key>WEFT_INSTALL_ID</key><string>${backgroundInstallId({ cliPath: "/opt/weft/weft.mjs" })}</string>`));
+});
+
+test("force stop kills only the verified worker pid, and network-pending startup is reported separately", async () => {
+  const calls = [];
+  const alive = new Set([41]);
+  const taskOperation = async (operation) => { calls.push(operation); return { state: operation }; };
+  const forced = await forceStopBackground("station", options, {
+    taskOperation, record: () => ({ pid: 41, processStartedAt: 5 }), verify: async () => ({ live: true }),
+    kill: (pid) => { calls.push(`kill-${pid}`); alive.delete(pid); }, isAlive: (pid) => alive.has(pid), sleep: async () => {},
+  });
+  assert.deepEqual(calls, ["disable", "kill-41", "stop"]);
+  assert.equal(forced.killedPid, 41);
+  calls.length = 0;
+  await forceStopBackground("station", options, {
+    taskOperation, record: () => ({ pid: 42, processStartedAt: 5 }), verify: async () => ({ live: false, reason: "pid-reused" }),
+    kill: () => calls.push("kill"), sleep: async () => {},
+  });
+  assert.deepEqual(calls, ["disable", "stop"], "a reused pid is never signalled");
+
+  let now = 0;
+  const pending = await startBackground("station", options, {
+    taskOperation: async () => ({}), inspect: async () => ({ state: "starting", stage: "waiting-network" }),
+    now: () => now, sleep: async (ms) => { now += ms; }, timeoutMs: 5_000, localTimeoutMs: 1_000, allowNetworkPending: true,
+  });
+  assert.equal(pending.networkPending, true);
+  now = 0;
+  await assert.rejects(startBackground("station", options, {
+    taskOperation: async () => ({}), inspect: async () => null,
+    now: () => now, sleep: async (ms) => { now += ms; }, timeoutMs: 5_000, localTimeoutMs: 1_000, allowNetworkPending: true,
+  }), /did not answer locally within 1 seconds/);
 });
 
 test("macOS launchd jobs are manually started and keep their job file outside LaunchAgents", () => {

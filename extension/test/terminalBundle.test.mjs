@@ -17,7 +17,7 @@ test("isolated bundles work without native assets and fail only explicit termina
     entryPoints: {
       weft: join(extension, "bin", "weft.mjs"),
       terminalHost: join(extension, "src", "terminalHost.mjs"),
-      listener: join(extension, "src", "listener.mjs"),
+      station: join(extension, "src", "station.mjs"),
       shared: join(extension, "..", "shared", "index.mjs"),
       extension: join(extension, "src", "extension.mjs"),
     },
@@ -63,9 +63,9 @@ test("isolated bundles work without native assets and fail only explicit termina
     assert.equal(disabled.supported, false);
     await disabled.stop();
 
-    const { createListener } = await import(pathToFileURL(join(root, "listener.mjs")).href);
+    const { createStation } = await import(pathToFileURL(join(root, "station.mjs")).href);
     const { generateKeyPair, createLocalTransport } = await import(pathToFileURL(join(root, "shared.mjs")).href);
-    const station = createListener({
+    const station = createStation({
       transport: createLocalTransport({ channelId: "no-native-test" }),
       transportDescriptor: { kind: "local", channelId: "no-native-test" },
       keyPair: await generateKeyPair(), channelId: "no-native-test", deviceId: "test-device",

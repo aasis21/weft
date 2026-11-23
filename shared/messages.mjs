@@ -15,6 +15,15 @@
 //
 // Zero dependencies on purpose: importable as-is by the Node extension and the browser app.
 
+import { LABELS as HEALTH_LABELS, REASONS as HEALTH_REASONS } from "./sessionHealth.mjs";
+
+/**
+ * Application protocol version carried by `channel_up` and `update_required`. Separate from the
+ * pairing handshake's PAIR_VERSION. Version 3 has no adapters: a peer on any other version gets an
+ * explicit `update_required` instead of a silent mismatch.
+ */
+export const PROTOCOL_VERSION = 3;
+
 /**
  * Top-level event types. Each is ALSO the transport topic the message publishes/subscribes on,
  * so there is no separate kind->event lookup to keep in sync — `eventType` is just a field.
@@ -93,6 +102,9 @@ export const SUBTYPE = Object.freeze({
     CATCH_UP_REQUEST: "catch_up_request",
     CATCH_UP_PAGE: "catch_up_page",
     CHANNEL_UP: "channel_up",
+    // both directions, session link: end-to-end ready after handlers attach (ext first, phone
+    // replies), then catch-up. Fenced by linkGeneration.
+    LINK_READY: "link_ready",
     WORKSPACE_REQUEST: "workspace_request",
     WORKSPACE_RESULT: "workspace_result",
     SESSION_META: "session_meta",
@@ -117,7 +129,7 @@ export const SUBTYPE = Object.freeze({
     PROJECT_LIST_REQUEST: "project_list_request",
     // listener -> phone: the machine's registered projects + the listener's display name.
     PROJECT_LIST: "project_list",
-    // phone -> listener: spawn a new Copilot session for a project with a permission mode.
+    // Legacy (pre-v3; replaced by OPEN_SESSION): spawn a new Copilot session for a project.
     SPAWN_SESSION: "spawn_session",
     // --- phone-driven resume of an existing CLI session (#resume) -----------
     // phone -> listener: give me the machine's recent resumable Copilot sessions (from the CLI
@@ -128,17 +140,25 @@ export const SUBTYPE = Object.freeze({
     // `{ sessionId, title, cwd, repository, branch, updatedAt }`. Sessions whose cwd no longer
     // exists are filtered out (a resume needs a valid working directory).
     SESSION_LIST: "session_list",
-    // phone -> listener: resume an existing CLI session by id (spawns `copilot --resume=<id>` in
+    // Legacy (pre-v3; replaced by OPEN_SESSION): resume an existing CLI session by id (spawns `copilot --resume=<id>` in
     // that session's own cwd). Replies over the SAME SPAWN_PAIRING / SPAWN_RESULT path a fresh
     // spawn uses, so the phone pairs to the resumed session digitally (no QR).
     RESUME_SESSION: "resume_session",
-    // Additive session-activation-v1 lifecycle contract. Mixed-version peers can project these
-    // messages to and from the legacy spawn/resume/status messages below.
+    // Protocol v3 open requests: the phone names a target; Station picks activate/resume/start.
     OPEN_SESSION: "open_session",
     LIFECYCLE_STATUS_REQUEST: "lifecycle_status_request",
     LIFECYCLE_STATUS: "lifecycle_status",
     TAKEOVER_CONFIRM: "takeover_confirm",
     LIFECYCLE_CANCEL: "lifecycle_cancel",
+    // phone -> Station: how is this session? Station -> phone: the shared sessionHealth() verdict.
+    SESSION_HEALTH_REQUEST: "session_health_request",
+    SESSION_HEALTH: "session_health",
+    // Station -> phone: the laptop's reachable address (Dev Tunnel) changed.
+    ENDPOINT_UPDATE: "endpoint_update",
+    // either direction: the peer speaks another protocol version; one side must update Weft.
+    UPDATE_REQUIRED: "update_required",
+    // Legacy (pre-v3; replaced by LIFECYCLE_STATUS) launch replies below, kept until the extension
+    // and phone stop using them.
     // listener -> phone: the pre-minted pairing payload for a freshly spawned session.
     SPAWN_PAIRING: "spawn_pairing",
     // listener -> phone: terminal result of a spawn request (ok / failure reason).
@@ -245,6 +265,35 @@ export const LIFECYCLE_FAILURE_CODES = Object.freeze([
   "internal-error",
 ]);
 
+/** v3 open-request stages, in order (`awaiting-confirmation` only for a takeover). */
+export const OPEN_STAGES = Object.freeze([
+  "accepted",
+  "resolving",
+  "awaiting-confirmation",
+  "dispatching",
+  "awaiting-runtime",
+  "preparing-link",
+]);
+/** v3 terminal outcomes; `null` while the request is still in progress. */
+export const OPEN_OUTCOMES = Object.freeze(["done", "failed", "cancelled", "outcome-unknown"]);
+/** Why a request failed or is waiting; `null` when there is nothing to explain. */
+export const OPEN_REASONS = Object.freeze([
+  "invalid-request",
+  "not-found",
+  "owner-unknown",
+  "controller-conflict",
+  "takeover-stale",
+  "update-required",
+  "config-error",
+  "launch-failed",
+  "runtime-unavailable",
+  "link-failed",
+  "timeout",
+  "internal-error",
+]);
+/** The mechanism Station chose; reported in `result.action`, never requested by the phone. */
+export const OPEN_ACTIONS = Object.freeze(["activate", "repair", "resume", "start", "takeover"]);
+
 const now = () => Date.now();
 const textEncoder = new TextEncoder();
 
@@ -311,8 +360,44 @@ export async function openIntentFingerprint(intent) {
     name: normalized.name,
     takeoverRequested: normalized.takeoverRequested,
   });
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", textEncoder.encode(material));
+  return sha256Hex(material);
+}
+
+async function sha256Hex(text) {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", textEncoder.encode(text));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeRequestTarget(target) {
+  const sessionId = nonEmptyString(target?.sessionId);
+  if (sessionId) {
+    const storeAuthority = nonEmptyString(target.storeAuthority);
+    return storeAuthority ? { sessionId, storeAuthority } : { sessionId };
+  }
+  return { project: nonEmptyString(target?.project) ?? "" };
+}
+
+/** Normalize a v3 `open_session` payload (phone-built or received by Station). */
+export function normalizeOpenRequest(request = {}) {
+  const options = request?.options ?? {};
+  return {
+    requestId: nonEmptyString(request?.requestId) ?? "",
+    target: normalizeRequestTarget(request?.target),
+    options: {
+      permissionMode: options.permissionMode === "allow-all" ? "allow-all" : "default",
+      title: nonEmptyString(options.title),
+    },
+  };
+}
+
+/** Idempotency fingerprint of a v3 open request: sha256(target | options | requester), hex. */
+export async function openRequestFingerprint(request, requester = null) {
+  const normalized = normalizeOpenRequest(request?.msg ?? request);
+  return sha256Hex(canonicalJson({
+    target: normalized.target,
+    options: normalized.options,
+    requester: nonEmptyString(requester),
+  }));
 }
 
 function normalizeFailure(failure) {
@@ -374,6 +459,57 @@ function normalizedLifecycleStatus(status = {}) {
     ...(Number.isFinite(status.updatedAt) ? { updatedAt: status.updatedAt } : {}),
   };
 }
+
+function normalizeOpenChallenge(challenge) {
+  if (!challenge || typeof challenge !== "object") return null;
+  const challengeId = nonEmptyString(challenge.challengeId);
+  const runtimeId = nonEmptyString(challenge.runtimeId);
+  if (!challengeId || !runtimeId) return null;
+  const controllerName = nonEmptyString(challenge.controllerName);
+  return {
+    challengeId,
+    runtimeId,
+    controllerRevision: lifecycleRevision(challenge.controllerRevision),
+    ...(controllerName ? { controllerName } : {}),
+  };
+}
+
+// Whitelisted so private handoff material (identity files, capabilities) can never leak to a phone.
+function normalizeOpenResult(result) {
+  if (!result || typeof result !== "object") return null;
+  const text = (key) => {
+    const value = nonEmptyString(result[key]);
+    return value ? { [key]: value } : {};
+  };
+  const challenge = normalizeOpenChallenge(result.challenge);
+  const normalized = {
+    ...(OPEN_ACTIONS.includes(result.action) ? { action: result.action } : {}),
+    ...text("sessionId"),
+    ...text("storeAuthority"),
+    ...text("runtimeId"),
+    ...(Number.isSafeInteger(result.pid) && result.pid > 0 ? { pid: result.pid } : {}),
+    ...text("name"),
+    ...(result.payload && typeof result.payload === "object" ? { payload: result.payload } : {}),
+    ...(challenge ? { challenge } : {}),
+    ...(result.mayBeRunning === true ? { mayBeRunning: true } : {}),
+    ...text("message"),
+  };
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function normalizeOpenStatus(status = {}) {
+  const reason = status?.reason;
+  return {
+    requestId: nonEmptyString(status?.requestId) ?? "",
+    revision: lifecycleRevision(status?.revision),
+    stage: OPEN_STAGES.includes(status?.stage) ? status.stage : "accepted",
+    outcome: OPEN_OUTCOMES.includes(status?.outcome) ? status.outcome : null,
+    reason: reason == null ? null : OPEN_REASONS.includes(reason) ? reason : "internal-error",
+    result: normalizeOpenResult(status?.result),
+  };
+}
+
+const HEALTH_OBSERVERS = Object.freeze(["station", "phone", "session"]);
 
 // ---- factories (ext -> phone : stream) -------------------------------------
 export const assistantMessage = (content, messageId) =>
@@ -504,11 +640,25 @@ export const catchUpPage = (items, epoch, cursor, hasMore = false, gap = false) 
 
 /**
  * Ext -> phone: the channel is live. channelId/sessionId now travel on the ENVELOPE (stamped by the
- * channel), so this only carries the session's cwd + CLI chat title (summary).
+ * channel), so this only carries the session's cwd + CLI chat title (summary), the protocol version
+ * (a phone on another version answers with update_required) and, from protocol v3, the
+ * `linkGeneration` so the phone can drop messages from an older link.
  */
-export const channelUp = (cwd, title, capabilities) =>
+export const channelUp = (cwd, title, capabilities, linkGeneration = null) =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.CHANNEL_UP, {
     cwd, title, ...(capabilities ? { capabilities } : {}),
+    protocolVersion: PROTOCOL_VERSION,
+    ...(Number.isSafeInteger(linkGeneration) && linkGeneration > 0 ? { linkGeneration } : {}),
+  });
+/**
+ * Both directions on the session link: handlers are attached and this end is ready. The extension
+ * sends it after the handshake; the phone replies with the same generation; then catch-up runs.
+ * Generations start at 1, so a malformed value (coerced to 0) never matches a live link.
+ */
+export const linkReady = ({ linkGeneration, controllerRevision } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.LINK_READY, {
+    linkGeneration: lifecycleRevision(linkGeneration),
+    controllerRevision: lifecycleRevision(controllerRevision),
   });
 /** Lightweight, post-start metadata refresh (ext -> phone): the latest CLI title (and cwd). */
 export const sessionMeta = (title, cwd) =>
@@ -707,43 +857,56 @@ export const resumeSession = (requestId, sessionId, mode = "default", force = fa
     force: Boolean(force),
   });
 
-/** Phone -> listener: request one generic, idempotent session open operation. */
-export const openSession = (operationId, target, options = {}) =>
-  lifecycleEnvelope(
-    SUBTYPE.CONTROL.OPEN_SESSION,
-    normalizeOpenIntent({ operationId, target, ...options }),
-  );
+/**
+ * Phone -> Station (protocol v3): open a session by TARGET only. `target` is `{ project }` for a
+ * new session or `{ sessionId, storeAuthority? }` for an existing one; Station decides whether to
+ * activate, repair, resume, start or ask for a takeover. `requestId` is the idempotency key.
+ */
+export const openSession = ({ requestId, target, options } = {}) =>
+  lifecycleEnvelope(SUBTYPE.CONTROL.OPEN_SESSION, normalizeOpenRequest({ requestId, target, options }));
 
-/** Phone -> listener: inspect one previously accepted lifecycle operation. */
-export const lifecycleStatusRequest = (operationId) =>
+/** Phone -> Station: inspect one previously accepted open request. */
+export const lifecycleStatusRequest = (requestId) =>
   lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS_REQUEST, {
-    operationId: nonEmptyString(operationId) ?? "",
+    requestId: nonEmptyString(requestId) ?? "",
   });
 
-/** Listener -> phone: a structured, revisioned lifecycle operation snapshot. */
+/** Station -> phone: one revisioned snapshot of an open request (protocol v3). */
 export const lifecycleStatus = (status) =>
-  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS, normalizedLifecycleStatus(status));
+  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS, normalizeOpenStatus(status));
 
-/** Phone -> listener: confirm the exact takeover challenge and operation revision shown to the user. */
-export const takeoverConfirm = (operationId, challengeId, revision) =>
+/**
+ * Phone -> Station: confirm the exact takeover challenge shown to the user. The challenge (in
+ * `result.challenge`) binds runtimeId + controllerRevision; `revision` fences a stale prompt.
+ */
+export const takeoverConfirm = (requestId, challengeId, revision) =>
   lifecycleEnvelope(SUBTYPE.CONTROL.TAKEOVER_CONFIRM, {
-    operationId: nonEmptyString(operationId) ?? "",
+    requestId: nonEmptyString(requestId) ?? "",
     challengeId: nonEmptyString(challengeId) ?? "",
     revision: lifecycleRevision(revision),
   });
 
-/** Phone -> listener: cancel an operation if the supplied revision is still current. */
-export const lifecycleCancel = (operationId, revision = null) =>
+/** Phone -> Station: cancel a request if the supplied revision is still current. */
+export const lifecycleCancel = (requestId, revision = null) =>
   lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_CANCEL, {
-    operationId: nonEmptyString(operationId) ?? "",
+    requestId: nonEmptyString(requestId) ?? "",
     ...(Number.isSafeInteger(revision) && revision >= 0 ? { revision } : {}),
   });
 
-/** Convert a supported legacy Start/Resume envelope to the generic Open contract. */
+// Pre-v3 builders, kept only for the deprecated legacy converters below.
+const legacyOpenSession = (operationId, target, options = {}) =>
+  lifecycleEnvelope(
+    SUBTYPE.CONTROL.OPEN_SESSION,
+    normalizeOpenIntent({ operationId, target, ...options }),
+  );
+const legacyLifecycleStatus = (status) =>
+  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS, normalizedLifecycleStatus(status));
+
+/** @deprecated pre-v3 adapter. Convert a legacy Start/Resume envelope to the v2 Open contract. */
 export function openSessionFromLegacy(message) {
   if (message?.eventType !== EVENT_TYPE.CONTROL || !message.msg) return null;
   if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {
-    return openSession(message.msg.requestId, {
+    return legacyOpenSession(message.msg.requestId, {
       kind: "new",
       projectName: message.msg.projectName,
     }, {
@@ -752,7 +915,7 @@ export function openSessionFromLegacy(message) {
     });
   }
   if (message.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {
-    return openSession(message.msg.requestId, {
+    return legacyOpenSession(message.msg.requestId, {
       kind: "existing",
       storeAuthority: null,
       sessionId: message.msg.sessionId,
@@ -764,7 +927,7 @@ export function openSessionFromLegacy(message) {
   return null;
 }
 
-/** Project a generic Open envelope to a legacy Start or Resume envelope for an older Station. */
+/** @deprecated pre-v3 adapter. Project a v2 Open envelope to a legacy Start or Resume envelope. */
 export function openSessionToLegacy(message) {
   const intent = normalizeOpenIntent(message?.msg ?? message);
   if (!intent.operationId) return null;
@@ -805,7 +968,7 @@ const LIFECYCLE_TO_LEGACY_STATE = Object.freeze({
   cancelled: "abandoned",
 });
 
-/** Convert one supported legacy launch reply to a structured lifecycle snapshot. */
+/** @deprecated pre-v3 adapter. Convert one legacy launch reply to a v2 lifecycle snapshot. */
 export function lifecycleStatusFromLegacy(message, previous = null) {
   if (message?.eventType !== EVENT_TYPE.CONTROL || !message.msg) return null;
   const operationId = nonEmptyString(message.msg.requestId);
@@ -821,7 +984,7 @@ export function lifecycleStatusFromLegacy(message, previous = null) {
       : operation === "new"
         ? { kind: "new", projectName: message.msg.projectName }
         : null;
-    return lifecycleStatus({
+    return legacyLifecycleStatus({
       operationId,
       revision,
       state: LEGACY_TO_LIFECYCLE_STATE[message.msg.state] ?? "failed",
@@ -842,7 +1005,7 @@ export function lifecycleStatusFromLegacy(message, previous = null) {
     });
   }
   if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
-    return lifecycleStatus({
+    return legacyLifecycleStatus({
       operationId,
       revision,
       state: "pairing-ready",
@@ -854,7 +1017,7 @@ export function lifecycleStatusFromLegacy(message, previous = null) {
     });
   }
   if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
-    return lifecycleStatus({
+    return legacyLifecycleStatus({
       operationId,
       revision,
       state: message.msg.ok ? "open" : "failed",
@@ -872,12 +1035,12 @@ export function lifecycleStatusFromLegacy(message, previous = null) {
     });
   }
   if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_CLAIMED) {
-    return lifecycleStatus({ operationId, revision, state: "open" });
+    return legacyLifecycleStatus({ operationId, revision, state: "open" });
   }
   return null;
 }
 
-/** Project a lifecycle snapshot to the legacy replies understood by older phones. */
+/** @deprecated pre-v3 adapter. Project a v2 lifecycle snapshot to legacy launch replies. */
 export function lifecycleStatusToLegacy(message) {
   const status = normalizedLifecycleStatus(message?.msg ?? message);
   if (!status.operationId) return [];
@@ -929,17 +1092,57 @@ export function lifecycleStatusToLegacy(message) {
   return projected;
 }
 
-/** Keep the latest snapshot for one operation; stale or duplicate revisions never replace it. */
+/** Keep the latest snapshot for one request; stale or duplicate revisions never replace it. */
 export function latestLifecycleStatus(current, candidate) {
   const currentStatus = current?.msg ?? current;
   const candidateStatus = candidate?.msg ?? candidate;
   if (!candidateStatus || typeof candidateStatus !== "object") return current;
   if (!currentStatus || typeof currentStatus !== "object") return candidate;
-  if (currentStatus.operationId !== candidateStatus.operationId) return candidate;
+  if (currentStatus.requestId !== candidateStatus.requestId) return candidate;
   return lifecycleRevision(candidateStatus.revision) > lifecycleRevision(currentStatus.revision)
     ? candidate
     : current;
 }
+
+/** Phone -> Station: ask for the health of one session (answered with session_health). */
+export const sessionHealthRequest = (sessionId) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_HEALTH_REQUEST, {
+    sessionId: nonEmptyString(sessionId) ?? "",
+  });
+
+/**
+ * Station -> phone: one sessionHealth() verdict. Unknown labels become `stalled` and unknown
+ * reasons `null`, so a phone never renders a state it has no copy for.
+ */
+export const sessionHealthMsg = ({ sessionId, label, reason = null, freshAt = null, observer = "station", runtimeId = null } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SESSION_HEALTH, {
+    sessionId: nonEmptyString(sessionId) ?? "",
+    label: HEALTH_LABELS.includes(label) ? label : "stalled",
+    reason: HEALTH_REASONS.includes(reason) ? reason : null,
+    freshAt: Number.isFinite(freshAt) ? freshAt : null,
+    observer: HEALTH_OBSERVERS.includes(observer) ? observer : "station",
+    ...(nonEmptyString(runtimeId) ? { runtimeId: runtimeId.trim() } : {}),
+  });
+
+/** Station -> phone: the laptop's reachable endpoint changed (Dev Tunnel address rotation). */
+export const endpointUpdate = ({ endpointRevision, descriptor } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.ENDPOINT_UPDATE, {
+    endpointRevision: lifecycleRevision(endpointRevision),
+    descriptor: descriptor && typeof descriptor === "object" && typeof descriptor.kind === "string"
+      ? { ...descriptor }
+      : null,
+  });
+
+/**
+ * Either direction: the peer speaks another protocol version. `side` names who must update
+ * ("laptop" | "phone"); `peerVersion` is what the peer advertised (null when it sent none).
+ */
+export const updateRequired = ({ minVersion = PROTOCOL_VERSION, peerVersion = null, side } = {}) =>
+  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.UPDATE_REQUIRED, {
+    minVersion: Number.isSafeInteger(minVersion) && minVersion > 0 ? minVersion : PROTOCOL_VERSION,
+    peerVersion: Number.isSafeInteger(peerVersion) && peerVersion >= 0 ? peerVersion : null,
+    side: side === "phone" ? "phone" : "laptop",
+  });
 /**
  * Listener -> phone: the pre-minted pairing payload of a freshly spawned session, so the phone
  * pairs to it digitally (no QR). `payload` is a buildPairingPayload() result; `name`/`projectName`

@@ -6,6 +6,7 @@ import {
   createLocalTransport,
   createSupabaseTransport,
   createRelayTransport,
+  decodePairingInput,
   generateKeyPair,
   importKeyPair,
   isValidEnvelope,
@@ -318,7 +319,7 @@ function getSupabaseClient(url: string, anonKey: string): SupabaseClient {
 /** The same socket endpoint as the real transport. Contains the public API key; do not render it. */
 export function supabaseProbeEndpoint(raw: string): string | null {
   try {
-    const { transport } = parsePairingPayload(raw);
+    const { transport } = parsePairingPayload(decodePairingInput(raw));
     if (transport.kind !== 'supabase') return null;
     const endpoint = new URL(getSupabaseClient(transport.url, transport.anonKey).realtime.endpointURL());
     return endpoint.protocol === 'wss:' && !endpoint.username && !endpoint.password ? endpoint.href : null;

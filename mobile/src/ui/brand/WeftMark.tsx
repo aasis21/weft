@@ -40,27 +40,15 @@ export function WeftMark({ size = 20, className }: WeftMarkProps): JSX.Element {
   );
 }
 
-/** Menu trigger glyph: hamburger top/bottom rails with the Weft mark woven through the middle. */
-export function WeftMenuIcon({ size = 24, className = 'weft-menu-icon' }: WeftMarkProps): JSX.Element {
+/**
+ * Header menu trigger: the plain Weft mark in a 36px accent-tinted tile. The button around it keeps
+ * the 44px hit target and the accessible name; `dot` marks another session waiting for a decision.
+ */
+export function WeftMenuTile({ dot = false }: { dot?: boolean }): JSX.Element {
   return (
-    <svg
-      className={className}
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M2.5 4.5h19M2.5 19.5h19" />
-      <path d="M2.5 8C7 8 7 16 12 16C17 16 17 8 21.5 8" />
-      <path d="M2.5 16C5 16 5.7 14.2 6.2 13.3" />
-      <path d="M7.9 10.6C9 9.1 10.2 8 12 8C13.8 8 15 9.1 16.1 10.6" />
-      <path d="M17.8 13.3C18.3 14.2 19 16 21.5 16" />
-    </svg>
+    <span className="weft-menu-tile" aria-hidden="true">
+      <WeftMark size={20} />
+      {dot ? <span className="decision-waiting-dot" /> : null}
+    </span>
   );
 }

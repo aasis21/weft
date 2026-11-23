@@ -84,6 +84,9 @@ export function toSessionView(session: Session): SessionView {
     events: session.debug,
     error: session.connection.error,
     ...(session.connection.spawning ? { spawning: session.connection.spawning } : {}),
+    ...(session.connection.link ? { link: session.connection.link } : {}),
+    ...(session.connection.health ? { health: session.connection.health } : {}),
+    ...(session.connection.recovery ? { recovery: session.connection.recovery } : {}),
   };
 }
 
