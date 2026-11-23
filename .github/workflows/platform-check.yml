@@ -38,7 +38,7 @@ jobs:
           extension/test/deviceClipboard.test.mjs
           extension/test/deviceKeepAwake.test.mjs
           extension/test/deviceTelemetry.test.mjs
-          extension/test/spawn.test.mjs
+          extension/test/terminalLauncher.test.mjs
           extension/test/controlCenter.test.mjs
       - name: Exercise installation and update transaction
         run: node --test extension/test/cliUpdate.test.mjs scripts/native-install.test.mjs

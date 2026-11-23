@@ -216,7 +216,7 @@ const HOST_CONFIRM_MS = 30_000;
 const RECONNECT_POLL_MS = 250;
 const SESSION_RECONNECT_BASE_MS = 15_000;
 const SESSION_RECONNECT_MAX_MS = 5 * 60_000;
-// Device (listener) channel heartbeat cadence is 2min (extension/src/listener.mjs). Rule: allow the
+// Device (Station) channel heartbeat cadence is 2min (extension/src/station.mjs). Rule: allow the
 // mobile-side offline threshold to be 50% longer than that cadence (3min) so one dropped beat
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
 const DEVICE_OFFLINE_AFTER_MS = 180_000;

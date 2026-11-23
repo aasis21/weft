@@ -2,7 +2,7 @@
 import { execFile, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { promisify } from "node:util";
 import {
   createControlServer as createLifecycleEndpoint,
@@ -84,9 +84,12 @@ export function backgroundTaskName(role, { baseDir = weftHome(), platform = proc
  */
 export function backgroundInstallId({ cliPath, version = resolveVersion(), platform = process.platform } = {}) {
   if (!cliPath) return null;
-  let path = resolve(cliPath);
-  try { path = realpathSync(path); } catch { /* A missing path still identifies the install. */ }
-  const folder = dirname(path);
+  const paths = platform === "win32" ? win32 : posix;
+  let path = paths.resolve(cliPath);
+  if (platform === process.platform) {
+    try { path = realpathSync(path); } catch { /* A missing path still identifies the install. */ }
+  }
+  const folder = paths.dirname(path);
   return createHash("sha256").update(`${platform === "win32" ? folder.toLowerCase() : folder}\n${version}`)
     .digest("hex").slice(0, 16);
 }
