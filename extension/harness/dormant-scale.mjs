@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -89,6 +90,23 @@ async function stableRss() {
   return percentile(samples, 0.5);
 }
 
+/** Where resident memory lives, so a budget failure names the growing pool. */
+function memoryBreakdown() {
+  const { heapTotal, heapUsed, external, arrayBuffers } = process.memoryUsage();
+  const breakdown = { heapTotal, heapUsed, external, arrayBuffers };
+  if (process.platform === "linux" && existsSync("/proc/self/status")) {
+    for (const line of readFileSync("/proc/self/status", "utf8").split("\n")) {
+      const match = /^(RssAnon|RssFile|RssShmem|VmData|Threads):\s+(\d+)/.exec(line);
+      if (match) breakdown[match[1]] = match[1] === "Threads" ? Number(match[2]) : Number(match[2]) * 1_024;
+    }
+  }
+  return breakdown;
+}
+
+function memoryGrowth(before, after) {
+  return Object.fromEntries(Object.keys(after).map((key) => [key, after[key] - (before[key] ?? 0)]));
+}
+
 async function sampleIdleCpu() {
   const startedAt = performance.now();
   const usage = process.cpuUsage();
@@ -157,12 +175,14 @@ async function runWorker(count) {
     const baselineRemoteSockets = activeRemoteSocketCount();
     const baselineCpu = await sampleIdleCpu();
     const baselineRss = await stableRss();
+    const baselineMemory = memoryBreakdown();
 
     recordRemoteActivity = true;
     for (let index = 0; index < count; index++) hosts.push(await startHost(baseDir, index));
     await settle();
 
     const dormantRss = await stableRss();
+    const dormantMemory = memoryBreakdown();
     const dormantResources = resourceCounts();
     const dormantHandles = osHandleCount();
     const dormantRemoteSockets = activeRemoteSocketCount();
@@ -207,6 +227,7 @@ async function runWorker(count) {
         baselineBytes: baselineRss,
         dormantBytes: dormantRss,
         incrementalBytes: Math.max(0, dormantRss - baselineRss),
+        growth: memoryGrowth(baselineMemory, dormantMemory),
       },
       handles: {
         source: dormantHandles.source,
@@ -315,7 +336,8 @@ export async function runDormantScaleHarness(counts = DEFAULT_COUNTS) {
   if (twenty) {
     assert.ok(
       twenty.rss.incrementalBytes < TWENTY_SESSION_RSS_BUDGET_BYTES,
-      `20 dormant sessions used ${(twenty.rss.incrementalBytes / 1_024 / 1_024).toFixed(2)} MB incremental RSS; budget is <5 MB`,
+      `20 dormant sessions used ${(twenty.rss.incrementalBytes / 1_024 / 1_024).toFixed(2)} MB incremental RSS; budget is <5 MB; ` +
+        `growth by pool (bytes): ${JSON.stringify(twenty.rss.growth)}`,
     );
   }
   return {
