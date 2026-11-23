@@ -13,12 +13,7 @@ const LABELS = {
   "control:project_list": "Project list",
   "control:session_list_request": "Session list requested",
   "control:session_list": "Session list",
-  "control:spawn_session": "Start session",
-  "control:resume_session": "Resume session",
   "control:open_session": "Open session",
-  "control:spawn_pairing": "Session pairing details",
-  "control:spawn_result": "Launch result",
-  "control:launch_status": "Launch status",
   "control:lifecycle_status_request": "Launch status requested",
   "control:lifecycle_status": "Launch status",
   "control:lifecycle_cancel": "Cancel launch",
@@ -83,9 +78,7 @@ const LABELS = {
 const REPLIES = {
   "control:project_list_request": "control:project_list",
   "control:session_list_request": "control:session_list",
-  "control:spawn_session": "control:spawn_result",
-  "control:resume_session": "control:spawn_result",
-  "control:open_session": "control:launch_status",
+  "control:open_session": "control:lifecycle_status",
   "control:lifecycle_status_request": "control:lifecycle_status",
   "control:keep_awake_status_request": "control:keep_awake_status",
   "control:clipboard_read": "control:clipboard_result",
@@ -117,7 +110,7 @@ function eventKey(message) {
 
 function failed(message) {
   const body = message?.msg;
-  return body?.ok === false || body?.state === "failed";
+  return body?.ok === false || body?.outcome === "failed";
 }
 
 function encryptedBytes(payload) {

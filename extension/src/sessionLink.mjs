@@ -178,7 +178,7 @@ export async function createSessionLink({
     }
   }
   const identity = reloadIdentity ?? handoff;
-  const requestId = identity?.requestId ?? identity?.operationId ?? null;
+  const requestId = identity?.requestId ?? null;
   const durableHandoff = Boolean(handoff?.operationOwnerToken || reloadIdentity?.durableHandoff || requestId);
   const laptopKeys = identity?.laptopKeys ?? (await deps.generateKeyPair());
   const channelId = identity?.channelId ?? (channelIdEnv || deps.randomChannelId());
@@ -646,7 +646,7 @@ export async function createSessionLink({
           trustedPeerPublicKeyB64: trustedPeer,
           controllerDeviceId,
           controllerName,
-          operationId: requestId,
+          requestId,
           operationOwnerToken: handoff?.operationOwnerToken ?? null,
         });
       } catch (error) {
@@ -787,8 +787,8 @@ export async function createSessionLink({
   }
 
   async function logPairing({ full = false } = {}) {
-    const payload = JSON.stringify(pairingPayload);
-    const qr = (await deps.renderQr(pairingQrText(pairingPayload))).replace(/\n+$/, "");
+    const link = pairingQrText(pairingPayload);
+    const qr = (await deps.renderQr(link)).replace(/\n+$/, "");
     const lines = full
       ? [
           `${ui.brand("WEFT")}  ${ui.dim("·  pair your phone")}`,
@@ -802,10 +802,10 @@ export async function createSessionLink({
           `${ui.lime("2")}  Scan the code above with your phone camera, or tap ${ui.dim("“Scan QR”")} in the app`,
           `${ui.lime("3")}  Approve the link on your phone — it confirms right here`,
           "",
-          ui.dim("Can’t scan? Tap “Paste a code” in the app and paste this:"),
+          ui.dim("Can’t scan? Open this link on your phone, or tap “Paste a code” in the app and paste it:"),
           // Fenced so the CLI's markdown renderer never autolinks bytes the user must copy exactly.
           "```",
-          payload,
+          link,
           "```",
           "",
           ...(deps.isStationRunning()

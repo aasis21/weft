@@ -349,6 +349,9 @@ async function startCommand(options) {
     status = await run(true);
   }
   printStationSummary(status);
+  // A restarted Station no longer holds the node-pty copy an earlier update had to keep.
+  reportNodePtyCleanup(cleanupNodePtyBackups(extensionInstallDir()));
+  if (reason === "update") await reloadSessionsAfterUpdate();
   if (!status.paired) {
     const pairing = await backgroundCommand("station");
     console.log(await renderPairingQr(pairing.pairingPayload));
@@ -361,6 +364,26 @@ function printStationSummary(summary) {
   const [headline, ...details] = stationSummaryLines(summary);
   console.log(headline.startsWith("✓") ? c.green(headline) : c.bold(headline));
   for (const line of details) console.log(line);
+}
+
+function reportNodePtyCleanup(cleanup) {
+  if (cleanup.removed.length) console.log(c.dim(`Removed ${cleanup.removed.length} leftover node-pty backup folder(s).`));
+  if (cleanup.remaining.length) {
+    console.log(c.yellow(`${cleanup.remaining.length} leftover node-pty backup folder(s) are still in use and were kept: ${cleanup.remaining.map((item) => item.name).join(", ")}.`));
+    console.log(c.dim("They are removed by the next `weft start` or `weft update` once nothing uses them."));
+  }
+}
+
+/** After an update, open sessions on an older Weft reload it, each when its current turn ends. */
+async function reloadSessionsAfterUpdate(installedVersion) {
+  try {
+    const result = await management.execute("sessions.reloadAll", {
+      confirmed: true, source: "update", ...(installedVersion ? { installedVersion } : {}),
+    }, { trustedCli: true });
+    if (result.reloaded + result.waiting + result.manual + result.unsupported + result.failed > 0) console.log(c.dim(result.message));
+  } catch (error) {
+    console.log(c.yellow(`Open sessions were not reloaded: ${error?.message ?? error}. Use Reload Weft in open sessions in Control Center.`));
+  }
 }
 
 function readFileSyncSafe(path) {
@@ -1752,26 +1775,25 @@ async function update(cmdArgs = []) {
   await placeRelease();
   ensureWindowsShim(extensionInstallDir());
   console.log(`\n${c.green(`Updated to Weft ${manifest.version}.`)} ${c.dim("Your ~/.weft config was left untouched.")}`);
+  let handedOff = false;
   if (["win32", "darwin"].includes(process.platform)) {
     let worker = null;
     try { worker = await backgroundCommand("station"); }
     catch { /* An unreadable control record is reported by weft status; never block the update. */ }
     if (worker && worker.version !== manifest.version) {
-      // The new code is on disk; let the newly installed CLI run ensureStationRunning.
+      // The new code is on disk; the newly installed CLI restarts Station, cleans up and reloads
+      // open sessions (its `weft start` with reason=update).
       console.log(`\nStation is running ${worker.version ?? "an older version"}; restarting it on ${manifest.version}. Pairing is kept.`);
       const restarted = spawnSync(process.execPath, [join(extensionInstallDir(), "weft.mjs"), "start"], {
         stdio: "inherit", env: { ...process.env, WEFT_START_REASON: "update" },
       });
-      if (restarted.status !== 0) console.log(c.yellow("Station was not restarted. Run `weft start` to restart it on the new version."));
+      handedOff = restarted.status === 0;
+      if (!handedOff) console.log(c.yellow("Station was not restarted. Run `weft start` to restart it on the new version."));
     }
   }
-  const cleanup = cleanupNodePtyBackups(extensionInstallDir());
-  if (cleanup.removed.length) console.log(c.dim(`Removed ${cleanup.removed.length} leftover node-pty backup folder(s).`));
-  if (cleanup.remaining.length) {
-    console.log(c.yellow(`${cleanup.remaining.length} leftover node-pty backup folder(s) are still in use and were kept: ${cleanup.remaining.map((item) => item.name).join(", ")}.`));
-    console.log(c.dim("Restart or reload open Copilot sessions; the next `weft update` removes them."));
-  }
-  console.log(c.dim("Restart or reload Copilot (CLI or app) to load the new extension in open sessions."));
+  if (handedOff) return;
+  reportNodePtyCleanup(cleanupNodePtyBackups(extensionInstallDir()));
+  await reloadSessionsAfterUpdate(manifest.version);
 }
 
 // `weft clean-install`: nuke BOTH the code dir (~/.copilot/extensions/weft) and ALL user data

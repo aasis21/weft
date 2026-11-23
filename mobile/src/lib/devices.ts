@@ -22,7 +22,7 @@ export interface RegisteredDevice {
   /**
    * This phone's OWN ECDH keypair from the original pairing (mirrors StoredPairing). Reused
    * verbatim on every reconnect instead of minting a new keypair: the listener locks onto the
-   * FIRST phone public key it sees per run (`boundPeerPub` in listener.mjs) and silently drops
+   * FIRST phone public key it sees per run (`boundPeerPub` in station.mjs) and silently drops
    * any hello carrying a different key ("ignoring pairing from a different phone"). Without this,
    * every reconnect looked like a new/different phone and was rejected.
    */

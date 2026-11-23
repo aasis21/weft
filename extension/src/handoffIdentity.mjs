@@ -16,7 +16,7 @@ export function writeIdentityFile(
     privateKeyJwk,
     pairingToken = null,
     pairingExpiresAt = null,
-    operationId = null,
+    requestId = null,
     operationOwnerToken = null,
   },
   { file: suppliedFile = null } = {},
@@ -26,7 +26,7 @@ export function writeIdentityFile(
   }
   const file = suppliedFile ?? join(tmpdir(), `weft-identity-${process.pid}-${randomUUID()}.json`);
   if (existsSync(file)) {
-    const error = new Error(`Weft spawn: identity file already exists for operation ${operationId}`);
+    const error = new Error(`Weft spawn: identity file already exists for request ${requestId}`);
     error.code = "EEXIST";
     throw error;
   }
@@ -41,7 +41,7 @@ export function writeIdentityFile(
         privateKeyJwk,
         ...(pairingToken ? { pairingToken } : {}),
         ...(pairingExpiresAt ? { pairingExpiresAt } : {}),
-        ...(operationId ? { operationId, requestId: operationId } : {}),
+        ...(requestId ? { requestId } : {}),
         ...(operationOwnerToken ? { operationOwnerToken } : {}),
       }),
       "utf8",
@@ -87,10 +87,7 @@ export async function readIdentityFile(file) {
       typeof parsed.controllerDeviceId === "string" ? parsed.controllerDeviceId : null,
     controllerName:
       typeof parsed.controllerName === "string" ? parsed.controllerName : null,
-    operationId: typeof parsed.operationId === "string" ? parsed.operationId
-      : typeof parsed.requestId === "string" ? parsed.requestId : null,
-    requestId: typeof parsed.requestId === "string" ? parsed.requestId
-      : typeof parsed.operationId === "string" ? parsed.operationId : null,
+    requestId: typeof parsed.requestId === "string" ? parsed.requestId : null,
     operationOwnerToken: typeof parsed.operationOwnerToken === "string" ? parsed.operationOwnerToken : null,
   };
 }
@@ -101,7 +98,7 @@ export function persistHandoffController(
     trustedPeerPublicKeyB64,
     controllerDeviceId = null,
     controllerName = null,
-    operationId = null,
+    requestId = null,
     operationOwnerToken = null,
   },
 ) {
@@ -110,7 +107,7 @@ export function persistHandoffController(
   }
   const parsed = JSON.parse(readFileSync(file, "utf8"));
   if (
-    (operationId && parsed.operationId !== operationId) ||
+    (requestId && parsed.requestId !== requestId) ||
     (operationOwnerToken && parsed.operationOwnerToken !== operationOwnerToken)
   ) {
     throw new Error("Weft handoff recovery identity ownership changed");

@@ -127,8 +127,9 @@ a server; the web `/pair` route reads the fragment and immediately clears it wit
 `history.replaceState`. In-app **Scan** and **Paste** accept the link or the raw payload JSON
 (`decodePairingInput`). A link version the phone doesn't know shows "This code needs a newer
 Weft". The laptop builds links from `WEFT_INSTALL_BASE` (default
-`https://useweft.netlify.app`), the same origin the installers use; **Copy pairing code** keeps
-copying the raw JSON so older phone builds can still paste it.
+`https://useweft.netlify.app`), the same origin the installers use. **Copy pairing code** in
+Control Center and the pairing panel, and the terminal's "Can't scan?" fallback, give the same
+link, which works opened on the phone or pasted into the app.
 
 A worked, runnable example lives in `shared/test/pairing.test.mjs`.
 

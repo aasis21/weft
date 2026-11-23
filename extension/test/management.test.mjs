@@ -95,25 +95,43 @@ test("status probes do not activate dormant sessions or expose pairing payloads"
   await assert.rejects(manager.execute("station.start"), /Windows/);
 });
 
-test("reloading Weft in open sessions is confirmed and reports sessions that cannot reload", async (t) => {
+test("reloading Weft in open sessions is confirmed, waits for running turns and reports sessions that cannot reload", async (t) => {
   const baseDir = await home(t);
   const asked = [];
+  const record = (id, version) => {
+    const live = liveRecord(id, id);
+    return { ...live, run: { ...live.run, version } };
+  };
   const manager = createManagement({
     baseDir, platform: "linux",
-    scan: async () => scanOf([liveRecord("one", "one"), liveRecord("two", "two"), liveRecord("three", "three")]),
-    sessionClient: (record) => ({ command: async (command) => {
-      asked.push([record.run.runtimeId, command]);
-      if (record.run.runtimeId === "two") throw Object.assign(new Error("old Copilot"), { code: "unsupported" });
-      if (record.run.runtimeId === "three") throw Object.assign(new Error("timed out"), { code: "timeout", timeout: true });
-      return { state: "reloading" };
+    scan: async () => scanOf([
+      record("idle", "0.2.76"), record("busy", "0.2.76"), record("old", "0.2.75"),
+      record("cli", "0.2.76"), record("gone", "0.2.76"), record("current", "9.9.9"),
+    ]),
+    sessionClient: (live) => ({ command: async (command, payload) => {
+      asked.push([live.run.runtimeId, command, payload.whenIdle]);
+      if (live.run.runtimeId === "cli") throw Object.assign(new Error("old Copilot"), { code: "unsupported" });
+      if (live.run.runtimeId === "gone") throw Object.assign(new Error("timed out"), { code: "timeout", timeout: true });
+      return { state: live.run.runtimeId === "busy" ? "waiting-for-turn" : "reloading" };
     } }),
   });
   await assert.rejects(manager.execute("sessions.reloadAll", {}), /Confirm/);
   assert.deepEqual(asked, []);
-  const result = await manager.execute("sessions.reloadAll", { confirmed: true });
-  assert.deepEqual([result.reloaded, result.unsupported, result.failed], [1, 1, 1]);
-  assert.match(result.message, /\/extensions reload/);
-  assert.ok(asked.every(([, command]) => command === "reloadExtension"));
+
+  const clicked = await manager.execute("sessions.reloadAll", { confirmed: true, installedVersion: "9.9.9" });
+  assert.deepEqual(
+    [clicked.reloaded, clicked.waiting, clicked.current, clicked.manual, clicked.unsupported, clicked.failed],
+    [2, 1, 1, 0, 1, 1],
+  );
+  assert.match(clicked.message, /reload when the current turn ends/);
+  assert.match(clicked.message, /\/extensions reload/);
+  assert.ok(asked.every(([, command, whenIdle]) => command === "reloadExtension" && whenIdle === true));
+  assert.ok(!asked.some(([id]) => id === "current"), "a session already on the installed version is left alone");
+
+  asked.length = 0;
+  const afterUpdate = await manager.execute("sessions.reloadAll", { confirmed: true, source: "update", installedVersion: "9.9.9" });
+  assert.equal(afterUpdate.manual, 1);
+  assert.ok(!asked.some(([id]) => id === "old"), "the automatic pass never reloads a session that cannot wait for its turn");
 });
 test("Station management shares relay startup, confirms stops, and never claims readiness early", async (t) => {
   const baseDir = await home(t);

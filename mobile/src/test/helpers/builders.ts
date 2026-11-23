@@ -41,10 +41,6 @@ export {
   stateSnapshot,
   projectListRequest,
   projectList,
-  spawnSession,
-  spawnPairing,
-  spawnResult,
-  launchStatus,
   lifecycleStatus,
   lifecycleStatusRequest,
   takeoverConfirm,
@@ -57,7 +53,6 @@ export {
   updateRequired,
   sessionListRequest,
   sessionList,
-  resumeSession,
   forgetDevice,
   deviceHeartbeat,
   deviceMonitorStart,
@@ -69,8 +64,8 @@ export {
   isValidEnvelope,
 } from '@aasis21/weft-shared';
 
-import { channelUp as realChannelUp, history, recentTurns as realRecentTurns } from '@aasis21/weft-shared';
-import type { ChannelUp, EnvelopeBase, History, HistoryItem, RecentTurnItem, RecentTurns } from '@aasis21/weft-shared';
+import { EVENT_TYPE, channelUp as realChannelUp, history, recentTurns as realRecentTurns } from '@aasis21/weft-shared';
+import type { ChannelUp, EnvelopeBase, EventEnvelope, History, HistoryItem, RecentTurnItem, RecentTurns } from '@aasis21/weft-shared';
 
 /** Identity/ordering fields a test may want to pin on an inbound envelope (as the wire would carry). */
 export interface StampFields {
@@ -104,6 +99,12 @@ export function linkedChannelUp(
   title?: string,
 ): ChannelUp {
   return stamp(realChannelUp(cwd, title, undefined, linkGeneration), { channelId, sessionId });
+}
+
+/** A control message only a pre-v3 peer sends (v3 has no builder for it), for update-required tests. */
+export function preV3Control(eventSubtype: string, msg: Record<string, unknown>): EventEnvelope {
+  // Not a member of the v3 EventEnvelope union, which is the point: the phone must still cope with it.
+  return { eventType: EVENT_TYPE.CONTROL, eventSubtype, msg, ts: Date.now() } as unknown as EventEnvelope;
 }
 
 /** Build a single backfill HistoryItem. */

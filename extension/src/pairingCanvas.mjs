@@ -64,9 +64,9 @@ export async function createPairingCanvasServer({ session, preparePairing, statu
     const paired = connected || current.paired === true;
     const payload = current.pairingPayload;
     const expired = !paired && payload?.expiresAt <= Date.now();
-    const code = !paired && !expired && payload ? JSON.stringify(payload) : null;
+    const code = !paired && !expired && payload ? pairingQrText(payload) : null;
     if (code !== cachedCode) {
-      const qr = code ? await QRCode.toDataURL(pairingQrText(payload), { width: 480, margin: 4 }) : null;
+      const qr = code ? await QRCode.toDataURL(code, { width: 480, margin: 4 }) : null;
       cachedQr = qr;
       cachedCode = code;
     }

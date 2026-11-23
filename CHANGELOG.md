@@ -5,6 +5,23 @@ with the Weft extension and mobile app.
 
 ## Unreleased
 
+## 0.2.76
+
+- **Updates reload open sessions without cutting a turn off.** After `weft update` restarts
+  Station, every open Copilot session on Weft 0.2.76 or later reloads Weft by itself: an idle
+  session right away, a busy one as soon as its current turn ends. Sessions already on the new
+  version are left alone. Sessions still on 0.2.75 need one manual reload (Control Center's
+  **Reload Weft in open sessions**, or `/extensions reload`); from then on it is automatic. The
+  Control Center button uses the same wait-for-the-turn behaviour.
+- **Leftover node-pty folders are cleaned up on `weft start`.** An update that could not remove the
+  previous node-pty copy (Station still had it loaded) now removes it as soon as Station restarts,
+  instead of waiting for the next update.
+- **"Copy pairing code" copies the pairing link.** Control Center, the pairing panel and the
+  terminal's "Can't scan?" fallback now give the same `/pair` link the QR opens, which works opened
+  on the phone or pasted into the app, instead of raw JSON.
+- **Legacy names removed.** Protocol v2 builders and the old `operationId` identity field are gone,
+  and docs point at the current modules.
+
 ## 0.2.75
 
 This release rebuilds how the laptop keeps sessions connected. Laptop and phone must both be on

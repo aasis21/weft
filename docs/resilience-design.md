@@ -170,14 +170,14 @@ behavior above. This table records the original gaps.
 | Station's owned-relay watchdog checks every 30 seconds, with repeated local probes before action. | `extension/bin/weft.mjs`, `startRelayHealthWatchdog`, `relayLooksWedged` | Include end-to-end forwarding checks and handle recovery regardless of the original launch path. |
 | Public probes distinguish `ok`, `rejected`, and `unreachable`; public verification is optional in `healthyRegistryEntry`. | `extension/src/devtunnel.mjs` | Reuse that classification during ongoing recovery, not just startup/reuse. A rejected probe alone should not trigger immediate replacement. |
 | The laptop socket reconnects with backoff and sends pings, but does not enforce a pong deadline. | `extension/src/reconnectingSocket.mjs` | Detect half-open sockets and connection attempts that never settle. |
-| Station persists its identity and trusted phone key; mobile reconnects with saved material and a fresh challenge-response. | `extension/src/pairingIdentity.mjs`, `listener.mjs`, `mobile/src/lib/weftClient.ts`, `shared/pairing.mjs` | Preserve this security contract; improve availability rather than remove authentication. |
+| Station persists its identity and trusted phone key; mobile reconnects with saved material and a fresh challenge-response. | `extension/src/pairingIdentity.mjs`, `station.mjs`, `mobile/src/lib/weftClient.ts`, `shared/pairing.mjs` | Preserve this security contract; improve availability rather than remove authentication. |
 | Tunnel ID and relay port are remembered; missing tunnels, host failures, or occupied local ports can result in a replacement URL. | `extension/src/relayServerProcess.mjs` | Prefer repairing the existing endpoint and classify failures before replacing it. |
-| Device telemetry already uses monitor start/renew/stop, bounded intervals, lease expiry, and monitor IDs. | `extension/src/listener.mjs`, `startMonitoring`, `stopMonitoring` | Extend the same lease pattern to session and Station application updates. |
+| Device telemetry already uses monitor start/renew/stop, bounded intervals, lease expiry, and monitor IDs. | `extension/src/station.mjs`, `startMonitoring`, `stopMonitoring` | Extend the same lease pattern to session and Station application updates. |
 | Activated sessions forward events independently of the phone's selected view. | `extension/src/relay.mjs` | Gate remote delivery by requested attention level. |
 | Mobile foregrounding requests state and history for warm sessions. | `mobile/src/session/runtime/sessionRuntime.ts`, `handleResume` | Reacquire watches, prioritize the visible view, and distinguish received data from viewed data. |
 | Host history primarily supplies completed-turn text; the recent-message buffer is in memory. | `extension/src/store.mjs`, `recentTurns.mjs` | Add bounded recovery for meaningful events that host history cannot supply. |
-| Reconnect and subscribe attempts can write persistent host warnings. | `extension/src/activeRuntime.mjs`, `connectRelayWithRetry`, `requestReconnect` | Replace repeated user-visible warnings with quiet state transitions and sanitized diagnostics. |
-| Dormant extensions expose local lifecycle discovery; activated phone traffic bypasses Station. | `README.md`, `extension/src/extensionBootstrap.mjs`, `runtimeLifecycle.mjs` | Preserve dormant inactivity and direct session operation. |
+| Reconnect and subscribe attempts can write persistent host warnings. | `extension/src/sessionLink.mjs`, `runLoop`, `restartLink` | Replace repeated user-visible warnings with quiet state transitions and sanitized diagnostics. |
+| Dormant extensions expose local lifecycle discovery; activated phone traffic bypasses Station. | `README.md`, `extension/src/sessionHost.mjs`, `sessionControl.mjs`, `sessionRegistry.mjs` | Preserve dormant inactivity and direct session operation. |
 
 ## Architecture: shared behavior, optional Station
 
@@ -443,28 +443,28 @@ boundary, not a new decision to expose device-wide features through `/weft`.
 
 ### A session-scoped runtime already exists
 
-`extensionBootstrap.mjs` registers the session hooks, canvas, and local lifecycle
-endpoint, then lazily loads `createActiveRuntime` after explicit activation.
-`activeRuntime.mjs` is already the session-scoped counterpart to Station: it owns
+`sessionHost.mjs` (`startSessionHost`) registers the session hooks, canvas, and local
+control endpoint (`sessionControl.mjs`), then lazily loads `createSessionLink` after
+explicit activation. `sessionLink.mjs` is already the session-scoped counterpart to Station: it owns
 that session's identity, pairing gate, transport connection, controller, and
 shutdown. Same-session reload transfers identity; `/clear` withdraws the old
 runtime and starts the replacement dormant.
 
 Calling this a "session Station" is reasonable conceptually, but starting the
-existing `createListener` inside every session is not the recommended implementation.
+existing `createStation` inside every session is not the recommended implementation.
 The listener is a device controller, not a generic connection engine.
 
 ### Why not embed the complete Station listener?
 
-`createListener` initializes device identity and device utility/terminal adapters.
-Its `start` constructs a cross-session coordinator, starts pending-session and launch
-watchers, prunes/reconciles launch operations, and binds device-level control
-handlers. Its successful pairing sends project lists, session offers, and launch
-replays. Injecting a one-session list would not remove those responsibilities.
+`createStation` initializes device identity and device utility/terminal adapters.
+Its `start` constructs the cross-session open handler (`createOpenSession`), starts the
+session-registry supervisor (`createSupervisor`), prunes finished open requests, and binds
+device-level control handlers. Its successful pairing sends project lists, session offers,
+and open-request replays. Injecting a one-session list would not remove those responsibilities.
 
-`createStationSessionCoordinator` integrates global runtime discovery, projects,
-launch journals, and process start/resume. The existing `SessionCoordinator` ports
-are useful for Station orchestration, but its mandatory launcher/project/directory
+`createOpenSession` (`openSession.mjs`) integrates global runtime discovery
+(`sessionRegistry.mjs`), projects, the open-request store (`openRequests.mjs`), and process
+start/resume. Its injected ports are useful for Station orchestration, but its mandatory launcher/project/directory
 dependencies are not a suitable foundation for a single live session's stream.
 
 Mobile also deliberately distinguishes pairing kinds: `addByQr` routes a
@@ -478,7 +478,7 @@ Extract one reusable **paired-endpoint lifecycle** within the extension layer.
 It may justify one new module with that stable responsibility, rather than many
 small service files or a large Station-with-flags constructor.
 
-Both `createActiveRuntime` and `createListener` compose it with explicit adapters:
+Both `createSessionLink` and `createStation` compose it with explicit adapters:
 
 | Shared endpoint lifecycle | Session adapter | Station adapter |
 | --- | --- | --- |
@@ -504,7 +504,8 @@ Current code couples these lifetimes:
 
 - `attachRelay` creates `recentTurns`, prompt-origin tracking, activity state, and
   pending permission/elicitation relays when the phone pairs.
-- `activeRuntime.teardownRelay` invokes `relay.stop` during reconnect.
+- the session runtime's reconnect teardown invoked `relay.stop` (since 0.2.75,
+  `sessionLink.mjs` `closeSlot` only calls `relay.detach`).
 - `relay.stop` removes the session event observer and closes pending relays.
 - `createPermissionRelay.close` resolves outstanding requests as rejected.
 - The next `attachRelay` creates a new in-memory recent-turn buffer. Host history
@@ -798,7 +799,7 @@ never put tokens in API responses or alter security policy to make it succeed.
 Use existing worker/session identity and IPC authentication. Add minimal read-only,
 additive runtime status fields where needed: Weft activation, current transport
 connectivity, peer/trust state, watch level, and last verified observation. Current
-`activeRuntime.status()` exposes pairing/runtime state but is not sufficient to
+`createSessionLink(...).status()` (`sessionLink.mjs`) exposes pairing/runtime state but is not sufficient to
 claim detailed attention or link health. Status inspection must not activate dormant
 extensions, create recovery journals, reveal private keys, or re-pair a phone.
 

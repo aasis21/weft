@@ -162,7 +162,7 @@ test("handoff identity preserves the one-time pairing grant for the spawned exte
 test("durable handoff persists the claimed phone identity for replacement processes", async () => {
   const material = {
     ...(await identity("chan-controller-recovery")),
-    operationId: "operation-a",
+    requestId: "request-a",
     operationOwnerToken: "owner-a",
   };
   const file = writeIdentityFile(material);
@@ -172,7 +172,7 @@ test("durable handoff persists the claimed phone identity for replacement proces
     trustedPeerPublicKeyB64: "phone-public-key",
     controllerDeviceId: "phone-a",
     controllerName: "WebApp",
-    operationId: "operation-a",
+    requestId: "request-a",
     operationOwnerToken: "owner-a",
   });
 
@@ -183,8 +183,16 @@ test("durable handoff persists the claimed phone identity for replacement proces
   assert.throws(
     () => persistHandoffController(file, {
       trustedPeerPublicKeyB64: "other-phone",
-      operationId: "operation-a",
+      requestId: "request-a",
       operationOwnerToken: "wrong-owner",
+    }),
+    /ownership changed/,
+  );
+  assert.throws(
+    () => persistHandoffController(file, {
+      trustedPeerPublicKeyB64: "other-phone",
+      requestId: "request-b",
+      operationOwnerToken: "owner-a",
     }),
     /ownership changed/,
   );
@@ -399,7 +407,7 @@ test("launchCopilotSession surfaces an asynchronous child error before spawn", a
   assert.throws(() => statSync(identityPath), /ENOENT/);
 });
 
-test("launchCopilotSession returns a reliable direct child pid and persists operation handoff", async () => {
+test("launchCopilotSession returns a reliable direct child pid and persists request handoff", async () => {
   delete process.env.WT_SESSION;
   delete process.env.TERM_PROGRAM;
   delete process.env.GNOME_TERMINAL_SCREEN;
@@ -409,7 +417,7 @@ test("launchCopilotSession returns a reliable direct child pid and persists oper
   const result = await launchCopilotSession({
     project: { name: "app", path: projectDir },
     identity: await identity("chan-operation"),
-    operationId: "req-operation",
+    requestId: "req-operation",
     operationOwnerToken: "owner-secret",
     baseDir: weftHome,
     platform: "linux",
@@ -420,11 +428,12 @@ test("launchCopilotSession returns a reliable direct child pid and persists oper
   assert.equal(result.ok, true);
   assert.equal(result.pid, 4321);
   const parsed = JSON.parse(readFileSync(result.identityFile, "utf8"));
-  assert.equal(parsed.operationId, "req-operation");
+  assert.equal(parsed.requestId, "req-operation");
+  assert.equal("operationId" in parsed, false);
   assert.equal(parsed.operationOwnerToken, "owner-secret");
   assert.ok(parsed.privateKeyJwk);
   const restored = await readIdentityFile(result.identityFile);
-  assert.equal(restored.operationId, "req-operation");
+  assert.equal(restored.requestId, "req-operation");
   assert.equal(restored.operationOwnerToken, "owner-secret");
 });
 

@@ -221,6 +221,12 @@ const SESSION_RECONNECT_MAX_MS = 5 * 60_000;
 // doesn't flap the Online dot, without waiting too long to notice a real disconnect.
 const DEVICE_OFFLINE_AFTER_MS = 180_000;
 const DEVICE_UTILITY_TIMEOUT_MS = 10_000;
+/** Launch replies only a pre-v3 Station sends; receiving one means the laptop must update. */
+const PRE_V3_STATION_REPLIES: ReadonlySet<string> = new Set([
+  SUBTYPE.CONTROL.SPAWN_PAIRING,
+  SUBTYPE.CONTROL.SPAWN_RESULT,
+  SUBTYPE.CONTROL.LAUNCH_STATUS,
+]);
 /** Base self-heal reconnect interval for an offline device in the watchdog, so a dead devtunnel/relay
  *  socket (which never re-opens on its own) gets re-established without an app foreground/restart, yet
  *  a genuinely-unreachable relay isn't hammered every tick. Matches the connect timeout (weftClient
@@ -2623,7 +2629,7 @@ export class SessionRuntime {
     }
     this.recordDeviceEvent(channelId, 'in', message);
     // Single inbound choke point: ANY control message is proof the laptop is alive right now, so
-    // refresh "last seen" here — before the per-subtype branches — so SPAWN_PAIRING, SPAWN_RESULT
+    // refresh "last seen" here — before the per-subtype branches — so LIFECYCLE_STATUS, SESSION_HEALTH
     // and any future control message keep the device fresh, not just the state-carrying subtypes.
     this.store.dispatch(deviceSeen({ channelId }));
     if (message.eventSubtype === SUBTYPE.CONTROL.DEVICE_HEARTBEAT) {
@@ -2723,12 +2729,8 @@ export class SessionRuntime {
       void this.handleLifecycleStatus(channelId, message.msg as LifecycleStatusMsg);
       return;
     }
-    if (
-      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING ||
-      message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT ||
-      message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS
-    ) {
-      // Only a pre-v3 Station still speaks these; there is no compatibility path (protocol v3).
+    if (PRE_V3_STATION_REPLIES.has(message.eventSubtype)) {
+      // There is no compatibility path (protocol v3).
       void this.handleDeviceUpdateRequired(channelId, { minVersion: 3, peerVersion: null, side: 'laptop' });
       return;
     }

@@ -630,7 +630,7 @@ export function createStation({
       launcher: launcher ?? {
         launch: ({ requestId, project, resumeSessionId, mode, title, identity, identityFile }) => launchCopilotSession({
           project, name: title, mode, identity, identityFile, resumeSessionId,
-          operationId: requestId, operationOwnerToken: randomUUID(), baseDir: connectionsHome, spawnFn,
+          requestId, operationOwnerToken: randomUUID(), baseDir: connectionsHome, spawnFn,
         }),
       },
       processes: {

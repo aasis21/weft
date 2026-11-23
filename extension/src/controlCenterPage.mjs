@@ -1129,7 +1129,7 @@ function controlCenterClient() {
   $("session-search").addEventListener("input", () => { renderSessions(); updateControls(); });
   $("session-filter").addEventListener("change", () => { renderSessions(); updateControls(); });
   $("sessions-reload-all").addEventListener("click", async () => {
-    if (await confirmChange("Reload Weft in open sessions?", "Each open Copilot session reloads its Weft extension so it runs the updated code.", ["A running turn in those sessions is interrupted.", "Phones reconnect on their own; Copilot itself keeps running."], "Reload Weft")) {
+    if (await confirmChange("Reload Weft in open sessions?", "Each open Copilot session that runs an older Weft reloads its extension so it runs the updated code.", ["A session in the middle of a turn reloads when that turn ends.", "Sessions still on Weft 0.2.75 or older reload right away, even mid-turn.", "Phones reconnect on their own; Copilot itself keeps running."], "Reload Weft")) {
       await runOperation("sessions.reloadAll", { confirmed: true });
     }
   });

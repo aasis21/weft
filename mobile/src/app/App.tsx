@@ -91,9 +91,9 @@ export default function App(): JSX.Element {
     devicesOpen, deviceDetailsChannelId, terminalChannelId]);
 
   const removeSession = useCallback((channelId: string): void => {
-    const operationId = snapshot.sessions.find((session) => session.meta.channelId === channelId)
+    const requestId = snapshot.sessions.find((session) => session.meta.channelId === channelId)
       ?.spawning?.requestId;
-    void (operationId ? sessionAccess.cancel(operationId) : sessionRuntime.remove(channelId));
+    void (requestId ? sessionAccess.cancel(requestId) : sessionRuntime.remove(channelId));
   }, [snapshot.sessions]);
 
   useEffect(() => {
@@ -689,9 +689,9 @@ export default function App(): JSX.Element {
       onConfirmTakeover={(requestId) => sessionAccess.confirmTakeover(requestId)}
       sessionOperation={active.spawning ? sessionRuntime.getLifecycleStatus(active.spawning.requestId) : null}
       onRetrySpawn={(id) => {
-        const operationId = snapshot.sessions.find((session) => session.meta.channelId === id)
+        const requestId = snapshot.sessions.find((session) => session.meta.channelId === id)
           ?.spawning?.requestId;
-        if (operationId) void sessionAccess.retry(operationId);
+        if (requestId) void sessionAccess.retry(requestId);
       }}
       onGoHome={() => {
         if (exploreOpen) {

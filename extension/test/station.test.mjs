@@ -16,9 +16,7 @@ import {
   generateKeyPair,
   importKeyPair,
   sayHello,
-  spawnSession,
   sessionListRequest,
-  resumeSession,
   projectListRequest,
   sessionClaimed,
   deviceMonitorStart,
@@ -988,8 +986,10 @@ test("pre-v3 launch requests are refused explicitly with update_required", async
     spawnFn: (...args) => { spawnCalls.push(args); return { unref() {} }; },
   });
   try {
-    await phoneChannel.send(spawnSession("legacy-1", "app"));
-    await phoneChannel.send(resumeSession("legacy-2", "session-a"));
+    // What a pre-v3 phone sends; v3 has no builders for these.
+    const preV3 = (eventSubtype, msg) => ({ eventType: EVENT_TYPE.CONTROL, eventSubtype, msg, ts: Date.now() });
+    await phoneChannel.send(preV3(SUBTYPE.CONTROL.SPAWN_SESSION, { requestId: "legacy-1", projectName: "app", mode: "default", name: null }));
+    await phoneChannel.send(preV3(SUBTYPE.CONTROL.RESUME_SESSION, { requestId: "legacy-2", sessionId: "session-a", mode: "default", force: false }));
     await waitFor(() => messages.filter((m) => m.eventSubtype === SUBTYPE.CONTROL.UPDATE_REQUIRED).length === 2, "update_required");
     const notice = messages.find((m) => m.eventSubtype === SUBTYPE.CONTROL.UPDATE_REQUIRED);
     assert.equal(notice.msg.side, "phone");

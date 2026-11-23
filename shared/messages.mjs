@@ -47,8 +47,6 @@ export const DEVICE_CAPABILITY = Object.freeze({
   SESSION_ACTIVATION_V1: "session-activation-v1",
 });
 
-export const SESSION_ACTIVATION_CAPABILITY = DEVICE_CAPABILITY.SESSION_ACTIVATION_V1;
-export const LIFECYCLE_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 export const LIFECYCLE_MESSAGE_MAX_BYTES = 64 * 1024;
 export const CLIPBOARD_MAX_BYTES = 64 * 1024;
 export const KEEP_AWAKE_MIN_MS = 15 * 60 * 1000;
@@ -129,8 +127,6 @@ export const SUBTYPE = Object.freeze({
     PROJECT_LIST_REQUEST: "project_list_request",
     // listener -> phone: the machine's registered projects + the listener's display name.
     PROJECT_LIST: "project_list",
-    // Legacy (pre-v3; replaced by OPEN_SESSION): spawn a new Copilot session for a project.
-    SPAWN_SESSION: "spawn_session",
     // --- phone-driven resume of an existing CLI session (#resume) -----------
     // phone -> listener: give me the machine's recent resumable Copilot sessions (from the CLI
     // session store), so the phone can offer a "Resume a session" list. On-demand only (viewed
@@ -140,10 +136,6 @@ export const SUBTYPE = Object.freeze({
     // `{ sessionId, title, cwd, repository, branch, updatedAt }`. Sessions whose cwd no longer
     // exists are filtered out (a resume needs a valid working directory).
     SESSION_LIST: "session_list",
-    // Legacy (pre-v3; replaced by OPEN_SESSION): resume an existing CLI session by id (spawns `copilot --resume=<id>` in
-    // that session's own cwd). Replies over the SAME SPAWN_PAIRING / SPAWN_RESULT path a fresh
-    // spawn uses, so the phone pairs to the resumed session digitally (no QR).
-    RESUME_SESSION: "resume_session",
     // Protocol v3 open requests: the phone names a target; Station picks activate/resume/start.
     OPEN_SESSION: "open_session",
     LIFECYCLE_STATUS_REQUEST: "lifecycle_status_request",
@@ -157,14 +149,14 @@ export const SUBTYPE = Object.freeze({
     ENDPOINT_UPDATE: "endpoint_update",
     // either direction: the peer speaks another protocol version; one side must update Weft.
     UPDATE_REQUIRED: "update_required",
-    // Legacy (pre-v3; replaced by LIFECYCLE_STATUS) launch replies below, kept until the extension
-    // and phone stop using them.
-    // listener -> phone: the pre-minted pairing payload for a freshly spawned session.
+    // Pre-v3 wire names. Nothing sends them any more and they have no builders: they are recognized
+    // only so the side that receives one can tell its user which end needs updating.
+    // pre-v3 phone -> Station launch requests (replaced by OPEN_SESSION):
+    SPAWN_SESSION: "spawn_session",
+    RESUME_SESSION: "resume_session",
+    // pre-v3 Station -> phone launch replies (replaced by LIFECYCLE_STATUS):
     SPAWN_PAIRING: "spawn_pairing",
-    // listener -> phone: terminal result of a spawn request (ok / failure reason).
     SPAWN_RESULT: "spawn_result",
-    // listener -> phone: durable lifecycle state for a launch request. Additive to the legacy
-    // SPAWN_PAIRING / SPAWN_RESULT replies so older phones continue to work unchanged.
     LAUNCH_STATUS: "launch_status",
     // phone -> listener: forget this device (the listener stops / drops the binding).
     FORGET_DEVICE: "forget_device",
@@ -197,7 +189,7 @@ export const SUBTYPE = Object.freeze({
     // listener -> phone: the set of in-session `/weft` sessions currently waiting to be adopted by
     // the paired phone (each carries its own SESSION pairing payload). Sent right after PROJECT_LIST
     // on (re)connect and again whenever the on-disk pending set changes. The mirror image of
-    // SPAWN_PAIRING: there the phone asks the station to spawn a session; here a session the user
+    // OPEN_SESSION: there the phone asks the station to open a session; here a session the user
     // started at the terminal advertises itself to the already-paired phone (see sessionOffers()).
     SESSION_OFFERS: "session_offers",
     // phone -> listener: the phone has adopted (paired to) an offered session, so the station can
@@ -209,62 +201,6 @@ export const SUBTYPE = Object.freeze({
 
 /** Session modes the phone can request. (Applied best-effort by the extension; see spike.) */
 export const MODES = Object.freeze(["interactive", "plan", "autopilot"]);
-export const LAUNCH_STATES = Object.freeze([
-  "accepted",
-  "launched",
-  "ready",
-  "failed",
-  "claimed",
-  "abandoned",
-  "superseded",
-]);
-export const LIFECYCLE_STATES = Object.freeze([
-  "accepted",
-  "locating",
-  "reserved",
-  "activating",
-  "launching",
-  "pairing-ready",
-  "pairing",
-  "open",
-  "failed",
-  "cancelled",
-]);
-export const LIFECYCLE_ACTIONS = Object.freeze([
-  "retry",
-  "confirm-takeover",
-  "cancel",
-  "choose-session",
-  "choose-directory",
-  "update-peer",
-]);
-export const LIFECYCLE_FAILURE_CODES = Object.freeze([
-  "invalid-request",
-  "unsupported",
-  "operation-conflict",
-  "operation-stale",
-  "target-reserved",
-  "writer-conflict",
-  "controller-conflict",
-  "capability-rejected",
-  "project-not-found",
-  "session-not-found",
-  "directory-not-found",
-  "ownership-unknown",
-  "runtime-unavailable",
-  "activation-failed",
-  "identity-failed",
-  "launch-failed",
-  "launch-outcome-unknown",
-  "launch-not-recoverable",
-  "pairing-failed",
-  "takeover-stale",
-  "takeover-failed",
-  "cancelled",
-  "timeout",
-  "internal-error",
-]);
-
 /** v3 open-request stages, in order (`awaiting-confirmation` only for a takeover). */
 export const OPEN_STAGES = Object.freeze([
   "accepted",
@@ -313,36 +249,6 @@ function lifecycleEnvelope(eventSubtype, msg) {
 
 const nonEmptyString = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
 const lifecycleRevision = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
-const lifecycleState = (value) => LIFECYCLE_STATES.includes(value) ? value : "failed";
-const lifecycleAction = (value) => LIFECYCLE_ACTIONS.includes(value) ? value : null;
-const lifecycleFailureCode = (value) =>
-  LIFECYCLE_FAILURE_CODES.includes(value) ? value : "internal-error";
-
-function normalizeOpenTarget(target) {
-  if (target?.kind === "existing") {
-    return {
-      kind: "existing",
-      storeAuthority: nonEmptyString(target.storeAuthority),
-      sessionId: nonEmptyString(target.sessionId) ?? "",
-    };
-  }
-  return {
-    kind: "new",
-    projectName: nonEmptyString(target?.projectName) ?? "",
-  };
-}
-
-export function normalizeOpenIntent(intent = {}) {
-  const target = normalizeOpenTarget(intent.target);
-  return {
-    operationId: nonEmptyString(intent.operationId) ?? "",
-    target,
-    mode: intent.mode === "allow-all" ? "allow-all" : "default",
-    name: target.kind === "new" ? nonEmptyString(intent.name) : null,
-    takeoverRequested: target.kind === "existing" && intent.takeoverRequested === true,
-  };
-}
-
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -350,17 +256,6 @@ function canonicalJson(value) {
       `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
-}
-
-export async function openIntentFingerprint(intent) {
-  const normalized = normalizeOpenIntent(intent?.msg ?? intent);
-  const material = canonicalJson({
-    target: normalized.target,
-    mode: normalized.mode,
-    name: normalized.name,
-    takeoverRequested: normalized.takeoverRequested,
-  });
-  return sha256Hex(material);
 }
 
 async function sha256Hex(text) {
@@ -398,66 +293,6 @@ export async function openRequestFingerprint(request, requester = null) {
     options: normalized.options,
     requester: nonEmptyString(requester),
   }));
-}
-
-function normalizeFailure(failure) {
-  if (!failure || typeof failure !== "object") return null;
-  return {
-    code: lifecycleFailureCode(failure.code),
-    actions: (Array.isArray(failure.actions) ? failure.actions : [])
-      .map(lifecycleAction)
-      .filter(Boolean),
-    ...(typeof failure.message === "string" && failure.message ? { message: failure.message } : {}),
-    ...(typeof failure.retryable === "boolean" ? { retryable: failure.retryable } : {}),
-  };
-}
-
-function normalizeTakeoverChallenge(challenge, operationId, revision) {
-  if (!challenge || typeof challenge !== "object") return null;
-  const challengeId = nonEmptyString(challenge.challengeId);
-  const sessionId = nonEmptyString(challenge.sessionId);
-  const runtimeInstanceId = nonEmptyString(challenge.runtimeInstanceId);
-  if (!challengeId || !sessionId || !runtimeInstanceId) return null;
-  return {
-    challengeId,
-    operationId,
-    revision,
-    storeAuthority: nonEmptyString(challenge.storeAuthority),
-    sessionId,
-    runtimeInstanceId,
-    generation: lifecycleRevision(challenge.generation),
-    pid: Number.isSafeInteger(challenge.pid) && challenge.pid > 0 ? challenge.pid : null,
-    processStartedAt: Number.isFinite(challenge.processStartedAt) ? challenge.processStartedAt : null,
-    responsive: challenge.responsive === true,
-    ...(typeof challenge.controllerName === "string" && challenge.controllerName
-      ? { controllerName: challenge.controllerName }
-      : {}),
-  };
-}
-
-function normalizedLifecycleStatus(status = {}) {
-  const operationId = nonEmptyString(status.operationId) ?? "";
-  const revision = lifecycleRevision(status.revision);
-  const target = status.target ? normalizeOpenTarget(status.target) : null;
-  const failure = normalizeFailure(status.failure);
-  const challenge = normalizeTakeoverChallenge(status.challenge, operationId, revision);
-  return {
-    operationId,
-    fingerprint: nonEmptyString(status.fingerprint),
-    state: lifecycleState(status.state),
-    revision,
-    ...(target ? { target } : {}),
-    ...(status.action === "reconnect" || status.action === "activate" || status.action === "resume" ||
-    status.action === "start" || status.action === "takeover" || status.action === "undecided"
-      ? { action: status.action }
-      : {}),
-    ...(status.payload ? { payload: status.payload } : {}),
-    ...(typeof status.name === "string" ? { name: status.name } : {}),
-    ...(failure ? { failure } : {}),
-    ...(challenge ? { challenge } : {}),
-    ...(Number.isFinite(status.createdAt) ? { createdAt: status.createdAt } : {}),
-    ...(Number.isFinite(status.updatedAt) ? { updatedAt: status.updatedAt } : {}),
-  };
 }
 
 function normalizeOpenChallenge(challenge) {
@@ -775,12 +610,6 @@ export const projectList = (
       : {}),
     defaultPermissionMode: defaultPermissionMode === "allow-all" ? "allow-all" : "default",
   });
-/**
- * Phone -> listener: spawn a new Copilot session. `requestId` correlates the reply; `projectName`
- * selects a registered project; `mode` is "default" | "allow-all"; `name` is the friendly session name.
- */
-export const spawnSession = (requestId, projectName, mode = "default", name = null) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_SESSION, { requestId, projectName, mode, name });
 /** Phone -> listener: request the machine's recent resumable CLI sessions (on-demand; not pushed on
  *  bind). Optional `limit` is clamped by the listener to SESSION_LIST_MAX. Optional `cwd` narrows the
  *  query to one folder *before* the cap applies — without it a busy folder's history is invisible
@@ -795,8 +624,9 @@ export const sessionListRequest = (limit = null, cwd = null, sort = "activity", 
 /**
  * Listener -> phone: the machine's recent resumable sessions, newest-first. Each entry is
  * `{ sessionId, title, cwd, repository, branch, updatedAt }` — `sessionId` is the CLI session UUID
- * the phone passes back to resumeSession() (and dedupes live cards on); `title` is the CLI-derived
- * chat summary (falling back to the cwd basename); `repository`/`branch` are null when unknown;
+ * the phone passes back as an openSession() `{ sessionId }` target (and dedupes live cards on);
+ * `title` is the CLI-derived chat summary (falling back to the cwd basename); `repository`/`branch`
+ * are null when unknown;
  * `updatedAt` is epoch ms of the session's last activity (for "2h ago" sorting/labels). Malformed
  * entries (missing sessionId/cwd) are dropped so a corrupt row can never wedge the phone list.
  */
@@ -838,26 +668,6 @@ export const sessionList = (sessions, folders = null, scope = {}) =>
       : {}),
   });
 /**
- * Phone -> listener: resume an existing CLI session. `requestId` correlates the reply (reusing the
- * SPAWN_PAIRING / SPAWN_RESULT path); `sessionId` is the CLI session UUID from sessionList(); `mode`
- * is "default" | "allow-all" (the resumed session's permission mode).
- *
- * `force` is the user's second tap. The listener refuses to resume a session that is already
- * attached to a phone and healthy, because doing so forks a second CLI process onto one session
- * store entry. But the phone cannot always tell a healthy attachment from a wedged one, and if weft
- * on the laptop has broken then resume is the ONLY way back — so `force` lets the user override the
- * refusal, after being told what it will cost (the running session is closed first, not left to run
- * alongside).
- */
-export const resumeSession = (requestId, sessionId, mode = "default", force = false) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.RESUME_SESSION, {
-    requestId,
-    sessionId: typeof sessionId === "string" ? sessionId : "",
-    mode,
-    force: Boolean(force),
-  });
-
-/**
  * Phone -> Station (protocol v3): open a session by TARGET only. `target` is `{ project }` for a
  * new session or `{ sessionId, storeAuthority? }` for an existing one; Station decides whether to
  * activate, repair, resume, start or ask for a takeover. `requestId` is the idempotency key.
@@ -892,205 +702,6 @@ export const lifecycleCancel = (requestId, revision = null) =>
     requestId: nonEmptyString(requestId) ?? "",
     ...(Number.isSafeInteger(revision) && revision >= 0 ? { revision } : {}),
   });
-
-// Pre-v3 builders, kept only for the deprecated legacy converters below.
-const legacyOpenSession = (operationId, target, options = {}) =>
-  lifecycleEnvelope(
-    SUBTYPE.CONTROL.OPEN_SESSION,
-    normalizeOpenIntent({ operationId, target, ...options }),
-  );
-const legacyLifecycleStatus = (status) =>
-  lifecycleEnvelope(SUBTYPE.CONTROL.LIFECYCLE_STATUS, normalizedLifecycleStatus(status));
-
-/** @deprecated pre-v3 adapter. Convert a legacy Start/Resume envelope to the v2 Open contract. */
-export function openSessionFromLegacy(message) {
-  if (message?.eventType !== EVENT_TYPE.CONTROL || !message.msg) return null;
-  if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_SESSION) {
-    return legacyOpenSession(message.msg.requestId, {
-      kind: "new",
-      projectName: message.msg.projectName,
-    }, {
-      mode: message.msg.mode,
-      name: message.msg.name,
-    });
-  }
-  if (message.eventSubtype === SUBTYPE.CONTROL.RESUME_SESSION) {
-    return legacyOpenSession(message.msg.requestId, {
-      kind: "existing",
-      storeAuthority: null,
-      sessionId: message.msg.sessionId,
-    }, {
-      mode: message.msg.mode,
-      takeoverRequested: message.msg.force === true,
-    });
-  }
-  return null;
-}
-
-/** @deprecated pre-v3 adapter. Project a v2 Open envelope to a legacy Start or Resume envelope. */
-export function openSessionToLegacy(message) {
-  const intent = normalizeOpenIntent(message?.msg ?? message);
-  if (!intent.operationId) return null;
-  return intent.target.kind === "existing"
-    ? resumeSession(
-      intent.operationId,
-      intent.target.sessionId,
-      intent.mode,
-      intent.takeoverRequested,
-    )
-    : spawnSession(
-      intent.operationId,
-      intent.target.projectName,
-      intent.mode,
-      intent.name,
-    );
-}
-
-const LEGACY_TO_LIFECYCLE_STATE = Object.freeze({
-  accepted: "accepted",
-  launched: "launching",
-  ready: "pairing-ready",
-  claimed: "open",
-  failed: "failed",
-  abandoned: "cancelled",
-  superseded: "cancelled",
-});
-const LIFECYCLE_TO_LEGACY_STATE = Object.freeze({
-  accepted: "accepted",
-  locating: "accepted",
-  reserved: "accepted",
-  activating: "launched",
-  launching: "launched",
-  "pairing-ready": "ready",
-  pairing: "ready",
-  open: "claimed",
-  failed: "failed",
-  cancelled: "abandoned",
-});
-
-/** @deprecated pre-v3 adapter. Convert one legacy launch reply to a v2 lifecycle snapshot. */
-export function lifecycleStatusFromLegacy(message, previous = null) {
-  if (message?.eventType !== EVENT_TYPE.CONTROL || !message.msg) return null;
-  const operationId = nonEmptyString(message.msg.requestId);
-  if (!operationId) return null;
-  const previousStatus = previous?.msg ?? previous;
-  const revision = previousStatus?.operationId === operationId
-    ? lifecycleRevision(previousStatus.revision) + 1
-    : 0;
-  if (message.eventSubtype === SUBTYPE.CONTROL.LAUNCH_STATUS) {
-    const operation = message.msg.operation;
-    const target = operation === "resume"
-      ? { kind: "existing", storeAuthority: null, sessionId: message.msg.sessionId }
-      : operation === "new"
-        ? { kind: "new", projectName: message.msg.projectName }
-        : null;
-    return legacyLifecycleStatus({
-      operationId,
-      revision,
-      state: LEGACY_TO_LIFECYCLE_STATE[message.msg.state] ?? "failed",
-      ...(target ? { target } : {}),
-      ...(message.msg.payload ? { payload: message.msg.payload } : {}),
-      ...(typeof message.msg.name === "string" ? { name: message.msg.name } : {}),
-      ...(typeof message.msg.error === "string" && message.msg.error
-        ? {
-            failure: {
-              code: message.msg.state === "abandoned" ? "cancelled" : "launch-failed",
-              message: message.msg.error,
-              actions: message.msg.state === "failed" ? ["retry"] : [],
-            },
-          }
-        : {}),
-      createdAt: message.msg.createdAt,
-      updatedAt: message.msg.readyAt ?? message.msg.launchedAt ?? message.msg.createdAt,
-    });
-  }
-  if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_PAIRING) {
-    return legacyLifecycleStatus({
-      operationId,
-      revision,
-      state: "pairing-ready",
-      payload: message.msg.payload,
-      name: message.msg.name,
-      target: message.msg.projectName
-        ? { kind: "new", projectName: message.msg.projectName }
-        : undefined,
-    });
-  }
-  if (message.eventSubtype === SUBTYPE.CONTROL.SPAWN_RESULT) {
-    return legacyLifecycleStatus({
-      operationId,
-      revision,
-      state: message.msg.ok ? "open" : "failed",
-      ...(!message.msg.ok
-        ? {
-            failure: {
-              code: "launch-failed",
-              ...(typeof message.msg.error === "string" && message.msg.error
-                ? { message: message.msg.error }
-                : {}),
-              actions: ["retry"],
-            },
-          }
-        : {}),
-    });
-  }
-  if (message.eventSubtype === SUBTYPE.CONTROL.SESSION_CLAIMED) {
-    return legacyLifecycleStatus({ operationId, revision, state: "open" });
-  }
-  return null;
-}
-
-/** @deprecated pre-v3 adapter. Project a v2 lifecycle snapshot to legacy launch replies. */
-export function lifecycleStatusToLegacy(message) {
-  const status = normalizedLifecycleStatus(message?.msg ?? message);
-  if (!status.operationId) return [];
-  const target = status.target;
-  const operation = target?.kind === "existing" ? "resume" : target?.kind === "new" ? "new" : undefined;
-  const details = {
-    ...(operation ? { operation } : {}),
-    ...(target?.kind === "existing" ? { sessionId: target.sessionId } : {}),
-    ...(target?.kind === "new" ? { projectName: target.projectName } : {}),
-    ...(typeof status.name === "string" ? { name: status.name } : {}),
-    ...(status.payload ? { payload: status.payload } : {}),
-    ...(status.failure?.message ? { error: status.failure.message } : {}),
-    ...(Number.isFinite(status.createdAt) ? { createdAt: status.createdAt } : {}),
-    ...(Number.isFinite(status.updatedAt) ? { readyAt: status.updatedAt } : {}),
-  };
-  const projected = [
-    launchStatus(
-      status.operationId,
-      LIFECYCLE_TO_LEGACY_STATE[status.state] ?? "failed",
-      details,
-    ),
-  ];
-  if (
-    status.payload &&
-    (
-      status.state === "activating" ||
-      status.state === "launching" ||
-      status.state === "pairing-ready" ||
-      status.state === "pairing"
-    )
-  ) {
-    projected.push(spawnPairing(
-      status.operationId,
-      status.payload,
-      status.name ?? null,
-      target?.kind === "new" ? target.projectName : null,
-    ));
-  }
-  if (status.state === "failed") {
-    projected.push(spawnResult(status.operationId, false, status.failure?.message ?? status.failure?.code ?? null));
-  } else if (
-    status.state === "launching" ||
-    status.state === "pairing-ready" ||
-    status.state === "pairing" ||
-    status.state === "open"
-  ) {
-    projected.push(spawnResult(status.operationId, true));
-  }
-  return projected;
-}
 
 /** Keep the latest snapshot for one request; stale or duplicate revisions never replace it. */
 export function latestLifecycleStatus(current, candidate) {
@@ -1143,34 +754,6 @@ export const updateRequired = ({ minVersion = PROTOCOL_VERSION, peerVersion = nu
     peerVersion: Number.isSafeInteger(peerVersion) && peerVersion >= 0 ? peerVersion : null,
     side: side === "phone" ? "phone" : "laptop",
   });
-/**
- * Listener -> phone: the pre-minted pairing payload of a freshly spawned session, so the phone
- * pairs to it digitally (no QR). `payload` is a buildPairingPayload() result; `name`/`projectName`
- * let the phone label the Initializing card immediately.
- */
-export const spawnPairing = (requestId, payload, name, projectName) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_PAIRING, { requestId, payload, name, projectName });
-/** Listener -> phone: terminal result of a spawn request. `ok=false` carries a human `error`. */
-export const spawnResult = (requestId, ok, error = null) =>
-  envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.SPAWN_RESULT, { requestId, ok: Boolean(ok), error });
-/** Listener -> phone: durable launch lifecycle. Private handoff key material is never included. */
-export const launchStatus = (requestId, state, details = {}) => {
-  const safe = details && typeof details === "object" ? details : {};
-  return envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.LAUNCH_STATUS, {
-    requestId: typeof requestId === "string" ? requestId : "",
-    state: LAUNCH_STATES.includes(state) ? state : "failed",
-    ...(safe.payload ? { payload: safe.payload } : {}),
-    ...(safe.operation === "new" || safe.operation === "resume" ? { operation: safe.operation } : {}),
-    ...(typeof safe.projectName === "string" ? { projectName: safe.projectName } : {}),
-    ...(typeof safe.sessionId === "string" ? { sessionId: safe.sessionId } : {}),
-    ...(typeof safe.name === "string" ? { name: safe.name } : {}),
-    ...(typeof safe.error === "string" ? { error: safe.error } : {}),
-    ...(Number.isFinite(safe.createdAt) ? { createdAt: safe.createdAt } : {}),
-    ...(Number.isFinite(safe.launchedAt) ? { launchedAt: safe.launchedAt } : {}),
-    ...(Number.isFinite(safe.readyAt) ? { readyAt: safe.readyAt } : {}),
-    ...(Number.isInteger(safe.pid) && safe.pid > 0 ? { pid: safe.pid } : {}),
-  });
-};
 /** Phone -> listener: forget this device; the listener stops (or drops its phone binding). */
 export const forgetDevice = () =>
   envelope(EVENT_TYPE.CONTROL, SUBTYPE.CONTROL.FORGET_DEVICE, {});
@@ -1328,7 +911,7 @@ export const invokeCommand = (name, input) =>
  * Listener -> phone: the in-session `/weft` sessions currently waiting to be adopted by the paired
  * phone. Each offer is `{ channelId, name, cwd, payload }`, where `payload` is a buildPairingPayload()
  * result for that session's own SESSION channel — so the phone pairs to it digitally (no QR), the
- * same way it consumes spawnPairing(). `channelId` (also present inside `payload`) is the stable key
+ * same way it consumes the `result.payload` of a lifecycleStatus(). `channelId` (also present inside `payload`) is the stable key
  * the phone dedupes on and echoes back in sessionClaimed(). Non-`{channelId, payload}` entries are
  * dropped so a malformed offer can never wedge the phone.
  */

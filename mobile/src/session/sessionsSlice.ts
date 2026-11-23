@@ -537,7 +537,7 @@ const sessionsSlice = createSlice({
     // so "last seen" tracks the last time the phone RECEIVED anything FROM the laptop, not just the
     // handful of subtypes (PROJECT_LIST / SESSION_OFFERS / DEVICE_HEARTBEAT) that carry their own
     // state, and never phone-side send/connect actions. Stamped at the single inbound choke point
-    // (sessionRuntime.onListenerMessage) so SPAWN_PAIRING, SPAWN_RESULT, and any future control
+    // (sessionRuntime.onListenerMessage) so LIFECYCLE_STATUS, SESSION_HEALTH, and any future control
     // message keep the device fresh too.
     deviceSeen(state, action: PayloadAction<{ channelId: string }>) {
       const device = state.devices.find((d) => d.channelId === action.payload.channelId);

@@ -43,8 +43,22 @@ const actions = {
   "pairing.rotate": ["confirmed"],
   "session.activate": ["runtimeId"], "session.disconnect": ["runtimeId", "confirmed"],
   "session.start": ["projectName", "name", "mode", "confirmed"],
-  "sessions.reloadAll": ["confirmed"],
+  "sessions.reloadAll": ["confirmed", "source", "installedVersion"],
 };
+
+/** First Weft version whose sessions can hold a reload until their current turn ends. */
+const RELOAD_WHEN_IDLE_SINCE = "0.2.76";
+
+function versionAtLeast(version, minimum) {
+  const parts = (value) => String(value ?? "").split(/[.+-]/).slice(0, 3).map((part) => Number.parseInt(part, 10));
+  const have = parts(version);
+  if (have.length < 3 || have.some(Number.isNaN)) return false;
+  const need = parts(minimum);
+  for (let index = 0; index < 3; index += 1) {
+    if (have[index] !== need[index]) return have[index] > need[index];
+  }
+  return true;
+}
 export function validateManagementAction(action, payload) {
   if (!Object.hasOwn(actions, action)) throw new ManagementError("invalid-action", "This management action is not supported.");
   if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
@@ -62,6 +76,8 @@ export function validateManagementAction(action, payload) {
   if (payload.makeDefault !== undefined && typeof payload.makeDefault !== "boolean") throw new ManagementError("invalid-input", "Invalid default selection.");
   if (payload.confirmed !== undefined && typeof payload.confirmed !== "boolean") throw new ManagementError("invalid-input", "Invalid confirmation.");
   if (payload.reason !== undefined && !["start", "update", "control-center"].includes(payload.reason)) throw new ManagementError("invalid-input", "Invalid start reason.");
+  if (payload.source !== undefined && payload.source !== "update") throw new ManagementError("invalid-input", "Invalid reload source.");
+  if (payload.installedVersion !== undefined && (typeof payload.installedVersion !== "string" || !/^\d+\.\d+\.\d+[\w.+-]{0,40}$/.test(payload.installedVersion))) throw new ManagementError("invalid-input", "Invalid installed version.");
   if (payload.replaceForeground !== undefined && typeof payload.replaceForeground !== "boolean") throw new ManagementError("invalid-input", "Invalid foreground replacement.");
   if (payload.mode !== undefined && !["default", "allow-all"].includes(payload.mode)) throw new ManagementError("invalid-input", "Invalid session permission mode.");
   if (action === "session.start" && payload.mode === "allow-all" && payload.confirmed !== true) throw new ManagementError("confirmation-required", "Confirm launching Copilot with Allow all permissions.");
@@ -448,33 +464,54 @@ export function createManagement({
           throw new ManagementError(response.reason ?? response.outcome, response.result?.message ?? `The session request ended: ${response.outcome}.`);
         }
         const pairingPayload = response.result?.payload ?? null;
-        const code = pairingPayload ? JSON.stringify(pairingPayload) : null;
+        const code = pairingPayload ? pairingQrText(pairingPayload) : null;
         return {
           state: response.outcome ?? response.stage, runtimeId: response.result?.runtimeId ?? null,
           message: "Session launch requested through Station. Do not repeat an uncertain launch.",
-          code, qr: code ? await QRCode.toDataURL(pairingQrText(pairingPayload)) : null,
+          code, qr: code ? await QRCode.toDataURL(code) : null,
         };
       }
       if (action === "sessions.reloadAll") {
-        // Opt-in after an update: each session reloads Weft in place (a running turn is interrupted).
+        // Sessions already on the installed version are left alone. 0.2.76+ sessions reload when
+        // idle and otherwise right after their current turn; older ones reload at once, so the
+        // automatic post-update pass skips them instead of cutting a turn off.
+        // `weft update` runs the previous CLI, so it names the version it just installed.
+        const installed = payload.installedVersion ?? resolveVersion();
         const scanned = await scan({ baseDir, cleanup: false });
         const results = await Promise.all((scanned.live ?? []).map(async (record) => {
+          const version = record.run?.version ?? null;
+          if (version === installed) return "current";
+          const waitsForTurn = versionAtLeast(version, RELOAD_WHEN_IDLE_SINCE);
+          if (payload.source === "update" && !waitsForTurn) return "manual";
           try {
-            await sessionClient(record, { baseDir }).command("reloadExtension", { opId: randomUUID() }, { timeoutMs: 5_000 });
+            const result = await sessionClient(record, { baseDir })
+              .command("reloadExtension", { opId: randomUUID(), whenIdle: true }, { timeoutMs: 5_000 });
+            if (result?.state === "waiting-for-turn") return "waiting";
+            if (result?.state === "activity-unknown") return "manual";
             return "reloaded";
           } catch (error) {
             return error?.code === "unsupported" ? "unsupported" : "failed";
           }
         }));
         const count = (value) => results.filter((item) => item === value).length;
-        const summary = { reloaded: count("reloaded"), unsupported: count("unsupported"), failed: count("failed") };
-        log("sessions.reload_all", summary);
+        const summary = {
+          reloaded: count("reloaded"), waiting: count("waiting"), current: count("current"),
+          manual: count("manual"), unsupported: count("unsupported"), failed: count("failed"),
+        };
+        log("sessions.reload_all", { ...summary, source: payload.source ?? "control-center" });
+        const sessions = (n) => `${n} session${n === 1 ? "" : "s"}`;
+        const parts = [
+          summary.reloaded && `reloaded Weft in ${sessions(summary.reloaded)}`,
+          summary.waiting && `${sessions(summary.waiting)} reload when the current turn ends`,
+          summary.current && `${sessions(summary.current)} already run ${installed}`,
+          summary.manual && `${sessions(summary.manual)} need a manual reload (Reload Weft in open sessions, or /extensions reload)`,
+          summary.unsupported && `${sessions(summary.unsupported)} need /extensions reload typed in the session`,
+          summary.failed && `${sessions(summary.failed)} did not answer`,
+        ].filter(Boolean);
+        const text = parts.join("; ");
         return {
           ...summary,
-          message: results.length === 0 ? "No open Copilot sessions use Weft."
-            : `Asked ${summary.reloaded} session${summary.reloaded === 1 ? "" : "s"} to reload Weft.` +
-              (summary.unsupported ? ` ${summary.unsupported} need /extensions reload typed in the session.` : "") +
-              (summary.failed ? ` ${summary.failed} did not answer.` : ""),
+          message: results.length === 0 ? "No open Copilot sessions use Weft." : `${text.charAt(0).toUpperCase()}${text.slice(1)}.`,
         };
       }
       if (action.startsWith("session.")) {
@@ -620,8 +657,8 @@ export function createManagement({
       }
       if (!status) throw new ManagementError("not-running", "Start the selected endpoint before showing pairing.");
       const payload = status.pairingPayload;
-      const code = !status.paired && payload && payload.expiresAt > Date.now() ? JSON.stringify(payload) : null;
-      return { state: status.state, paired: status.paired === true, phoneName: status.phoneName, code, qr: code ? await QRCode.toDataURL(pairingQrText(payload), { width: 480, margin: 3 }) : null };
+      const code = !status.paired && payload && payload.expiresAt > Date.now() ? pairingQrText(payload) : null;
+      return { state: status.state, paired: status.paired === true, phoneName: status.phoneName, code, qr: code ? await QRCode.toDataURL(code, { width: 480, margin: 3 }) : null };
     },
     async update() {
       const origin = (process.env.WEFT_INSTALL_BASE || "https://useweft.netlify.app").replace(/\/+$/, "");

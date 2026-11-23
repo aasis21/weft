@@ -50,8 +50,6 @@ export const DEVICE_CAPABILITY: {
   readonly SESSION_ACTIVATION_V1: "session-activation-v1";
 };
 
-export const SESSION_ACTIVATION_CAPABILITY: "session-activation-v1";
-export const LIFECYCLE_RETENTION_MS: number;
 export const LIFECYCLE_MESSAGE_MAX_BYTES: number;
 export type DeviceUtilityCode = "ok" | "invalid-request" | "too-large" | "unsupported" | "unavailable" | "timeout" | "lease-mismatch";
 export const DEVICE_UTILITY_CODES: readonly DeviceUtilityCode[];
@@ -103,12 +101,8 @@ export const SUBTYPE: {
     readonly STATE_SNAPSHOT: "state_snapshot";
     readonly PROJECT_LIST_REQUEST: "project_list_request";
     readonly PROJECT_LIST: "project_list";
-    /** @deprecated pre-v3; replaced by OPEN_SESSION. Remove once extension/phone stop using it. */
-    readonly SPAWN_SESSION: "spawn_session";
     readonly SESSION_LIST_REQUEST: "session_list_request";
     readonly SESSION_LIST: "session_list";
-    /** @deprecated pre-v3; replaced by OPEN_SESSION. Remove once extension/phone stop using it. */
-    readonly RESUME_SESSION: "resume_session";
     /** v3: target-only open request (phone -> Station). */
     readonly OPEN_SESSION: "open_session";
     readonly LIFECYCLE_STATUS_REQUEST: "lifecycle_status_request";
@@ -124,11 +118,11 @@ export const SUBTYPE: {
     readonly ENDPOINT_UPDATE: "endpoint_update";
     /** v3, either direction: explicit protocol-version mismatch notice. */
     readonly UPDATE_REQUIRED: "update_required";
-    /** @deprecated pre-v3; replaced by LIFECYCLE_STATUS. */
+    /** Pre-v3 wire names with no builders; recognized only to tell the sender to update. */
+    readonly SPAWN_SESSION: "spawn_session";
+    readonly RESUME_SESSION: "resume_session";
     readonly SPAWN_PAIRING: "spawn_pairing";
-    /** @deprecated pre-v3; replaced by LIFECYCLE_STATUS. */
     readonly SPAWN_RESULT: "spawn_result";
-    /** @deprecated pre-v3; replaced by LIFECYCLE_STATUS. */
     readonly LAUNCH_STATUS: "launch_status";
     readonly FORGET_DEVICE: "forget_device";
     readonly DEVICE_HEARTBEAT: "device_heartbeat";
@@ -384,119 +378,6 @@ export interface PairAckMsg {
 
 // ---- payload shapes: phone-launched sessions (#156) ------------------------
 export type SpawnMode = "default" | "allow-all";
-export type LifecycleState =
-  | "accepted"
-  | "locating"
-  | "reserved"
-  | "activating"
-  | "launching"
-  | "pairing-ready"
-  | "pairing"
-  | "open"
-  | "failed"
-  | "cancelled";
-export type LifecycleAction =
-  | "retry"
-  | "confirm-takeover"
-  | "cancel"
-  | "choose-session"
-  | "choose-directory"
-  | "update-peer";
-export type LifecycleFailureCode =
-  | "invalid-request"
-  | "unsupported"
-  | "operation-conflict"
-  | "operation-stale"
-  | "target-reserved"
-  | "writer-conflict"
-  | "controller-conflict"
-  | "capability-rejected"
-  | "project-not-found"
-  | "session-not-found"
-  | "directory-not-found"
-  | "ownership-unknown"
-  | "runtime-unavailable"
-  | "activation-failed"
-  | "identity-failed"
-  | "launch-failed"
-  | "launch-outcome-unknown"
-  | "launch-not-recoverable"
-  | "pairing-failed"
-  | "takeover-stale"
-  | "takeover-failed"
-  | "cancelled"
-  | "timeout"
-  | "internal-error";
-export type LifecycleOperationAction =
-  | "undecided"
-  | "reconnect"
-  | "activate"
-  | "resume"
-  | "start"
-  | "takeover";
-/** @deprecated pre-v3 (v2 lifecycle state). Use {@link OPEN_STAGES} / {@link OPEN_OUTCOMES}. */
-export const LIFECYCLE_STATES: readonly LifecycleState[];
-/** @deprecated pre-v3. */
-export const LIFECYCLE_ACTIONS: readonly LifecycleAction[];
-/** @deprecated pre-v3. Use {@link OPEN_REASONS}. */
-export const LIFECYCLE_FAILURE_CODES: readonly LifecycleFailureCode[];
-/** @deprecated pre-v3 target. v3 uses {@link OpenRequestTarget}. */
-export interface NewSessionTarget {
-  kind: "new";
-  projectName: string;
-}
-/** @deprecated pre-v3 target. v3 uses {@link OpenRequestTarget}. */
-export interface ExistingSessionTarget {
-  kind: "existing";
-  storeAuthority: string | null;
-  sessionId: string;
-}
-/** @deprecated pre-v3 target. v3 uses {@link OpenRequestTarget}. */
-export type OpenTarget = NewSessionTarget | ExistingSessionTarget;
-/** @deprecated pre-v3 open payload (caller could request a takeover). v3 uses {@link OpenSessionMsg}. */
-export interface OpenIntentMsg {
-  operationId: string;
-  target: OpenTarget;
-  mode: SpawnMode;
-  name: string | null;
-  takeoverRequested: boolean;
-}
-/** @deprecated pre-v3. */
-export interface StructuredFailure {
-  code: LifecycleFailureCode;
-  actions: LifecycleAction[];
-  message?: string;
-  retryable?: boolean;
-}
-/** @deprecated pre-v3 challenge. v3 uses {@link OpenChallenge}. */
-export interface TakeoverChallenge {
-  challengeId: string;
-  operationId: string;
-  revision: number;
-  storeAuthority: string | null;
-  sessionId: string;
-  runtimeInstanceId: string;
-  generation: number;
-  pid: number | null;
-  processStartedAt: number | null;
-  responsive: boolean;
-  controllerName?: string;
-}
-/** @deprecated pre-v3 lifecycle snapshot (was `LifecycleStatusMsg`). Only the legacy converters use it. */
-export interface LegacyLifecycleStatusMsg {
-  operationId: string;
-  fingerprint: string | null;
-  state: LifecycleState;
-  revision: number;
-  target?: OpenTarget;
-  action?: LifecycleOperationAction;
-  payload?: PairingPayload;
-  name?: string;
-  failure?: StructuredFailure;
-  challenge?: TakeoverChallenge;
-  createdAt?: number;
-  updatedAt?: number;
-}
 
 // ---- protocol v3: open requests (LLD §3.2, §4.2, §6.2) -----------------------
 export type OpenStage =
@@ -577,17 +458,14 @@ export interface LifecycleStatusMsg {
   result: OpenResult | null;
 }
 export interface LifecycleStatusRequestMsg {
-  /** v3: renamed from `operationId`. */
   requestId: string;
 }
 export interface TakeoverConfirmMsg {
-  /** v3: renamed from `operationId`. */
   requestId: string;
   challengeId: string;
   revision: number;
 }
 export interface LifecycleCancelMsg {
-  /** v3: renamed from `operationId`. */
   requestId: string;
   revision?: number;
 }
@@ -637,16 +515,10 @@ export interface ProjectListMsg {
   /** Permission mode this device prefers for new/resumed sessions. Older listeners omit it. */
   defaultPermissionMode?: SpawnMode;
 }
-export interface SpawnSessionMsg {
-  requestId: string;
-  projectName: string;
-  mode: SpawnMode;
-  name: string | null;
-}
 export type SessionListSort = 'activity' | 'created';
 /** One recent resumable CLI session the phone can offer in its "Resume a session" list. */
 export interface StoredSession {
-  /** CLI session UUID — passed back to resumeSession() and used to dedupe already-live cards. */
+  /** CLI session UUID — passed back as an openSession() `{ sessionId }` target and used to dedupe already-live cards. */
   sessionId: string;
   /** CLI-derived chat summary, or null (the phone falls back to the cwd basename). */
   title: string | null;
@@ -691,49 +563,6 @@ export interface SessionListMsg {
   /** Per-folder totals across the entire store, independent of the capped `sessions` page. Absent
    *  from listeners that predate it. */
   folders?: SessionFolder[];
-}
-export interface ResumeSessionMsg {
-  requestId: string;
-  /** CLI session UUID from StoredSession.sessionId. */
-  sessionId: string;
-  mode: SpawnMode;
-  /** Close an already-attached session and resume anyway — the user's explicit second tap, used
-   *  when weft on the laptop has wedged and resuming is the only way back. */
-  force?: boolean;
-}
-export interface SpawnPairingMsg {
-  requestId: string;
-  payload: PairingPayload;
-  name: string | null;
-  projectName: string | null;
-}
-export interface SpawnResultMsg {
-  requestId: string;
-  ok: boolean;
-  error: string | null;
-}
-export type LaunchState =
-  | "accepted"
-  | "launched"
-  | "ready"
-  | "failed"
-  | "claimed"
-  | "abandoned"
-  | "superseded";
-export const LAUNCH_STATES: readonly LaunchState[];
-export interface LaunchStatusMsg {
-  requestId: string;
-  state: LaunchState;
-  payload?: PairingPayload;
-  operation?: "new" | "resume";
-  projectName?: string;
-  sessionId?: string;
-  name?: string;
-  error?: string;
-  createdAt?: number;
-  launchedAt?: number;
-  readyAt?: number;
-  pid?: number;
 }
 export type ForgetDeviceMsg = Record<string, never>;
 /** Liveness beat for the DEVICE channel; deviceId mirrors ProjectListMsg.deviceId. */
@@ -869,7 +698,7 @@ export interface SessionOffer {
   name: string | null;
   /** Working directory of the offered session, or null. */
   cwd: string | null;
-  /** buildPairingPayload() result for the offered session, consumed like SpawnPairingMsg.payload. */
+  /** buildPairingPayload() result for the offered session, consumed like OpenResult.payload. */
   payload: PairingPayload;
 }
 /** Listener -> phone: the set of `/weft` sessions currently waiting to be adopted by this phone. */
@@ -924,10 +753,8 @@ export type StateRequest = Envelope<"control", "state_request", StateRequestMsg>
 export type StateSnapshot = Envelope<"control", "state_snapshot", StateSnapshotMsg>;
 export type ProjectListRequest = Envelope<"control", "project_list_request", ProjectListRequestMsg>;
 export type ProjectListMessage = Envelope<"control", "project_list", ProjectListMsg>;
-export type SpawnSessionMessage = Envelope<"control", "spawn_session", SpawnSessionMsg>;
 export type SessionListRequest = Envelope<"control", "session_list_request", SessionListRequestMsg>;
 export type SessionListMessage = Envelope<"control", "session_list", SessionListMsg>;
-export type ResumeSessionMessage = Envelope<"control", "resume_session", ResumeSessionMsg>;
 export type OpenSessionMessage = Envelope<"control", "open_session", OpenSessionMsg>;
 export type LifecycleStatusRequest = Envelope<"control", "lifecycle_status_request", LifecycleStatusRequestMsg>;
 export type LifecycleStatusMessage = Envelope<"control", "lifecycle_status", LifecycleStatusMsg>;
@@ -938,13 +765,6 @@ export type SessionHealthRequest = Envelope<"control", "session_health_request",
 export type SessionHealthMessage = Envelope<"control", "session_health", SessionHealthMsg>;
 export type EndpointUpdateMessage = Envelope<"control", "endpoint_update", EndpointUpdateMsg>;
 export type UpdateRequiredMessage = Envelope<"control", "update_required", UpdateRequiredMsg>;
-/** @deprecated pre-v3 shapes produced/consumed only by the legacy converters; not in EventEnvelope. */
-export type LegacyOpenSessionMessage = Envelope<"control", "open_session", OpenIntentMsg>;
-/** @deprecated see {@link LegacyOpenSessionMessage}. */
-export type LegacyLifecycleStatusMessage = Envelope<"control", "lifecycle_status", LegacyLifecycleStatusMsg>;
-export type SpawnPairing = Envelope<"control", "spawn_pairing", SpawnPairingMsg>;
-export type SpawnResult = Envelope<"control", "spawn_result", SpawnResultMsg>;
-export type LaunchStatusMessage = Envelope<"control", "launch_status", LaunchStatusMsg>;
 export type ForgetDevice = Envelope<"control", "forget_device", ForgetDeviceMsg>;
 export type DeviceHeartbeat = Envelope<"control", "device_heartbeat", DeviceHeartbeatMsg>;
 export type DeviceMonitorStart = Envelope<"control", "device_monitor_start", DeviceMonitorStartMsg>;
@@ -1042,10 +862,8 @@ export type EventEnvelope =
   | StateSnapshot
   | ProjectListRequest
   | ProjectListMessage
-  | SpawnSessionMessage
   | SessionListRequest
   | SessionListMessage
-  | ResumeSessionMessage
   | OpenSessionMessage
   | LifecycleStatusRequest
   | LifecycleStatusMessage
@@ -1056,9 +874,6 @@ export type EventEnvelope =
   | SessionHealthMessage
   | EndpointUpdateMessage
   | UpdateRequiredMessage
-  | SpawnPairing
-  | SpawnResult
-  | LaunchStatusMessage
   | ForgetDevice
   | DeviceHeartbeat
   | DeviceMonitorStart
@@ -1179,13 +994,6 @@ export function projectList(
   capabilities?: string[] | null,
   defaultPermissionMode?: SpawnMode
 ): ProjectListMessage;
-/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
-export function spawnSession(
-  requestId: string,
-  projectName: string,
-  mode?: SpawnMode,
-  name?: string | null
-): SpawnSessionMessage;
 export function sessionListRequest(
   limit?: number | null,
   cwd?: string | null,
@@ -1197,17 +1005,6 @@ export function sessionList(
   folders?: SessionFolder[] | null,
   scope?: { requestId?: string | null; cwd?: string | null; sort?: SessionListSort; errorCode?: 'session-store-unavailable' }
 ): SessionListMessage;
-/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
-export function resumeSession(
-  requestId: string,
-  sessionId: string,
-  mode?: SpawnMode,
-  force?: boolean
-): ResumeSessionMessage;
-/** @deprecated pre-v3. Normalizes the v2 open payload; use {@link normalizeOpenRequest}. */
-export function normalizeOpenIntent(intent?: Partial<OpenIntentMsg> & { target?: Partial<OpenTarget> }): OpenIntentMsg;
-/** @deprecated pre-v3. Use {@link openRequestFingerprint}. */
-export function openIntentFingerprint(intent: OpenIntentMsg | LegacyOpenSessionMessage): Promise<string>;
 /** Normalize a v3 `open_session` payload: trims ids, `sessionId` wins over `project`, mode defaults to "default". */
 export function normalizeOpenRequest(request?: {
   requestId?: string;
@@ -1236,24 +1033,7 @@ export function takeoverConfirm(
   revision: number
 ): TakeoverConfirmMessage;
 export function lifecycleCancel(requestId: string, revision?: number | null): LifecycleCancelMessage;
-/** @deprecated pre-v3 adapter; emits the v2 open payload. Remove with sessionCompatibility (W1). */
-export function openSessionFromLegacy(
-  message: SpawnSessionMessage | ResumeSessionMessage | EventEnvelope
-): LegacyOpenSessionMessage | null;
-/** @deprecated pre-v3 adapter. */
-export function openSessionToLegacy(
-  message: OpenIntentMsg | LegacyOpenSessionMessage
-): SpawnSessionMessage | ResumeSessionMessage | null;
-/** @deprecated pre-v3 adapter; emits the v2 lifecycle snapshot. */
-export function lifecycleStatusFromLegacy(
-  message: LaunchStatusMessage | SpawnPairing | SpawnResult | SessionClaimedMessage | EventEnvelope,
-  previous?: LegacyLifecycleStatusMsg | LegacyLifecycleStatusMessage | null
-): LegacyLifecycleStatusMessage | null;
-/** @deprecated pre-v3 adapter. */
-export function lifecycleStatusToLegacy(
-  message: LegacyLifecycleStatusMsg | LegacyLifecycleStatusMessage
-): Array<LaunchStatusMessage | SpawnPairing | SpawnResult>;
-/** Keeps the higher `revision` for the same `requestId` (v3; previously keyed by `operationId`). */
+/** Keeps the higher `revision` for the same `requestId`. */
 export function latestLifecycleStatus<T extends LifecycleStatusMsg | LifecycleStatusMessage>(
   current: T | null,
   candidate: T | null
@@ -1276,25 +1056,6 @@ export function updateRequired(notice: {
   peerVersion?: number | null;
   side: "laptop" | "phone";
 }): UpdateRequiredMessage;
-/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
-export function spawnPairing(
-  requestId: string,
-  payload: PairingPayload,
-  name?: string | null,
-  projectName?: string | null
-): SpawnPairing;
-/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
-export function spawnResult(
-  requestId: string,
-  ok: boolean,
-  error?: string | null
-): SpawnResult;
-/** @deprecated pre-v3; replaced by openSession/lifecycleStatus. Remove once extension/phone stop using it. */
-export function launchStatus(
-  requestId: string,
-  state: LaunchState,
-  details?: Omit<LaunchStatusMsg, "requestId" | "state">
-): LaunchStatusMessage;
 export function forgetDevice(): ForgetDevice;
 export function deviceHeartbeat(deviceId?: string | null): DeviceHeartbeat;
 export function deviceMonitorStart(

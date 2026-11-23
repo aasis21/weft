@@ -240,7 +240,9 @@ describe('scenario: phone-launched sessions (protocol v3)', () => {
     await h!.flush();
     const open = listener.sentOfKind('control.open_session')[0]!;
 
-    listener.emit(B.spawnResult(open.requestId as string, false, 'Unknown request'));
+    listener.emit(B.preV3Control(B.SUBTYPE.CONTROL.SPAWN_RESULT, {
+      requestId: open.requestId, ok: false, error: 'Unknown request',
+    }));
     await h!.flush();
 
     expect(h!.snapshot().devices[0]).toMatchObject({ updateRequired: 'laptop' });

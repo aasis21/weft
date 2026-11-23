@@ -217,7 +217,7 @@ weft update</code></pre></div>
         <ol>
           <li><strong>Check:</strong> <code>weft version</code> shows the installed version; <code>weft update --check</code> compares it with the hosted release without installing.</li>
           <li><strong>Update the laptop:</strong> <code>weft update</code> downloads and verifies the code bundles and usage skill against the published SHA-256 manifest. It preserves configuration, projects, logs, and persistent pairing material under <code>~/.weft/</code>.</li>
-          <li><strong>Reload:</strong> restart Device Station and restart CLI sessions or reload extensions in the Copilot app to use the new code.</li>
+          <li><strong>Reload:</strong> the update restarts a running Device Station on the new code, and open sessions on Weft 0.2.76 or later reload Weft themselves (a busy session waits for its turn to end). Sessions on an older Weft need one <strong>Reload Weft in open sessions</strong> from Control Center or <code>/extensions reload</code>.</li>
           <li><strong>Refresh the phone:</strong> reload the web app, or close and reopen the installed PWA. Do not clear its storage just to refresh the UI.</li>
         </ol>
         <h3 id="versions"><a class="heading-link" href="#versions">Compare phone and laptop versions</a></h3>

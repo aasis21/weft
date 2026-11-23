@@ -28,7 +28,7 @@ export async function launchCopilotSession({
   identity,
   identityFile: identityTarget = null,
   resumeSessionId = null,
-  operationId = null,
+  requestId = null,
   operationOwnerToken = null,
   baseDir = undefined,
   spawnFn = childSpawn,
@@ -39,11 +39,11 @@ export async function launchCopilotSession({
   if (!cwd) return { ok: false, error: "Project path is required" };
   const cleanup = [];
   const startedAt = Date.now();
-  const operation = createHash("sha256").update(operationId ?? identity?.channelId ?? randomUUID()).digest("hex").slice(0, 12);
+  const operation = createHash("sha256").update(requestId ?? identity?.channelId ?? randomUUID()).digest("hex").slice(0, 12);
   const log = (event, fields, level = "info") => appendStationLog(event, { operation, ...fields }, { baseDir, level });
   try {
     const identityFile = writeIdentityFile(
-      { ...identity, operationId, operationOwnerToken },
+      { ...identity, requestId, operationOwnerToken },
       { file: identityTarget },
     );
     cleanup.push(identityFile);

@@ -1,6 +1,6 @@
 ## Context
 
-Device Station owns an encrypted paired device channel in `extension/src/listener.mjs`.
+Device Station owns an encrypted paired device channel in `extension/src/station.mjs`.
 The phone already routes device control messages independently of Copilot sessions.
 Hosted installs use bundled JavaScript rather than a source checkout, so native PTY
 distribution is part of the feature, not a developer-only prerequisite.

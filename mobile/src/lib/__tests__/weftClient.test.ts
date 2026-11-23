@@ -128,7 +128,7 @@ describe('connectDevice', () => {
       { transport },
     );
 
-    // The listener's boundPeerPub lock (listener.mjs) requires the SAME phone public key across
+    // The listener's boundPeerPub lock (station.mjs) requires the SAME phone public key across
     // reconnects — a fresh keypair here would make this look like "a different phone".
     expect(generateKeyPair).not.toHaveBeenCalled();
     expect(sayHello).toHaveBeenCalledWith(

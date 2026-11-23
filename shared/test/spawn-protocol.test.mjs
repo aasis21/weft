@@ -1,5 +1,5 @@
 // #156 phone-launched sessions: protocol additions (pairing kind, keypair export/import,
-// project/spawn/forget control factories). Kept dependency-free (node:test).
+// project/forget control factories). Kept dependency-free (node:test).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -17,14 +17,8 @@ import {
   SUBTYPE,
   projectListRequest,
   projectList,
-  spawnSession,
   sessionListRequest,
   sessionList,
-  resumeSession,
-  spawnPairing,
-  spawnResult,
-  launchStatus,
-  LAUNCH_STATES,
   forgetDevice,
   sessionOffers,
   sessionClaimed,
@@ -73,7 +67,7 @@ test("exportKeyPair -> importKeyPair round-trips a working ECDH identity", async
   assert.deepEqual(await decryptJSON(restoredKey, enc), { hello: "spawned" });
 });
 
-test("spawn/project/forget factories build valid CONTROL envelopes", () => {
+test("project/forget factories build valid CONTROL envelopes", () => {
   const cases = [
     [projectListRequest(), SUBTYPE.CONTROL.PROJECT_LIST_REQUEST],
     [projectList(
@@ -83,10 +77,6 @@ test("spawn/project/forget factories build valid CONTROL envelopes", () => {
       ["device-monitor-v1"],
       "allow-all",
     ), SUBTYPE.CONTROL.PROJECT_LIST],
-    [spawnSession("r1", "web", "allow-all", "brave-otter"), SUBTYPE.CONTROL.SPAWN_SESSION],
-    [spawnPairing("r1", { v: 1, channelId: "c", pub: "p" }, "brave-otter", "web"), SUBTYPE.CONTROL.SPAWN_PAIRING],
-    [spawnResult("r1", false, "no such project"), SUBTYPE.CONTROL.SPAWN_RESULT],
-    [launchStatus("r1", "accepted", { operation: "new" }), SUBTYPE.CONTROL.LAUNCH_STATUS],
     [forgetDevice(), SUBTYPE.CONTROL.FORGET_DEVICE],
   ];
   for (const [env, subtype] of cases) {
@@ -105,8 +95,6 @@ test("spawn/project/forget factories build valid CONTROL envelopes", () => {
     "allow-all",
   );
   assert.equal(projectList([]).msg.defaultPermissionMode, "default");
-  assert.equal(spawnSession("r2", "web").msg.mode, "default", "spawn mode defaults to 'default'");
-  assert.equal(spawnResult("r3", true).msg.error, null);
 });
 
 test("voiceMode builds a CONTROL envelope with a boolean active flag", () => {
@@ -144,37 +132,6 @@ test("sessionClaimed carries the offered channelId as a string", () => {
   assert.equal(env.msg.requestId, "req-1");
   assert.ok(isValidEnvelope(env));
   assert.equal(sessionClaimed(undefined).msg.channelId, "", "coerces a missing id to empty string");
-});
-
-test("launchStatus carries only the public durable launch shape", () => {
-  assert.deepEqual(LAUNCH_STATES, ["accepted", "launched", "ready", "failed", "claimed", "abandoned", "superseded"]);
-  const payload = { v: 1, channelId: "c1", pub: "PUB", transport: { kind: "local" } };
-  const env = launchStatus("req-1", "ready", {
-    operation: "resume",
-    sessionId: "sid-1",
-    name: "restored",
-    payload,
-    createdAt: 10,
-    launchedAt: 20,
-    readyAt: 30,
-    pid: 123,
-    privateKeyJwk: { d: "must-not-leak" },
-    identityFile: "secret.json",
-  });
-  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.LAUNCH_STATUS);
-  assert.deepEqual(env.msg, {
-    requestId: "req-1",
-    state: "ready",
-    payload,
-    operation: "resume",
-    sessionId: "sid-1",
-    name: "restored",
-    createdAt: 10,
-    launchedAt: 20,
-    readyAt: 30,
-    pid: 123,
-  });
-  assert.ok(isValidEnvelope(env));
 });
 
 test("sessionListRequest carries an optional clamped limit", () => {
@@ -225,16 +182,4 @@ test("sessionList filters malformed rows and normalizes fields", () => {
     folders: [{ cwd: "/repo", count: 2, updatedAt: 10 }],
   });
   assert.equal(sessionList([], null, { errorCode: "session-store-unavailable" }).msg.errorCode, "session-store-unavailable");
-});
-
-test("resumeSession carries requestId, sessionId, and a defaulted mode", () => {
-  const env = resumeSession("r9", "s1", "allow-all");
-  assert.equal(env.eventType, EVENT_TYPE.CONTROL);
-  assert.equal(env.eventSubtype, SUBTYPE.CONTROL.RESUME_SESSION);
-  assert.ok(isValidEnvelope(env));
-  assert.equal(env.msg.requestId, "r9");
-  assert.equal(env.msg.sessionId, "s1");
-  assert.equal(env.msg.mode, "allow-all");
-  assert.equal(resumeSession("r10", "s2").msg.mode, "default", "mode defaults to 'default'");
-  assert.equal(resumeSession("r11", undefined).msg.sessionId, "", "coerces a missing id to empty string");
 });

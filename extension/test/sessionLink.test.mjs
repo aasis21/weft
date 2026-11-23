@@ -211,6 +211,43 @@ test("reloadExtension asks the SDK to reload Weft when the host supports it", as
   await waitFor(() => reloads === 1, "SDK reload");
 });
 
+test("a reload that waits for idle holds until the running turn ends and skips sessions that cannot report activity", async (t) => {
+  const calls = newCalls();
+  const session = fakeSession();
+  let reloads = 0;
+  let busy = true;
+  session.rpc.extensions = { reload: async () => { reloads += 1; } };
+  session.rpc.metadata = { activity: async () => ({ hasActiveWork: busy, abortable: busy }) };
+  const timers = [];
+  const host = await startSessionHost(hostOptions({
+    session, scope: {}, loadSessionLink: fakeLinkLoader(calls), setTimer: (fn) => { timers.push(fn); return 0; },
+  }));
+  t.after(() => host.close());
+  const client = createSessionControlClient(host.record.record, { baseDir: home });
+  const runTimers = async () => { for (const fn of timers.splice(0)) await fn(); };
+
+  assert.deepEqual(await client.command("reloadExtension", { opId: "w-1", whenIdle: true }), { state: "waiting-for-turn" });
+  assert.deepEqual(await client.command("reloadExtension", { opId: "w-2", whenIdle: true }), { state: "waiting-for-turn" },
+    "a second request joins the pending reload");
+  await runTimers();
+  await runTimers();
+  assert.equal(reloads, 0, "the reload never cuts a running turn off");
+  busy = false;
+  await runTimers();
+  await runTimers();
+  assert.equal(reloads, 1, "the session reloads once the turn ends");
+
+  const unknown = fakeSession("session-b");
+  unknown.rpc.extensions = { reload: async () => { reloads += 1; } };
+  const other = await startSessionHost(hostOptions({
+    session: unknown, scope: {}, loadSessionLink: fakeLinkLoader(newCalls()), setTimer: (fn) => { fn(); return 0; },
+  }));
+  t.after(() => other.close());
+  const otherClient = createSessionControlClient(other.record.record, { baseDir: home });
+  assert.deepEqual(await otherClient.command("reloadExtension", { opId: "u-1", whenIdle: true }), { state: "activity-unknown" });
+  assert.equal(reloads, 1);
+});
+
 test("a same-session reload keeps the runtime id and record, bumps its generation, and hands over the link identity", async (t) => {
   const scope = {};
   const calls = newCalls();

@@ -53,7 +53,7 @@ const isClear = (reason) => String(reason).toLowerCase().includes("clear");
 function readHandoffRequestId(file) {
   try {
     const parsed = JSON.parse(readFileSync(file, "utf8"));
-    const id = parsed?.requestId ?? parsed?.operationId;
+    const id = parsed?.requestId;
     return typeof id === "string" && id ? id : null;
   } catch {
     return null;
@@ -62,6 +62,26 @@ function readHandoffRequestId(file) {
 
 function stale(message, extra = {}) {
   return Object.assign(new Error(message), { code: "stale", ...extra });
+}
+
+const RELOAD_IDLE_CHECK_MS = 5_000;
+
+/** Whether a turn is in flight: true, false, or null when this Copilot cannot tell. */
+async function readSessionBusy(session) {
+  const metadata = session?.rpc?.metadata;
+  try {
+    if (typeof metadata?.activity === "function") {
+      const activity = await metadata.activity();
+      if (typeof activity?.hasActiveWork === "boolean") return activity.hasActiveWork;
+    }
+  } catch { /* fall through */ }
+  try {
+    if (typeof metadata?.isProcessing === "function") {
+      const processing = await metadata.isProcessing();
+      return Boolean(processing && (typeof processing === "object" ? processing.isProcessing : processing));
+    }
+  } catch { /* unknown */ }
+  return null;
 }
 
 export async function startSessionHost({
@@ -102,6 +122,7 @@ export async function startSessionHost({
   let record = null;
   let control = null;
   let stopping = false;
+  let reloadWaiting = false;
   let closePromise = null;
   const pairingPanels = new Map();
 
@@ -358,14 +379,37 @@ export async function startSessionHost({
       return { state: "dormant" };
     }),
     traffic: () => link?.traffic?.() ?? { title: null, entries: [] },
-    reloadExtension: () => {
+    reloadExtension: async (payload) => {
       const reload = session.rpc?.extensions?.reload;
       if (typeof reload !== "function") {
         throw Object.assign(new Error("This Copilot version cannot reload extensions on request. Run /extensions reload in the session."), { code: "unsupported" });
       }
       // Reply first; the reload replaces this instance.
-      setTimer(() => { void Promise.resolve().then(() => reload.call(session.rpc.extensions)).catch(() => {}); }, 50);
-      return { state: "reloading" };
+      const reloadSoon = () => setTimer(() => {
+        if (!stopping) void Promise.resolve().then(() => reload.call(session.rpc.extensions)).catch(() => {});
+      }, 50);
+      if (!payload?.whenIdle) {
+        reloadSoon();
+        return { state: "reloading" };
+      }
+      if (reloadWaiting) return { state: "waiting-for-turn" };
+      const busy = await readSessionBusy(session);
+      if (busy === null) return { state: "activity-unknown" };
+      if (!busy) {
+        reloadSoon();
+        return { state: "reloading" };
+      }
+      // Never cut a turn off: check again until the session is idle, then reload.
+      reloadWaiting = true;
+      const check = async () => {
+        if (stopping) return;
+        const stillBusy = await readSessionBusy(session);
+        if (stillBusy === false) reloadSoon();
+        else if (stillBusy === true) setTimer(check, RELOAD_IDLE_CHECK_MS);
+        else reloadWaiting = false;
+      };
+      setTimer(check, RELOAD_IDLE_CHECK_MS);
+      return { state: "waiting-for-turn" };
     },
   };
   try {

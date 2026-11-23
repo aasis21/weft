@@ -2,11 +2,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPairingCanvasServer, readCanvasSessionDetails } from "../src/pairingCanvas.mjs";
+import { decodePairingInput } from "@aasis21/weft-shared";
+
+const GRANT = "test-grant-0123456789abcdefghijklmnop";
 
 async function harness(t, overrides = {}) {
   let current = {
     state: "waiting",
-    pairingPayload: { channelId: "test-channel", token: "test-grant", expiresAt: Date.now() + 60_000,
+    pairingPayload: { v: 2, channelId: "test-channel", pub: "test-public-key", token: GRANT, expiresAt: Date.now() + 60_000,
       transport: { kind: "local" } },
   };
   const calls = [];
@@ -46,7 +49,8 @@ test("canvas serves a graphical QR and exact copy code only to its private route
   assert.equal(page.headers.get("cache-control"), "no-store");
   const state = await h.state();
   assert.match(state.qr, /^data:image\/png;base64,/);
-  assert.equal(JSON.parse(state.code).token, "test-grant");
+  assert.match(state.code, /^https:\/\/[^/]+\/pair#v3\./, "the copy code is the same pairing link the QR opens");
+  assert.equal(decodePairingInput(state.code).token, GRANT);
   assert.equal((await fetch(h.origin)).status, 404);
 });
 

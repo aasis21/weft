@@ -370,7 +370,12 @@ The check is read-only and also reports mandatory files that need repair at the 
 version. The update uses the bundle set declared by the published release manifest,
 verifies every downloaded file, replaces installed code and the Weft skill transactionally,
 and preserves `~/.weft/` configuration, registered projects, and persistent pairing
-material. Restart Station and restart or reload the Copilot session after updating. PWA updates arrive through
+material. When Station is running an older version, the update restarts it on the new one;
+a stopped Station stays stopped and starts on the new version next time. Open Copilot sessions
+on Weft 0.2.76 or later then reload Weft by themselves: an idle session at once, a busy one when
+its current turn ends. Sessions on an older Weft need one manual reload (**Reload Weft in open
+sessions** in Control Center, or `/extensions reload`). Leftover node-pty folders from an
+earlier update are removed once nothing uses them. PWA updates arrive through
 the browser; close and reopen the installed PWA if a newly published version is not visible.
 
 Weft does not ask for notification permission at launch. After the first real pairing it
