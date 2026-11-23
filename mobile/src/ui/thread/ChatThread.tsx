@@ -343,11 +343,20 @@ export function ChatThread({ items, streaming = false, busy = false, intent = nu
   });
 
   // Settle once the history pull has gone quiet for a beat. Keyed on the item count too, so a
-  // second page restarts the wait rather than settling between pages.
+  // second page restarts the wait rather than settling between pages. Scroll events were ignored
+  // while settling, so read where the reader really is now: a scrollbar drag or keyboard scroll
+  // during that window moved them away from the end, and following them back down would yank them.
   useEffect(() => {
     if (!settling || !settlingRef.current) return undefined;
     if (initialLoading || historyLoading) return undefined;
-    const timer = window.setTimeout(endSettling, 250);
+    const timer = window.setTimeout(() => {
+      endSettling();
+      const scroller = rootRef.current?.closest('.thread-scroll') as HTMLElement | null;
+      if (!scroller || bottomGap(scroller) < PIN_SLACK_PX) return;
+      readerDetachedRef.current = true;
+      pinnedRef.current = false;
+      setIsPinned(false);
+    }, 250);
     return () => window.clearTimeout(timer);
   }, [conversationKey, endSettling, historyLoading, initialLoading, items.length, settling]);
 

@@ -318,6 +318,33 @@ describe('ChatThread', () => {
       expect(scrollIntoView).not.toHaveBeenCalled();
     });
 
+    it('does not pull down a reader who scrolled up while the thread was still settling', async () => {
+      // A scrollbar drag or keyboard scroll lands inside the settling window, where scroll events
+      // are ignored; once it settles, the next streamed item must not follow the reader to the end.
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView as never;
+      const first: TimelineItem[] = [{ kind: 'assistant', id: 'a1', text: 'reply', ts: now }];
+      const { container, rerender } = render(
+        <div className="thread-scroll"><ChatThread items={first} /></div>,
+      );
+      const scroller = container.querySelector('.thread-scroll') as HTMLElement;
+      Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 1000 });
+      Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 400 });
+      Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 0 });
+      fireEvent.scroll(scroller);
+      await settleThread();
+      scrollIntoView.mockClear();
+
+      rerender(
+        <div className="thread-scroll">
+          <ChatThread items={[...first, { kind: 'assistant', id: 'a2', text: 'more', ts: now + 1 }]} />
+        </div>,
+      );
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Scroll to latest' })).toBeInTheDocument();
+    });
+
     it('opens at the newest message without animating, and offers no jump-to-latest on arrival', async () => {
       // The thread is mid-history and "unpinned" by the numbers, but it has only just opened — the
       // reader has not gone anywhere, history simply landed above them.
